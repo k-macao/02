@@ -74,17 +74,34 @@ def _http_get(url, timeout=15):
         return None
 
 def _pushplus_send(token, title, content):
-    payload = json.dumps({"token":token,"title":title,"content":content,"template":"html","channel":"wechat"}).encode()
-    for url in ["https://www.pushplus.plus/send", "https://pushplus.hxtrip.com/send"]:
-        try:
-            import urllib.request
-            req = urllib.request.Request(url, data=payload, headers={"Content-Type":"application/json","User-Agent":"OctopusAI/2.0"})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                result = json.loads(r.read().decode())
-                print(f"  📬 PushPlus: code={result.get('code')}")
-                return result.get("code") == 200
-        except Exception as e:
-            print(f"  ⚠️ {url}: {e}")
+    """PushPlus 推送，尝试 JSON 和 form-urlencoded 两种编码"""
+    import urllib.request, urllib.parse
+    configs = [
+        {"token": token, "title": title, "content": content, "template": "html"},
+        {"token": token, "title": title, "content": content, "template": "html", "channel": "wechat"},
+    ]
+    urls = ["https://www.pushplus.plus/send", "https://pushplus.hxtrip.com/send"]
+    for cfg in configs:
+        for url in urls:
+            for method, ctype in [
+                ("json", "application/json; charset=utf-8"),
+                ("form", "application/x-www-form-urlencoded; charset=utf-8"),
+            ]:
+                try:
+                    if method == "json":
+                        data = json.dumps(cfg, ensure_ascii=False).encode("utf-8")
+                    else:
+                        data = urllib.parse.urlencode(cfg).encode("utf-8")
+                    req = urllib.request.Request(url, data=data,
+                        headers={"Content-Type": ctype, "User-Agent": "OctopusAI/2.0"})
+                    with urllib.request.urlopen(req, timeout=20) as r:
+                        result = json.loads(r.read().decode("utf-8"))
+                        print(f"  📬 PushPlus [{method}] code={result.get('code')}, msg={result.get('msg','')}")
+                        if result.get("code") == 200:
+                            return True
+                except Exception as e:
+                    print(f"  ⚠️ [{method}] {url.split('/')[2]}: {e}")
+    print("  ❌ 所有推送方式均失败")
     return False
 
 # ======================== HTML 组件（全 inline + table，微信兼容） ========================
@@ -98,7 +115,7 @@ def _row_cell(label, value, vcolor=C_BLUE):
 
 def _data_table(rows):
     """rows: [(label, value), ...] 或 [(label, value, color), ...]"""
-    t = '<table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">'
+    t = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
     for r in rows:
         c = r[2] if len(r) > 2 else C_BLUE
         t += _row_cell(r[0], r[1], c)
@@ -106,7 +123,7 @@ def _data_table(rows):
 
 def _mini_table(rows):
     """rows: [(key, value_html), ...]"""
-    t = '<table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">'
+    t = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
     for k, v in rows:
         t += f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">{_esc(k)}</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed {C_DASH};">{v}</td></tr>'
     return t + '</table>'
@@ -115,7 +132,7 @@ def _card(title_emoji, title_text, body, extra_style=""):
     """白色卡片"""
     return f'''
 <!-- card -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};{extra_style}">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_WHITE};{extra_style}">
   <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr><td style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">{title_emoji} {_esc(title_text)}</td></tr>
@@ -126,18 +143,18 @@ def _card(title_emoji, title_text, body, extra_style=""):
 '''
 
 def _note(text):
-    return f'<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:{C_NOTE_BG};border-left:3px solid {C_BLUE};"><tr><td style="padding:8px 10px;font-size:13px;color:{C_BLUE};line-height:1.7;">{text}</td></tr></table>'
+    return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;background:{C_NOTE_BG};border-left:3px solid {C_BLUE};"><tr><td style="padding:8px 10px;font-size:13px;color:{C_BLUE};line-height:1.7;">{text}</td></tr></table>'
 
 def _alert(text, color=C_RED, bg=C_ALERT_R):
-    return f'<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;background:{bg};"><tr><td style="padding:6px 10px;font-size:13px;color:{color};font-weight:600;text-align:center;">{text}</td></tr></table>'
+    return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:6px;background:{bg};"><tr><td style="padding:6px 10px;font-size:13px;color:{color};font-weight:600;text-align:center;">{text}</td></tr></table>'
 
 def _vs_box(left_name, left_pct, left_detail, right_name, right_pct, right_detail):
     """并排对比：table布局两列"""
     return f'''
-<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:6px 0;">
   <tr>
     <td width="50%" valign="top" style="padding-right:3px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="background:#e6f4ea;border:1px solid #c6e6ce;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e6f4ea;border:1px solid #c6e6ce;">
         <tr><td style="padding:8px;text-align:center;">
           <div style="font-weight:700;font-size:15px;color:{C_GREEN};">{_esc(left_name)}</div>
           <div style="font-size:22px;font-weight:800;color:{C_GREEN};">{_esc(left_pct)}</div>
@@ -146,7 +163,7 @@ def _vs_box(left_name, left_pct, left_detail, right_name, right_pct, right_detai
       </table>
     </td>
     <td width="50%" valign="top" style="padding-left:3px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="background:#fce8e6;border:1px solid #f5c6cb;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fce8e6;border:1px solid #f5c6cb;">
         <tr><td style="padding:8px;text-align:center;">
           <div style="font-weight:700;font-size:15px;color:{C_RED};">{_esc(right_name)}</div>
           <div style="font-size:22px;font-weight:800;color:{C_RED};">{_esc(right_pct)}</div>
@@ -327,199 +344,132 @@ def generate_report(data, date_display, date_str):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="format-detection" content="telephone=no">
-<title>🐙 章鱼 AI · {date_str}</title>
-<style>
-*{{margin:0;padding:0}}
-body{{background:{C_BG};font-family:{FONT};color:{C_BLUE};font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}}
-table{{border-collapse:collapse}}
-</style>
+<title>OctopusAI</title>
 </head>
-<body>
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:PingFang SC,Hiragino Sans GB,Microsoft YaHei,sans-serif;color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%;">
 
-<!-- ═══ 外层容器 ═══ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:{C_BG};">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:600px;margin:0 auto;background:#f0f0f0;">
 <tr><td style="padding:10px;">
 
-<!-- ═══════ HEADER ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_BLUE};">
-  <tr><td style="padding:18px 14px 14px;text-align:center;color:{C_WHITE};font-size:13px;letter-spacing:2px;">
-    🐙 章鱼 AI · 全景分析
-  </td></tr>
-  <tr><td style="padding:0 14px 4px;text-align:center;color:{C_WHITE};font-size:20px;font-weight:700;letter-spacing:1px;">
-    全网多模型协同日报
-  </td></tr>
-  <tr><td style="padding:0 14px 14px;text-align:center;color:{C_WHITE};font-size:12px;">
-    {_esc(date_display)} · 实时数据
-  </td></tr>
-  <tr><td style="padding:0 14px 16px;text-align:center;">
-    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:{C_WHITE};">🌐 全球扫描</span>
-    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:{C_WHITE};">🤖 多模型推理</span>
-    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:{C_WHITE};">📡 {_now()}</span>
-  </td></tr>
+<!-- HEADER -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#002FA7;">
+<tr><td style="padding:16px 14px 12px;text-align:center;color:#fff;font-size:13px;">{chr(0x1F419)} Octopus AI · Panorama</td></tr>
+<tr><td style="padding:0 14px 4px;text-align:center;color:#fff;font-size:20px;font-weight:700;">Multi-Model Daily Report</td></tr>
+<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · Live</td></tr>
+<tr><td style="padding:0 14px 14px;text-align:center;">
+<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">Global</span>
+<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI</span>
+<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">{_now()}</span>
+</td></tr>
 </table>
 
-<!-- ═══════ ① 昨夜今晨重磅 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">⚡ 昨夜今晨 · 重磅速览</div>
-
-    {_alert("⚠️ 美联储 9-3 维持利率，30年期国债飙至 5.24%（2007以来最高） | 伊朗突袭→美军反击→原油 +7.2%")}
-
-    {_data_table([
-      ("🇺🇸 道琼斯", '<span style="color:{0};">51,618（-1,153 点 / -2.19%）</span>'.format(C_RED), C_RED),
-      ("🇺🇸 标普500", '<span style="color:{0};">7,317（-1.52%）</span>'.format(C_RED), C_RED),
-      ("🇺🇸 纳斯达克", '<span style="color:{0};">24,460（-1.74%）· 六连跌</span>'.format(C_RED), C_RED),
-      ("📈 30年期国债", '<span style="color:{0};">5.24%（2007年来最高）</span>'.format(C_RED), C_RED),
-      ("🛢 原油 WTI", '<span style="color:{0};">$84.9（+7.2%）</span>'.format(C_RED), C_RED),
-      ("🇺🇸 GDP Q2", '<span style="color:{0};">年化 +1.5%（预期 +2.0%）⚠️</span>'.format(C_RED), C_RED),
-      ("📊 核心 PCE 6月", '<span style="color:{0};">+3.3% YoY · 月率 +0.1%（低于预期）✅</span>'.format(C_GREEN), C_GREEN),
-    ])}
-
-    {_vs_box(
-      "🟢 微软 MSFT", "+11%",
-      "Azure 突破 $1000亿<br>AI 年营收 $370亿(+123%)<br>RPO 暴增 +84%",
-      "🔴 Meta META", "-9%",
-      "EPS $6.18 远逊 $7.22<br>自由现金流暴跌 -91%<br>资本支出吞没 97.5%",
-    )}
-
-    {_note("🧠 <b>多模型共识：</b>AI 路线大分化。微软证明 AI 基础设施→Azure 收入正循环成立；Meta 烧 $310 亿资本开支却无利润兑现。市场正在对 AI 投入回报率进行残酷投票。今晚 Apple + Amazon 财报是下一块试金石。")}
-  </td></tr>
+<!-- CARD 1 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Flash</div>
+{_alert('Fed 9-3 hold | 30Y 5.24% | Iran strike')}
+{_data_table([('US Dow','<span style="color:#d93025;">51,618 (-1,153 / -2.19%)</span>', C_RED),('US S&P500','<span style="color:#d93025;">7,317 (-1.52%)</span>', C_RED),('US Nasdaq','<span style="color:#d93025;">24,460 (-1.74%)</span>', C_RED),('30Y Bond','<span style="color:#d93025;">5.24% (highest since 2007)</span>', C_RED),('Oil WTI','<span style="color:#d93025;">$84.9 (+7.2%)</span>', C_RED),('US GDP Q2','<span style="color:#d93025;">+1.5% (vs 2.0% est)</span>', C_RED),('Core PCE Jun','<span style="color:#188038;">+3.3% YoY, +0.1% MoM</span>', C_GREEN)])}
+{_vs_box('MSFT','+11%','Azure >$100B<br>AI rev $37B(+123%)','META','-9%','EPS $6.18 miss $7.22<br>FCF -91%')}
+{_note('<b>Consensus:</b> AI divergence. MSFT proves AI pays off; META burns $31B capex with no profit. AAPL+AMZN earnings tonight.')}
+</td></tr>
 </table>
 
-<!-- ═══════ ② 7/30 盘前盘中 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">📈 7月30日 盘前与盘中</div>
-    {_alert("🟢 美股反弹：微软领涨 +11%，PCE 通胀降温助阵", C_GREEN, C_ALERT_G)}
-    {_data_table([
-      ("🇺🇸 标普500", '<span style="color:{0};">+0.88%</span>'.format(C_GREEN), C_GREEN),
-      ("🇺🇸 纳斯达克", '<span style="color:{0};">+1.6%</span>'.format(C_GREEN), C_GREEN),
-      ("🇺🇸 道琼斯", '<span style="color:{0};">+0.53%</span>'.format(C_GREEN), C_GREEN),
-      ("🇺🇸 罗素2000", '<span style="color:{0};">-1.61%（小盘承压）</span>'.format(C_RED), C_RED),
-      ("⚠️ GDP价格指数", '<span style="color:{0};">+6.2% YoY · 滞胀信号</span>'.format(C_RED), C_RED),
-      ("📉 初请失业金", '19.7万（低于预期 20万）'),
-    ])}
-    {_note("💡 GDP 放缓 + 通胀顽固 = 经典滞胀组合。但核心 PCE 月率仅 +0.1% 是好消息。JPMorgan 已发出「战术性买入」信号，认为超卖到足以反弹。")}
-  </td></tr>
+<!-- CARD 2 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Jul 30 Pre-Market</div>
+{_alert('Stocks rebound: MSFT +11%, PCE cools', C_GREEN, C_ALERT_G)}
+{_data_table([('US S&P500','<span style="color:#188038;">+0.88%</span>', C_GREEN),('US Nasdaq','<span style="color:#188038;">+1.6%</span>', C_GREEN),('US Dow','<span style="color:#188038;">+0.53%</span>', C_GREEN),('Russell 2000','<span style="color:#d93025;">-1.61%</span>', C_RED),('GDP Price Index','<span style="color:#d93025;">+6.2% YoY</span>', C_RED),('Jobless Claims','197K (below 200K est)')])}
+{_note('GDP slowing + inflation sticky = stagflation risk. But core PCE MoM +0.1% is good. JPMorgan issues tactical buy signal.')}
+</td></tr>
 </table>
 
-<!-- ═══════ ③ 雅虎财经头条 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">📰 雅虎财经 · 实时头条</div>
-    {yh_items}
-  </td></tr>
+<!-- CARD 3 Yahoo -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Yahoo Finance</div>
+{yh_items}
+</td></tr>
 </table>
 
-<!-- ═══════ ④ KOSPI · 半导体风暴 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">🇰🇷 KOSPI · 半导体风暴</div>
-    {_alert("🔥 费城半导体指数 SOX 进入熊市（-20%+）| KOSPI 7月累跌约 -32%，史上最惨月份")}
-    {_section_title("📅 7月30日收盘")}
-    {_mini_table([
-      ("KOSPI 收盘", '<span style="color:{0};">5,594（-1.23%）</span>'.format(C_RED)),
-      ("三星电子", '<span style="color:{0};">+0.7%（早盘一度 +7%）</span>'.format(C_GREEN)),
-      ("SK 海力士", '<span style="color:{0};">-5.64%（三日累跌 -27%）</span>'.format(C_RED)),
-      ("三星 Q2 营业利润", '<span style="color:{0};">89.49万亿韩元（+1,814%）🥇</span>'.format(C_GREEN)),
-      ("日经 225", '<span style="color:{0};">+0.71%（与韩国背离）</span>'.format(C_GREEN)),
-    ])}
-    {_section_title("🔻 三连暴击")}
-    <div style="font-size:13px;color:{C_BLUE};margin:4px 0;">
-      ① CXMT 长鑫存储 IPO — 首日暴涨 +466%，市值 3.3万亿人民币<br>
-      ② 中国 DUV 光刻机突破 — 国资背景量产浸没式 DUV<br>
-      ③ AI 循环融资质疑 — 英伟达-OpenAI $2500亿担保 + 供应过剩恐慌
-    </div>
-    {_section_title("🇰🇷 实时新闻")}
-    {kospi_items}
-    {_note("💡 韩国政府出台杠杆 ETF 新规（零售配比上限 20%）。三星利润暴增 18 倍仍无法救大盘 → 市场从基本面驱动切换至恐慌驱动。KOSPI PER 降至 5.1 倍，半导体低于 4 倍——历史极端。")}
-  </td></tr>
+<!-- CARD 4 KOSPI -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">KOSPI / Semis</div>
+{_alert('SOX enters bear market (-20%+) | KOSPI Jul -32%, worst month ever')}
+{_section_title('Jul 30 Close')}
+{_mini_table([('KOSPI','<span style="color:#d93025;">5,594 (-1.23%)</span>'),('Samsung','<span style="color:#188038;">+0.7% (intraday +7%)</span>'),('SK Hynix','<span style="color:#d93025;">-5.64% (3-day -27%)</span>'),('Samsung Q2 OP','<span style="color:#188038;">89.49T won (+1,814%)</span>'),('Nikkei 225','<span style="color:#188038;">+0.71%</span>')])}
+{_section_title('Triple Shock')}
+<div style="font-size:13px;color:#002FA7;margin:4px 0;">
+1. CXMT IPO +466%, mkt cap 3.3T yuan<br>
+2. China DUV lithography breakthrough<br>
+3. AI circular financing (NVDA-OpenAI $250B)
+</div>
+{_section_title('Live News')}
+{kospi_items}
+{_note('Korea tightens leveraged ETF rules. Samsung +1,814% profit cannot save market. KOSPI PER 5.1x, semis <4x.')}
+</td></tr>
 </table>
 
-<!-- ═══════ ⑤ Reddit WSB ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">💬 Reddit · WSB · 全网热议</div>
-    <div style="font-size:13px;color:#888;padding-bottom:6px;">📡 r/wallstreetbets · r/stocks · r/investing | 过去24小时</div>
-    {_section_title("🔥 最热股票提及 Top 10", 15)}
-    {_mini_table(wsb_rows)}
-    {_section_title("🗣 热议话题")}
-    <div style="margin:4px 0;line-height:28px;">{_tags_html(topics)}</div>
-    {_note('💬 <b>WSB 情绪：</b>"AI trade 彻底分叉——微软证明 AI 能赚钱，Meta 证明 AI 能烧钱。""Fed 9-3 简直是在预告加息。"散户对 KORU（3倍做多韩国）讨论激增，逆势赌博情绪浓厚。')}
-  </td></tr>
+<!-- CARD 5 WSB -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Reddit / WSB</div>
+<div style="font-size:13px;color:#888;padding-bottom:4px;">r/wallstreetbets · r/stocks · r/investing | past 24h</div>
+{_section_title('Top 10 Mentions', 15)}
+{_mini_table(wsb_rows)}
+{_section_title('Trending')}
+<div style="margin:4px 0;line-height:28px;">{_tags_html(topics)}</div>
+{_note('<b>WSB mood:</b> AI trade splits: MSFT proves AI works, META proves it burns cash. KORU (3x Korea long) discussions surging.')}
+</td></tr>
 </table>
 
-<!-- ═══════ ⑥ A股动态 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">🇨🇳 A股 · 中国动态</div>
-    {_data_table([
-      ("上证综指", '<span style="color:{0};">3,813（+0.40%）</span>'.format(C_GREEN), C_GREEN),
-      ("深证成指", '<span style="color:{0};">+1.10%</span>'.format(C_GREEN), C_GREEN),
-      ("创业板指", '<span style="color:{0};">+1.55%</span>'.format(C_GREEN), C_GREEN),
-      ("科创50", '<span style="color:{0};">-0.87%</span>'.format(C_RED), C_RED),
-      ("成交额", '2.31万亿元'),
-    ])}
-    {_section_title("🇨🇳 实时新闻")}
-    {sina_items}
-    {_note('📌 大消费全面爆发，乳业 +6.82% 领涨。存储芯片/半导体持续杀跌，长鑫科技逆势 +12.66%。4,253 只个股上涨，市场"新旧主线切换"。')}
-  </td></tr>
+<!-- CARD 6 A-Shares -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">China A-Shares</div>
+{_data_table([('SSE Composite','<span style="color:#188038;">3,813 (+0.40%)</span>', C_GREEN),('SZSE Component','<span style="color:#188038;">+1.10%</span>', C_GREEN),('ChiNext','<span style="color:#188038;">+1.55%</span>', C_GREEN),('STAR 50','<span style="color:#d93025;">-0.87%</span>', C_RED),('Volume','2.31T yuan')])}
+{_section_title('Live News')}
+{sina_items}
+{_note('Consumer sector surges (+6.82% dairy). Semis under pressure. CXMT +12.66%. 4,253 stocks up.')}
+</td></tr>
 </table>
 
-<!-- ═══════ ⑦ 亮点个股 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">✨ 今日亮点个股</div>
-    {_mini_table([
-      ("🟢 微软 MSFT", '<span style="color:{0};">+11% · Azure 里程碑</span>'.format(C_GREEN)),
-      ("🔴 Meta META", '<span style="color:{0};">-9% · FCF 崩塌 91%</span>'.format(C_RED)),
-      ("🟢 Lam Research LRCX", '<span style="color:{0};">+14.1% · 双创纪录</span>'.format(C_GREEN)),
-      ("🟢 MarketAxess MKTX", '<span style="color:{0};">+30% · ICE $57亿收购</span>'.format(C_GREEN)),
-      ("🔴 Alnylam ALNY", '<span style="color:{0};">-21.1% · 营收不及预期</span>'.format(C_RED)),
-      ("🔴 SK海力士", '<span style="color:{0};">-5.6% · 三日累跌 27%</span>'.format(C_RED)),
-      ("🟢 SpaceX SPCX", '<span style="color:{0};">$16亿太空部队合约</span>'.format(C_GREEN)),
-      ("🔴 费城半导体 SOX", '<span style="color:{0};">熊市 -20%+</span>'.format(C_RED)),
-    ])}
-  </td></tr>
+<!-- CARD 7 Highlights -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Stock Highlights</div>
+{_mini_table([('MSFT','<span style="color:#188038;">+11% Azure milestone</span>'),('META','<span style="color:#d93025;">-9% FCF -91%</span>'),('LRCX','<span style="color:#188038;">+14.1% record</span>'),('MKTX','<span style="color:#188038;">+30% ICE $5.7B buyout</span>'),('ALNY','<span style="color:#d93025;">-21.1% miss</span>'),('SK Hynix','<span style="color:#d93025;">-5.6% 3-day -27%</span>'),('SpaceX','<span style="color:#188038;">$1.6B Space Force</span>'),('SOX','<span style="color:#d93025;">bear -20%+</span>')])}
+</td></tr>
 </table>
 
-<!-- ═══════ ⑧ 今日关注 ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">🎯 今日关注</div>
-    {_mini_table([
-      ("📌 今晚财报", '<b>Apple (AAPL) + Amazon (AMZN)</b> 盘后'),
-      ("📌 PCE 通胀", '核心 +3.3% YoY · 月率 +0.1%（降温中）'),
-      ("📌 GDP", 'Q2 +1.5% · 滞胀担忧上升'),
-      ("📌 地缘", '美军空袭伊朗十余处目标，局势升级'),
-      ("📌 债券", '30年期 5.24% · 压制科技估值'),
-      ("📌 技术面", '纳斯达克距高点 -9.8%，逼近修正 -10%'),
-    ])}
-    {_note("🐙 <b>章鱼AI综合研判：</b>Microsoft 的 AI→收入正循环是全局最大亮点。但 Meta 的 FCF 崩塌和 Fed 9-3 投票构成双重压力。恐慌接近极值（JPMorgan 战术性买入信号已触发），反弹需 Apple/Amazon 财报确认。警惕「滞胀」叙事取代「AI狂热」成为市场主旋律。")}
-  </td></tr>
+<!-- CARD 8 Watch -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Focus Today</div>
+{_mini_table([('Earnings','<b>Apple + Amazon</b> after close'),('PCE','Core +3.3% YoY, +0.1% MoM'),('GDP','Q2 +1.5%, stagflation fear'),('Geopolitics','US strikes Iran targets'),('Bonds','30Y 5.24%, crushing tech valuations'),('Technical','Nasdaq -9.8% from peak')])}
+{_note('<b>Verdict:</b> MSFT AI revenue loop is the bright spot. Panic near extreme (JPM buy signal). Rebound needs AAPL/AMZN confirmation. Watch stagflation narrative.')}
+</td></tr>
 </table>
 
-<!-- ═══════ FOOTER ═══════ -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background:{C_WHITE};margin-top:0;">
-  <tr><td style="padding:14px 12px;text-align:center;">
-    <div style="font-size:11px;color:#8899c0;line-height:1.8;">
-      🐙 <b style="color:{C_BLUE};">章鱼 AI</b>，仅供参考。<br>
-      全网境内外检索公开行情，多模型协同推理决策<br>
-      Claude / ChatGPT / Gemini / Grok / Qwen / Kimi
-    </div>
-    <div style="font-size:10px;color:#99aacc;margin-top:6px;line-height:1.6;">
-      自动生成：{_now()}<br>
-      数据源：Reddit · Yahoo Finance · 新浪财经 · TradingKey · Bloomberg · SCMP
-    </div>
-  </td></tr>
+<!-- FOOTER -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;text-align:center;">
+<div style="font-size:11px;color:#8899c0;line-height:1.8;">
+Octopus AI, for reference only<br>
+Claude / ChatGPT / Gemini / Grok / Qwen / Kimi
+</div>
+<div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
+{_now()} | Reddit · Yahoo · Sina · TradingKey · Bloomberg
+</div>
+</td></tr>
 </table>
 
 </td></tr>
 </table>
-
 </body>
 </html>'''
+
     return html
 
 
