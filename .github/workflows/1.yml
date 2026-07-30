@@ -38,7 +38,7 @@ jobs:
 
       - name: 🐙 运行章鱼AI流水线
         env:
-          PUSHPUS_TOKEN: ${{ secrets.PUSHPUSH_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python3 output/pipeline.py --dry-run
