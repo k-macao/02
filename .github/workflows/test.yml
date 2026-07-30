@@ -1,0 +1,11 @@
+- name: 验证 Token 是否正常
+  env:
+    PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+  run: |
+    echo "Token 长度：${#PUSHPLUS_TOKEN}"
+    if [ ${#PUSHPLUS_TOKEN} -gt 0 ]; then
+      echo "✅ Token 配置正常"
+    else
+      echo "❌ Token 为空，请重新配置"
+      exit 1
+    fi
