@@ -1,13 +1,8 @@
 name: 🐙 章鱼AI · 每日自动推送
 
 on:
-  # 每天北京时间 08:00 自动运行（UTC 00:00 = CST 08:00）
   schedule:
     - cron: "0 0 * * *"
-  # 每天北京时间 21:00 晚间补充推送（美股盘中）
-  # schedule:
-  #   - cron: "0 13 * * *"
-  # 手动触发
   workflow_dispatch:
     inputs:
       dry_run:
@@ -37,13 +32,19 @@ jobs:
           python -m pip install --upgrade pip --quiet
           pip install --quiet requests
 
+      - name: 🔍 查看仓库文件结构（定位脚本用）
+        run: |
+          echo "=== 当前工作目录 ==="
+          pwd
+          echo "=== 全部文件列表 ==="
+          find . -name "*.py" -type f
+
       - name: 🐙 运行章鱼AI流水线
         env:
           PUSHPUS_TOKEN: ${{ secrets.PUSHPUS_TOKEN }}
         run: |
           set -euo pipefail
 
-          # 兼容定时触发/手动触发两种场景
           DRY_RUN="${{ github.event.inputs.dry_run }}"
           if [ "$DRY_RUN" = "true" ]; then
             echo "运行模式：预览模式（不推送）"
@@ -53,7 +54,7 @@ jobs:
             SCRIPT_ARGS=""
           fi
 
-          # 脚本路径校验，不存在则直接报明确错误
+          # 👇 这里改成上一步查到的真实路径
           SCRIPT_PATH="output/pipeline.py"
           if [ ! -f "$SCRIPT_PATH" ]; then
             echo "❌ 错误：未找到脚本文件 $SCRIPT_PATH"
@@ -62,7 +63,7 @@ jobs:
 
           python3 "$SCRIPT_PATH" $SCRIPT_ARGS
 
-      - name: 📤 提交生成的日报（可选）
+      - name: 📤 提交生成的日报
         if: success()
         run: |
           set -euo pipefail
