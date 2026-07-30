@@ -1,4 +1,4 @@
-- name: 验证 Token 是否正常
+ - name: 验证 Token 是否正常
   env:
     PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
   run: |
@@ -9,3 +9,4 @@
       echo "❌ Token 为空，请重新配置"
       exit 1
     fi
+  
