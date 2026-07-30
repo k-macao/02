@@ -23,7 +23,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 # ======================== 配置 ========================
-PUSHPUS_TOKEN = os.environ.get("PUSHPUS_TOKEN", "507a6c0cf9cf46229f5f3c5107a967cc")
+PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "507a6c0cf9cf46229f5f3c5107a967cc")
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 CST = timezone(timedelta(hours=8))
 USER_AGENT = "Mozilla/5.0 OctopusAI/2.0"
