@@ -32,17 +32,10 @@ jobs:
         with:
           python-version: "3.11"
 
-
       - name: 📦 安装依赖
         run: |
           python -m pip install --upgrade pip --quiet
           pip install --quiet requests
-
-      - name: 🔍 打印目录结构（路径排查用）
-        run: |
-          echo "当前工作目录: $(pwd)"
-          echo "仓库文件结构:"
-          ls -R
 
       - name: 🐙 运行章鱼AI流水线
         env:
@@ -64,7 +57,6 @@ jobs:
           SCRIPT_PATH="output/pipeline.py"
           if [ ! -f "$SCRIPT_PATH" ]; then
             echo "❌ 错误：未找到脚本文件 $SCRIPT_PATH"
-            echo "请参考上一步的目录结构，修正脚本路径"
             exit 1
           fi
 
