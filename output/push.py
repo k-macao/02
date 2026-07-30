@@ -3,21 +3,55 @@
 🐙 章鱼 AI · 一键推送
 每次运行都先抓取最新数据 → 分析 → 生成 → 推送。
 """
-import os, sys, subprocess
+import os
+import sys
+import subprocess
+import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PIPELINE = os.path.join(SCRIPT_DIR, "pipeline.py")
+PIPELINE = os.path.join(SCRIPT_DIR, "output", "pipeline.py")
+# 日报输出目录与pipeline保持一致：pipeline.py所在的目录
+REPORT_DIR = os.path.dirname(PIPELINE)
 
-if "--list" in sys.argv:
-    import glob
-    files = sorted(glob.glob(os.path.join(SCRIPT_DIR, "daily_report_*.html")), reverse=True)
+
+def list_reports():
+    """列出所有已生成的日报文件"""
+    pattern = os.path.join(REPORT_DIR, "daily_report_*.html")
+    files = sorted(glob.glob(pattern), reverse=True)
     if not files:
-        print("No report files yet.")
-    else:
-        print(f"{len(files)} reports:\n")
-        for i, f in enumerate(files, 1):
-            print(f"  {i:2d}. {os.path.basename(f)}  ({os.path.getsize(f):,} bytes)")
-    sys.exit(0)
+        print("暂无日报文件。")
+        return 0
+    
+    print(f"共找到 {len(files)} 份日报：\n")
+    for idx, filepath in enumerate(files, 1):
+        filename = os.path.basename(filepath)
+        size = os.path.getsize(filepath)
+        print(f"  {idx:2d}. {filename}  ({size:,} 字节)")
+    return 0
 
-cmd = [sys.executable, PIPELINE] + sys.argv[1:]
-sys.exit(subprocess.call(cmd))
+
+def main():
+    # --list 模式
+    if "--list" in sys.argv:
+        sys.exit(list_reports())
+
+    # 前置校验：pipeline.py 是否存在
+    if not os.path.isfile(PIPELINE):
+        print(f"❌ 错误：找不到流水线脚本 {PIPELINE}")
+        print(f"   请检查脚本路径是否正确，当前脚本目录：{SCRIPT_DIR}")
+        sys.exit(1)
+
+    # 透传参数执行pipeline
+    cmd = [sys.executable, PIPELINE] + sys.argv[1:]
+    returncode = subprocess.call(cmd)
+
+    # 退出码归一化：负数（信号终止）统一转为正数
+    if returncode < 0:
+        print(f"\n⚠️  进程被信号终止，信号码：{-returncode}")
+        sys.exit(1)
+    
+    sys.exit(returncode)
+
+
+if __name__ == "__main__":
+    main()
