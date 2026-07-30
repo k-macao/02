@@ -1,0 +1,1 @@
+pip install requests && python3 output/push.py
