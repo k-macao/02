@@ -1,8 +1,15 @@
 name: 🐙 章鱼AI · 每日自动推送
 
 on:
+  # 每天北京时间 08:00 自动运行（UTC 00:00 = CST 08:00）
   schedule:
     - cron: "0 0 * * *"
+
+  # 每天北京时间 21:00 晚间补充推送（美股盘中）
+  # schedule:
+  #   - cron: "0 13 * * *"
+
+  # 手动触发
   workflow_dispatch:
     inputs:
       dry_run:
@@ -15,53 +22,39 @@ jobs:
   octopus-daily:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
     steps:
       - name: 📥 检出仓库
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐍 配置 Python 环境
+      - name: 🐍 安装 Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: 📦 安装依赖
         run: |
-          python -m pip install --upgrade pip --quiet
           pip install --quiet requests
 
       - name: 🐙 运行章鱼AI流水线
         env:
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPUS_TOKEN: ${{ secrets.PUSHPUS_TOKEN }}
         run: |
-          set -euo pipefail
-
-          DRY_RUN="${{ github.event.inputs.dry_run }}"
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "运行模式：预览模式（不推送）"
-            SCRIPT_ARGS="--dry-run"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python3 output/pipeline.py --dry-run
           else
-            echo "运行模式：正式推送模式"
-            SCRIPT_ARGS=""
+            python3 output/pipeline.py
           fi
 
-          python3 output/pipeline.py $SCRIPT_ARGS
-
-      - name: 📤 提交生成的日报
-        if: always()
+      - name: 📤 提交生成的日报（可选）
+        if: success()
         run: |
-          set -euo pipefail
           git config user.name "octopus-bot"
           git config user.email "bot@octopus.ai"
-
-          git add output/daily_report_*.html output/latest.html 2>/dev/null || true
-
+          git add output/daily_report_*.html output/latest.html
           if git diff --cached --quiet; then
             echo "无新内容，跳过提交。"
           else
-            COMMIT_DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-            git commit -m "📰 自动日报 $COMMIT_DATE"
+            git commit -m "📰 自动日报 $(TZ='Asia/Macau' date +%Y-%m-%d)"
             git push origin HEAD
           fi
