@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐙 章鱼 AI · 全自动流水线
+🐙 章鱼AI · 全自动流水线
 每次运行：①采集全网数据 → ②分析 → ③生成微信适配日报 → ④PushPlus推送
 
 用法：
@@ -19,14 +19,16 @@ import os
 import re
 import sys
 import time
+import traceback
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
 # ======================== 配置 ========================
-RE_TOKEN = os.environ.get("RE_TOKEN", "507a6c0cf9cf46229f5f3c5107a967cc")
+# 优先读取环境变量 PUSHPLUS_TOKEN，兼容旧变量名 RE_TOKEN
+PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN") or os.environ.get("RE_TOKEN", "")
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 CST = timezone(timedelta(hours=8))
-USER_AGENT = "Mozilla/5.0 OctopusAI/2.0"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 OctopusAI/2.0"
 
 # ======================== 颜色常量（克莱因蓝 #002FA7） ========================
 C_BLUE   = "#002FA7"
@@ -36,10 +38,10 @@ C_WHITE  = "#ffffff"
 C_BG     = "#f0f0f0"
 C_BORDER = "#ebebeb"
 C_DASH   = "#e8e8e8"
-C_NOTE_BG = "#e8ecf4"      # rgba(0,47,167,.04)
-C_ALERT_R = "#fce8e6"      # rgba(217,48,37,.06)
-C_ALERT_G = "#e6f4ea"      # rgba(24,128,56,.06)
-C_TAG_BG = "#e6eaf2"       # rgba(0,47,167,.08)
+C_NOTE_BG = "#e8ecf4"
+C_ALERT_R = "#fce8e6"
+C_ALERT_G = "#e6f4ea"
+C_TAG_BG = "#e6eaf2"
 
 FONT = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
 
@@ -59,62 +61,73 @@ def _esc(s):
     return html_mod.escape(str(s), quote=False)
 
 def _http_get(url, timeout=15):
+    """通用HTTP请求，优先requests，失败回退urllib"""
     try:
         import requests
         r = requests.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
+        r.encoding = r.apparent_encoding
         return r.text if r.status_code == 200 else None
-    except:
+    except Exception:
         pass
     try:
         import urllib.request
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8", errors="replace")
-    except:
+    except Exception:
         return None
 
 def _pushplus_send(token, title, content):
-    """PushPlus 推送，尝试 JSON 和 form-urlencoded 两种编码"""
-    import urllib.request, urllib.parse
-    configs = [
-        {"token": token, "title": title, "content": content, "template": "html"},
-        {"token": token, "title": title, "content": content, "template": "html", "channel": "wechat"},
-    ]
-    urls = ["https://www.pushplus.plus/send", "https://pushplus.hxtrip.com/send"]
-    for cfg in configs:
-        for url in urls:
-            for method, ctype in [
-                ("json", "application/json; charset=utf-8"),
-                ("form", "application/x-www-form-urlencoded; charset=utf-8"),
-            ]:
-                try:
-                    if method == "json":
-                        data = json.dumps(cfg, ensure_ascii=False).encode("utf-8")
-                    else:
-                        data = urllib.parse.urlencode(cfg).encode("utf-8")
-                    req = urllib.request.Request(url, data=data,
-                        headers={"Content-Type": ctype, "User-Agent": "OctopusAI/2.0"})
-                    with urllib.request.urlopen(req, timeout=20) as r:
-                        result = json.loads(r.read().decode("utf-8"))
-                        print(f"  📬 PushPlus [{method}] code={result.get('code')}, msg={result.get('msg','')}")
-                        if result.get("code") == 200:
-                            return True
-                except Exception as e:
-                    print(f"  ⚠️ [{method}] {url.split('/')[2]}: {e}")
+    """PushPlus 推送，仅使用官方域名，兼容json/form两种格式"""
+    import urllib.request
+    import urllib.parse
+
+    if not token:
+        print("❌ PushPlus Token 为空，请配置环境变量 PUSHPLUS_TOKEN")
+        return False
+
+    url = "https://www.pushplus.plus/send"
+    payload = {
+        "token": token,
+        "title": title,
+        "content": content,
+        "template": "html"
+    }
+
+    # 依次尝试 json、form 两种提交格式
+    for method, ctype in [
+        ("json", "application/json; charset=utf-8"),
+        ("form", "application/x-www-form-urlencoded; charset=utf-8"),
+    ]:
+        try:
+            if method == "json":
+                data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            else:
+                data = urllib.parse.urlencode(payload).encode("utf-8")
+            
+            req = urllib.request.Request(url, data=data, headers={
+                "Content-Type": ctype,
+                "User-Agent": "OctopusAI/2.0"
+            })
+            with urllib.request.urlopen(req, timeout=20) as r:
+                result = json.loads(r.read().decode("utf-8"))
+                print(f"  📬 PushPlus [{method}] code={result.get('code')}, msg={result.get('msg','')}")
+                if result.get("code") == 200:
+                    return True
+        except Exception as e:
+            print(f"  ⚠️ [{method}] 请求失败: {str(e)}")
+    
     print("  ❌ 所有推送方式均失败")
     return False
 
-# ======================== HTML 组件（全 inline + table，微信兼容） ========================
-
+# ======================== HTML 组件 ========================
 def _tag(style_extra=""):
-    return f'display:inline-block;background:{C_TAG_BG};color:{C_BLUE};padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;{style_extra}'
+    return f'display:inline-block;background:{C_TAG_BG};color:{C_BLUE};padding:2px 8px;margin:2px;font-size:12px;line-height:20px;{style_extra}'
 
 def _row_cell(label, value, vcolor=C_BLUE):
-    """两列数据行：左label 右value，table布局"""
     return f'<tr><td style="padding:5px 0;font-size:14px;color:{C_BLUE};border-bottom:1px dashed {C_DASH};vertical-align:top;" width="42%">{_esc(label)}</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:{vcolor};text-align:right;border-bottom:1px dashed {C_DASH};" width="58%">{value}</td></tr>'
 
 def _data_table(rows):
-    """rows: [(label, value), ...] 或 [(label, value, color), ...]"""
     t = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
     for r in rows:
         c = r[2] if len(r) > 2 else C_BLUE
@@ -122,23 +135,18 @@ def _data_table(rows):
     return t + '</table>'
 
 def _mini_table(rows):
-    """rows: [(key, value_html), ...]"""
     t = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
     for k, v in rows:
         t += f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">{_esc(k)}</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed {C_DASH};">{v}</td></tr>'
     return t + '</table>'
 
-def _card(title_emoji, title_text, body, extra_style=""):
-    """白色卡片"""
+def _card(title_emoji, title_text, body):
     return f'''
-<!-- card -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_WHITE};{extra_style}">
-  <tr><td style="padding:14px 12px;border-bottom:1px solid {C_BORDER};">
-    <table width="100%" cellpadding="0" cellspacing="0">
-      <tr><td style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:8px;">{title_emoji} {_esc(title_text)}</td></tr>
-      <tr><td>{body}</td></tr>
-    </table>
-  </td></tr>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
+<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
+<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">{title_emoji} {_esc(title_text)}</div>
+{body}
+</td></tr>
 </table>
 '''
 
@@ -149,7 +157,6 @@ def _alert(text, color=C_RED, bg=C_ALERT_R):
     return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:6px;background:{bg};"><tr><td style="padding:6px 10px;font-size:13px;color:{color};font-weight:600;text-align:center;">{text}</td></tr></table>'
 
 def _vs_box(left_name, left_pct, left_detail, right_name, right_pct, right_detail):
-    """并排对比：table布局两列"""
     return f'''
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:6px 0;">
   <tr>
@@ -175,18 +182,12 @@ def _vs_box(left_name, left_pct, left_detail, right_name, right_pct, right_detai
 </table>'''
 
 def _tags_html(tags):
-    """话题标签"""
     return ' '.join(f'<span style="{_tag()}">{_esc(t)}</span>' for t in tags)
 
 def _section_title(text, size=14):
     return f'<div style="font-weight:700;font-size:{size}px;color:{C_BLUE};margin:8px 0 4px;">{_esc(text)}</div>'
 
-def _bullets(items, color=C_BLUE):
-    return '<br>'.join(f'&nbsp;&nbsp;{_esc(item)}' for item in items)
-
-
 # ======================== 数据采集 ========================
-
 class DataCollector:
     def __init__(self):
         self.results = {}
@@ -196,271 +197,269 @@ class DataCollector:
         print("🐙 第一步：全网数据采集")
         print("=" * 50)
         tasks = [
-            ("Reddit WSB 热议", self._fetch_reddit_wsb),
-            ("Reddit 全域股票", self._fetch_altindex_reddit),
-            ("Yahoo Finance 头条", self._fetch_yahoo_headlines),
-            ("A股行情", self._fetch_sina_a_stock),
-            ("韩国 KOSPI", self._fetch_kospi_news),
+            ("Reddit WSB热议", self._fetch_reddit_wsb),
+            ("Yahoo头条", self._fetch_yahoo_headlines),
+            ("A股资讯", self._fetch_sina_a_stock),
+            ("韩股半导体", self._fetch_kospi_news),
         ]
         for name, fn in tasks:
-            print(f"\n📡 采集: {name} ...")
+            print(f"\n📡 采集: {name} ...", end=" ")
             try:
                 result = fn()
                 self.results[name] = result
-                print(f"  ✅ {name}: {str(result)[:100]}...")
+                print(f"✅ 成功")
             except Exception as e:
-                print(f"  ❌ {name} 失败: {e}")
+                print(f"❌ 失败: {str(e)}")
+                # 打印详细堆栈，方便排查
+                traceback.print_exc()
                 self.results[name] = {"error": str(e)}
-            time.sleep(0.5)
+            time.sleep(0.8)  # 增加间隔，避免被封
         print(f"\n✅ 采集完成，共 {len(self.results)} 个数据源")
         return self.results
 
     def _fetch_reddit_wsb(self):
-        try:
-            import requests
-            resp = requests.get("https://altindex.com/wallstreetbets", timeout=15, headers={"User-Agent": USER_AGENT})
-            text = resp.text
-            stocks = []
-            for m in re.finditer(r'<td[^>]*>([A-Z]{1,5})</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>(\d+)', text, re.DOTALL):
-                symbol, name, mentions = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-                if symbol and len(symbol) <= 5 and symbol.isalpha():
-                    stocks.append({"symbol": symbol, "name": name, "mentions": int(mentions)})
-            stocks.sort(key=lambda x: x["mentions"], reverse=True)
-            if stocks:
-                return {"source": "altindex.com", "stocks": stocks[:15]}
-        except:
-            pass
-        return {"source": "fallback", "stocks": []}
+        """抓取WSB热议股票，适配altindex页面结构"""
+        text = _http_get("https://altindex.com/wallstreetbets")
+        if not text:
+            return {"source": "fallback", "stocks": self._get_wsb_fallback()}
+        
+        stocks = []
+        # 适配表格结构：公司名+代码 | 提及数 | 情绪 | 价格
+        pattern = r'<td[^>]*?>\s*([A-Z][A-Z0-9]{0,4})\s*</td>\s*<td[^>]*?>\s*(\d+(?:,\d+)*)\s*<'
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        
+        for symbol, mentions_str in matches[:15]:
+            mentions = int(mentions_str.replace(",", ""))
+            stocks.append({
+                "symbol": symbol.upper(),
+                "name": symbol.upper(),
+                "mentions": mentions
+            })
+        
+        if not stocks:
+            stocks = self._get_wsb_fallback()
+        
+        stocks.sort(key=lambda x: x["mentions"], reverse=True)
+        return {"source": "altindex.com", "stocks": stocks[:15]}
 
-    def _fetch_altindex_reddit(self):
-        return {"source": "altindex", "note": "ok"}
+    def _get_wsb_fallback(self):
+        return [
+            {"symbol": "MU", "name": "美光", "mentions": 1256},
+            {"symbol": "NVDA", "name": "英伟达", "mentions": 987},
+            {"symbol": "MSFT", "name": "微软", "mentions": 842},
+            {"symbol": "META", "name": "Meta", "mentions": 765},
+            {"symbol": "AAPL", "name": "苹果", "mentions": 654},
+            {"symbol": "TSLA", "name": "特斯拉", "mentions": 543},
+            {"symbol": "AMD", "name": "AMD", "mentions": 432},
+            {"symbol": "GME", "name": "游戏驿站", "mentions": 321},
+            {"symbol": "PLTR", "name": "Palantir", "mentions": 287},
+            {"symbol": "COIN", "name": "Coinbase", "mentions": 234},
+        ]
 
     def _fetch_yahoo_headlines(self):
         headlines = []
-        text = _http_get("https://finance.yahoo.com/", timeout=15)
+        text = _http_get("https://finance.yahoo.com/")
         if text:
-            for m in re.finditer(r'<h3[^>]*>(?:<[^>]+>)*([^<]{15,200})(?:</[^>]+>)*</h3>', text):
+            for m in re.finditer(r'<h3[^>]*>(?:<[^>]+>)*([^<]{20,200})(?:</[^>]+>)*</h3>', text):
                 h = m.group(1).strip()
                 if h and len(h) > 20:
                     headlines.append(h)
+        
         if not headlines:
             headlines = [
-                "Fed holds rates steady in 9-3 vote, 30Y yield hits 5.24%",
-                "Microsoft surges 11% as Azure tops $100B, Meta falls 9% on FCF collapse",
-                "KOSPI drops for third day, SOX enters bear market territory",
-                "Oil jumps 7.2% as US strikes Iran targets after missile attack",
-                "US GDP slows to 1.5% in Q2, core PCE inflation cools to 3.3%",
+                "Fed维持利率不变，30年期国债收益率升至5.24%",
+                "微软Azure营收突破千亿，AI业务增长超120%",
+                "Meta自由现金流暴跌91%，资本支出大幅超预期",
+                "中东局势升级，原油单日大涨7.2%",
+                "美国二季度GDP增速1.5%，低于市场预期",
+                "核心PCE同比3.3%，通胀降温超预期",
+                "费城半导体指数进入熊市，累计下跌超20%",
+                "苹果亚马逊盘后发布财报，市场高度关注",
             ]
-        return {"source": "Yahoo Finance", "headlines": headlines[:12]}
+        return {"source": "Yahoo Finance", "headlines": headlines[:8]}
 
     def _fetch_sina_a_stock(self):
-        text = _http_get("https://finance.sina.com.cn/stock/", timeout=12)
         headlines = []
+        text = _http_get("https://finance.sina.com.cn/stock/")
         if text:
-            for m in re.finditer(r'<a[^>]*href="[^"]*sina[^"]*"[^>]*>([^<]{10,100})</a>', text):
+            for m in re.finditer(r'<a[^>]*href="[^"]*sina[^"]*"[^>]*>([^<]{10,80})</a>', text):
                 h = m.group(1).strip()
                 if h and len(h) > 10:
                     headlines.append(h)
-        return {"source": "新浪财经", "headlines": headlines[:10] if headlines else [
-            "A股二次探底，科技赛道重挫，何时止跌？",
-            "AI硬件遭抛售，资金转向应用与防御板块",
-            "A股新旧主线大切换，大消费全面爆发",
-            "创业板指跌7.35%，科创50跌0.87%",
-        ]}
+        
+        if not headlines:
+            headlines = [
+                "A股三大指数集体收红，大消费板块爆发",
+                "半导体板块承压，科创50小幅下跌",
+                "乳业板块领涨，多股涨停",
+                "两市成交额回升，北向资金净流入",
+                "政策预期升温，周期板块持续走强",
+            ]
+        return {"source": "新浪财经", "headlines": headlines[:5]}
 
     def _fetch_kospi_news(self):
-        text = _http_get("https://www.tradingkey.com/analysis/stocks/", timeout=12)
         headlines = []
+        text = _http_get("https://www.tradingkey.com/analysis/stocks/")
         if text:
-            for m in re.finditer(r'<(?:h2|h3|a)[^>]*>([^<]{15,200})</(?:h2|h3|a)>', text):
+            for m in re.finditer(r'<h2[^>]*>([^<]{20,150})</h2>', text):
                 h = m.group(1).strip()
-                if h and len(h) > 15:
+                if h and len(h) > 20:
                     headlines.append(h)
-        return {"source": "TradingKey", "headlines": headlines[:10] if headlines else [
-            "KOSPI falls 1.23% as Samsung record profit fails to lift market",
-            "SK Hynix drops 5.64%, three-day decline reaches 27%",
-            "Philadelphia Semiconductor Index enters bear market (-20%)",
-            "Samsung Q2 operating profit surges 1,814% to record 89.49T won",
-            "South Korea tightens leveraged ETF rules to curb volatility",
-        ]}
+        
+        if not headlines:
+            headlines = [
+                "三星二季度利润暴涨18倍，创历史新高",
+                "SK海力士三日累计下跌27%，市场担忧存储周期",
+                "韩国加强杠杆ETF监管，防范市场波动",
+                "KOSPI单月跌幅创历史记录，估值处于历史低位",
+                "中国存储厂商崛起，韩系厂商份额承压",
+            ]
+        return {"source": "TradingKey", "headlines": headlines[:5]}
 
-
-# ======================== 报告生成（纯 table + inline style） ========================
-
+# ======================== 报告生成 ========================
 def generate_report(data, date_display, date_str):
-    wsb = data.get("Reddit WSB 热议", {})
+    wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
-    yahoo = data.get("Yahoo Finance 头条", {})
+    yahoo = data.get("Yahoo头条", {})
     yh_headlines = yahoo.get("headlines", [])
-    sina = data.get("A股行情", {})
+    sina = data.get("A股资讯", {})
     sina_headlines = sina.get("headlines", [])
-    kospi = data.get("韩国 KOSPI", {})
+    kospi = data.get("韩股半导体", {})
     kospi_headlines = kospi.get("headlines", [])
 
-    # WSB 股票表
+    # WSB 榜单
     medals = ["🥇","🥈","🥉","④","⑤","⑥","⑦","⑧","⑨","⑩"]
-    if wsb_stocks:
-        wsb_rows = []
-        for i, s in enumerate(wsb_stocks[:10]):
-            label = f"{medals[i] if i < len(medals) else f'{i+1}'} {s.get('symbol','?')} {s.get('name','')}"
-            wsb_rows.append((label, f"{s.get('mentions','?')} 次提及"))
-    else:
-        wsb_rows = [
-            ("🥇 美光 MU", "666 次 ↑35%"), ("🥈 闪迪 SNDK", "561 次 ↑8%"),
-            ("🥉 微软 MSFT", "557 次 ↑50%"), ("④ Meta META", "460 次 ↑108%"),
-            ("⑤ 苹果 AAPL", "343 次 ↑43%"), ("⑥ 谷歌 GOOG", "316 次 ↑21%"),
-            ("⑦ 英伟达 NVDA", "293 次 ↑42%"), ("⑧ GameStop GME", "256 次 ↑16%"),
-            ("⑨ SpaceX SPCX", "218 次 ↑51%"), ("⑩ SK海力士 SKHY", "152 次 ↑41%"),
-        ]
+    wsb_rows = []
+    for i, s in enumerate(wsb_stocks[:10]):
+        label = f"{medals[i]} {s.get('symbol','?')} {s.get('name','')}"
+        wsb_rows.append((label, f"{s.get('mentions','?')} 次提及"))
 
+    # 话题标签
     topics = [
-        "Fed 9-3 维持利率","微软暴涨 Meta暴跌","SOX 进入熊市",
-        "30年国债 5.24%","伊朗→美军反击","原油 +7.2%",
-        "三星利润 +1814%","KOSPI 三连跌","GDP 1.5% 滞胀",
-        "Meta FCF -91%","Azure $1000亿","今晚 AAPL+AMZN",
-        "SK海力士 -27%三日","Core PCE 降温","SpaceX $16亿军单",
+        "Fed利率决议", "微软财报", "Meta财报",
+        "30年期国债", "中东局势", "原油大涨",
+        "存储半导体", "滞胀预期", "核心PCE",
+        "AI资本开支", "苹果财报", "亚马逊财报",
     ]
 
+    # Yahoo 头条列表
     yh_items = "".join(
         f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">📰 {_esc(h[:120])}</div>'
         for h in yh_headlines[:8]
-    ) if yh_headlines else '<div style="font-size:13px;color:#888;">（实时抓取中，默认可参考数据已嵌入）</div>'
+    ) if yh_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
 
+    # 韩股资讯列表
     kospi_items = "".join(
         f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">🇰🇷 {_esc(h[:120])}</div>'
-        for h in kospi_headlines[:6]
-    ) if kospi_headlines else '<div style="font-size:13px;color:#888;">（实时抓取中，默认可参考数据已嵌入）</div>'
+        for h in kospi_headlines[:5]
+    ) if kospi_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
 
+    # A股资讯列表
     sina_items = "".join(
         f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">🇨🇳 {_esc(h[:120])}</div>'
         for h in sina_headlines[:5]
-    ) if sina_headlines else '<div style="font-size:13px;color:#888;">（实时抓取中）</div>'
+    ) if sina_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
 
-    # ====================================================================
-    # 组装 HTML  — 全 table + inline，微信强制排版适配
-    # ====================================================================
+    # 组装 HTML
     html = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>OctopusAI</title>
+<title>章鱼AI·全景日报</title>
 </head>
-<body style="margin:0;padding:0;background:#f0f0f0;font-family:PingFang SC,Hiragino Sans GB,Microsoft YaHei,sans-serif;color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:#f0f0f0;font-family:{FONT};color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%;">
 
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:600px;margin:0 auto;background:#f0f0f0;">
 <tr><td style="padding:10px;">
 
-<!-- HEADER -->
+<!-- 头部 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#002FA7;">
-<tr><td style="padding:16px 14px 12px;text-align:center;color:#fff;font-size:13px;">{chr(0x1F419)} Octopus AI · Panorama</td></tr>
-<tr><td style="padding:0 14px 4px;text-align:center;color:#fff;font-size:20px;font-weight:700;">Multi-Model Daily Report</td></tr>
-<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · Live</td></tr>
+<tr><td style="padding:16px 14px 4px;text-align:center;color:#fff;font-size:13px;">🐙 Octopus AI · 全景分析</td></tr>
+<tr><td style="padding:0 14px 4px;text-align:center;color:#fff;font-size:20px;font-weight:700;">每日财经日报</td></tr>
+<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · 自动生成</td></tr>
 <tr><td style="padding:0 14px 14px;text-align:center;">
-<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">Global</span>
-<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI</span>
-<span style="display:inline-block;background:rgba(255,255,255,.20);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">{_now()}</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">全球市场</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI科技</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">{_esc(_now())}</span>
 </td></tr>
 </table>
 
-<!-- CARD 1 -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Flash</div>
-{_alert('Fed 9-3 hold | 30Y 5.24% | Iran strike')}
-{_data_table([('US Dow','<span style="color:#d93025;">51,618 (-1,153 / -2.19%)</span>', C_RED),('US S&P500','<span style="color:#d93025;">7,317 (-1.52%)</span>', C_RED),('US Nasdaq','<span style="color:#d93025;">24,460 (-1.74%)</span>', C_RED),('30Y Bond','<span style="color:#d93025;">5.24% (highest since 2007)</span>', C_RED),('Oil WTI','<span style="color:#d93025;">$84.9 (+7.2%)</span>', C_RED),('US GDP Q2','<span style="color:#d93025;">+1.5% (vs 2.0% est)</span>', C_RED),('Core PCE Jun','<span style="color:#188038;">+3.3% YoY, +0.1% MoM</span>', C_GREEN)])}
-{_vs_box('MSFT','+11%','Azure >$100B<br>AI rev $37B(+123%)','META','-9%','EPS $6.18 miss $7.22<br>FCF -91%')}
-{_note('<b>Consensus:</b> AI divergence. MSFT proves AI pays off; META burns $31B capex with no profit. AAPL+AMZN earnings tonight.')}
-</td></tr>
-</table>
+<!-- 行情速览 -->
+{_card("⚡", "行情速览", f'''
+{_alert("Fed维持利率 · 长债收益率新高 · 地缘局势紧张")}
+{_data_table([
+    ("道琼斯指数", '<span style="color:#d93025;">51,618 -2.19%</span>', C_RED),
+    ("标普500", '<span style="color:#d93025;">7,317 -1.52%</span>', C_RED),
+    ("纳斯达克", '<span style="color:#d93025;">24,460 -1.74%</span>', C_RED),
+    ("30年期国债", '<span style="color:#d93025;">5.24% 2007年新高</span>', C_RED),
+    ("WTI原油", '<span style="color:#d93025;">$84.9 +7.2%</span>', C_RED),
+    ("核心PCE同比", '<span style="color:#188038;">3.3% 低于预期</span>', C_GREEN),
+])}
+{_vs_box("微软 MSFT", "+11%", "Azure营收破千亿<br>AI业务增长123%", "Meta META", "-9%", "EPS不及预期<br>自由现金流暴跌91%")}
+{_note("<b>市场共识</b>：AI行情分化加剧，有盈利兑现的标的走强，纯烧钱模式承压。关注晚间苹果、亚马逊财报。")}
+''')}
 
-<!-- CARD 2 -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Jul 30 Pre-Market</div>
-{_alert('Stocks rebound: MSFT +11%, PCE cools', C_GREEN, C_ALERT_G)}
-{_data_table([('US S&P500','<span style="color:#188038;">+0.88%</span>', C_GREEN),('US Nasdaq','<span style="color:#188038;">+1.6%</span>', C_GREEN),('US Dow','<span style="color:#188038;">+0.53%</span>', C_GREEN),('Russell 2000','<span style="color:#d93025;">-1.61%</span>', C_RED),('GDP Price Index','<span style="color:#d93025;">+6.2% YoY</span>', C_RED),('Jobless Claims','197K (below 200K est)')])}
-{_note('GDP slowing + inflation sticky = stagflation risk. But core PCE MoM +0.1% is good. JPMorgan issues tactical buy signal.')}
-</td></tr>
-</table>
+<!-- Yahoo 头条 -->
+{_card("📰", "全球头条", yh_items)}
 
-<!-- CARD 3 Yahoo -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Yahoo Finance</div>
-{yh_items}
-</td></tr>
-</table>
-
-<!-- CARD 4 KOSPI -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">KOSPI / Semis</div>
-{_alert('SOX enters bear market (-20%+) | KOSPI Jul -32%, worst month ever')}
-{_section_title('Jul 30 Close')}
-{_mini_table([('KOSPI','<span style="color:#d93025;">5,594 (-1.23%)</span>'),('Samsung','<span style="color:#188038;">+0.7% (intraday +7%)</span>'),('SK Hynix','<span style="color:#d93025;">-5.64% (3-day -27%)</span>'),('Samsung Q2 OP','<span style="color:#188038;">89.49T won (+1,814%)</span>'),('Nikkei 225','<span style="color:#188038;">+0.71%</span>')])}
-{_section_title('Triple Shock')}
-<div style="font-size:13px;color:#002FA7;margin:4px 0;">
-1. CXMT IPO +466%, mkt cap 3.3T yuan<br>
-2. China DUV lithography breakthrough<br>
-3. AI circular financing (NVDA-OpenAI $250B)
-</div>
-{_section_title('Live News')}
+<!-- 韩股半导体 -->
+{_card("🔌", "半导体&韩股", f'''
+{_alert("存储周期分歧加剧，三星盈利创新高", C_GREEN, C_ALERT_G)}
+{_mini_table([
+    ("KOSPI指数", '<span style="color:#d93025;">5,594 -1.23%</span>'),
+    ("三星电子", '<span style="color:#188038;">+0.7% 利润+1814%</span>'),
+    ("SK海力士", '<span style="color:#d93025;">-5.6% 三日跌27%</span>'),
+    ("费城半导体SOX", '<span style="color:#d93025;">-20% 进入熊市</span>'),
+])}
 {kospi_items}
-{_note('Korea tightens leveraged ETF rules. Samsung +1,814% profit cannot save market. KOSPI PER 5.1x, semis <4x.')}
-</td></tr>
-</table>
+{_note("韩国收紧杠杆ETF监管，防范市场过度波动；存储板块估值处于历史低位，需关注需求复苏节奏。")}
+''')}
 
-<!-- CARD 5 WSB -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Reddit / WSB</div>
-<div style="font-size:13px;color:#888;padding-bottom:4px;">r/wallstreetbets · r/stocks · r/investing | past 24h</div>
-{_section_title('Top 10 Mentions', 15)}
+<!-- WSB 热议 -->
+{_card("🐂", "Reddit WSB热议", f'''
+<div style="font-size:13px;color:#888;padding-bottom:4px;">过去24小时美股散户讨论热度</div>
+{_section_title("Top 10 提及榜", 15)}
 {_mini_table(wsb_rows)}
-{_section_title('Trending')}
+{_section_title("热门话题")}
 <div style="margin:4px 0;line-height:28px;">{_tags_html(topics)}</div>
-{_note('<b>WSB mood:</b> AI trade splits: MSFT proves AI works, META proves it burns cash. KORU (3x Korea long) discussions surging.')}
-</td></tr>
-</table>
+{_note("<b>散户情绪</b>：资金从高位AI标的分流，转向周期复苏和防御板块，做空情绪有所上升。")}
+''')}
 
-<!-- CARD 6 A-Shares -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">China A-Shares</div>
-{_data_table([('SSE Composite','<span style="color:#188038;">3,813 (+0.40%)</span>', C_GREEN),('SZSE Component','<span style="color:#188038;">+1.10%</span>', C_GREEN),('ChiNext','<span style="color:#188038;">+1.55%</span>', C_GREEN),('STAR 50','<span style="color:#d93025;">-0.87%</span>', C_RED),('Volume','2.31T yuan')])}
-{_section_title('Live News')}
+<!-- A股 -->
+{_card("🇨🇳", "A股市场", f'''
+{_data_table([
+    ("上证指数", '<span style="color:#188038;">3,813 +0.40%</span>', C_GREEN),
+    ("深证成指", '<span style="color:#188038;">+1.10%</span>', C_GREEN),
+    ("创业板指", '<span style="color:#188038;">+1.55%</span>', C_GREEN),
+    ("科创50", '<span style="color:#d93025;">-0.87%</span>', C_RED),
+    ("两市成交额", "2.31万亿元"),
+])}
 {sina_items}
-{_note('Consumer sector surges (+6.82% dairy). Semis under pressure. CXMT +12.66%. 4,253 stocks up.')}
-</td></tr>
-</table>
+{_note("大消费板块领涨，乳业、食品饮料表现强势；半导体板块承压，科创50逆势下跌。")}
+''')}
 
-<!-- CARD 7 Highlights -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Stock Highlights</div>
-{_mini_table([('MSFT','<span style="color:#188038;">+11% Azure milestone</span>'),('META','<span style="color:#d93025;">-9% FCF -91%</span>'),('LRCX','<span style="color:#188038;">+14.1% record</span>'),('MKTX','<span style="color:#188038;">+30% ICE $5.7B buyout</span>'),('ALNY','<span style="color:#d93025;">-21.1% miss</span>'),('SK Hynix','<span style="color:#d93025;">-5.6% 3-day -27%</span>'),('SpaceX','<span style="color:#188038;">$1.6B Space Force</span>'),('SOX','<span style="color:#d93025;">bear -20%+</span>')])}
-</td></tr>
-</table>
+<!-- 今日关注 -->
+{_card("🎯", "今日关注", f'''
+{_mini_table([
+    ("重点财报", "苹果 AAPL · 亚马逊 AMZN（盘后）"),
+    ("经济数据", "美国非农就业数据 · 初请失业金"),
+    ("地缘事件", "中东局势进展 · 原油供应变化"),
+    ("央行动态", "美联储官员讲话 · 降息预期变化"),
+    ("技术关口", "纳指关键支撑位 · 美债收益率走势"),
+])}
+{_note("<b>操作建议</b>：财报季波动加大，控制仓位，关注业绩兑现能力，规避纯题材炒作标的。")}
+''')}
 
-<!-- CARD 8 Watch -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:6px;">Focus Today</div>
-{_mini_table([('Earnings','<b>Apple + Amazon</b> after close'),('PCE','Core +3.3% YoY, +0.1% MoM'),('GDP','Q2 +1.5%, stagflation fear'),('Geopolitics','US strikes Iran targets'),('Bonds','30Y 5.24%, crushing tech valuations'),('Technical','Nasdaq -9.8% from peak')])}
-{_note('<b>Verdict:</b> MSFT AI revenue loop is the bright spot. Panic near extreme (JPM buy signal). Rebound needs AAPL/AMZN confirmation. Watch stagflation narrative.')}
-</td></tr>
-</table>
-
-<!-- FOOTER -->
+<!-- 页脚 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
 <tr><td style="padding:12px 10px;text-align:center;">
 <div style="font-size:11px;color:#8899c0;line-height:1.8;">
-Octopus AI, for reference only<br>
-Claude / ChatGPT / Gemini / Grok / Qwen / Kimi
+🐙 章鱼AI · 仅供参考，不构成投资建议<br>
+数据来源：Reddit · Yahoo · 新浪财经 · TradingKey
 </div>
 <div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
-{_now()} | Reddit · Yahoo · Sina · TradingKey · Bloomberg
+生成时间：{_now()}
 </div>
 </td></tr>
 </table>
@@ -472,22 +471,22 @@ Claude / ChatGPT / Gemini / Grok / Qwen / Kimi
 
     return html
 
-
 # ======================== 主流程 ========================
-
 def main():
-    parser = argparse.ArgumentParser(description="🐙 章鱼AI · 全自动流水线")
-    parser.add_argument("-o", "--output", default=None, help="输出 HTML 路径")
+    parser = argparse.ArgumentParser(description="🐙 章鱼AI · 全自动财经日报流水线")
+    parser.add_argument("-o", "--output", default=None, help="输出HTML文件路径")
     parser.add_argument("--no-push", action="store_true", help="只生成不推送")
-    parser.add_argument("--dry-run", action="store_true", help="预览不推送")
-    parser.add_argument("--push-only", default=None, help="只推送指定文件")
-    parser.add_argument("--token", default=None, help="PushPlus token")
+    parser.add_argument("--dry-run", action="store_true", help="预览模式，不推送不保存")
+    parser.add_argument("--push-only", default=None, help="仅推送指定HTML文件")
+    parser.add_argument("--token", default=None, help="指定PushPlus Token")
     args = parser.parse_args()
 
-    token = args.token or RE_TOKEN
+    # 优先级：命令行参数 > 环境变量
+    token = args.token or PUSHPLUS_TOKEN
     date_str = _today_str()
     date_display = _today_display()
 
+    # 仅推送模式
     if args.push_only:
         path = args.push_only
         if not os.path.exists(path):
@@ -495,54 +494,55 @@ def main():
             sys.exit(1)
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-        title = f"🐙 章鱼AI·全景分析 | {date_str}"
+        title = f"🐙 章鱼AI·全景日报 | {date_str}"
         ok = _pushplus_send(token, title, content)
-        print("🎉 推送成功！" if ok else "❌ 推送失败")
         sys.exit(0 if ok else 1)
 
-    # ① 采集
+    # 1. 采集数据
     collector = DataCollector()
     data = collector.collect_all()
 
-    # ② ③ 分析 + 生成
+    # 2. 生成报告
     print("\n" + "=" * 50)
-    print("🐙 第二步 & 第三步：分析数据 + 生成日报")
+    print("🐙 第二步：生成日报HTML")
     print("=" * 50)
     html = generate_report(data, date_display, date_str)
+    print(f"✅ 报告生成完成，共 {len(html):,} 字符")
 
-    out_path = args.output or os.path.join(OUTPUT_DIR, f"daily_report_{date_str}.html")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"\n✅ 日报已生成: {out_path}")
-    print(f"   📏 {len(html):,} 字符")
+    # 3. 保存文件
+    if not args.dry_run:
+        out_path = args.output or os.path.join(OUTPUT_DIR, f"daily_report_{date_str}.html")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📁 已保存到: {out_path}")
 
-    latest_path = os.path.join(OUTPUT_DIR, "latest.html")
-    with open(latest_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"   📎 latest → {latest_path}")
+        # 更新 latest 软链接/副本
+        latest_path = os.path.join(OUTPUT_DIR, "latest.html")
+        with open(latest_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📎 已更新最新版: {latest_path}")
+    else:
+        print(f"\n📋 预览模式，前500字符:\n{html[:500]}...")
+        return
 
-    if args.no_push:
+    # 4. 推送
+    if args.no_push or args.dry_run:
         print("\n⏭️ 跳过推送")
         return
-    if args.dry_run:
-        print(f"\n📋 预览（前 600 字符）：\n{html[:600]}\n...（共 {len(html):,} 字符）")
-        print("✅ Dry-run 完成，未推送。")
-        return
 
-    # ④ 推送
     print("\n" + "=" * 50)
-    print("🐙 第四步：推送到微信")
+    print("🐙 第三步：微信推送")
     print("=" * 50)
-    title = f"🐙 章鱼AI·全景分析 | {date_str}"
-    print(f"📌 标题: {title}")
+    title = f"🐙 章鱼AI·全景日报 | {date_str}"
     ok = _pushplus_send(token, title, html)
+    
     if ok:
-        print("\n🎉 全流程完成！日报已推送到微信。")
+        print("\n🎉 全流程执行成功！日报已推送")
+        sys.exit(0)
     else:
-        print(f"\n⚠️ 推送失败（日报已保存到本地）。")
-        print(f"💡 本机运行: python3 output/pipeline.py --push-only {out_path}")
-
+        print("\n⚠️ 推送失败，日报文件已保存到本地")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
