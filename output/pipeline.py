@@ -484,7 +484,7 @@ def main():
     parser.add_argument("--token", default=None, help="PushPlus token")
     args = parser.parse_args()
 
-    token = args.token or PUSHPUS_TOKEN
+    token = args.token or PUSHPLUS_TOKEN
     date_str = _today_str()
     date_display = _today_display()
 
