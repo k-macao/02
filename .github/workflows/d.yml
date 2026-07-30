@@ -1,0 +1,21 @@
+name: 🐙 章鱼AI · 自动推送日报
+
+on:
+  schedule:
+    - cron: "0 0 * * *"           # UTC 00:00 = 北京时间 08:00
+  workflow_dispatch:               # 手动触发
+
+jobs:
+  push-to-wechat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 推送最新日报
+        env:
+          PUSHPUS_TOKEN: ${{ secrets.PUSHPUS_TOKEN }}
+        run: |
+          pip install requests
+          python3 output/push.py
