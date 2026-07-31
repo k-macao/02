@@ -4,476 +4,169 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="format-detection" content="telephone=no">
-<title>章鱼 AI · 全景分析 · 2026年7月30日</title>
+<title>🐙 章鱼 AI · 20260730</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;}
-body{
-  background:#f0f0f0;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
-  color:#002FA7;
-  font-size:15px;
-  line-height:1.75;
-  -webkit-text-size-adjust:100%;
-  -ms-text-size-adjust:100%;
-}
-.container{
-  max-width:600px;
-  margin:0 auto;
-  padding:12px;
-}
-/* 头部 */
-.header{
-  background:linear-gradient(135deg,#002FA7,#0047d4);
-  color:#fff;
-  border-radius:12px 12px 0 0;
-  padding:20px 16px 16px;
-  text-align:center;
-}
-.header .brand{
-  font-size:13px;
-  letter-spacing:2px;
-  opacity:0.85;
-  margin-bottom:4px;
-}
-.header h1{
-  font-size:20px;
-  font-weight:700;
-  letter-spacing:1px;
-}
-.header .date{
-  font-size:12px;
-  opacity:0.7;
-  margin-top:6px;
-}
-.header .tags{
-  margin-top:10px;
-  display:flex;
-  flex-wrap:wrap;
-  justify-content:center;
-  gap:6px;
-}
-.header .tag{
-  background:rgba(255,255,255,0.18);
-  border-radius:20px;
-  padding:3px 10px;
-  font-size:11px;
-  color:#fff;
-}
-/* 卡片 */
-.card{
-  background:#fff;
-  border-radius:0;
-  padding:16px 14px;
-  margin:0;
-  border-bottom:1px solid #ebebeb;
-}
-.card:first-of-type{
-  border-radius:0;
-}
-.card:last-of-type{
-  border-radius:0 0 12px 12px;
-  border-bottom:none;
-}
-.card-title{
-  font-size:17px;
-  font-weight:700;
-  color:#002FA7;
-  margin-bottom:10px;
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-.card-title .icon{
-  font-size:20px;
-}
-/* 数据行 */
-.data-row{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:8px 0;
-  border-bottom:1px dashed #e8e8e8;
-}
-.data-row:last-child{
-  border-bottom:none;
-}
-.data-label{
-  font-size:14px;
-  color:#002FA7;
-  font-weight:500;
-}
-.data-value{
-  font-size:14px;
-  font-weight:700;
-  color:#002FA7;
-}
-.data-value.red{color:#d93025;}
-.data-value.green{color:#188038;}
-/* 热点列表 */
-.hot-item{
-  padding:8px 0;
-  border-bottom:1px dashed #e8e8e8;
-  display:flex;
-  gap:8px;
-  font-size:14px;
-}
-.hot-item:last-child{
-  border-bottom:none;
-}
-.hot-idx{
-  color:#002FA7;
-  font-weight:700;
-  font-size:16px;
-  min-width:22px;
-  opacity:0.6;
-}
-.hot-content{
-  flex:1;
-}
-.hot-title{
-  color:#002FA7;
-  font-weight:600;
-  font-size:14px;
-  margin-bottom:2px;
-}
-.hot-meta{
-  font-size:11px;
-  color:#002FA7;
-  opacity:0.55;
-}
-/* 热议话题 */
-.topic-tag{
-  display:inline-block;
-  background:rgba(0,47,167,0.08);
-  color:#002FA7;
-  border-radius:4px;
-  padding:2px 8px;
-  margin:3px 4px 3px 0;
-  font-size:12px;
-  line-height:1.8;
-}
-/* 分割线 */
-.divider{
-  height:1px;
-  background:#ddd;
-  margin:6px 0;
-}
-/* 板块小结 */
-.section-note{
-  background:rgba(0,47,167,0.04);
-  border-left:3px solid #002FA7;
-  padding:8px 12px;
-  margin-top:10px;
-  font-size:13px;
-  color:#002FA7;
-  border-radius:0 6px 6px 0;
-  line-height:1.7;
-}
-/* 页脚 */
-.footer{
-  background:#fff;
-  border-radius:12px;
-  padding:14px;
-  margin-top:12px;
-  text-align:center;
-}
-.footer .copyright{
-  font-size:11px;
-  color:#002FA7;
-  opacity:0.6;
-  line-height:1.8;
-}
-.footer .models{
-  font-size:10px;
-  color:#002FA7;
-  opacity:0.5;
-  margin-top:6px;
-  line-height:1.6;
-}
-/* 警告条 */
-.alert-strip{
-  background:rgba(217,48,37,0.06);
-  border-radius:6px;
-  padding:8px 10px;
-  margin-bottom:10px;
-  font-size:13px;
-  color:#d93025;
-  font-weight:600;
-  text-align:center;
-}
-/* 表格风格 */
-.mini-table{
-  width:100%;
-  font-size:13px;
-  border-collapse:collapse;
-}
-.mini-table td{
-  padding:5px 4px;
-  border-bottom:1px dashed #e8e8e8;
-  color:#002FA7;
-}
-.mini-table td:last-child{
-  text-align:right;
-  font-weight:700;
-}
-.mini-table tr:last-child td{
-  border-bottom:none;
-}
-.up{color:#188038;}
-.down{color:#d93025;}
+*{margin:0;padding:0}
+body{background:#f0f0f0;font-family:PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif;color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}
+table{border-collapse:collapse}
 </style>
 </head>
 <body>
-<div class="container">
 
-<!-- ========== HEADER ========== -->
-<div class="header">
-  <div class="brand">🐙 章鱼 AI · 全景分析</div>
-  <h1>全网多模型协同日报</h1>
-  <div class="date">2026年7月30日 · 周四</div>
-  <div class="tags">
-    <span class="tag">🌐 全球扫描</span>
-    <span class="tag">🤖 多模型推理</span>
-    <span class="tag">📡 实时行情</span>
-  </div>
-</div>
+<!-- ═══ 外层容器 ═══ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#f0f0f0;">
+<tr><td style="padding:10px;">
 
-<!-- ========== 全球市场概览 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">📊</span>全球市场概览</div>
-  <div class="alert-strip">⚠️ 韩国KOSPI连续两日熔断，7月累跌超30%，为历史最惨月份</div>
-  <div class="data-row">
-    <span class="data-label">🇺🇸 道琼斯</span>
-    <span class="data-value green">52,747 (+1.03%)</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇺🇸 纳斯达克</span>
-    <span class="data-value red">-0.22%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇺🇸 标普500</span>
-    <span class="data-value green">+0.21%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇰🇷 KOSPI</span>
-    <span class="data-value red">-10.84%（周二）<br>二连熔断，7月累跌 -28.9%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇯🇵 日经225</span>
-    <span class="data-value red">7月累跌 -12.31%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇦🇺 澳洲ASX 200</span>
-    <span class="data-value red">-0.8% → 8,968</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇨🇳 上证综指</span>
-    <span class="data-value green">3,813 (+0.40%)</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇨🇳 创业板指</span>
-    <span class="data-value red">3,327 (-7.35%)</span>
-  </div>
-  <div class="section-note">
-    💡 <b>多模型共识：</b>全球呈现"冰火两重天"——道指创新高，纳指/半导体承压。资金从AI硬件轮动至传统价值板块与AI应用软件。费城半导体指数（SOX）连续两日累跌超6%。
-  </div>
-</div>
+<!-- ═══════ HEADER ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#002FA7;">
+  <tr><td style="padding:18px 14px 14px;text-align:center;color:#ffffff;font-size:13px;letter-spacing:2px;">
+    🐙 章鱼 AI · 全景分析
+  </td></tr>
+  <tr><td style="padding:0 14px 4px;text-align:center;color:#ffffff;font-size:20px;font-weight:700;letter-spacing:1px;">
+    全网多模型协同日报
+  </td></tr>
+  <tr><td style="padding:0 14px 14px;text-align:center;color:#ffffff;font-size:12px;">
+    2026年7月30日 · 周四 · 实时数据
+  </td></tr>
+  <tr><td style="padding:0 14px 16px;text-align:center;">
+    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:#ffffff;">🌐 全球扫描</span>
+    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:#ffffff;">🤖 多模型推理</span>
+    <span style="display:inline-block;background:rgba(255,255,255,.20);padding:3px 10px;margin:2px;font-size:11px;color:#ffffff;">📡 2026-07-30 23:59:13 CST</span>
+  </td></tr>
+</table>
 
-<!-- ========== 半导体/AI 风暴 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">🔥</span>半导体 · AI 风暴核心</div>
+<!-- ═══════ ① 昨夜今晨重磅 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">⚡ 昨夜今晨 · 重磅速览</div>
 
-  <table class="mini-table">
-    <tr><td>🇰🇷 SK海力士</td><td class="down">-14.7%（周二）<br>ADR跌破发行价</td></tr>
-    <tr><td>🇰🇷 三星电子</td><td class="down">-14.4%（周二）<br>2008年以来最大单日跌幅</td></tr>
-    <tr><td>🇺🇸 美光 MU</td><td class="down">-8.85%</td></tr>
-    <tr><td>🇺🇸 闪迪 SNDK</td><td class="down">-14.25%</td></tr>
-    <tr><td>🇺🇸 AMD</td><td class="down">-8.15%</td></tr>
-    <tr><td>🇺🇸 英特尔 INTC</td><td class="down">-5.86%</td></tr>
-    <tr><td>🇺🇸 英伟达 NVDA</td><td class="down">-3.6%</td></tr>
-    <tr><td>🇳🇱 ASML</td><td class="down">-2.0%</td></tr>
-    <tr><td>🇺🇸 戴尔 DELL</td><td class="down">-8.15%</td></tr>
-    <tr><td>🇺🇸 康宁 GLW</td><td class="down">-12%+</td></tr>
-  </table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;background:#fce8e6;"><tr><td style="padding:6px 10px;font-size:13px;color:#d93025;font-weight:600;text-align:center;">⚠️ 美联储 9-3 维持利率，30年期国债飙至 5.24%（2007以来最高） | 伊朗突袭→美军反击→原油 +7.2%</td></tr></table>
 
-  <div class="section-note" style="margin-top:10px;">
-    <b>🔍 三重暴击解析：</b><br>
-    ① <b>CXMT（长鑫存储）IPO</b>——首日暴涨466%，市值达3.3万亿元人民币，亚洲2026年最大IPO，引发存储芯片"中国威胁"恐慌<br>
-    ② <b>中国DUV光刻机突破</b>——中国国资背景企业开始量产浸没式DUV光刻设备，挑战ASML垄断地位<br>
-    ③ <b>AI循环融资质疑</b>——英伟达与OpenAI 2500亿美元融资担保被批"循环融资"，CDS溢价飙升，重现2000年 vendor financing 担忧
-  </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 道琼斯</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">51,618（-1,153 点 / -2.19%）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 标普500</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">7,317（-1.52%）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 纳斯达克</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">24,460（-1.74%）· 六连跌</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">📈 30年期国债</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">5.24%（2007年来最高）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🛢 原油 WTI</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">$84.9（+7.2%）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 GDP Q2</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">年化 +1.5%（预期 +2.0%）⚠️</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">📊 核心 PCE 6月</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+3.3% YoY · 月率 +0.1%（低于预期）✅</span></td></tr></table>
 
-  <div style="margin-top:8px;font-size:13px;">
-    <b>📈 逆势亮点：</b><br>
-    <span class="topic-tag">Adobe +4.81%</span>
-    <span class="topic-tag">IBM +5.21%</span>
-    <span class="topic-tag">Salesforce +4.55%</span>
-    <span class="topic-tag">Workday +8%+</span>
-    <span class="topic-tag">ServiceNow 走强</span>
-    <span style="color:#002FA7;font-size:12px;display:block;margin-top:4px;">——资金从"卖铲子"的AI硬件，转向"用AI"的软件应用</span>
-  </div>
+    
+<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0;">
+  <tr>
+    <td width="50%" valign="top" style="padding-right:3px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#e6f4ea;border:1px solid #c6e6ce;">
+        <tr><td style="padding:8px;text-align:center;">
+          <div style="font-weight:700;font-size:15px;color:#188038;">🟢 微软 MSFT</div>
+          <div style="font-size:22px;font-weight:800;color:#188038;">+11%</div>
+          <div style="font-size:11px;color:#188038;">Azure 突破 $1000亿<br>AI 年营收 $370亿(+123%)<br>RPO 暴增 +84%</div>
+        </td></tr>
+      </table>
+    </td>
+    <td width="50%" valign="top" style="padding-left:3px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#fce8e6;border:1px solid #f5c6cb;">
+        <tr><td style="padding:8px;text-align:center;">
+          <div style="font-weight:700;font-size:15px;color:#d93025;">🔴 Meta META</div>
+          <div style="font-size:22px;font-weight:800;color:#d93025;">-9%</div>
+          <div style="font-size:11px;color:#d93025;">EPS $6.18 远逊 $7.22<br>自由现金流暴跌 -91%<br>资本支出吞没 97.5%</div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
 
-  <div style="margin-top:10px;font-size:13px;color:#002FA7;">
-    <b>🏆 苹果里程碑：</b>盘中市值首次突破5万亿美元，超越英伟达成为全球最有价值公司。AAPL创历史新高 $343.70。
-  </div>
-</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">🧠 <b>多模型共识：</b>AI 路线大分化。微软证明 AI 基础设施→Azure 收入正循环成立；Meta 烧 $310 亿资本开支却无利润兑现。市场正在对 AI 投入回报率进行残酷投票。今晚 Apple + Amazon 财报是下一块试金石。</td></tr></table>
+  </td></tr>
+</table>
 
-<!-- ========== Reddit / WSB 热议 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">💬</span>Reddit · WSB 全网热议</div>
+<!-- ═══════ ② 7/30 盘前盘中 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">📈 7月30日 盘前与盘中</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;background:#e6f4ea;"><tr><td style="padding:6px 10px;font-size:13px;color:#188038;font-weight:600;text-align:center;">🟢 美股反弹：微软领涨 +11%，PCE 通胀降温助阵</td></tr></table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 标普500</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+0.88%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 纳斯达克</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+1.6%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 道琼斯</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+0.53%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">🇺🇸 罗素2000</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">-1.61%（小盘承压）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">⚠️ GDP价格指数</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">+6.2% YoY · 滞胀信号</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">📉 初请失业金</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#002FA7;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%">19.7万（低于预期 20万）</td></tr></table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">💡 GDP 放缓 + 通胀顽固 = 经典滞胀组合。但核心 PCE 月率仅 +0.1% 是好消息。JPMorgan 已发出「战术性买入」信号，认为超卖到足以反弹。</td></tr></table>
+  </td></tr>
+</table>
 
-  <div style="font-size:13px;color:#002FA7;opacity:0.7;margin-bottom:8px;">📡 数据源：r/wallstreetbets · r/stocks · r/investing | 过去24小时</div>
+<!-- ═══════ ③ 雅虎财经头条 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">📰 雅虎财经 · 实时头条</div>
+    <div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 U.S. markets close in 4h 2m</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 Microsoft stock soars after $41B AI bet clears major test</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 US economic growth slows to 1.5% in second quarter</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 Fed's favored inflation gauge shows prices edged down but remain high</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 US economic growth slows to 1.5% in second quarter</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 Fed's favored inflation gauge shows prices edged down but remain high</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 Kevin Warsh’s stripped-back Fed communication ‘already backfiring’, say investors</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">📰 Meta stock sinks on earnings miss, 'barely passable' quarterly results</div>
+  </td></tr>
+</table>
 
-  <div style="font-weight:700;font-size:15px;color:#002FA7;margin-bottom:6px;">🔥 最热股票提及 Top 10</div>
-  <table class="mini-table">
-    <tr><td>🥇 美光 MU</td><td>497 次提及 ↑36%</td></tr>
-    <tr><td>🥈 闪迪 SNDK</td><td>487 次提及 ↑17%</td></tr>
-    <tr><td>🥉 微软 MSFT</td><td>253 次提及 ↑30% · 看涨</td></tr>
-    <tr><td>④ Meta META</td><td>173 次提及 ↑92%</td></tr>
-    <tr><td>⑤ SK海力士 SKHY</td><td>172 次提及 ↑365%</td></tr>
-    <tr><td>⑥ SpaceX SPCX</td><td>171 次提及 ↑39%</td></tr>
-    <tr><td>⑦ 英伟达 NVDA</td><td>154 次提及 ↑61%</td></tr>
-    <tr><td>⑧ 希捷 STX</td><td>142 次提及 ↑517%</td></tr>
-    <tr><td>⑨ 苹果 AAPL</td><td>132 次提及 ↑67%</td></tr>
-    <tr><td>⑩ 谷歌 GOOG</td><td>115 次提及 ↑18%</td></tr>
-  </table>
+<!-- ═══════ ④ KOSPI · 半导体风暴 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">🇰🇷 KOSPI · 半导体风暴</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;background:#fce8e6;"><tr><td style="padding:6px 10px;font-size:13px;color:#d93025;font-weight:600;text-align:center;">🔥 费城半导体指数 SOX 进入熊市（-20%+）| KOSPI 7月累跌约 -32%，史上最惨月份</td></tr></table>
+    <div style="font-weight:700;font-size:14px;color:#002FA7;margin:8px 0 4px;">📅 7月30日收盘</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">KOSPI 收盘</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">5,594（-1.23%）</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">三星电子</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">+0.7%（早盘一度 +7%）</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">SK 海力士</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">-5.64%（三日累跌 -27%）</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">三星 Q2 营业利润</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">89.49万亿韩元（+1,814%）🥇</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">日经 225</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">+0.71%（与韩国背离）</span></td></tr></table>
+    <div style="font-weight:700;font-size:14px;color:#002FA7;margin:8px 0 4px;">🔻 三连暴击</div>
+    <div style="font-size:13px;color:#002FA7;margin:4px 0;">
+      ① CXMT 长鑫存储 IPO — 首日暴涨 +466%，市值 3.3万亿人民币<br>
+      ② 中国 DUV 光刻机突破 — 国资背景量产浸没式 DUV<br>
+      ③ AI 循环融资质疑 — 英伟达-OpenAI $2500亿担保 + 供应过剩恐慌
+    </div>
+    <div style="font-weight:700;font-size:14px;color:#002FA7;margin:8px 0 4px;">🇰🇷 实时新闻</div>
+    <div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 Editors&amp;#x27; Picks</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 Cryptocurrencies</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 Oracle Rises Over 8% as Google Cloud Partnership Expands to Bring Gemini Models to Fusion and NetSuite Enterprise Applic</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 Alphabet (GOOGL) Price Forecast: 17.7x P/E at $335, Testing Trendline, Amazon Earnings Today</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 SK Hynix Rises Over 15% as Citi Says Chinese Memory Makers Won’t Impact Market in Short Term, Memory Tightness to Last U</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇰🇷 Netflix (NFLX) Stock Forecast: 23x P/E, $94 Target, Testing Trendline at $73</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">💡 韩国政府出台杠杆 ETF 新规（零售配比上限 20%）。三星利润暴增 18 倍仍无法救大盘 → 市场从基本面驱动切换至恐慌驱动。KOSPI PER 降至 5.1 倍，半导体低于 4 倍——历史极端。</td></tr></table>
+  </td></tr>
+</table>
 
-  <div style="margin-top:12px;font-weight:700;font-size:15px;color:#002FA7;margin-bottom:6px;">🗣️ 热议话题</div>
-  <div>
-    <span class="topic-tag">🔥 KOSPI暴跌8%触发熔断</span>
-    <span class="topic-tag">Michael Burry做空NVDA</span>
-    <span class="topic-tag">CXMT暴涨466%</span>
-    <span class="topic-tag">中国DUV光刻机突破</span>
-    <span class="topic-tag">苹果超越英伟达</span>
-    <span class="topic-tag">AI capex vs 自由现金流</span>
-    <span class="topic-tag">记忆体交易死了吗？</span>
-    <span class="topic-tag">ASML被过度抛售</span>
-    <span class="topic-tag">NVDA·OpenAI $2500亿</span>
-    <span class="topic-tag">Citadel预言加息</span>
-    <span class="topic-tag">不做期权</span>
-    <span class="topic-tag">SoFi ↑730%讨论</span>
-    <span class="topic-tag">Bloom Energy升级买入</span>
-  </div>
+<!-- ═══════ ⑤ Reddit WSB ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">💬 Reddit · WSB · 全网热议</div>
+    <div style="font-size:13px;color:#888;padding-bottom:6px;">📡 r/wallstreetbets · r/stocks · r/investing | 过去24小时</div>
+    <div style="font-weight:700;font-size:15px;color:#002FA7;margin:8px 0 4px;">🔥 最热股票提及 Top 10</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🥇 美光 MU</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">666 次 ↑35%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🥈 闪迪 SNDK</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">561 次 ↑8%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🥉 微软 MSFT</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">557 次 ↑50%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">④ Meta META</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">460 次 ↑108%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑤ 苹果 AAPL</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">343 次 ↑43%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑥ 谷歌 GOOG</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">316 次 ↑21%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑦ 英伟达 NVDA</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">293 次 ↑42%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑧ GameStop GME</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">256 次 ↑16%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑨ SpaceX SPCX</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">218 次 ↑51%</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">⑩ SK海力士 SKHY</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">152 次 ↑41%</td></tr></table>
+    <div style="font-weight:700;font-size:14px;color:#002FA7;margin:8px 0 4px;">🗣 热议话题</div>
+    <div style="margin:4px 0;line-height:28px;"><span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">Fed 9-3 维持利率</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">微软暴涨 Meta暴跌</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">SOX 进入熊市</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">30年国债 5.24%</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">伊朗→美军反击</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">原油 +7.2%</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">三星利润 +1814%</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">KOSPI 三连跌</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">GDP 1.5% 滞胀</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">Meta FCF -91%</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">Azure $1000亿</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">今晚 AAPL+AMZN</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">SK海力士 -27%三日</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">Core PCE 降温</span> <span style="display:inline-block;background:#e6eaf2;color:#002FA7;padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">SpaceX $16亿军单</span></div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">💬 <b>WSB 情绪：</b>"AI trade 彻底分叉——微软证明 AI 能赚钱，Meta 证明 AI 能烧钱。""Fed 9-3 简直是在预告加息。"散户对 KORU（3倍做多韩国）讨论激增，逆势赌博情绪浓厚。</td></tr></table>
+  </td></tr>
+</table>
 
-  <div class="section-note" style="margin-top:10px;">
-    💬 <b>WSB情绪摘要：</b>恐慌与抄底并存。「这是买入SNDK和DRAM ETF的好时机」「ASML芯片股抛售是过度反应」vs「别接飞刀」「不做期权」。零售投资者正在逆势买入SK海力士、三星（散户净买入4万亿韩元），但外资净卖出5万亿韩元。
-  </div>
-</div>
+<!-- ═══════ ⑥ A股动态 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">🇨🇳 A股 · 中国动态</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">上证综指</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">3,813（+0.40%）</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">深证成指</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+1.10%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">创业板指</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#188038;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#188038;">+1.55%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">科创50</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#d93025;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%"><span style="color:#d93025;">-0.87%</span></td></tr><tr><td style="padding:5px 0;font-size:14px;color:#002FA7;border-bottom:1px dashed #e8e8e8;vertical-align:top;" width="42%">成交额</td><td style="padding:5px 0;font-size:14px;font-weight:700;color:#002FA7;text-align:right;border-bottom:1px dashed #e8e8e8;" width="58%">2.31万亿元</td></tr></table>
+    <div style="font-weight:700;font-size:14px;color:#002FA7;margin:8px 0 4px;">🇨🇳 实时新闻</div>
+    <div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇨🇳 æ°æµªé¦é¡µ</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇨🇳 æ°æµªè´¢ç»å¨çèµæ¬å³°ä¼</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇨🇳 ä¸çäººå·¥æºè½å¤§ä¼</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇨🇳 èç¦2026åºéäºå­£æ¥</div><div style="font-size:13px;padding:3px 0;border-bottom:1px dashed #e8e8e8;color:#002FA7;">🇨🇳 ç¹å»ä¸è½½</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">📌 大消费全面爆发，乳业 +6.82% 领涨。存储芯片/半导体持续杀跌，长鑫科技逆势 +12.66%。4,253 只个股上涨，市场"新旧主线切换"。</td></tr></table>
+  </td></tr>
+</table>
 
-<!-- ========== 美联储观察 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">🏦</span>美联储 · FOMC 观察</div>
+<!-- ═══════ ⑦ 亮点个股 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">✨ 今日亮点个股</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🟢 微软 MSFT</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">+11% · Azure 里程碑</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🔴 Meta META</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">-9% · FCF 崩塌 91%</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🟢 Lam Research LRCX</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">+14.1% · 双创纪录</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🟢 MarketAxess MKTX</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">+30% · ICE $57亿收购</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🔴 Alnylam ALNY</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">-21.1% · 营收不及预期</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🔴 SK海力士</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">-5.6% · 三日累跌 27%</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🟢 SpaceX SPCX</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#188038;">$16亿太空部队合约</span></td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">🔴 费城半导体 SOX</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><span style="color:#d93025;">熊市 -20%+</span></td></tr></table>
+  </td></tr>
+</table>
 
-  <div class="data-row">
-    <span class="data-label">📅 FOMC 会议</span>
-    <span class="data-value">7月29-30日（今晚决议）</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🎯 市场预期</span>
-    <span class="data-value">维持利率不变</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">⚡ Citadel 预测</span>
-    <span class="data-value" style="color:#d93025;">意外加息！</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🏛️ 政治压力</span>
-    <span class="data-value">特朗普施压降息 vs 数据支持加息</span>
-  </div>
+<!-- ═══════ ⑧ 今日关注 ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;">
+  <tr><td style="padding:14px 12px;border-bottom:1px solid #ebebeb;">
+    <div style="font-size:17px;font-weight:700;color:#002FA7;padding-bottom:8px;">🎯 今日关注</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;"><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 今晚财报</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;"><b>Apple (AAPL) + Amazon (AMZN)</b> 盘后</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 PCE 通胀</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">核心 +3.3% YoY · 月率 +0.1%（降温中）</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 GDP</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">Q2 +1.5% · 滞胀担忧上升</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 地缘</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">美军空袭伊朗十余处目标，局势升级</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 债券</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">30年期 5.24% · 压制科技估值</td></tr><tr><td style="padding:4px 0;color:#002FA7;border-bottom:1px dashed #e8e8e8;">📌 技术面</td><td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed #e8e8e8;">纳斯达克距高点 -9.8%，逼近修正 -10%</td></tr></table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;background:#e8ecf4;border-left:3px solid #002FA7;"><tr><td style="padding:8px 10px;font-size:13px;color:#002FA7;line-height:1.7;">🐙 <b>章鱼AI综合研判：</b>Microsoft 的 AI→收入正循环是全局最大亮点。但 Meta 的 FCF 崩塌和 Fed 9-3 投票构成双重压力。恐慌接近极值（JPMorgan 战术性买入信号已触发），反弹需 Apple/Amazon 财报确认。警惕「滞胀」叙事取代「AI狂热」成为市场主旋律。</td></tr></table>
+  </td></tr>
+</table>
 
-  <div class="section-note">
-    💡 <b>多模型推理：</b>美联储面临"三难困境"——通胀数据支持加息，特朗普政治施压要求降息，市场脆弱性要求维稳。Citadel认为意外加息反可彰显Fed独立性。今晚FOMC决议将是本周最大变量。同步关注微软、Meta盘后财报。
-  </div>
-</div>
+<!-- ═══════ FOOTER ═══════ -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;margin-top:0;">
+  <tr><td style="padding:14px 12px;text-align:center;">
+    <div style="font-size:11px;color:#8899c0;line-height:1.8;">
+      🐙 <b style="color:#002FA7;">章鱼 AI</b>，仅供参考。<br>
+      全网境内外检索公开行情，多模型协同推理决策<br>
+      Claude / ChatGPT / Gemini / Grok / Qwen / Kimi
+    </div>
+    <div style="font-size:10px;color:#99aacc;margin-top:6px;line-height:1.6;">
+      自动生成：2026-07-30 23:59:13 CST<br>
+      数据源：Reddit · Yahoo Finance · 新浪财经 · TradingKey · Bloomberg · SCMP
+    </div>
+  </td></tr>
+</table>
 
-<!-- ========== A股动态 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">🇨🇳</span>A股 · 中国动态</div>
+</td></tr>
+</table>
 
-  <div class="data-row">
-    <span class="data-label">上证综指</span>
-    <span class="data-value green">3,813 (+0.40%)</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">深证成指</span>
-    <span class="data-value green">+1.10%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">创业板指</span>
-    <span class="data-value green">+1.55%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">科创50</span>
-    <span class="data-value red">-0.87%</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">成交额</span>
-    <span class="data-value">2.31万亿元</span>
-  </div>
-
-  <div class="section-note" style="margin-top:8px;">
-    📌 <b>关键信号：</b>大消费全面爆发，乳业指数 +6.82% 领涨。存储芯片/半导体/PCB持续杀跌但午后有资金抄底。<b>长鑫科技（CXMT）逆势收涨12.66%</b>，总市值3.54万亿元。市场呈现"新旧主线切换"——从科技转向消费防御，4,253只个股上涨，赚钱效应改善。
-  </div>
-</div>
-
-<!-- ========== 地缘政治 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">🌍</span>地缘政治 · 关键变量</div>
-
-  <div class="data-row">
-    <span class="data-label">🛢️ 原油</span>
-    <span class="data-value red">飙升 · 霍尔木兹海峡紧张</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🤝 阿曼提案</span>
-    <span class="data-value green">联合管控霍尔木兹海峡<br>通行费"自愿"缴纳</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇰🇷 韩国</span>
-    <span class="data-value">年内第9次熔断<br>政府暂不救市</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🇨🇳 CXMT</span>
-    <span class="data-value">中国存储芯片崛起<br>苹果正测试其芯片</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">🤖 Kimi K3</span>
-    <span class="data-value">月之暗面发布2.8万亿参数开源模型</span>
-  </div>
-
-  <div class="section-note" style="margin-top:10px;">
-    💡 <b>关键转折：</b>阿曼提出的霍尔木兹海峡"自愿缴费"方案可能成为伊朗战争突破口——特朗普可宣布"无强制收费=胜利"，伊朗可宣称"收费原则获承认=胜利"。若达成，油价风险溢价将快速消退。
-  </div>
-</div>
-
-<!-- ========== 部分模型推理 ========== -->
-<div class="card">
-  <div class="card-title"><span class="icon">🧠</span>多模型共识与分歧</div>
-
-  <table class="mini-table">
-    <tr><td>📉 短期</td><td style="text-align:left;">半导体超卖但未企稳，等待FOMC+财报落地</td></tr>
-    <tr><td>📊 中期</td><td style="text-align:left;">AI产业逻辑未破，但估值需重建；HBM需求真实</td></tr>
-    <tr><td>⚠️ 风险</td><td style="text-align:left;">CXMT产能扩张→存储供过于求；AI循环融资→信用风险</td></tr>
-    <tr><td>🔑 关注</td><td style="text-align:left;">今晚FOMC决议 · 微软/Meta财报 · 霍尔木兹谈判</td></tr>
-  </table>
-  <div class="section-note" style="margin-top:8px;">
-    🐙 <b>章鱼AI综合研判：</b>最大恐慌阶段或已接近尾声（KOSPI PER降至5.1倍，半导体低于4倍），但反弹需要催化剂——FOMC偏鸽 + 科技巨头财报超预期 = 情绪修复；反之则仍有下行空间。当前建议轻仓观望，等待右侧信号。
-  </div>
-</div>
-
-<!-- ========== FOOTER ========== -->
-<div class="footer">
-  <div class="copyright">
-    🐙 <b>章鱼 AI</b>，仅供参考。<br>
-    全网境内外检索公开行情，由多个大模型协同推理决策，<br>
-    包括但不限于 Claude、ChatGPT、Gemini、Grok、Qwen 以及 Kimi，<br>
-    提供多任务分析数据支持。
-  </div>
-  <div class="models">
-    数据截止：2026年7月30日 北京时间 · 来源：Reddit r/wallstreetbets · Moomoo · 新浪财经 · Bloomberg · Reuters · SCMP · 韩国经济日报
-  </div>
-</div>
-
-</div>
 </body>
 </html>

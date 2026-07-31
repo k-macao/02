@@ -1,88 +1,61 @@
+# 02
 # 🐙 章鱼 AI · 全景分析 · 全网多模型协同
 
-## 📁 项目结构
-
-```
-output/
-├── daily_report_20260730.html   ← 📰 微信适配 HTML 日报
-├── push.py                      ← 🚀 统一推送脚本（推荐）
-└── auto_push.sh                 ← 🔁 Bash 版自动推送（cron 用）
-```
-
-## 🚀 推送方式
-
-### 方式一：CLI 推送（推荐）
+## ⚡ 一键运行
 
 ```bash
-# 自动推送最新日报
-python3 output/push.py
-
-# 指定文件
-python3 output/push.py -f output/daily_report_20260730.html
-
-# 预览不推送
-python3 output/push.py --dry-run
-
-# 列出所有日报
-python3 output/push.py --list
+cd /path/to/02
+python3 output/push.py           # ①采集 → ②分析 → ③生成日报 → ④推送到微信
 ```
 
-### 方式二：Bash 脚本
+**每次运行都会重新抓取全网最新数据，再推送。**
+
+## 🎛️ 高级用法
 
 ```bash
-./output/auto_push.sh            # 推送最新
-./output/auto_push.sh 20260730   # 推送指定日期
+python3 output/pipeline.py                  # 全流程
+python3 output/pipeline.py --no-push        # 只生成日报，不推送
+python3 output/pipeline.py --dry-run        # 采集+预览，不推送
+python3 output/pipeline.py -o custom.html   # 指定输出路径
+python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 只推送已有文件
+python3 output/push.py --list               # 列出已生成的日报
 ```
 
-### 方式三：Cron 定时任务
+## ⏰ 定时自动运行（cron）
 
 ```bash
 crontab -e
-# 每天早 8 点自动推送
-0 8 * * * cd /path/to/02 && ./output/auto_push.sh >> /tmp/octopus_push.log 2>&1
+# 每天早 8 点自动采集+生成+推送
+0 8 * * * cd /path/to/02 && ./output/auto_push.sh >> /tmp/octopus.log 2>&1
 ```
 
-## 🤖 GitHub Actions 自动推送
+## 📊 数据流
 
-将以下内容保存为 `.github/workflows/push-daily.yml`，即可每天 08:00 (北京时间) 自动推送：
-
-```yaml
-name: 🐙 章鱼AI · 自动推送日报
-
-on:
-  schedule:
-    - cron: "0 0 * * *"           # UTC 00:00 = 北京时间 08:00
-  workflow_dispatch:               # 手动触发
-
-jobs:
-  push-to-wechat:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: 推送最新日报
-        env:
-          PUSHPUS_TOKEN: ${{ secrets.PUSHPUS_TOKEN }}
-        run: |
-          pip install requests
-          python3 output/push.py
+```
+🌐 全网数据源                     📄 本地输出
+┌──────────────┐              ┌─────────────────────┐
+│ Reddit WSB   │──┐           │ daily_report_*.html │
+│ Yahoo Finance│──┤  ①采集     │ latest.html         │
+│ 新浪财经      │──┼─────────→ │                     │
+│ TradingKey   │──┤  ②分析     └─────────┬───────────┘
+│ Bloomberg    │──┘  ③生成              │ ④推送
+│ SCMP         │                         │
+└──────────────┘                    ┌────▼─────┐
+                                    │ PushPlus │
+                                    │   微信   │
+                                    └──────────┘
 ```
 
-> **⚠️ 还需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加 `PUSHPUS_TOKEN` = `507a6c0cf9cf46229f5f3c5107a967cc`**
+## 📁 文件结构
 
----
-
-## 💬 数据源
-
-| 平台 | 抓取内容 |
-|------|----------|
-| Reddit | r/wallstreetbets · r/stocks · r/investing |
-| Moomoo | 社区讨论 · 行情分析 |
-| 新浪财经 | A股 · 亚太市场 |
-| Bloomberg / Reuters | 全球宏观 |
-| SCMP · 韩国经济日报 | 亚太芯片 |
+```
+output/
+├── pipeline.py          ← 🧠 核心引擎（采集→分析→生成→推送）
+├── push.py              ← 🚀 快捷入口（= pipeline.py）
+├── auto_push.sh         ← 🔁 Bash 版（cron 用）
+├── daily_report_*.html  ← 📰 每日生成的日报
+└── latest.html          ← 📎 最新一份日报的副本
+```
 
 ## 📜 版权
 
