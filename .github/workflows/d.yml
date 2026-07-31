@@ -6,8 +6,8 @@ on:
     - cron: "0 0 * * *"
 
   # 每天北京时间 21:00 晚间补充推送（美股盘中）
-  # schedule:
-  #   - cron: "0 13 * * *"
+   schedule:
+     - cron: "0 13 * * *"
 
   # 手动触发
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
 
       - name: 🐙 运行章鱼AI流水线
         env:
-          RE_TOKEN: ${{ secrets.RE_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python3 output/pipeline.py --dry-run
