@@ -35,17 +35,19 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertNotIn("51,618 -2.19%", html)
         self.assertNotIn("3,813 +0.40%", html)
 
-    def test_save_replaces_existing_file_and_latest_atomically(self):
+    def test_duplicate_output_gets_date_and_three_digit_random_name(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "report.html"
+            target = Path(directory) / "daily_report.html"
             target.write_text("old", encoding="utf-8")
             old_report_dir = pipeline.REPORT_DIR
             try:
                 pipeline.REPORT_DIR = directory
-                pipeline.save_report("new", str(target), {})
+                actual = pipeline.save_report("new", str(target), {})
             finally:
                 pipeline.REPORT_DIR = old_report_dir
-            self.assertEqual(target.read_text(encoding="utf-8"), "new")
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+            self.assertRegex(Path(actual).name, r"daily_report_\d{8}_\d{3}\.html")
+            self.assertEqual(Path(actual).read_text(encoding="utf-8"), "new")
             self.assertEqual((Path(directory) / "latest.html").read_text(encoding="utf-8"), "new")
 
     def test_locked_daily_file_creates_new_timestamped_report(self):
@@ -67,7 +69,7 @@ class ReportFreshnessTests(unittest.TestCase):
                 pipeline.REPORT_DIR = old_report_dir
 
             self.assertNotEqual(actual, requested)
-            self.assertRegex(Path(actual).name, r"daily_report_\d{8}_\d{6}(?:_\d+)?\.html")
+            self.assertRegex(Path(actual).name, r"daily_report_\d{8}_\d{3}\.html")
             self.assertEqual(Path(actual).read_text(encoding="utf-8"), "newest")
             self.assertEqual((Path(directory) / "latest.html").read_text(encoding="utf-8"), "newest")
 
@@ -119,11 +121,10 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertIn("郭思治（郭Sir）", html)
         self.assertIn("今日市场解读", html)
         self.assertIn("当天", html)          # 当天徽标
-        self.assertIn("当天内容检验", html)   # 检验横幅
-        # 需登录的频道在卡片内标注「暂缺」及原因，不伪造内容
-        self.assertIn("智通財經App（微信公众号）", html)
-        self.assertIn("暂缺", html)
-        self.assertIn("微信公众号需登录", html)
+        self.assertNotIn("📅 当天内容检验", html)   # 页面不显示检验横幅
+        # 需登录/未配置的频道不在日报中渲染
+        self.assertNotIn("智通財經App（微信公众号）", html)
+        self.assertNotIn("微信公众号需登录", html)
 
     def test_new_layout_omits_empty_sections_and_keeps_meta(self):
         data = self._sample_data()
