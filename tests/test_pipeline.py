@@ -187,14 +187,16 @@ class ReportFreshnessTests(unittest.TestCase):
 class _FakeResp:
     """模拟 PushPlus HTTP 响应。"""
 
-    def __init__(self, code):
+    def __init__(self, code, msg="fake-msg", status_code=200):
         self._code = code
+        self._msg = msg
+        self.status_code = status_code
 
     def raise_for_status(self):
         pass
 
     def json(self):
-        return {"code": self._code, "msg": "fake-msg"}
+        return {"code": self._code, "msg": self._msg}
 
 
 class PushResultTests(unittest.TestCase):
@@ -217,12 +219,140 @@ class PushResultTests(unittest.TestCase):
 
     def test_push_to_wechat_returns_false_on_error_code(self):
         with patch.object(pipeline, "requests",
-                          types.SimpleNamespace(post=lambda **kw: _FakeResp(500))):
+                          types.SimpleNamespace(post=lambda *a, **kw: _FakeResp(500))):
             self.assertFalse(pipeline.push_to_wechat("t", "body", token="abc"))
+
+    def test_push_to_wechat_non_network_exception_fails_fast(self):
+        # 编程错误类异常（非网络异常）不应触发重试：立即失败，不白白等待退避
+        calls = []
+
+        def broken_post(*a, **kw):
+            calls.append(a)
+            raise TypeError("mock signature mismatch")
+
+        sleeps = []
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=broken_post)), \
+             patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: sleeps.append(s))):
+            self.assertFalse(pipeline.push_to_wechat("t", "body", token="abc"))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sleeps, [])
 
     def test_push_to_wechat_returns_false_when_token_missing(self):
         with patch.object(pipeline, "PUSHPLUS_TOKEN", ""):
             self.assertFalse(pipeline.push_to_wechat("t", "body", token=None))
+
+
+class PushRetryTests(unittest.TestCase):
+    """可恢复错误按退避重试；配额/凭证/未知业务错误不重试（2026-08-01 Actions 显红修复）。"""
+
+    def _run_push(self, responses):
+        """依次返回 responses（元素可为 _FakeResp 或 Exception），返回 (结果, 请求数, 等待序列)。"""
+        calls, sleeps = [], []
+        it = iter(responses)
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(json)
+            resp = next(it)
+            if isinstance(resp, Exception):
+                raise resp
+            return resp
+
+        fake_time = types.SimpleNamespace(sleep=lambda s: sleeps.append(s))
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "time", fake_time):
+            result = pipeline.push_to_wechat("标题", "正文", token="abc", template="html")
+        return result, len(calls), sleeps
+
+    def test_rate_limit_is_retried_then_succeeds(self):
+        ok, n_calls, sleeps = self._run_push([
+            _FakeResp(500, "发送太频繁，请稍后再试"),
+            _FakeResp(200),
+        ])
+        self.assertTrue(ok)
+        self.assertEqual(n_calls, 2)              # 重试一次后成功
+        self.assertEqual(sleeps, [10])            # 按 PUSH_RETRY_BACKOFF 的第一个节奏等待
+
+    def test_network_exception_is_retried(self):
+        ok, n_calls, sleeps = self._run_push([
+            ConnectionError("connection reset"),
+            _FakeResp(200),
+        ])
+        self.assertTrue(ok)
+        self.assertEqual(n_calls, 2)
+        self.assertEqual(sleeps, [10])
+
+    def test_quota_exhausted_is_not_retried(self):
+        ok, n_calls, sleeps = self._run_push([
+            _FakeResp(500, "今日发送次数已达上限"),
+        ])
+        self.assertFalse(ok)
+        self.assertEqual(n_calls, 1)              # 配额类错误重试无意义，立即失败
+        self.assertEqual(sleeps, [])
+
+    def test_unknown_business_error_fails_fast_without_retry(self):
+        ok, n_calls, sleeps = self._run_push([
+            _FakeResp(500, "fake-msg"),
+        ])
+        self.assertFalse(ok)
+        self.assertEqual(n_calls, 1)              # 未知业务错误不重试，保持快速失败
+        self.assertEqual(sleeps, [])
+
+    def test_transient_error_gives_up_after_all_retries(self):
+        ok, n_calls, sleeps = self._run_push([
+            _FakeResp(500, "服务器繁忙，请稍后再试"),
+            _FakeResp(500, "发送太频繁，请稍后再试"),
+            _FakeResp(500, "请求频率过高"),
+            _FakeResp(500, "服务器繁忙，请稍后再试"),
+        ])
+        self.assertFalse(ok)
+        self.assertEqual(n_calls, 1 + len(pipeline.PUSH_RETRY_BACKOFF))  # 首次+全部重试
+        self.assertEqual(sleeps, list(pipeline.PUSH_RETRY_BACKOFF))
+
+    def test_failure_kind_classification(self):
+        k = pipeline._push_failure_kind
+        self.assertEqual(k(None, 500, "发送太频繁，请稍后再试"), "transient")
+        self.assertEqual(k(None, 500, "今日发送次数已达上限"), "fatal")
+        self.assertEqual(k(None, 500, "token错误"), "fatal")
+        self.assertEqual(k(None, 500, "内容包含敏感词"), "fatal")
+        self.assertEqual(k(None, 500, "fake-msg"), "unknown")
+        self.assertEqual(k(503, 500, "fake-msg"), "transient")   # HTTP 5xx 始终可重试
+        self.assertEqual(k(429, None, ""), "transient")
+        self.assertEqual(k(401, None, ""), "fatal")
+
+
+class PushFailureAlertTests(unittest.TestCase):
+    """日报推送失败后的兜底告警：微信侧能直接看到原因与处理建议。"""
+
+    def test_failure_alert_text_has_reason_advice_and_file(self):
+        data = {
+            "Yahoo头条": pipeline._source_result("n", "success", is_today=True,
+                                                 content_date="2026-08-01", headlines=["今日头条"]),
+            "A股资讯": pipeline._source_result("s", "unavailable", headlines=[], error="offline"),
+        }
+        text = pipeline.build_push_failure_alert_text(
+            "日报 HTML 多次推送均被 PushPlus 拒绝（详见上方 code/msg）",
+            data, "/tmp/daily_report_20260801.html")
+        self.assertIn("推送到微信失败", text)
+        self.assertIn("PushPlus 拒绝", text)
+        self.assertIn("1/2 个来源为当天内容", text)     # 说明日报内容本身无问题
+        self.assertIn("发送频繁", text)                  # 给出频率限制处理建议
+        self.assertIn("额度", text)                      # 给出配额处理建议
+        self.assertIn("PUSHPLUS_TOKEN", text)            # 给出 token 失效处理建议
+        self.assertIn("daily_report_20260801.html", text)
+
+    def test_failure_alert_uses_txt_template_and_time_title(self):
+        calls = {}
+
+        def fake_post(url, json=None, timeout=None):
+            calls.update(json or {})
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            ok = pipeline.push_failure_alert("测试原因", report_path="/tmp/x.html", token="abc")
+        self.assertTrue(ok)
+        self.assertEqual(calls["template"], "txt")
+        self.assertRegex(calls["title"], r"日报推送失败提醒 \d{2}/\d{2} \d{2}:\d{2}")
+        self.assertIn("测试原因", calls["content"])
 
 
 class NoPushAlertTests(unittest.TestCase):
