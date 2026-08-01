@@ -32,6 +32,11 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
+  7.1 页面风格（2026-08-02 起）：瑞士国际主义排版（Swiss International Style）×
+     高级电子杂志——严格网格 + 全程左对齐、黑白 + 克莱因蓝单一强调色（红绿仅作
+     涨跌/状态语义色）、粗黑栏线 + 发丝线分级、杂志式刊头（刊名行 / 大标题 /
+     导语 / 期号元信息栅格）+ 编号栏目 + 数据审计栏 + 版权页。
+     硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
      截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
@@ -278,11 +283,11 @@ def _source_result(source, status, is_today=False, content_date=None, **payload)
 
 
 def _source_note(item):
-    """供 HTML 使用的数据来源状态。"""
+    """供 HTML 使用的数据来源状态（纯文字溯源行；状态以色块徽标另行表达）。"""
     if item.get("status") == "success":
-        return f"✅ {item.get('source', '数据源')} · 抓取于 {item.get('fetched_at', '—')}"
+        return f"{item.get('source', '数据源')} · 抓取于 {item.get('fetched_at', '—')}"
     detail = _esc(item.get("error", "暂时不可用"))
-    return f"⚠️ {item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
+    return f"{item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
 
 
 def fetch_market_snapshot():
@@ -908,113 +913,96 @@ def collect_all_data():
 
 
 # ============================================================
-# HTML 组件
+# HTML 组件（设计系统：瑞士国际主义排版 × 高级电子杂志）
+# ------------------------------------------------------------
+# 版式语言：
+#   · 严格网格 + 全程左对齐（flush-left），非对称留白；
+#   · 黑 / 白 / 克莱因蓝 #002FA7（品牌色）为唯一编辑强调色；
+#     红 / 绿 / 琥珀仅作「涨跌与数据状态」语义色，不参与装饰；
+#   · 粗黑栏线（3px）分隔「栏目」，细发丝线（1px hairline）分隔条目；
+#   · 杂志式刊头（masthead）：刊名行 → 大标题 → 导语（standfirst）→ 期号元信息栅格；
+#   · 栏目带编号 kicker（01 · MARKET SNAPSHOT），如杂志编辑部栏目；
+# ------------------------------------------------------------
+# 渲染硬约束：全部使用「内联样式 + 表格布局」——微信 / PushPlus 会剥离
+# <style> 标签与 class 选择器，外部样式表与类名排版会在微信端整体失效。
 # ============================================================
-# 颜色常量
+C_INK = "#191919"      # 墨色正文（近黑）
+C_PAPER = "#FFFFFF"    # 纸面
+C_BG = "#F4F4F2"       # 页面底色（纸灰）
+C_ACCENT = "#002FA7"   # 克莱因蓝：唯一编辑强调色（品牌色）
+C_MUTED = "#6E6E73"    # 次级灰（来源说明 / caption）
+C_FAINT = "#9B9BA0"    # 三级灰（刊头小字）
+C_HAIR = "#E5E5E1"     # 发丝分隔线
+C_ZEBRA = "#FAFAF7"    # 极浅底（注释盒 / 暂缺盒）
+# 数据语义色（沿用旧值：红跌绿涨；另保留琥珀色表示「非当天」）
+# ——仅用于数值与状态标识，不作版式装饰
 C_RED = "#d93025"
 C_GREEN = "#188038"
-C_BLUE = "#002FA7"
 C_AMBER = "#8a5300"
-C_DASH = "#e8e8e8"
-C_ALERT_R = "#fce8e6"
-C_ALERT_G = "#e6f4ea"
-C_ALERT_A = "#fdf3d9"
-FONT = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+C_BLUE = C_ACCENT      # 兼容别名
+FONT = ("Helvetica Neue, Helvetica, -apple-system, Arial, "
+        "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif")
 
 
-def _card(icon, title, content, badge_html=""):
-    """生成卡片 HTML（可附带新鲜度徽标）"""
-    return f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:6px;">{icon} {title} {badge_html}</div>
-{content}
-</td></tr></table>'''
+def _sq(color=C_ACCENT, size=8):
+    """瑞士方块点：最小的强调单元（纯字符，跨端渲染稳定）。"""
+    return f'<span style="color:{color};font-size:{size}px;line-height:1;">■</span>'
 
 
 def _badge(text, kind="ok"):
-    """生成小徽标：ok=绿(当天) / warn=黄(非当天) / bad=红(无数据)"""
-    styles = {
-        "ok": (C_GREEN, C_ALERT_G, "✅"),
-        "warn": (C_AMBER, C_ALERT_A, "🕓"),
-        "bad": (C_RED, C_ALERT_R, "⚠️"),
-    }
-    color, bg, icon = styles.get(kind, styles["ok"])
-    return (f'<span style="display:inline-block;background:{bg};color:{color};'
-            f'padding:1px 8px;margin-left:4px;font-size:11px;font-weight:700;'
-            f'border-radius:8px;vertical-align:2px;">{icon} {_esc(text)}</span>')
+    """状态徽标：直角描边（非填充药丸）。ok=绿(当天) / warn=黄(非当天) / bad=红(无数据)"""
+    colors = {"ok": C_GREEN, "warn": C_AMBER, "bad": C_RED}
+    color = colors.get(kind, C_GREEN)
+    return (f'<span style="display:inline-block;border:1px solid {color};color:{color};'
+            f'background:#fff;padding:0 5px;margin-left:6px;font-size:10px;font-weight:700;'
+            f'letter-spacing:1px;line-height:16px;vertical-align:2px;">■&nbsp;{_esc(text)}</span>')
 
 
-def _alert(text, color=C_RED, bg=C_ALERT_R):
-    """生成提示条"""
-    return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:6px;background:{bg};"><tr><td style="padding:6px 10px;font-size:13px;color:{color};font-weight:600;text-align:center;">{text}</td></tr></table>'
+def _alert(text, color=C_AMBER, bg=None):
+    """状态提示条：白底 + 左侧色条 + 色文（直角，无圆角填充）。"""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+            f'margin-bottom:8px;border:1px solid {C_HAIR};border-left:3px solid {color};">'
+            f'<tr><td style="padding:7px 10px;font-size:11px;color:{color};font-weight:700;'
+            f'line-height:1.75;letter-spacing:.5px;">{text}</td></tr></table>')
+
+
+def _ledger_table(rows, pad):
+    """分类账式数据表：左标签右数值，发丝线行分隔（share by _data_table / _mini_table）。"""
+    html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+    for label, value, *color in rows:
+        val_color = color[0] if color else C_INK
+        html += (f'<tr><td style="padding:{pad} 0;border-bottom:1px solid {C_HAIR};'
+                 f'font-size:13px;color:{C_INK};vertical-align:top;line-height:1.5;" '
+                 f'width="46%">{label}</td>'
+                 f'<td style="padding:{pad} 0;border-bottom:1px solid {C_HAIR};'
+                 f'font-size:13px;font-weight:700;color:{val_color};text-align:right;'
+                 f'line-height:1.5;font-variant-numeric:tabular-nums;" width="54%">{value}</td></tr>')
+    return html + '</table>'
 
 
 def _data_table(rows):
-    """生成数据表格"""
-    html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
-    for label, value, *color in rows:
-        val_color = color[0] if color else C_RED
-        html += f'<tr><td style="padding:5px 0;font-size:14px;color:{C_BLUE};border-bottom:1px dashed {C_DASH};vertical-align:top;" width="42%">{label}</td>'
-        html += f'<td style="padding:5px 0;font-size:14px;font-weight:700;color:{val_color};text-align:right;border-bottom:1px dashed {C_DASH};" width="58%">{value}</td></tr>'
-    html += '</table>'
-    return html
+    """主数据表（行情速览等大行距）。"""
+    return _ledger_table(rows, "8px")
 
 
 def _mini_table(rows):
-    """生成迷你表格（支持可选第三元组为数值颜色）"""
-    html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
-    for label, value, *color in rows:
-        val_color = color[0] if color else C_RED
-        html += f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">{label}</td>'
-        html += f'<td style="padding:4px 0;text-align:right;font-weight:700;color:{val_color};border-bottom:1px dashed {C_DASH};">{value}</td></tr>'
-    html += '</table>'
-    return html
-
-
-def _vs_box(left_sym, left_pct, left_desc, right_sym, right_pct, right_desc):
-    """生成对比卡片"""
-    left_color = C_GREEN if "+" in left_pct else C_RED
-    right_color = C_GREEN if "+" in right_pct else C_RED
-    return f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:6px 0;">
-  <tr>
-    <td width="50%" valign="top" style="padding-right:3px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#e6f4ea;border:1px solid #c6e6ce;">
-        <tr><td style="padding:8px;text-align:center;">
-          <div style="font-weight:700;font-size:15px;color:{left_color};">{left_sym}</div>
-          <div style="font-size:22px;font-weight:800;color:{left_color};">{left_pct}</div>
-          <div style="font-size:11px;color:{left_color};">{left_desc}</div>
-        </td></tr>
-      </table>
-    </td>
-    <td width="50%" valign="top" style="padding-left:3px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fce8e6;border:1px solid #f5c6cb;">
-        <tr><td style="padding:8px;text-align:center;">
-          <div style="font-weight:700;font-size:15px;color:{right_color};">{right_sym}</div>
-          <div style="font-size:22px;font-weight:800;color:{right_color};">{right_pct}</div>
-          <div style="font-size:11px;color:{right_color};">{right_desc}</div>
-        </td></tr>
-      </table>
-    </td>
-  </tr>
-</table>'''
+    """迷你数据表（榜单等紧凑行距）。可选第三元组为数值颜色，默认墨色。"""
+    return _ledger_table(rows, "6px")
 
 
 def _note(text):
-    """生成注释条"""
-    return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;background:#e8ecf4;border-left:3px solid {C_BLUE};"><tr><td style="padding:8px 10px;font-size:13px;color:{C_BLUE};line-height:1.7;">{text}</td></tr></table>'
+    """注释盒：杂志编辑脚注样式（浅底 + 墨色左条 + 小号灰字）。"""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+            f'margin-top:8px;background:{C_ZEBRA};border-left:3px solid {C_INK};">'
+            f'<tr><td style="padding:7px 10px;font-size:10px;color:{C_MUTED};'
+            f'line-height:1.8;letter-spacing:.3px;">注&nbsp;—&nbsp;{text}</td></tr></table>')
 
 
-def _section_title(text, size=15):
-    """生成小节标题"""
-    return f'<div style="font-weight:700;font-size:{size}px;color:{C_BLUE};margin:8px 0 4px;">{text}</div>'
-
-
-def _tags_html(tags):
-    """生成标签 HTML"""
-    return " ".join(
-        f'<span style="display:inline-block;background:#e6eaf2;color:{C_BLUE};padding:2px 8px;margin:2px 3px;font-size:12px;line-height:20px;">{t}</span>'
-        for t in tags
-    )
+def _subsection(text):
+    """栏内小节标题：发丝线 + 小方块 + 加粗小题。"""
+    return (f'<div style="border-top:1px solid {C_HAIR};margin-top:10px;padding:8px 0 2px;'
+            f'font-size:13px;font-weight:800;color:{C_INK};letter-spacing:.5px;">'
+            f'{_sq(C_INK, 7)}<span style="padding-left:5px;">{text}</span></div>')
 
 
 def _source_badge(item):
@@ -1027,14 +1015,19 @@ def _source_badge(item):
 
 
 def _item_row(icon, text, sub=""):
-    """生成列表项"""
-    sub_html = f'<div style="font-size:11px;color:#8899c0;">{sub}</div>' if sub else ""
-    return (f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};'
-            f'color:{C_BLUE};line-height:1.6;">{icon} {text}{sub_html}</div>')
+    """条目行：索引/符号窄列 + 标题与来源信息，发丝线收尾。"""
+    sub_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
+                f'padding-top:2px;line-height:1.5;">{sub}</div>' if sub else "")
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+            f'<tr><td width="26" valign="top" style="padding:7px 0;border-bottom:1px solid {C_HAIR};'
+            f'font-size:10px;font-weight:800;color:{C_ACCENT};line-height:1.6;">{icon}</td>'
+            f'<td style="padding:7px 0;border-bottom:1px solid {C_HAIR};font-size:13px;'
+            f'color:{C_INK};line-height:1.7;">{text}{sub_html}</td></tr></table>')
 
 
-def _headline_row(it):
-    """Google News 头条行：中文标题 + 来源/时间小字。"""
+def _headline_row(it, index=None):
+    """Google News 头条行：杂志索引号 + 中文标题 + 来源/时间小字。"""
+    marker = f"{index:02d}" if isinstance(index, int) else "—"
     display = it.get("title") if isinstance(it, dict) else it
     sub = ""
     if isinstance(it, dict):
@@ -1044,22 +1037,28 @@ def _headline_row(it):
         if it.get("published_cst") and it["published_cst"] != "—":
             parts.append(it["published_cst"])
         sub = " · ".join(parts)
-    return _item_row("📰", _esc(display[:120]), _esc(sub[:140]))
+    return _item_row(marker, _esc(display[:120]), _esc(sub[:140]))
 
 
-def _em_news_row(it):
-    """东方财富快讯行：标题 + 时间/摘要小字（兼容字符串与 dict 两种结构）。"""
+def _em_news_row(it, index=None):
+    """东方财富快讯行：编号 + 标题 + 时间/摘要小字（兼容字符串与 dict 两种结构）。"""
+    marker = f"{index:02d}" if isinstance(index, int) else "—"
     if isinstance(it, dict):
         title = it.get("title") or ""
         sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
-        return _item_row("📈", _esc(title[:120]), _esc(sub[:110]))
-    return _item_row("📈", _esc(it[:120]))
+        return _item_row(marker, _esc(title[:120]), _esc(sub[:110]))
+    return _item_row(marker, _esc(it[:120]))
+
+
+def _rank_span(i):
+    """榜单序号：00 起始的等宽小编号，杂志索引式。"""
+    return (f'<span style="color:{C_ACCENT};font-weight:800;'
+            f'font-variant-numeric:tabular-nums;">{i + 1:02d}</span>')
 
 
 def _hot_market_block(market, mdata):
-    """热门榜单单个市场：涨幅前十迷你表。"""
+    """热门榜单单个市场：涨幅前十迷你表（编号 + 名称/代码 + 价与涨跌幅）。"""
     stocks = (mdata or {}).get("stocks", [])
-    medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
     rows = []
     for i, s in enumerate(stocks[:10]):
         pct = s.get("change_pct")
@@ -1073,91 +1072,82 @@ def _hot_market_block(market, mdata):
         price = s.get("price")
         if price is None:
             price = "—"
-        rows.append((f"{medals[i]} {s.get('name', '?')} {s.get('code', '')}",
-                     f"{price} {pct_display}", val_color))
-    block = _section_title(f"🔥 {market}涨幅前十（{_esc((mdata or {}).get('desc', ''))}）", 14)
+        label = (f'{_rank_span(i)}&nbsp; {_esc(s.get("name", "?"))} '
+                 f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
+        rows.append((label, f"{price} {pct_display}", val_color))
+    block = _subsection(f"{market}涨幅前十（{_esc((mdata or {}).get('desc', ''))}）")
     if rows:
         block += _mini_table(rows)
     else:
-        block += '<div style="font-size:12px;color:#8899c0;">暂无数据</div>'
+        block += f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">暂无数据</div>'
     return block
 
 
 def _channel_block(ch):
-    """生成单个频道的内容块：有内容时列出最新 CHANNEL_TOP_N 条；无内容（需登录/未配置）标注暂缺原因。"""
+    """生成单个频道的内容块：有内容时列出最新 CHANNEL_TOP_N 条；无内容（需登录/未配置）标注暂缺原因。
+
+    有内容：墨色左边条 + 频道名（链接）+ 新鲜度徽标 + ▶️ 条目清单；
+    暂缺：虚线边框盒 + 「暂缺」徽标 + 原因，不伪造内容。
+    """
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
     url = ch.get("url", "")
     videos = ch.get("videos") or []
     if not videos:
         note = _esc(ch.get("note") or "平台需登录，暂不支持自动抓取")
-        return f'''<div style="margin:8px 0 4px;padding:8px;background:#fdf6ec;border:1px solid #f0ddb8;">
-<div style="font-size:14px;font-weight:700;color:{C_BLUE};">📺 {name} {_badge("暂缺", "bad")}</div>
-<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
-<div style="font-size:12px;color:#8a5300;line-height:1.6;">{note}</div>
+        return f'''<div style="margin:8px 0;border:1px dashed {C_FAINT};border-left:3px solid {C_FAINT};background:{C_ZEBRA};padding:10px 12px;">
+<div style="font-size:13px;font-weight:800;color:{C_INK};">{name} {_badge("暂缺", "bad")}</div>
+<div style="font-size:10px;color:{C_MUTED};padding:3px 0 1px;">{desc}</div>
+<div style="font-size:11px;color:{C_MUTED};line-height:1.7;">{note}</div>
 </div>'''
     badge = _badge("当天", "ok") if ch.get("is_today") else _badge("非当天", "warn")
     rows = []
-    for v in videos[:CHANNEL_TOP_N]:
+    top_n = videos[:CHANNEL_TOP_N]
+    for vi, v in enumerate(top_n):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
-        today_tag = (' <span style="display:inline-block;background:#e6f4ea;color:#0b6e34;'
-                     'padding:0 6px;font-size:10px;font-weight:700;border-radius:6px;">🆕 当天</span>'
-                     if v.get("is_today") else "")
-        link = f'<a href="{v.get("url","#")}" style="color:{C_BLUE};text-decoration:none;">{title}</a>'
-        rows.append(f'<div style="font-size:13px;padding:4px 0;border-bottom:1px dashed {C_DASH};'
-                    f'color:{C_BLUE};line-height:1.6;">▶️ {link}<br>'
-                    f'<span style="font-size:11px;color:#8899c0;">发布于 {pub}</span>{today_tag}</div>')
-    return f'''<div style="margin:8px 0 4px;padding:8px;background:#f5f7fb;border:1px solid #dfe5f2;">
-<div style="font-size:14px;font-weight:700;color:{C_BLUE};">
-<a href="{_esc(url)}" style="color:{C_BLUE};text-decoration:none;">📺 {name}</a> {badge}
+        today_tag = (f' <span style="display:inline-block;border:1px solid {C_ACCENT};color:{C_ACCENT};'
+                     f'padding:0 4px;font-size:9px;font-weight:700;letter-spacing:1px;'
+                     f'background:#fff;">NEW · 当天</span>' if v.get("is_today") else "")
+        link = f'<a href="{v.get("url","#")}" style="color:{C_ACCENT};text-decoration:none;">{title}</a>'
+        # 最后一行免发丝线，避免与频道盒下边框叠线
+        hair = "" if vi == len(top_n) - 1 else f"border-bottom:1px solid {C_HAIR};"
+        rows.append(
+            f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+            f'<tr><td width="24" valign="top" style="padding:5px 0;{hair}'
+            f'font-size:11px;line-height:1.6;">▶️</td>'
+            f'<td style="padding:5px 0;{hair}font-size:13px;'
+            f'color:{C_INK};line-height:1.65;">{link}'
+            f'<div style="font-size:10px;color:{C_MUTED};padding-top:2px;">发布于 {pub}{today_tag}</div>'
+            f'</td></tr></table>')
+    return f'''<div style="margin:8px 0;border:1px solid {C_HAIR};border-left:3px solid {C_ACCENT};padding:10px 12px;">
+<div style="font-size:13px;font-weight:800;color:{C_INK};">
+<a href="{_esc(url)}" style="color:{C_INK};text-decoration:none;">{name}</a> {badge}
 </div>
-<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
+<div style="font-size:10px;color:{C_MUTED};padding:2px 0 4px;letter-spacing:.3px;">{desc}</div>
 {"".join(rows)}
 </div>'''
 
 
-def _freshness_banner(sources):
-    """生成「当天内容检验」横幅。sources: [(名称, item), ...]"""
-    total = len(sources)
-    today_n = sum(1 for _, s in sources if s.get("is_today"))
-    no_data = sum(1 for _, s in sources if s.get("status") != "success")
-    ok = today_n > 0
-
-    chips = "".join(
-        f'<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;'
-        f'margin:2px 3px;font-size:11px;color:#fff;">{_esc(name)} {_source_badge(s)}</span>'
-        for name, s in sources
-    )
-
-    if ok:
-        headline = f"✅ {today_n}/{total} 个数据源含当天内容，本次满足推送条件"
-        color, bg = C_GREEN, C_ALERT_G
-    else:
-        headline = (f"⏸️ 本次没有任何数据源含当天内容（{today_n}/{total}），默认不推送"
-                    if no_data < total else
-                    f"❌ 本次全部数据源均未抓到内容（0/{total}），不会推送")
-        color, bg = C_AMBER, C_ALERT_A if no_data < total else (C_RED, C_ALERT_R)
-
-    return f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:6px;background:{bg};">
-<tr><td style="padding:8px 10px;">
-<div style="font-size:14px;font-weight:700;color:{color};">📅 当天内容检验</div>
-<div style="font-size:13px;color:{color};font-weight:600;padding:2px 0;">{headline}</div>
-<div style="padding:4px 0;">{chips}</div>
-</td></tr></table>'''
-
-
 def _status_footer(sources):
-    """生成页脚数据源状态清单（含无数据源，便于审计）"""
+    """数据审计清单（含无数据源，便于审计）：状态方块 + 名称 + 徽标 + 抓取时间。"""
     lines = []
     for name, s in sources:
         if s.get("status") == "success":
-            lines.append(f'✅ {_esc(name)} · {_source_badge(s)} · 抓取于 {_esc(s.get("fetched_at","—"))}')
+            lines.append((_sq(C_GREEN, 8),
+                          f'<b style="color:{C_INK};">{_esc(name)}</b> {_source_badge(s)}'
+                          f' · 抓取于 {_esc(s.get("fetched_at", "—"))}'))
         else:
             detail = _esc(s.get("error", "暂时不可用"))
-            lines.append(f'⚠️ {_esc(name)} 数据暂缺（{detail}）· 抓取于 {_esc(s.get("fetched_at","—"))}')
-    return "<br>".join(f'<div style="font-size:11px;padding:2px 0;color:#8899c0;line-height:1.7;">{line}</div>'
-                       for line in lines)
+            lines.append((_sq(C_RED, 8),
+                          f'<b style="color:{C_INK};">{_esc(name)}</b> 数据暂缺（{detail}）'
+                          f' · 抓取于 {_esc(s.get("fetched_at", "—"))}'))
+    rows = "".join(
+        f'<tr><td width="22" valign="top" style="padding:5px 0;border-bottom:1px solid {C_HAIR};">{marker}</td>'
+        f'<td style="padding:5px 0;border-bottom:1px solid {C_HAIR};font-size:11px;'
+        f'color:{C_MUTED};line-height:1.7;">{line}</td></tr>'
+        for marker, line in lines)
+    return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{rows}</table>'
 
 
 def _report_meta(html):
@@ -1181,21 +1171,58 @@ def _report_meta(html):
     }
 
 
+def _masthead_cell(label, value, value_color=C_INK, first=False):
+    """刊头元信息栅格单元：小号大写标签 + 加粗值；除首列外带左发丝线。"""
+    border = "" if first else f"border-left:1px solid {C_HAIR};"
+    padding = "0" if first else "12px"
+    return (f'<td width="33%" valign="top" style="padding:8px 0;{border}">'
+            f'<div style="padding-left:{padding};">'
+            f'<div style="font-size:9px;font-weight:700;color:{C_FAINT};letter-spacing:2px;">{label}</div>'
+            f'<div style="font-size:12px;font-weight:800;color:{value_color};padding-top:3px;'
+            f'font-variant-numeric:tabular-nums;">{value}</div></div></td>')
+
+
+def _section(num, kicker_en, title, content, badge_html="", caption=""):
+    """栏目块：3px 粗黑栏线 + 编号 kicker + 中文题 + 来源说明 + 内容。
+
+    num        —— 杂志栏目编号（"01"…），按实际渲染顺序生成；
+    kicker_en  —— 英文 kicker（大写字距拉开，置灰）；
+    badge_html —— 右侧新鲜度徽标（可选）；
+    caption    —— 栏目来源/抓取时间说明行（可选）。
+    """
+    badge_cell = (f'<td align="right" valign="bottom">{badge_html}</td>' if badge_html else "")
+    caption_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
+                    f'padding:4px 0 8px;line-height:1.6;">{caption}</div>'
+                    if caption else '<div style="padding-bottom:6px;"></div>')
+    return f'''
+<div style="border-top:3px solid {C_INK};margin-top:26px;padding-top:9px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+<tr>
+<td valign="bottom">{_sq(C_ACCENT, 8)}<span style="font-size:11px;font-weight:800;color:{C_ACCENT};padding-left:6px;letter-spacing:.5px;">{num}</span><span style="font-size:10px;font-weight:700;color:{C_MUTED};letter-spacing:2px;padding-left:8px;">{kicker_en}</span></td>
+{badge_cell}
+</tr>
+</table>
+<div style="font-size:16px;font-weight:800;color:{C_INK};letter-spacing:1px;padding-top:4px;">{title}</div>
+{caption_html}
+{content}
+</div>'''
+
+
 # ============================================================
-# 报告生成（新版排版：只渲染有内容的区块 + 当天检验横幅）
+# 报告生成（Swiss × 杂志排版：刊头 + 编号栏目 + 审计栏 + 版权页）
+# ——只渲染有内容的区块；每个区块带来源、抓取时间与「当天/非当天/无数据」徽标
 # ============================================================
 def generate_report(data, date_display, date_str):
-    """生成完整的 HTML 日报（新排版）
+    """生成完整的 HTML 日报
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
-    - 没有抓到内容的区块不出现在页面主体，仅在页脚状态清单中留痕；
-    - 页面顶部是当天内容检验横幅，直接展示本次是否满足推送条件。
+    - 没有抓到内容的区块不出现在页面主体，仅在数据审计栏留痕；
+    - 当天内容检验仍作为推送门禁，但不在页面顶部单独显示横幅。
     """
     # 1. 提取所有数据源（缺失的键按空处理，兼容旧测试数据）
     market = data.get("实时行情", {})
     yt = data.get("港股名家频道", {})
     yt_live = yt.get("channels", [])        # 已抓取到内容的频道
-    yt_missing = yt.get("unsupported", [])  # 需登录/未配置的频道（带暂缺原因）
     wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
     google = data.get("全球头条", {})
@@ -1226,8 +1253,10 @@ def generate_report(data, date_display, date_str):
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
 
-    # 4. 行情速览（有数据才渲染）
-    card_market = ""
+    # 4. 逐栏目构建内容（只登记有内容的栏目；编号在拼版时统一生成）
+    sections = []  # (kicker_en, title, content, badge_html, caption)
+
+    # 4.1 行情速览
     if market.get("status") == "success":
         market_rows = []
         for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
@@ -1239,65 +1268,71 @@ def generate_report(data, date_display, date_str):
             value, color = _quote_value(market, label, precision)
             astock_rows.append((label, value, color))
         data_date = market.get("content_date") or "—"
-        card_market = _card(
-            "⚡", "行情速览（实时）", _source_badge(market),
-            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(market)} · 数据日期 {data_date}</div>'
-            + _data_table(market_rows + astock_rows)
-            + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
-        )
+        sections.append((
+            "MARKET SNAPSHOT", "行情速览（实时）",
+            _subsection("全球与美股") + _data_table(market_rows)
+            + _subsection("A股四指数") + _data_table(astock_rows)
+            + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"),
+            _source_badge(market),
+            f"{_source_note(market)} · 数据日期 {data_date}",
+        ))
 
-    # 5. 港股名家频道：只显示实际抓取到内容的频道；暂缺/未配置项不渲染到日报。
-    card_yt = ""
+    # 4.2 港股名家频道：只显示实际抓取到内容的频道；暂缺/未配置项不渲染到日报
     if yt_live:
         blocks = "".join(_channel_block(ch) for ch in yt_live)
-        note = f'本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取'
-        card_yt = _card(
-            "📺", "港股名家频道",
-            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 内容最新日期 {_esc(yt.get("content_date") or "—")}</div>'
-            + blocks
-            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的内容发布于今天（北京时间）；"
-                    f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
+        note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
+        sections.append((
+            "HK GURU CHANNELS", "港股名家频道",
+            blocks + _note(f"数据来自各频道公开 RSS；{note}。带 NEW · 当天 标记的内容发布于今天（北京时间）；"
+                           f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
             _source_badge(yt),
-        )
+            f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
+        ))
 
-    # 6. 其它资讯区块（有数据才渲染）
-    gh_items = "".join(_headline_row(it) for it in gh_headlines[:8])
-    card_google = _card("📰", "全球头条", _source_badge(google),
-                        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(google)}</div>'
-                        + gh_items) \
-        if gh_headlines else ""
+    # 4.3 全球头条（Google News 中文）
+    if gh_headlines:
+        gh_items = "".join(_headline_row(it, i)
+                           for i, it in enumerate(gh_headlines[:8], 1))
+        sections.append(("GLOBAL HEADLINES", "全球头条", gh_items,
+                         _source_badge(google), _source_note(google)))
 
-    em_items = "".join(_em_news_row(it) for it in em_headlines[:5])
-    card_em = _card("📈", "东方财富快讯", _source_badge(em),
-                    f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(em)} · 免费公开数据源</div>'
-                    + em_items) \
-        if em_headlines else ""
+    # 4.4 东方财富快讯
+    if em_headlines:
+        em_items = "".join(_em_news_row(it, i)
+                           for i, it in enumerate(em_headlines[:5], 1))
+        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
+                         _source_badge(em),
+                         f"{_source_note(em)} · 免费公开数据源"))
 
-    kospi_items = "".join(_item_row("🇰🇷", _esc(h[:120])) for h in kospi_headlines[:5])
-    card_semi = _card("🔌", "半导体&韩股", _source_badge(kospi),
-                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>'
-                      + kospi_items) \
-        if kospi_headlines else ""
+    # 4.5 半导体 & 韩股
+    if kospi_headlines:
+        kospi_items = "".join(_item_row(f"{i:02d}", _esc(h[:120]))
+                              for i, h in enumerate(kospi_headlines[:5], 1))
+        sections.append(("SEMIS & KOSPI", "半导体 & 韩股", kospi_items,
+                         _source_badge(kospi), _source_note(kospi)))
 
-    sina_items = "".join(_item_row("🇨🇳", _esc(h[:120])) for h in sina_headlines[:5])
-    # 注：A股四指数行情已并入上方「行情速览」卡片，这里只展示新浪资讯
-    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）", _source_badge(sina),
-                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>'
-                        + sina_items) \
-        if sina_headlines else ""
+    # 4.6 A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
+    if sina_headlines:
+        sina_items = "".join(_item_row(f"{i:02d}", _esc(h[:120]))
+                             for i, h in enumerate(sina_headlines[:5], 1))
+        sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
+                         _source_badge(sina), _source_note(sina)))
 
-    medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
-    wsb_rows = []
-    for i, s in enumerate(wsb_stocks[:10]):
-        label = f"{medals[i]} {s.get('symbol', '?')} {s.get('name', '')}"
-        wsb_rows.append((label, f"{s.get('mentions', '?')} 次提及"))
-    card_wsb = _card("🐂", "Reddit WSB热议", _source_badge(wsb),
-                     f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get("content_date") or "—")}</div>'
-                     + (_section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows))) \
-        if wsb_rows else ""
+    # 4.7 Reddit WSB 热议
+    if wsb_stocks:
+        wsb_rows = []
+        for i, s in enumerate(wsb_stocks[:10]):
+            label = (f'{_rank_span(i)}&nbsp; <b>{_esc(s.get("symbol", "?"))}</b>'
+                     f' <span style="color:{C_MUTED};font-size:11px;">{_esc(s.get("name", ""))}</span>')
+            wsb_rows.append((label, f'{s.get("mentions", "?")} 次提及', C_INK))
+        sections.append((
+            "WSB HEAT", "Reddit WSB热议",
+            _subsection("TOP 10 · 提及榜") + _mini_table(wsb_rows),
+            _source_badge(wsb),
+            f"{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get('content_date') or '—')}",
+        ))
 
-    # 6.5 热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
-    card_hot = ""
+    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
     if hot.get("status") == "success":
         hot_blocks = []
         for mlabel in ["A股", "港股", "美股"]:
@@ -1306,41 +1341,40 @@ def generate_report(data, date_display, date_str):
                 continue
             hot_blocks.append(_hot_market_block(mlabel, mdata))
         if hot_blocks:
-            card_hot = _card(
-                "🔥", "热门榜单 · 最近交易日收盘", _source_badge(hot),
-                f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(hot)} · '
-                f'涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）</div>'
-                + "".join(hot_blocks)
-                + _note("榜单为最近交易日收盘后的涨幅排名。"),
-            )
+            sections.append((
+                "HOT LIST", "热门榜单 · 最近交易日收盘",
+                "".join(hot_blocks) + _note("榜单为最近交易日收盘后的涨幅排名。"),
+                _source_badge(hot),
+                f"{_source_note(hot)} · 涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）",
+            ))
 
-    # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
-    content_cards = "".join(c for c in [card_market, card_yt, card_google, card_em,
-                                        card_semi, card_astock, card_wsb, card_hot] if c)
-
-    # 8. 数据可用性面板（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
-
-    # 推送策略说明（与 main() 中的实际门禁保持一致）
+    # 5. 数据审计栏（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
     if today_n > 0:
-        push_hint = f"✅ 有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
+        push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
         hint_color = C_GREEN
     else:
-        push_hint = ("⏸️ 无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
+        push_hint = ("无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
                      if content_n > 0 else
-                     "❌ 无任何抓取内容 → 本次不会推送。")
+                     "无任何抓取内容 → 本次不会推送。")
         hint_color = C_AMBER if content_n > 0 else C_RED
 
-    card_focus = _card("🎯", "本次数据可用性 · 当天检验",
-                       _alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
-                              f"所有暂缺项均已明确标注，不会复用旧日报内容。",
-                              C_GREEN if today_n > 0 else hint_color,
-                              C_ALERT_G if today_n > 0 else C_ALERT_A) +
-                       _status_footer(source_items) +
-                       _note(f"{push_hint} 生成、抓取和推送是独立步骤：请以各来源的抓取时间、数据日期和当天标记判断数据新鲜度。")
-                       )
+    audit_content = (
+        _alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
+               f"所有暂缺项均已明确标注，不会复用旧日报内容。",
+               C_GREEN if today_n > 0 else hint_color)
+        + _status_footer(source_items)
+        + _note(f"{push_hint}生成、抓取和推送是独立步骤：请以各来源的抓取时间、数据日期和当天标记判断数据新鲜度。")
+    )
+    sections.append(("DATA AUDIT", "本次数据可用性 · 当天检验", audit_content, "", ""))
 
-    # 9. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
+    # 6. 拼版：栏目编号按渲染顺序生成（只在场的栏目占用编号）
+    content_html = "".join(
+        _section(f"{i:02d}", kicker, title, content, badge, caption)
+        for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
+
+    # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
     generated_at = _now()
+    src_color = C_GREEN if today_n > 0 else (C_AMBER if content_n > 0 else C_RED)
     html = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -1350,38 +1384,54 @@ def generate_report(data, date_display, date_str):
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
-<title>章鱼AI·财经日报</title>
+<title>章鱼AI · 每日财经日报</title>
 </head>
-<body style="margin:0;padding:0;background:#f0f0f0;font-family:{FONT};color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:14px;line-height:1.8;-webkit-text-size-adjust:100%;">
 
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:600px;margin:0 auto;background:#f0f0f0;">
-<tr><td style="padding:10px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;margin:0 auto;background:{C_BG};">
+<tr><td style="padding:14px 10px;">
 
-<!-- 头部 -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#002FA7;">
-<tr><td style="padding:16px 14px 4px;text-align:center;color:#fff;font-size:13px;">🐙 Octopus AI · 全景分析</td></tr>
-<tr><td style="padding:0 14px 4px;text-align:center;color:#fff;font-size:20px;font-weight:700;">每日财经日报</td></tr>
-<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · 自动生成 · 生成时间 {_esc(generated_at)}</td></tr>
-<tr><td style="padding:0 14px 14px;text-align:center;">
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">全球市场</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">多源数据</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">港股名家频道</span>
-</td></tr>
+<!-- 纸面（Swiss sheet） -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_PAPER};border:1px solid {C_HAIR};border-top:4px solid {C_INK};">
+<tr><td style="padding:22px 20px 20px;">
+
+<!-- 刊头 masthead -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+<tr>
+<td valign="bottom">{_sq(C_ACCENT, 12)}<span style="font-size:12px;font-weight:800;color:{C_INK};letter-spacing:3px;padding-left:7px;">OCTOPUS AI</span><span style="font-size:10px;color:{C_FAINT};letter-spacing:2px;padding-left:8px;">章鱼 · 全景分析</span></td>
+<td align="right" valign="bottom"><span style="font-size:9px;font-weight:700;color:{C_FAINT};letter-spacing:3px;">FINANCE DAILY</span></td>
+</tr>
 </table>
 
-{content_cards}
-{card_focus}
+<div style="font-size:30px;font-weight:800;color:{C_INK};letter-spacing:2px;line-height:1.3;padding-top:16px;">每日财经日报</div>
+<div style="font-size:10px;font-weight:700;color:{C_FAINT};letter-spacing:3px;padding-top:6px;">DAILY FINANCE · MULTI-SOURCE SCAN · UTC+8</div>
+<div style="border-bottom:5px solid {C_ACCENT};width:46px;margin-top:12px;font-size:0;line-height:0;">&nbsp;</div>
 
-<!-- 页脚 -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
-<tr><td style="padding:12px 10px;text-align:center;">
-<div style="font-size:11px;color:#8899c0;line-height:1.8;">
-🐙 章鱼AI · 仅供参考，不构成投资建议<br>
-数据来源：港股名家频道(YouTube/RSS) · Google News · 东方财富 · Reddit · 新浪财经 · Naver
+<!-- 导语 standfirst -->
+<div style="margin-top:16px;padding-left:10px;border-left:3px solid {C_ACCENT};font-size:12px;color:#3A3A3E;line-height:1.9;">
+全网多源实时抓取，只呈现「确有内容」的栏目；每个栏目标注来源、抓取时间与新鲜度徽标。无数据栏目自动缺席，不以历史内容充数。</div>
+
+<!-- 期号元信息栅格 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:2px solid {C_INK};border-bottom:1px solid {C_INK};margin-top:18px;">
+<tr>
+{_masthead_cell("DATE · 日期", _esc(date_display), first=True)}
+{_masthead_cell("GENERATED · 生成", _esc(generated_at))}
+{_masthead_cell("TODAY SOURCES · 当天源", f"{today_n} / {total}", src_color)}
+</tr>
+</table>
+
+{content_html}
+
+<!-- 版权页 colophon -->
+<div style="border-top:3px solid {C_INK};margin-top:28px;padding-top:10px;">
+<div>{_sq(C_ACCENT, 9)}<span style="font-size:10px;font-weight:800;color:{C_INK};letter-spacing:2px;padding-left:6px;">OCTOPUS AI · COLOPHON</span></div>
+<div style="font-size:11px;color:{C_MUTED};line-height:1.9;padding-top:8px;">
+仅供投资参考，不构成投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动缺席，不以历史内容充数。</div>
+<div style="font-size:10px;color:{C_FAINT};letter-spacing:.5px;line-height:1.8;padding-top:4px;">
+DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富 · Reddit · 新浪财经 · NAVER<br>
+生成时间 {_esc(generated_at)} · 报告日期 {date_str} · 章鱼AI 自动出品</div>
 </div>
-<div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
-生成时间：{_esc(generated_at)} · 报告日期：{date_str}
-</div>
+
 </td></tr>
 </table>
 
@@ -1452,15 +1502,15 @@ def _build_truncate_notice(report_name=None):
         if repo:
             url = (f"https://raw.githubusercontent.com/{repo}/main/output/"
                    f"{report_name}")
-            link = (f'<div style="padding:6px 0 2px;"><a href="{url}" '
-                    f'style="color:#002FA7;font-weight:700;text-decoration:none;">'
-                    f"📄 查看完整日报（{report_name}）</a></div>")
+            link = (f'<div style="padding-top:6px;"><a href="{url}" '
+                    f'style="color:{C_ACCENT};font-weight:700;text-decoration:none;">'
+                    f"→ 查看完整日报（{report_name}）</a></div>")
     fname = f"（完整版文件：{report_name}）" if report_name else ""
     return (f'<table width="100%" cellpadding="0" cellspacing="0" '
-            f'style="border-collapse:collapse;margin-top:8px;background:#fdf3d9;'
-            f'border-left:3px solid #8a5300;"><tr><td '
-            f'style="padding:8px 10px;font-size:12px;color:#8a5300;line-height:1.7;">'
-            f"⚠️ 微信推送有内容长度上限，本消息已自动截断；仓库中的完整日报不受影响{fname}。"
+            f'style="border-collapse:collapse;margin-top:8px;background:{C_ZEBRA};'
+            f'border:1px solid {C_HAIR};border-left:3px solid {C_AMBER};"><tr><td '
+            f'style="padding:8px 10px;font-size:11px;color:{C_AMBER};line-height:1.75;">'
+            f"微信推送有内容长度上限，本消息已自动截断；仓库中的完整日报不受影响{fname}。"
             f"{link}</td></tr></table>")
 
 
