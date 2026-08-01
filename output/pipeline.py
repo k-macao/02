@@ -14,6 +14,13 @@
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
      含「检验未通过」告警发送失败）都以退出码 1 结束：GitHub Actions 会显红并触发
      失败通知，杜绝“推送失败却显示成功”的假象。
+  6. PushPlus 推送对「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」
+     等可恢复错误按 10s→30s→60s 退避自动重试（最多 4 次）；对「当日配额已达上限、
+     token 失效、内容违规」等重试无意义的错误不重试、立即失败。日报多次推送仍失败时
+     会再发一条纯文本「推送失败」告警（含 PushPlus 返回的 code/msg 与处理建议），
+     让微信侧也能感知原因，而不是只看到 Actions 变红。
+  7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
+     触发反垃圾/去重拦截，也便于区分每一次推送。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -948,8 +955,51 @@ def generate_report(data, date_display, date_str):
 # ============================================================
 # PushPlus 推送
 # ============================================================
+# 可恢复错误的退避重试节奏：首次 + 3 次重试（共最多 4 次尝试）
+PUSH_RETRY_BACKOFF = (10, 30, 60)
+
+# 配额/凭证/内容类错误关键字：重试无意义，立即失败，避免浪费仅剩的额度。
+_PUSH_FATAL_KEYWORDS = (
+    "已达上限", "已用完", "超出今日", "超过今日", "今日已达", "发送次数",
+    "token错误", "token 错误", "token 无效", "token无效", "用户不存在",
+    "敏感", "违规",
+)
+
+# 频率/服务器类错误关键字：稍等重试通常可以恢复。
+_PUSH_RETRYABLE_KEYWORDS = (
+    "频繁", "太快", "频率", "稍后再试", "稍后重试", "请重试", "繁忙",
+    "too many", "frequent", "rate limit", "busy", "retry", "timeout", "超时",
+)
+
+
+def _push_failure_kind(http_status=None, code=None, msg=""):
+    """把一次推送失败分类：
+
+    transient —— 频率/服务器/网络类，按 PUSH_RETRY_BACKOFF 重试；
+    fatal     —— 配额/凭证/内容类，重试无意义，立即失败；
+    unknown   —— 无法归类的业务错误，不重试，立即失败并把 code/msg 打进日志。
+    """
+    if isinstance(http_status, int) and (http_status == 429 or http_status >= 500):
+        return "transient"
+    if isinstance(http_status, int) and 400 <= http_status < 500:
+        return "fatal"
+    low = (msg or "").lower()
+    # 先看致命关键字，避免「已达上限，请稍后再试」被误判成可重试
+    if any(k in low for k in _PUSH_FATAL_KEYWORDS):
+        return "fatal"
+    if any(k in low for k in _PUSH_RETRYABLE_KEYWORDS):
+        return "transient"
+    return "unknown"
+
+
 def push_to_wechat(title, content_html, token=None, template="html"):
-    """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。"""
+    """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
+
+    - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
+      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
+    - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
+    - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
+    """
     token = token or PUSHPLUS_TOKEN
 
     if not token:
@@ -959,30 +1009,55 @@ def push_to_wechat(title, content_html, token=None, template="html"):
         return False
 
     print(f"📤 正在推送到微信 (PushPlus, template={template})...")
+    payload = {
+        "token": token,
+        "title": title,
+        "content": content_html,
+        "template": template,
+    }
+    attempts = (0, *PUSH_RETRY_BACKOFF)
+    last_error = "未知错误"
 
-    try:
-        resp = requests.post(
-            PUSHPLUS_URL,
-            json={
-                "token": token,
-                "title": title,
-                "content": content_html,
-                "template": template,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-
-        if result.get("code") == 200:
-            print("  ✅ 推送成功！")
-            return True
+    for attempt, wait in enumerate(attempts, 1):
+        if wait:
+            print(f"  ⏳ 等待 {wait}s 后进行第 {attempt}/{len(attempts)} 次尝试...")
+            time.sleep(wait)
+        http_status = None
+        try:
+            resp = requests.post(PUSHPLUS_URL, json=payload, timeout=30)
+            http_status = getattr(resp, "status_code", None)
+            result = resp.json()
+        except Exception as exc:
+            last_error = f"网络/请求异常: {exc}"
+            if http_status is not None:
+                kind = _push_failure_kind(http_status, None, str(exc))
+            elif isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+                # requests 的网络异常（含 SSL/超时/连接重置）都是 OSError 子类，可重试
+                kind = "transient"
+            else:
+                # 编程错误等非网络异常：重试无意义，立即失败并暴露原因
+                kind = "unknown"
         else:
-            print(f"  ❌ 推送失败: {result.get('msg', '未知错误')}")
-            return False
-    except Exception as e:
-        print(f"  ❌ 推送异常: {e}")
+            code = result.get("code") if isinstance(result, dict) else None
+            msg = str(result.get("msg", "未知错误")) if isinstance(result, dict) else "返回数据格式错误"
+            if code == 200:
+                print("  ✅ 推送成功！" if attempt == 1 else f"  ✅ 推送成功！（第 {attempt} 次尝试）")
+                return True
+            last_error = f"PushPlus code={code} msg={msg}"
+            kind = _push_failure_kind(http_status, code, msg)
+
+        remaining = len(attempts) - attempt
+        if kind == "transient" and remaining > 0:
+            print(f"  ⚠️ 第 {attempt}/{len(attempts)} 次推送失败（可重试错误）: {last_error}")
+            continue
+        if kind == "fatal":
+            print(f"  ❌ 推送失败（配额/凭证/内容类错误，重试无意义）: {last_error}")
+        else:
+            print(f"  ❌ 推送失败: {last_error}")
         return False
+
+    print(f"  ❌ 推送最终失败（已重试 {len(attempts) - 1} 次）: {last_error}")
+    return False
 
 
 def build_no_push_alert_text(reason, data, report_path=None):
@@ -1024,8 +1099,47 @@ def push_no_push_alert(reason, data, report_path=None, token=None):
     确保 token 缺失 / 接口异常在 Actions 上显红而不是静默。
     """
     print("📣 正在推送「检验未通过」纯文本告警（避免彻底沉默）...")
-    title = f"🐙 日报未推送提醒 {datetime.now(CST).strftime('%m/%d')}"
+    title = f"🐙 日报未推送提醒 {datetime.now(CST).strftime('%m/%d %H:%M')}"
     return push_to_wechat(title, build_no_push_alert_text(reason, data, report_path),
+                          token=token, template="txt")
+
+
+def build_push_failure_alert_text(reason, data=None, report_path=None):
+    """生成「日报推送失败」兜底告警正文：日报已生成但被 PushPlus 拒绝时，
+    让微信侧也能直接看到失败原因和处理建议，而不是只看到 Actions 变红。"""
+    lines = [
+        f"⚠️ 日报已生成，但推送到微信失败（{_now()} 北京时间）",
+        f"原因：{reason}",
+        "",
+    ]
+    if data:
+        items = [v for v in data.values() if isinstance(v, dict)]
+        today_n = sum(1 for v in items if v.get("is_today"))
+        lines.append(f"数据状态：{today_n}/{len(items)} 个来源为当天内容，日报内容本身无问题。")
+        lines.append("")
+    lines += [
+        "处理建议：",
+        "· 若日志提示「发送频繁 / 稍后再试 / 服务器繁忙」：属 PushPlus 频率限制，"
+        "稍等片刻后在 Actions 重跑一次即可；",
+        "· 若提示「发送次数已达上限 / 已用完」：今日 PushPlus 额度已耗尽，次日零点恢复，"
+        "或在 PushPlus 升级套餐后更新 Secrets；",
+        "· 若提示 token 无效 / 已失效：到 pushplus.plus 重新获取，"
+        "并更新仓库 Settings → Secrets → PUSHPLUS_TOKEN；",
+        "· 手动重新推送：Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow，"
+        "或本地 ./output/manual_push.sh --force。",
+        f"报告文件：{os.path.basename(report_path) if report_path else '—'}",
+    ]
+    return "\n".join(lines)
+
+
+def push_failure_alert(reason, data=None, report_path=None, token=None):
+    """日报推送失败后的兜底告警（template=txt）。
+
+    返回 True/False；本告警只负责「让微信侧感知失败」，不改变调用方的退出码——
+    日报未送达，调用方仍应以退出码 1 结束（Actions 显红）。"""
+    print("📣 正在发送「推送失败」兜底告警（让微信侧也能看到失败原因）...")
+    title = f"🐙 日报推送失败提醒 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+    return push_to_wechat(title, build_push_failure_alert_text(reason, data, report_path),
                           token=token, template="txt")
 
 
@@ -1216,10 +1330,12 @@ def main():
             print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
+        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, html):
             print("\n🎉 全部完成！")
             return 0
+        push_failure_alert("通过 --push-only 推送日报被 PushPlus 拒绝（详见上方 code/msg）",
+                           report_path=push_path)
         print("\n❌ 推送未成功（退出码 1；在 GitHub Actions 中将标红提醒）。")
         return 1
 
@@ -1273,21 +1389,34 @@ def main():
 
     if can_push:
         print(f"\n📤 当天检验通过：{reason}")
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
+        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
-        return _finish(push_to_wechat(title, push_html))
+        if push_to_wechat(title, push_html):
+            return _finish(True)
+        # 日报推送失败：再发一条纯文本失败告警，微信侧能直接看到原因；退出码仍为 1。
+        push_failure_alert("日报 HTML 多次推送均被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
 
     if args.force_push:
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d')}"
-        return _finish(push_to_wechat(title, push_html))
+        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        if push_to_wechat(title, push_html):
+            return _finish(True)
+        push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
 
     if args.allow_incomplete_push:
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d')}"
-        return _finish(push_to_wechat(title, push_html))
+        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        if push_to_wechat(title, push_html):
+            return _finish(True)
+        push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
 
     # 当天检验未通过且不强制：不推日报，但推一条纯文本告警，避免彻底沉默。
     print(f"\n⏸️ 当天检验未通过，本次不推送日报。")
