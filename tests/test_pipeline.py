@@ -300,63 +300,28 @@ class _FakeResp:
         return {"code": self._code, "msg": self._msg}
 
 
-class _FakeGeminiResp:
-    """模拟 Gemini generateContent HTTP 响应。"""
-
-    def __init__(self, text):
-        self._text = text
-        self.status_code = 200
-
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return {"candidates": [{"content": {"parts": [{"text": self._text}]}}]}
-
-
 class GoogleNewsSourceTests(unittest.TestCase):
-    """2026-08-02 新增：全球头条改用 Google News（英文源 + Gemini 翻译 / 中文源降级）。"""
+    """2026-08-02 新增：全球头条改用 Google News 中文版。"""
 
-    EN_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+    ZH_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
-  <item><title>Fed signals rate cut - Reuters</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
-  <item><title>Stocks rally on tech earnings - Bloomberg</title><link>https://news.google.com/b</link><pubDate>Sat, 02 Aug 2026 03:00:00 GMT</pubDate></item>
+  <item><title>美联储释放降息信号 - 华尔街见闻</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
+  <item><title>科技股财报推动股市上涨 - 彭博</title><link>https://news.google.com/b</link><pubDate>Sat, 02 Aug 2026 03:00:00 GMT</pubDate></item>
 </channel></rss>"""
 
-    def test_fetch_google_news_uses_en_feed_and_translates_with_key(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-             patch.object(pipeline, "safe_request", return_value=self.EN_RSS) as req, \
-             patch.object(pipeline, "ai_translate_titles", return_value=[
-                 {"i": 0, "zh": "美联储暗示降息"}, {"i": 1, "zh": "科技股财报推动股市上涨"}]) as tr:
+    def test_fetch_google_news_uses_chinese_feed(self):
+        with patch.object(pipeline, "safe_request", return_value=self.ZH_RSS) as req:
             result = pipeline.fetch_google_news()
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["source"], "Google News")
-        self.assertTrue(result["translated"])
-        self.assertEqual(result["headlines"][0]["zh"], "美联储暗示降息")
-        self.assertEqual(result["headlines"][0]["title"], "Fed signals rate cut")
-        self.assertEqual(result["headlines"][0]["source"], "Reuters")
-        self.assertEqual(result["headlines"][1]["zh"], "科技股财报推动股市上涨")
-        # 配置 Key 时走英文源
-        self.assertIn("hl=en-US", req.call_args[0][0])
-        tr.assert_called_once()
-
-    def test_fetch_google_news_falls_back_to_chinese_feed_without_key(self):
-        zh_rss = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-  <item><title>美联储释放降息信号 - 华尔街见闻</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
-</channel></rss>"""
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
-             patch.object(pipeline, "safe_request", return_value=zh_rss) as req:
-            result = pipeline.fetch_google_news()
-        self.assertEqual(result["status"], "success")
-        self.assertFalse(result["translated"])
-        self.assertIn("hl=zh-CN", req.call_args[0][0])  # 未配置 Key 走中文源
         self.assertEqual(result["headlines"][0]["title"], "美联储释放降息信号")
         self.assertEqual(result["headlines"][0]["source"], "华尔街见闻")
+        self.assertEqual(result["headlines"][1]["title"], "科技股财报推动股市上涨")
+        # 直接抓中文源
+        self.assertIn("hl=zh-CN", req.call_args[0][0])
 
     def test_fetch_google_news_unavailable_marks_error(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
-             patch.object(pipeline, "safe_request", return_value=None):
+        with patch.object(pipeline, "safe_request", return_value=None):
             result = pipeline.fetch_google_news()
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["headlines"], [])
@@ -406,79 +371,14 @@ class EastmoneySourceTests(unittest.TestCase):
         self.assertEqual(result["markets"]["A股"]["stocks"], [])
 
 
-class GeminiAiTests(unittest.TestCase):
-    """2026-08-02 新增：Gemini AI 研判 / 翻译 / 总结。"""
-
-    def test_ai_analyze_section_parses_json(self):
-        def fake_post(url, json=None, timeout=None):
-            self.assertIn("generativelanguage.googleapis.com", url)
-            return _FakeGeminiResp('{"direction":"偏多","probability":68,"reason":"科技股财报超预期"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            analysis = pipeline.ai_analyze_section("全球头条", "内容")
-        self.assertEqual(analysis["direction"], "偏多")
-        self.assertEqual(analysis["probability"], 68)
-        self.assertIn("科技股", analysis["reason"])
-
-    def test_ai_analyze_section_returns_none_without_key(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
-            self.assertIsNone(pipeline.ai_analyze_section("全球头条", "内容"))
-
-    def test_ai_analyze_section_normalizes_bad_direction_and_probability(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('{"direction":"大涨","probability":150,"reason":"x"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            analysis = pipeline.ai_analyze_section("x", "y")
-        self.assertEqual(analysis["direction"], "中性")   # 非法方向归一
-        self.assertEqual(analysis["probability"], 100)    # 概率夹到 0-100
-
-    def test_ai_translate_titles_parses_json_array(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('[{"i":0,"zh":"标题甲"},{"i":1,"zh":"标题乙"}]')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            result = pipeline.ai_translate_titles([{"i": 0, "title": "A"}, {"i": 1, "title": "B"}])
-        self.assertEqual(result[0]["zh"], "标题甲")
-        self.assertEqual(result[1]["zh"], "标题乙")
-
-    def test_ai_translate_titles_keeps_original_when_parsing_fails(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "gemini_json", return_value=None):
-            result = pipeline.ai_translate_titles([{"i": 0, "title": "Original"}])
-        self.assertIsNone(result)   # 整体失败 → 调用方保留原文
-
-    def test_gemini_json_strips_markdown_code_fence(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('```json\n{"direction":"偏空","probability":55,"reason":"利率上行"}\n```')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            data = pipeline.gemini_json("prompt")
-        self.assertEqual(data["direction"], "偏空")
-        self.assertEqual(data["probability"], 55)
-
-    def test_ai_overall_summary_parses(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('{"summary":"市场整体偏强，科技板块领涨。"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            summary = pipeline.ai_overall_summary([("全球头条", "偏多", 66, "科技领涨")])
-        self.assertIn("偏强", summary)
-
-
 class NewLayoutRenderingTests(unittest.TestCase):
-    """2026-08-02 新增：AI 总览表 / 东财快讯 / 热门榜单渲染。"""
+    """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
 
     def _rich_data(self):
         data = ReportFreshnessTests()._sample_data()
         data["全球头条"] = pipeline._source_result(
-            "Google News", "success", is_today=True, content_date="2026-08-02", translated=True,
-            headlines=[{"title": "Fed Holds Rates", "zh": "美联储按兵不动", "source": "Reuters",
+            "Google News", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": "美联储释放降息信号", "source": "华尔街见闻",
                         "url": "", "published_cst": "2026-08-02 10:00", "is_today": True}])
         data["东财快讯"] = pipeline._source_result(
             "东方财富", "success", is_today=True, content_date="2026-08-02",
@@ -491,32 +391,21 @@ class NewLayoutRenderingTests(unittest.TestCase):
                 for i in range(10)]} for m in ["A股", "港股", "美股"]})
         return data
 
-    def test_report_renders_new_sections_without_key(self):
+    def test_report_renders_new_sections(self):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn("AI 总览", html)              # AI 总览卡片
-        self.assertIn("GEMINI_API_KEY", html)       # 未配置 Key 的降级提示
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
         self.assertIn("热门榜单", html)
         self.assertIn("A股涨幅前十", html)
         self.assertIn("美股涨幅前十", html)
-        self.assertIn("美联储按兵不动", html)        # Google News 中文标题
-        self.assertIn("原文：Fed Holds Rates", html)  # 原文保留
-        self.assertIn("AI暂缺", html)              # 无 Key → 栏目 AI 徽章降级
+        self.assertIn("美联储释放降息信号", html)
+        # 不再渲染 AI 总览相关元素
+        self.assertNotIn("AI 总览", html)
+        self.assertNotIn("栏目 AI 研判表", html)
+        self.assertNotIn("Gemini", html)
+        self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["total_sources"], 8)  # 数据源扩展到 8 个
-
-    def test_report_renders_ai_summary_table_with_key(self):
-        fake_analysis = {"direction": "偏多", "probability": 66, "reason": "科技股领涨"}
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "ai_analyze_section", return_value=fake_analysis), \
-             patch.object(pipeline, "ai_overall_summary", return_value="市场整体偏强，关注科技板块。"):
-            html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn("AI 总结", html)
-        self.assertIn("市场整体偏强", html)
-        self.assertIn("栏目 AI 研判表", html)
-        self.assertIn("偏多 66%", html)
-        self.assertIn("热门榜·A股", html)          # 热门榜三个市场也进分析表
 
 
 class PushResultTests(unittest.TestCase):
@@ -635,8 +524,10 @@ class PushTruncationTests(unittest.TestCase):
     def test_member_limit_default_allows_full_report(self):
         # 账号已升级会员：默认上限 10 万字，当前日报（约 3.3 万字）完整推送、不截断
         self.assertEqual(pipeline.PUSHPLUS_MAX_CONTENT_CHARS, 100000)
-        html = open(Path(__file__).parents[1] / "output" / "daily_report_20260802.html",
-                    encoding="utf-8").read()
+        report_path = Path(__file__).parents[1] / "output" / "daily_report_20260802.html"
+        if not report_path.exists():
+            self.skipTest(f"日报样例文件不存在: {report_path}")
+        html = open(report_path, encoding="utf-8").read()
         self.assertGreater(len(html), 20000)
         out, truncated = pipeline._truncate_html_for_push(html)
         self.assertFalse(truncated)
@@ -826,6 +717,161 @@ class MainExitCodeTests(unittest.TestCase):
     def test_force_push_failure_returns_one(self):
         self.assertEqual(
             self._run_main(["pipeline.py", "--force-push"], self._stale_data(), False), 1)
+
+
+class CleanOldReportsTests(unittest.TestCase):
+    """2026-08-02 新增：手动/自动推送前必须清理历史 HTML 报告。
+
+    避免历史残留文件（含旧版本特征）被 latest.html 引用或被 --push-only 误推。
+    清理函数 clean_old_html_reports 是 main() 正常流程的第一步（--dry-run 跳过）。
+    """
+
+    def _seed_reports(self, directory):
+        """在测试目录里放几份旧报告 + latest.html，返回它们的路径。"""
+        files = [
+            "daily_report_20260801.html",
+            "daily_report_20260802_20260802_069.html",
+            "daily_report_20260802_20260802_098.html",
+            "daily_report_20260802_20260802_243.html",
+            "latest.html",
+        ]
+        created = []
+        for name in files:
+            p = Path(directory) / name
+            p.write_text(f"OLD-CONTENT-{name}", encoding="utf-8")
+            created.append(p)
+        return created
+
+    def test_clean_old_html_reports_removes_daily_reports_and_latest(self):
+        """默认行为：删除全部 daily_report_*.html 和 latest.html。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 4)
+            self.assertTrue(latest_deleted)
+            # 目录里现在应只剩 pipeline 自身的非 HTML 文件
+            remaining = list(Path(directory).glob("*.html"))
+            self.assertEqual(remaining, [], f"应无 HTML 残留，实际: {remaining}")
+
+    def test_clean_old_html_reports_keep_latest_keeps_latest(self):
+        """keep_latest=True 时保留 latest.html，仅清 daily_report_*.html。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports(keep_latest=True)
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 4)
+            self.assertFalse(latest_deleted)
+            # latest.html 仍存在
+            self.assertTrue((Path(directory) / "latest.html").is_file())
+            self.assertTrue((Path(directory) / "latest.html").read_text(
+                encoding="utf-8").startswith("OLD-CONTENT-latest.html"))
+
+    def test_clean_old_html_reports_on_empty_directory(self):
+        """空目录：不报错，返回 (0, False)。"""
+        with tempfile.TemporaryDirectory() as directory:
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 0)
+            self.assertFalse(latest_deleted)
+
+    def test_clean_old_html_reports_ignores_non_html_files(self):
+        """清理只匹配 .html，不动其他扩展名文件。"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "daily_report_20260801.html").write_text("old", encoding="utf-8")
+            (Path(directory) / "notes.txt").write_text("keep me", encoding="utf-8")
+            (Path(directory) / "data.json").write_text("{}", encoding="utf-8")
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            # HTML 被清，txt/json 保留
+            self.assertFalse((Path(directory) / "daily_report_20260801.html").exists())
+            self.assertTrue((Path(directory) / "notes.txt").exists())
+            self.assertTrue((Path(directory) / "data.json").exists())
+
+    def test_main_normal_flow_calls_clean_before_collect(self):
+        """main() 正常流程：必须在 collect_all_data 之前调用 clean_old_html_reports。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            call_order = []
+
+            original_collect = pipeline.collect_all_data
+            original_clean = pipeline.clean_old_html_reports
+
+            def tracking_clean(*a, **kw):
+                call_order.append("clean")
+                return original_clean(*a, **kw)
+
+            def tracking_collect():
+                call_order.append("collect")
+                return original_collect()
+
+            def fake_save(html, output_path=None, data=None):
+                p = Path(directory) / "daily_report_test.html"
+                p.write_text(html, encoding="utf-8")
+                return str(p)
+
+            try:
+                pipeline.REPORT_DIR = directory
+                with patch.object(sys, "argv", ["pipeline.py"]), \
+                     patch.object(pipeline, "collect_all_data",
+                                  side_effect=tracking_collect), \
+                     patch.object(pipeline, "clean_old_html_reports",
+                                  side_effect=tracking_clean), \
+                     patch.object(pipeline, "generate_report",
+                                  return_value="<html>ok</html>"), \
+                     patch.object(pipeline, "save_report", side_effect=fake_save), \
+                     patch.object(pipeline, "push_to_wechat", return_value=True):
+                    pipeline.main()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+
+            self.assertEqual(call_order, ["clean", "collect"],
+                             "清理必须在采集之前执行，避免最新报告被旧文件污染")
+
+    def test_main_dry_run_skips_clean(self):
+        """--dry-run 模式：不清理（不写文件，清理无意义且会产生空目录警告）。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            original_clean = pipeline.clean_old_html_reports
+            clean_called = []
+
+            def tracking_clean(*a, **kw):
+                clean_called.append(True)
+                return original_clean(*a, **kw)
+
+            try:
+                pipeline.REPORT_DIR = directory
+                with patch.object(sys, "argv", ["pipeline.py", "--dry-run"]), \
+                     patch.object(pipeline, "collect_all_data", return_value={}), \
+                     patch.object(pipeline, "clean_old_html_reports",
+                                  side_effect=tracking_clean):
+                    pipeline.main()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+
+            self.assertEqual(clean_called, [],
+                             "--dry-run 不应调用 clean_old_html_reports")
+            # 旧文件应原封不动
+            self.assertTrue((Path(directory) / "daily_report_20260801.html").exists())
+            self.assertTrue((Path(directory) / "latest.html").exists())
 
 
 if __name__ == "__main__":

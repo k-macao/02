@@ -33,21 +33,11 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
   （无需 API Key），**每个频道列出最新 3 条内容**；需登录的微信公众号 / 雪球 / 微博 /
   Bilibili（走 RSSHub）/ 未配置链接的 Medium / Substack 会明确标注「暂缺」及原因，
   抓取失败的频道同样标注「暂缺」，绝不伪造内容；
-- **🌍 全球头条改用 Google News 数据源**（替换原 Yahoo Finance News）：配置
-  `GEMINI_API_KEY` 时抓英文财经版并由 Gemini **翻译成简体中文**（附原文对照）；
-  未配置时自动降级为 Google News 中文版，无需翻译；
+- **🌍 全球头条改用 Google News 数据源**（替换原 Yahoo Finance News）：直接抓
+  Google News 中文版财经头条，标题本身即中文，无需翻译；
 - **📈 东方财富快讯** 区块：东方财富免费公开接口的最新 **5 条**财经新闻（无需 API Key）；
 - **🔥 热门榜单** 区块：最近一个交易日收盘后的 **A股 / 港股 / 美股 涨幅前十**
-  （东方财富 push2 免费接口），每个市场附 Gemini AI 分析的**涨跌热门原因**；
-- **🧠 Gemini AI 研判**（环境变量 `GEMINI_API_KEY` 或 `GOOGLE_API_KEY`，模型可用
-  `GEMINI_MODEL` 覆盖，默认 `gemini-2.5-flash`）：
-  - 每个有内容的栏目给出 **偏多 / 偏空 / 中性 + 概率（0-100%）+ 一句话理由**；
-  - 页面顶部新增 **「AI 总览 · 分析表」**：整体 AI 总结 + 各栏目研判汇总表；
-  - 未配置 Key 或调用失败时页面明确标注「AI 暂缺」，**绝不伪造分析**；
-  - **在 GitHub Actions 中启用**：先到仓库 Settings → Secrets 添加 `GEMINI_API_KEY`，
-    然后在两个 workflow（`.github/workflows/manual.yml` 和 `octopus-daily.yml`）的
-    `env:` 中加一行 `GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}`（与
-    `PUSHPLUS_TOKEN` 同级）；本地运行则 `export GEMINI_API_KEY=你的key`；
+  （东方财富 push2 免费接口）；
 - 全部数据源不可用时生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。
 
 ## 🎛️ 高级用法
@@ -98,12 +88,12 @@ crontab -e
 ┌────────────────────────┐     ┌─────────────────────┐
 │ 港股名家频道(YouTube/RSS) │──┐  │ daily_report_*.html │
 │ Reddit WSB             │──┤  │ latest.html         │
-│ Google News(全球头条+翻译) │──┼─→│                     │
+│ Google News(全球头条)   │──┼─→│                     │
 │ 东方财富(快讯+热门榜单)    │──┤ ②分析 └─────────┬───────────┘
 │ 新浪财经                │──┤ ③生成              │
-│ 韩股半导体(Naver)       │──┤ ④当天检验        │
-│ Gemini AI(研判/翻译/总结) │──┘                  ┌────▼─────┐
-└────────────────────────┘                     │ PushPlus │
+│ 韩股半导体(Naver)       │──┘ ④当天检验        │
+└────────────────────────┘                     ┌────▼─────┐
+                                                │ PushPlus │
                                                 │   微信   │
                                                 └──────────┘
 ```
@@ -129,6 +119,4 @@ output/
 
 ## 📜 版权
 
-章鱼 AI，仅供参考。全网境内外检索公开行情，由多个大模型协同推理决策，
-包括但不限于 Claude、ChatGPT、Gemini、Grok、Qwen 以及 Kimi，
-提供多任务分析数据支持。
+章鱼 AI，仅供参考。全网境内外检索公开行情。
