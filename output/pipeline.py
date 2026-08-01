@@ -50,6 +50,7 @@ import sys
 import json
 import time
 import argparse
+import random
 import re
 import glob
 import xml.etree.ElementTree as ET
@@ -1038,18 +1039,17 @@ def generate_report(data, date_display, date_str):
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
         )
 
-    # 5. 港股名家频道（已抓取频道 + 需登录/未配置的暂缺频道，均展示来源状态）
+    # 5. 港股名家频道：只显示实际抓取到内容的频道；暂缺/未配置项不渲染到日报。
     card_yt = ""
-    if yt_live or yt_missing:
-        blocks = "".join(_channel_block(ch) for ch in (yt_live + yt_missing))
-        note = (f'本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取'
-                + (f'；{yt.get("error")}' if yt.get("error") else ""))
+    if yt_live:
+        blocks = "".join(_channel_block(ch) for ch in yt_live)
+        note = f'本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取'
         card_yt = _card(
             "📺", "港股名家频道",
             f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 内容最新日期 {_esc(yt.get("content_date") or "—")}</div>'
             + blocks
             + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的内容发布于今天（北京时间）；"
-                    f"每个频道列出最新 {CHANNEL_TOP_N} 条。需登录或未配置的频道标注「暂缺」及原因，不伪造内容。"),
+                    f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
             _source_badge(yt),
         )
 
@@ -1083,8 +1083,7 @@ def generate_report(data, date_display, date_str):
     # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
     content_cards = "".join(c for c in [card_market, card_yt, card_yahoo, card_semi, card_astock, card_wsb] if c)
 
-    # 8. 当天检验横幅 + 数据可用性面板
-    banner = _freshness_banner(source_items)
+    # 8. 数据可用性面板（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
 
     # 推送策略说明（与 main() 中的实际门禁保持一致）
     if today_n > 0:
@@ -1135,7 +1134,6 @@ def generate_report(data, date_display, date_str):
 </td></tr>
 </table>
 
-{banner}
 {content_cards}
 {card_focus}
 
@@ -1445,15 +1443,39 @@ def _atomic_write(path, content):
             os.unlink(tmp_path)
 
 
+def _unique_report_path(requested_path):
+    """返回不重复的 HTML 路径。
+
+    自动和手动运行都可能在同一天执行多次；日报不能因同名而覆盖上一份。
+    冲突时统一追加澳门日期（YYYYMMDD）和三位随机数，例如：
+    ``daily_report_20260802_417.html``。循环检查可避免随机数碰撞。
+    """
+    if not os.path.exists(requested_path):
+        return requested_path
+
+    directory = os.path.dirname(os.path.abspath(requested_path))
+    extension = os.path.splitext(requested_path)[1] or ".html"
+    stem = os.path.splitext(os.path.basename(requested_path))[0]
+    date = _today_str()
+    for _ in range(1000):
+        suffix = f"{random.SystemRandom().randint(0, 999):03d}"
+        candidate = os.path.join(directory, f"{stem}_{date}_{suffix}{extension}")
+        if not os.path.exists(candidate):
+            return candidate
+
+    raise RuntimeError(f"无法为 {requested_path} 找到不重复的日期随机文件名")
+
+
 def _timestamped_report_path():
-    """目标文件被锁定/不可覆盖时使用的全新日期时间文件名。"""
-    stamp = datetime.now(CST).strftime("%Y%m%d_%H%M%S")
-    candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}.html")
-    sequence = 1
-    while os.path.exists(candidate):
-        candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}_{sequence}.html")
-        sequence += 1
-    return candidate
+    """目标文件被锁定/不可覆盖时使用的全新日期随机文件名。"""
+    directory = os.path.abspath(REPORT_DIR)
+    date = _today_str()
+    for _ in range(1000):
+        suffix = f"{random.SystemRandom().randint(0, 999):03d}"
+        candidate = os.path.join(directory, f"daily_report_{date}_{suffix}.html")
+        if not os.path.exists(candidate):
+            return candidate
+    raise RuntimeError("无法为锁定的日报找到不重复的日期随机文件名")
 
 
 def newest_report_path():
@@ -1463,20 +1485,26 @@ def newest_report_path():
 
 
 def save_report(html, output_path=None, data=None):
-    """保存本次报告；目标不能覆盖时创建带日期时间的新 HTML，绝不退回旧文件。"""
+    """保存本次报告；同名或无法覆盖时创建日期+三位随机数的新 HTML。"""
     requested_path = output_path or os.path.join(REPORT_DIR, f"daily_report_{_today_str()}.html")
+    # 先检查文件名是否已存在，避免自动/手动重复运行覆盖既有日报。
+    target_path = _unique_report_path(requested_path)
+    if target_path != requested_path:
+        print(f"⚠️ 输出文件已存在: {requested_path}")
+        print(f"   本次改用不重复文件: {target_path}")
+
     try:
-        _atomic_write(requested_path, html)
-        output_path = requested_path
+        _atomic_write(target_path, html)
+        output_path = target_path
         print(f"💾 日报已原子保存: {output_path}")
     except OSError as exc:
-        # 文件被其它进程锁定、只读或无法替换时，保留旧文件并输出一份可追溯的新报告。
+        # 文件在检查后被其它进程锁定或抢先创建时，再生成一个日期随机文件。
         output_path = _timestamped_report_path()
         try:
             _atomic_write(output_path, html)
         except OSError as fallback_exc:
             raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}") from fallback_exc
-        print(f"⚠️ 无法覆盖 {requested_path}: {exc}")
+        print(f"⚠️ 无法写入 {target_path}: {exc}")
         print(f"💾 已改存为新的日期文件: {output_path}")
 
     latest_path = os.path.join(REPORT_DIR, "latest.html")
