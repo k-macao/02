@@ -3,7 +3,7 @@
 🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
-核心规则（2026-08-01 新版，当天修订）：
+核心规则（2026-08-02 新版，当天修订）：
   1. 没有数据的区块不出现在页面里，也不推送空内容。
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
      只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
@@ -11,6 +11,15 @@
   3. 页面内容包含「港股名家频道」区块：香港股评人/财经平台的 YouTube 与通用 RSS
      抓取（无需 API Key），每频道列出最新 3 条；需登录平台明确标注「暂缺」及原因，
      不伪造内容。
+  4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：配置
+     GEMINI_API_KEY 时抓英文源并由 Gemini 翻译成简体中文；未配置时直接抓中文源。
+  5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
+  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 涨幅前十
+     （东方财富 push2 免费接口），每个市场附 Gemini AI 分析的涨跌热门原因。
+  7. Gemini AI 研判（环境变量 GEMINI_API_KEY / GOOGLE_API_KEY，模型可用
+     GEMINI_MODEL 覆盖，默认 gemini-2.5-flash）：每个有内容的栏目给出
+     「偏多 / 偏空 / 中性 + 概率 + 理由」；页面顶部新增「AI 总览 · 分析表」卡片
+     （整体 AI 总结 + 各栏目研判表）。未配置 Key 时明确标注「AI 暂缺」，绝不伪造分析。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -254,6 +263,142 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
 
 
 # ============================================================
+# Gemini AI（多栏目 AI 研判 / 翻译 / 整体总结）
+# ============================================================
+# 通过环境变量配置：
+#   GEMINI_API_KEY（或 GOOGLE_API_KEY）—— Gemini API Key，必填才启用 AI 分析
+#   GEMINI_MODEL —— 模型名，默认 gemini-2.5-flash
+# 未配置 API Key 时，AI 分析/翻译自动降级（页面明确标注「AI 暂缺」，绝不伪造分析）。
+def _gemini_api_key():
+    return os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+
+
+def _gemini_model():
+    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+def gemini_complete(prompt, temperature=0.3, timeout=40):
+    """调用 Gemini generateContent 生成文本；未配置 Key / 调用失败返回 None。"""
+    key = _gemini_api_key()
+    if not key:
+        print("  ⚠️ 未配置 GEMINI_API_KEY，跳过 Gemini 调用")
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{_gemini_model()}:generateContent?key={key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": temperature},
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        result = resp.json()
+        parts = (result.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            print("  ⚠️ Gemini 返回空内容")
+            return None
+        return text
+    except Exception as exc:
+        print(f"  ⚠️ Gemini 调用失败: {exc}")
+        return None
+
+
+def gemini_json(prompt, temperature=0.3):
+    """调用 Gemini 并解析 JSON（对象或数组）；失败返回 None。"""
+    text = gemini_complete(prompt, temperature=temperature)
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("```"):  # 去掉 markdown 代码围栏
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r"(\{.*\}|\[.*\])", text, re.S)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:
+                return None
+    return None
+
+
+def ai_analyze_section(name, items_text):
+    """对单个栏目做 AI 研判：偏多 / 偏空 / 中性 + 概率 + 一句话理由。
+
+    返回 {"direction": str, "probability": int, "reason": str}；失败返回 None。
+    """
+    if not _gemini_api_key():
+        return None
+    prompt = (
+        "你是资深股市分析师。请基于下面的「" + name + "」栏目内容，给出对相关市场/板块的短线 AI 研判：\n"
+        "direction 只能是「偏多」「偏空」「中性」之一；probability 为 0-100 的整数，表示该方向成立的把握；\n"
+        "reason 用简体中文、不超过 45 字，必须基于给定内容，禁止编造数据。\n"
+        "只输出 JSON：{\"direction\":\"偏多\",\"probability\":65,\"reason\":\"...\"}\n\n"
+        "栏目内容：\n" + items_text
+    )
+    data = gemini_json(prompt)
+    if not isinstance(data, dict):
+        return None
+    direction = data.get("direction") or "中性"
+    if direction not in ("偏多", "偏空", "中性"):
+        direction = "中性"
+    try:
+        probability = max(0, min(100, int(float(data.get("probability", 0)))))
+    except (TypeError, ValueError):
+        probability = 0
+    reason = str(data.get("reason", "")).strip()[:60] or "AI 未给出理由"
+    return {"direction": direction, "probability": probability, "reason": reason}
+
+
+def ai_translate_titles(items, src_lang="en"):
+    """批量把标题翻译成简体中文。items: [{"i": 序号, "title": 原文}, ...]
+
+    返回 [{"i", "zh"}, ...]（翻译失败的原样保留）；失败返回 None。
+    """
+    if not _gemini_api_key():
+        return None
+    lines = "\n".join(f"{it['i']}. {it['title']}" for it in items)
+    prompt = (
+        "你是财经新闻翻译。把下列" + ("英文" if src_lang == "en" else "外文") +
+        "新闻标题逐条翻译成简体中文，公司名/指数名用常见译法，\n"
+        "只输出 JSON 数组，每项格式 {\"i\":序号,\"zh\":\"中文标题\"}，数量与输入一致：\n\n" + lines
+    )
+    data = gemini_json(prompt)
+    if not isinstance(data, list):
+        return None
+    by_index = {}
+    for item in data:
+        if isinstance(item, dict) and item.get("i") is not None:
+            try:
+                idx = int(item["i"])
+            except (TypeError, ValueError):
+                continue
+            zh = str(item.get("zh", "")).strip()
+            if zh:
+                by_index[idx] = zh
+    return [{"i": it["i"], "zh": by_index.get(it["i"]) or it["title"]} for it in items]
+
+
+def ai_overall_summary(section_judgments):
+    """生成整体 AI 总结（≤90 字）。section_judgments: [(栏目名, 方向, 概率, 理由)]"""
+    if not _gemini_api_key() or not section_judgments:
+        return None
+    lines = "\n".join(f"- {name}：{direction} {probability}%（{reason}）"
+                      for name, direction, probability, reason in section_judgments)
+    prompt = (
+        "基于以下各财经栏目的人工智能研判，用简体中文写一段不超过 90 字的整体市场总结，\n"
+        "用于日报开头，语气中性客观，概括今日/近期市场情绪与关注点。\n"
+        "只输出 JSON：{\"summary\":\"...\"}\n\n各栏目研判：\n" + lines
+    )
+    data = gemini_json(prompt)
+    if isinstance(data, dict) and data.get("summary"):
+        return str(data["summary"]).strip()[:120]
+    return None
+
+
+# ============================================================
 # 数据新鲜度与实时行情
 # ============================================================
 def _source_result(source, status, is_today=False, content_date=None, **payload):
@@ -397,48 +542,203 @@ def fetch_wsb():
 
 
 # ============================================================
-# 数据源 2：Yahoo Finance 头条
+# 数据源 2：全球头条（Google News，输出翻译成中文）
 # ============================================================
-def fetch_yahoo_headlines():
-    """抓取 Yahoo Finance 热门新闻标题"""
-    print("📡 正在抓取 Yahoo Finance 头条...")
+GOOGLE_NEWS_RSS = {
+    # 英文财经版（配置 GEMINI_API_KEY 时使用，抓取后翻译成中文）
+    "en": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en",
+    # 中文财经版（未配置 Gemini Key 时直接使用，标题本身即中文）
+    "zh": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+}
 
-    headlines = []
 
-    # 尝试抓取新闻页面
-    news_url = "https://finance.yahoo.com/topic/stock-market-news/"
-    html = safe_request(news_url, is_json=False)
+def _rfc2822_cst(pub_raw):
+    """解析 RFC 2822 时间（如 Google News pubDate）为北京时间 datetime；失败返回 None。"""
+    if not pub_raw:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(pub_raw).astimezone(CST)
+    except Exception:
+        return None
 
-    if html:
-        # 提取标题
-        titles = re.findall(r'"headline":"([^"]+)"', html)
-        if not titles:
-            titles = re.findall(r'<h3[^>]*>([^<]{20,200})</h3>', html)
 
-        for t in titles[:15]:
-            clean = t.encode().decode('unicode_escape') if '\\u' in t else t
-            clean = re.sub(r'<[^>]+>', '', clean).strip()
-            if clean and len(clean) > 10:
-                headlines.append(clean)
+def fetch_google_news():
+    """抓取 Google News 商业/财经头条（替换原 Yahoo Finance News 数据源）。
 
-    # 兜底 RSS
-    if not headlines:
-        rss_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
-        rss_html = safe_request(rss_url, is_json=False)
-        if rss_html:
-            items = re.findall(r'<title>(.*?)</title>', rss_html)
-            for item in items[1:10]:
-                clean = re.sub(r'<[^>]+>', '', item).strip()
-                if clean:
-                    headlines.append(clean)
+    - 配置 GEMINI_API_KEY：抓英文源，AI 批量翻译成简体中文（title 保留原文、zh 为译文）；
+    - 未配置：直接抓 Google News 中文版，无需翻译；
+    - 每条返回 {title, zh, source, url, published_cst, is_today}。
+    """
+    print("📡 正在抓取 Google News 全球头条...")
+    use_en = bool(_gemini_api_key())
+    url = GOOGLE_NEWS_RSS["en"] if use_en else GOOGLE_NEWS_RSS["zh"]
+    xml_text = safe_request(url, is_json=False, timeout=15)
 
-    if not headlines:
-        print("  ⚠️ Yahoo 暂不可用，不显示历史兜底头条")
-        return _source_result("Yahoo Finance News", "unavailable", headlines=[], error="未取得有效新闻")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条头条（本次抓取 = 当天内容）")
-    return _source_result("Yahoo Finance News", "success",
-                          is_today=True, content_date=_today_display(),
-                          headlines=headlines[:8])
+    items = []
+    if xml_text:
+        try:
+            root = ET.fromstring(xml_text)
+            for item in root.findall("channel/item")[:12]:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub = (item.findtext("pubDate") or "").strip()
+                if not title:
+                    continue
+                # Google News 标题形如「原标题 - 来源名」，拆出来源
+                src = ""
+                m = re.search(r"\s+-\s+([^-]+)$", title)
+                if m:
+                    src = m.group(1).strip()
+                    title = title[: m.start()].strip()
+                pub_dt = _rfc2822_cst(pub)
+                items.append({
+                    "title": title,
+                    "zh": "",                       # 翻译后填充
+                    "source": src,
+                    "url": link,
+                    "published": pub,
+                    "published_cst": pub_dt.strftime("%Y-%m-%d %H:%M") if pub_dt else "—",
+                    "is_today": _date_is_today(pub_dt),
+                })
+        except Exception as exc:
+            print(f"  ⚠️ Google News RSS 解析失败: {exc}")
+
+    if not items:
+        print("  ⚠️ Google News 暂不可用，不显示历史兜底头条")
+        return _source_result("Google News", "unavailable", headlines=[], error="未取得有效新闻")
+
+    # 英文源 → AI 批量翻译成中文
+    translated = False
+    if use_en:
+        result = ai_translate_titles([{"i": i, "title": it["title"]} for i, it in enumerate(items)])
+        if result:
+            translated = True
+            zh_map = {t["i"]: t["zh"] for t in result}
+            for i, it in enumerate(items):
+                it["zh"] = zh_map.get(i) or it["title"]
+        else:
+            print("  ⚠️ Gemini 翻译失败，标题保留原文")
+
+    content_date = max((it["published_cst"][:10] for it in items if it["published_cst"] != "—"), default=None)
+    is_today = any(it["is_today"] for it in items)
+    mode = "英文源+AI翻译" if translated else ("英文源（翻译失败）" if use_en else "中文源")
+    print(f"  ✅ 成功抓取 {len(items)} 条全球头条（{mode}，最新 {content_date}）")
+    return _source_result("Google News", "success",
+                          is_today=is_today, content_date=content_date,
+                          headlines=items[:8], translated=translated)
+
+
+# ============================================================
+# 数据源 6：东方财富快讯（免费 API，5 条最新新闻）
+# ============================================================
+EASTMONEY_NEWS_URLS = [
+    "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns",
+    "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
+]
+
+
+def fetch_eastmoney_news():
+    """抓取东方财富最新财经新闻（免费接口，无 API Key，取 5 条）。"""
+    print("📡 正在抓取东方财富快讯...")
+    params = {
+        "client": "web", "biz": "web_news_col", "column": "350",
+        "order": "1", "needInteractData": "0",
+        "page_index": "1", "page_size": "10",
+    }
+    news, content_dates = [], []
+    for url in EASTMONEY_NEWS_URLS:
+        data = safe_request(url, params=params, timeout=12)
+        if not data:
+            continue
+        try:
+            lst = ((data.get("data") or {}).get("list")) or []
+        except AttributeError:
+            lst = []
+        for it in lst[:10]:
+            title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
+            if not title:
+                continue
+            raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
+            news.append({
+                "title": title[:120],
+                "url": it.get("url") or it.get("articleUrl") or "",
+                "time": raw_time[:16],
+                "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
+                "is_today": raw_time[:10] == _today_display(),
+            })
+            if raw_time[:10]:
+                content_dates.append(raw_time[:10])
+        if news:
+            break
+
+    if not news:
+        print("  ⚠️ 东方财富快讯暂不可用，不显示历史兜底资讯")
+        return _source_result("东方财富", "unavailable", headlines=[], error="未取得有效资讯")
+    content_date = max(content_dates) if content_dates else None
+    is_today = any(n["is_today"] for n in news)
+    print(f"  ✅ 成功抓取 {len(news)} 条东财快讯（最新 {content_date or '—'}）")
+    return _source_result("东方财富", "success",
+                          is_today=is_today, content_date=content_date,
+                          headlines=news[:5])
+
+
+# ============================================================
+# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
+# ============================================================
+HOT_STOCK_MARKETS = {
+    "A股": {"fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23", "desc": "沪深京 A 股"},
+    "港股": {"fs": "m:128+t:3,m:128+t:4,m:128+t:1,m:128+t:2", "desc": "港股主板"},
+    "美股": {"fs": "m:105,m:106,m:107", "desc": "美股（纽交所/纳斯达克/美交所）"},
+}
+
+
+def fetch_hot_stocks():
+    """抓取最近一个交易日收盘后的 A股/港股/美股涨幅前十（东方财富 push2 免费接口）。
+
+    返回 _source_result：markets={市场名: {"desc", "stocks":[{code,name,price,change_pct}]}}
+    """
+    print("📡 正在抓取 A股/港股/美股热门前十...")
+    markets = {}
+    any_stock = False
+    for label, cfg in HOT_STOCK_MARKETS.items():
+        params = {
+            "pn": "1", "pz": "10", "po": "1", "np": "1", "fltt": "2", "invt": "2",
+            "fid": "f3", "fs": cfg["fs"], "fields": "f2,f3,f4,f12,f14",
+        }
+        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
+                            params=params, timeout=12)
+        stocks = []
+        try:
+            diff = ((data or {}).get("data") or {}).get("diff") or []
+            for it in diff[:10]:
+                name = str(it.get("f14") or "").strip()
+                if not name:
+                    continue
+                stocks.append({
+                    "code": str(it.get("f12") or ""),
+                    "name": name,
+                    "price": it.get("f2"),
+                    "change_pct": it.get("f3"),
+                })
+        except Exception:
+            stocks = []
+        markets[label] = {"desc": cfg["desc"], "stocks": stocks}
+        if stocks:
+            any_stock = True
+        print(f"  {'✅' if stocks else '⚠️'} {label}涨幅前十: {len(stocks)} 只")
+
+    if not any_stock:
+        print("  ⚠️ 热门榜单暂不可用，不显示历史兜底榜单")
+        return _source_result("东方财富热门榜", "unavailable", markets=markets,
+                              error="push2 接口未返回有效数据")
+
+    # 榜单即最近交易日收盘数据；标注数据日期为最近交易日（无法从接口取得时用当天）
+    content_date = _today_display()
+    print("  ✅ 热门榜单抓取完成（数据为最近交易日收盘后）")
+    return _source_result("东方财富热门榜", "success",
+                          is_today=True, content_date=content_date,
+                          markets=markets)
 
 
 # ============================================================
@@ -745,13 +1045,19 @@ def collect_all_data():
     data["Reddit WSB热议"] = fetch_wsb()
     time.sleep(0.5)
 
-    data["Yahoo头条"] = fetch_yahoo_headlines()
+    data["全球头条"] = fetch_google_news()
     time.sleep(0.5)
 
     data["A股资讯"] = fetch_sina_headlines()
     time.sleep(0.5)
 
     data["韩股半导体"] = fetch_kospi_headlines()
+    time.sleep(0.5)
+
+    data["东财快讯"] = fetch_eastmoney_news()
+    time.sleep(0.5)
+
+    data["热门榜单"] = fetch_hot_stocks()
 
     print("\n✅ 数据采集完成！")
     return data
@@ -779,6 +1085,126 @@ def _card(icon, title, content, badge_html=""):
 <div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:6px;">{icon} {title} {badge_html}</div>
 {content}
 </td></tr></table>'''
+
+
+def _ai_badge(analysis):
+    """栏目级 AI 研判徽章：🤖 偏多 68% / 偏空 32% / 中性 50%；无分析显示 AI暂缺。"""
+    if not analysis:
+        return ('<span style="display:inline-block;background:#e8ecf4;color:#8899c0;'
+                'padding:1px 8px;margin-left:4px;font-size:11px;font-weight:700;'
+                'border-radius:8px;vertical-align:2px;">🤖 AI暂缺</span>')
+    direction = analysis.get("direction", "中性")
+    probability = analysis.get("probability", 0)
+    color, bg = {"偏多": (C_GREEN, C_ALERT_G), "偏空": (C_RED, C_ALERT_R),
+                 "中性": (C_AMBER, C_ALERT_A)}.get(direction, (C_AMBER, C_ALERT_A))
+    return (f'<span style="display:inline-block;background:{bg};color:{color};'
+            f'padding:1px 8px;margin-left:4px;font-size:11px;font-weight:700;'
+            f'border-radius:8px;vertical-align:2px;">🤖 {direction} {probability}%</span>')
+
+
+def _ai_reason(analysis):
+    """栏目级 AI 研判的一句话理由（无分析时返回空串）。"""
+    if not analysis or not analysis.get("reason"):
+        return ""
+    return (f'<div style="font-size:11px;color:#8899c0;padding:0 0 4px;line-height:1.6;">'
+            f'🤖 AI 分析：{_esc(analysis["reason"])}</div>')
+
+
+def _ai_summary_card(judgments, summary):
+    """生成页面顶部的「AI 总览 · 分析表」卡片。
+
+    judgments: [(栏目名, analysis dict), ...]；summary: 整体总结文字或 None。
+    """
+    ai_enabled = bool(_gemini_api_key())
+    badge = _badge("Gemini 已启用", "ok") if ai_enabled else _badge("Gemini 未配置", "warn")
+    if not judgments:
+        hint = ("⚠️ 未配置 GEMINI_API_KEY 或 Gemini 调用失败，本次 AI 总览与逐栏 AI 研判暂缺。"
+                "在环境变量配置 GEMINI_API_KEY（GitHub Actions 中为 Secrets）后自动启用："
+                "每个栏目给出 偏多/偏空/中性 + 概率 的 AI 研判，顶部附整体总结与分析表。")
+        return _card("🧠", "AI 总览 · Gemini 研判", badge,
+                     f'<div style="font-size:12px;color:#8a5300;line-height:1.7;padding:2px 0;">{hint}</div>')
+
+    summary_html = ""
+    if summary:
+        summary_html = (f'<div style="font-size:13px;color:{C_BLUE};line-height:1.8;'
+                        f'padding:4px 0 8px;border-bottom:1px dashed {C_DASH};">'
+                        f'💡 <b>AI 总结：</b>{_esc(summary)}</div>')
+
+    rows_html = ""
+    for name, analysis in judgments:
+        if not analysis:
+            rows_html += (f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">'
+                          f'{_esc(name)}</td><td style="padding:4px 0;text-align:right;color:#8899c0;'
+                          f'border-bottom:1px dashed {C_DASH};">AI 暂缺</td></tr>')
+            continue
+        direction = analysis.get("direction", "中性")
+        probability = analysis.get("probability", 0)
+        color = {"偏多": C_GREEN, "偏空": C_RED}.get(direction, C_AMBER)
+        reason = _esc(analysis.get("reason", ""))
+        rows_html += (f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};'
+                      f'vertical-align:top;width:34%;">{_esc(name)}</td>'
+                      f'<td style="padding:4px 0;border-bottom:1px dashed {C_DASH};vertical-align:top;width:66%;">'
+                      f'<span style="color:{color};font-weight:700;">{direction} {probability}%</span>'
+                      f'<span style="color:#8899c0;font-size:12px;"> · {reason}</span></td></tr>')
+    table_html = (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                  f'style="border-collapse:collapse;font-size:13px;margin-top:6px;">'
+                  f'<tr><td style="padding:4px 0;font-size:12px;color:#8899c0;'
+                  f'border-bottom:1px solid #dfe5f2;">📊 栏目 AI 研判表</td></tr>'
+                  f'{rows_html}</table>')
+    return _card("🧠", "AI 总览 · Gemini 研判", badge, summary_html + table_html)
+
+
+def _headline_row(it):
+    """Google News 头条行：中文标题（AI 翻译）+ 原文/来源/时间小字。"""
+    display = it.get("zh") or it.get("title") if isinstance(it, dict) else it
+    sub = ""
+    if isinstance(it, dict):
+        parts = []
+        if it.get("zh") and it.get("title") and it["zh"] != it["title"]:
+            parts.append(f"原文：{it['title'][:70]}")
+        if it.get("source"):
+            parts.append(it["source"])
+        if it.get("published_cst") and it["published_cst"] != "—":
+            parts.append(it["published_cst"])
+        sub = " · ".join(parts)
+    return _item_row("📰", _esc(display[:120]), _esc(sub[:140]))
+
+
+def _em_news_row(it):
+    """东方财富快讯行：标题 + 时间/摘要小字（兼容字符串与 dict 两种结构）。"""
+    if isinstance(it, dict):
+        title = it.get("title") or ""
+        sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
+        return _item_row("📈", _esc(title[:120]), _esc(sub[:110]))
+    return _item_row("📈", _esc(it[:120]))
+
+
+def _hot_market_block(market, mdata, analysis):
+    """热门榜单单个市场：涨幅前十迷你表 + 该市场 AI 涨跌原因分析。"""
+    stocks = (mdata or {}).get("stocks", [])
+    medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+    rows = []
+    for i, s in enumerate(stocks[:10]):
+        pct = s.get("change_pct")
+        try:
+            pct_f = float(pct)
+            pct_display = f"{pct_f:+.2f}%"
+            val_color = C_GREEN if pct_f >= 0 else C_RED
+        except (TypeError, ValueError):
+            pct_display = str(pct or "—")
+            val_color = C_RED
+        price = s.get("price")
+        if price is None:
+            price = "—"
+        rows.append((f"{medals[i]} {s.get('name', '?')} {s.get('code', '')}",
+                     f"{price} {pct_display}", val_color))
+    block = _section_title(f"🔥 {market}涨幅前十（{_esc((mdata or {}).get('desc', ''))}）", 14)
+    if rows:
+        block += _mini_table(rows)
+    else:
+        block += '<div style="font-size:12px;color:#8899c0;">暂无数据</div>'
+    block += _ai_reason(analysis)
+    return block
 
 
 def _badge(text, kind="ok"):
@@ -811,11 +1237,12 @@ def _data_table(rows):
 
 
 def _mini_table(rows):
-    """生成迷你表格"""
+    """生成迷你表格（支持可选第三元组为数值颜色）"""
     html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
-    for label, value in rows:
+    for label, value, *color in rows:
+        val_color = color[0] if color else C_RED
         html += f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">{label}</td>'
-        html += f'<td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed {C_DASH};">{value}</td></tr>'
+        html += f'<td style="padding:4px 0;text-align:right;font-weight:700;color:{val_color};border-bottom:1px dashed {C_DASH};">{value}</td></tr>'
     html += '</table>'
     return html
 
@@ -997,27 +1424,102 @@ def generate_report(data, date_display, date_str):
     yt_missing = yt.get("unsupported", [])  # 需登录/未配置的频道（带暂缺原因）
     wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
-    yahoo = data.get("Yahoo头条", {})
-    yh_headlines = yahoo.get("headlines", [])
+    google = data.get("全球头条", {})
+    gh_headlines = google.get("headlines", [])
     sina = data.get("A股资讯", {})
     sina_headlines = sina.get("headlines", [])
     kospi = data.get("韩股半导体", {})
     kospi_headlines = kospi.get("headlines", [])
+    em = data.get("东财快讯", {})
+    em_headlines = em.get("headlines", [])
+    hot = data.get("热门榜单", {})
+    hot_markets = hot.get("markets", {})
 
     # 2. 数据源清单（顺序即页面展示顺序）
     source_items = [
         ("实时行情", market),
         ("港股名家频道", yt),
-        ("Yahoo头条", yahoo),
+        ("全球头条", google),
         ("A股资讯", sina),
         ("韩股半导体", kospi),
         ("Reddit WSB热议", wsb),
+        ("东财快讯", em),
+        ("热门榜单", hot),
     ]
 
     # 3. 当天内容检验统计
     total = len(source_items)
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
+
+    # 3.5 AI 分析：为每个有内容的栏目生成 Gemini 研判（偏多/偏空/中性 + 概率 + 理由）
+    def _section_items_text(key, source):
+        """把栏目内容拼成给 Gemini 的文本（只取代表性条目，控制 token）。"""
+        if key == "实时行情":
+            quotes = source.get("quotes", {})
+            return "\n".join(
+                f"- {k}: {v.get('price')} ({v.get('change_pct'):+.2f}%)"
+                for k, v in list(quotes.items())[:10])
+        if key == "港股名家频道":
+            lines = []
+            for ch in source.get("channels", [])[:6]:
+                titles = "；".join(v.get("title", "") for v in ch.get("videos", [])[:2])
+                lines.append(f"- {ch.get('name')}: {titles}")
+            return "\n".join(lines)
+        if key == "全球头条":
+            return "\n".join(f"- {it.get('zh') or it.get('title') if isinstance(it, dict) else it}"
+                             for it in source.get("headlines", [])[:6])
+        if key == "Reddit WSB热议":
+            return "\n".join(f"- {s.get('symbol')} {s.get('mentions')} 次提及"
+                             for s in source.get("stocks", [])[:10])
+        if key in ("A股资讯", "韩股半导体", "东财快讯"):
+            return "\n".join(f"- {it.get('title') if isinstance(it, dict) else it}"
+                             for it in source.get("headlines", [])[:5])
+        return ""
+
+    ai_judgments = []  # [(栏目名, analysis)]
+    for ai_label, ai_key in [("行情速览", "实时行情"), ("港股名家频道", "港股名家频道"),
+                             ("全球头条", "全球头条"), ("A股资讯", "A股资讯"),
+                             ("韩股半导体", "韩股半导体"), ("Reddit WSB热议", "Reddit WSB热议"),
+                             ("东财快讯", "东财快讯")]:
+        src = data.get(ai_key, {})
+        if src.get("status") != "success":
+            continue
+        items_text = _section_items_text(ai_key, src)
+        if not items_text:
+            continue
+        analysis = ai_analyze_section(ai_label, items_text)
+        if analysis:
+            ai_judgments.append((ai_label, analysis))
+
+    # 热门榜单：三个市场分别 AI 分析涨跌热门原因
+    hot_analyses = {}
+    if hot.get("status") == "success":
+        for mlabel, mdata in hot_markets.items():
+            stocks = (mdata or {}).get("stocks", [])
+            if not stocks:
+                continue
+            items_text = "\n".join(
+                f"- {s.get('name')}({s.get('code')}) 最新 {s.get('price')} "
+                f"涨跌幅 {s.get('change_pct')}%"
+                for s in stocks[:10])
+            analysis = ai_analyze_section(f"{mlabel}涨幅热门前十", items_text)
+            if analysis:
+                hot_analyses[mlabel] = analysis
+                ai_judgments.append((f"热门榜·{mlabel}", analysis))
+
+    ai_summary = ai_overall_summary(
+        [(name, a.get("direction"), a.get("probability"), a.get("reason"))
+         for name, a in ai_judgments])
+
+    ai_by_label = dict(ai_judgments)
+    market_analysis = ai_by_label.get("行情速览")
+    yt_analysis = ai_by_label.get("港股名家频道")
+    google_analysis = ai_by_label.get("全球头条")
+    sina_analysis = ai_by_label.get("A股资讯")
+    kospi_analysis = ai_by_label.get("韩股半导体")
+    wsb_analysis = ai_by_label.get("Reddit WSB热议")
+    em_analysis = ai_by_label.get("东财快讯")
 
     # 4. 行情速览（有数据才渲染）
     card_market = ""
@@ -1033,8 +1535,9 @@ def generate_report(data, date_display, date_str):
             astock_rows.append((label, value, color))
         data_date = market.get("content_date") or "—"
         card_market = _card(
-            "⚡", "行情速览（实时）", _source_badge(market),
+            "⚡", "行情速览（实时）", _source_badge(market) + _ai_badge(market_analysis),
             f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(market)} · 数据日期 {data_date}</div>'
+            + _ai_reason(market_analysis)
             + _data_table(market_rows + astock_rows)
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
         )
@@ -1047,27 +1550,38 @@ def generate_report(data, date_display, date_str):
         card_yt = _card(
             "📺", "港股名家频道",
             f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 内容最新日期 {_esc(yt.get("content_date") or "—")}</div>'
+            + _ai_reason(yt_analysis)
             + blocks
             + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的内容发布于今天（北京时间）；"
                     f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
-            _source_badge(yt),
+            _source_badge(yt) + _ai_badge(yt_analysis),
         )
 
     # 6. 其它资讯区块（有数据才渲染）
-    yh_items = "".join(_item_row("📰", _esc(h[:120])) for h in yh_headlines[:8])
-    card_yahoo = _card("📰", "全球头条", _source_badge(yahoo),
-                       f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yahoo)}</div>' + yh_items) \
-        if yh_headlines else ""
+    gh_items = "".join(_headline_row(it) for it in gh_headlines[:8])
+    card_google = _card("📰", "全球头条", _source_badge(google) + _ai_badge(google_analysis),
+                        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(google)}'
+                        + (f' · 内容已由 Gemini 翻译为中文' if google.get("translated") else '')
+                        + f'</div>' + _ai_reason(google_analysis) + gh_items) \
+        if gh_headlines else ""
+
+    em_items = "".join(_em_news_row(it) for it in em_headlines[:5])
+    card_em = _card("📈", "东方财富快讯", _source_badge(em) + _ai_badge(em_analysis),
+                    f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(em)} · 免费公开数据源</div>'
+                    + _ai_reason(em_analysis) + em_items) \
+        if em_headlines else ""
 
     kospi_items = "".join(_item_row("🇰🇷", _esc(h[:120])) for h in kospi_headlines[:5])
-    card_semi = _card("🔌", "半导体&韩股", _source_badge(kospi),
-                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>' + kospi_items) \
+    card_semi = _card("🔌", "半导体&韩股", _source_badge(kospi) + _ai_badge(kospi_analysis),
+                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>'
+                      + _ai_reason(kospi_analysis) + kospi_items) \
         if kospi_headlines else ""
 
     sina_items = "".join(_item_row("🇨🇳", _esc(h[:120])) for h in sina_headlines[:5])
     # 注：A股四指数行情已并入上方「行情速览」卡片，这里只展示新浪资讯
-    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）", _source_badge(sina),
-                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>' + sina_items) \
+    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）", _source_badge(sina) + _ai_badge(sina_analysis),
+                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>'
+                        + _ai_reason(sina_analysis) + sina_items) \
         if sina_headlines else ""
 
     medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
@@ -1075,13 +1589,34 @@ def generate_report(data, date_display, date_str):
     for i, s in enumerate(wsb_stocks[:10]):
         label = f"{medals[i]} {s.get('symbol', '?')} {s.get('name', '')}"
         wsb_rows.append((label, f"{s.get('mentions', '?')} 次提及"))
-    card_wsb = _card("🐂", "Reddit WSB热议", _source_badge(wsb),
+    card_wsb = _card("🐂", "Reddit WSB热议", _source_badge(wsb) + _ai_badge(wsb_analysis),
                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get("content_date") or "—")}</div>'
+                     + _ai_reason(wsb_analysis)
                      + (_section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows))) \
         if wsb_rows else ""
 
+    # 6.5 热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十 + 各自 AI 涨跌原因）
+    card_hot = ""
+    if hot.get("status") == "success":
+        hot_blocks = []
+        for mlabel in ["A股", "港股", "美股"]:
+            mdata = hot_markets.get(mlabel) or {}
+            if not mdata.get("stocks"):
+                continue
+            hot_blocks.append(_hot_market_block(mlabel, mdata, hot_analyses.get(mlabel)))
+        if hot_blocks:
+            card_hot = _card(
+                "🔥", "热门榜单 · 最近交易日收盘", _source_badge(hot),
+                f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(hot)} · '
+                f'涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）</div>'
+                + "".join(hot_blocks)
+                + _note("榜单为最近交易日收盘后的涨幅排名；各市场均附 Gemini AI 分析的涨跌热门原因。"),
+            )
+
     # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
-    content_cards = "".join(c for c in [card_market, card_yt, card_yahoo, card_semi, card_astock, card_wsb] if c)
+    card_ai = _ai_summary_card(ai_judgments, ai_summary)
+    content_cards = "".join(c for c in [card_ai, card_market, card_yt, card_google, card_em,
+                                        card_semi, card_astock, card_wsb, card_hot] if c)
 
     # 8. 数据可用性面板（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
 
@@ -1142,7 +1677,7 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:12px 10px;text-align:center;">
 <div style="font-size:11px;color:#8899c0;line-height:1.8;">
 🐙 章鱼AI · 仅供参考，不构成投资建议<br>
-数据来源：港股名家频道(YouTube/RSS) · Reddit · Yahoo · 新浪财经 · Naver · TradingKey
+数据来源：港股名家频道(YouTube/RSS) · Google News · 东方财富 · Reddit · 新浪财经 · Naver · Gemini AI
 </div>
 <div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
 生成时间：{_esc(generated_at)} · 报告日期：{date_str}
@@ -1672,9 +2207,11 @@ def main():
         print("\n🔍 预览模式（不推送、不保存）")
         print(f"   数据源: 港股名家频道({len(data.get('港股名家频道', {}).get('channels', []))}频道可抓取) | "
               f"WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
-              f"Yahoo({len(data.get('Yahoo头条', {}).get('headlines', []))}条) | "
+              f"全球头条({len(data.get('全球头条', {}).get('headlines', []))}条) | "
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
-              f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条)")
+              f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条) | "
+              f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
+              f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只)")
         return 0
 
     # 4. 保存文件
