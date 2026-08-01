@@ -3,13 +3,21 @@
 🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
-核心规则（2026-08-01 新版）：
+核心规则（2026-08-01 新版，当天修订）：
   1. 没有数据的区块不出现在页面里，也不推送空内容。
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
-     只有当「至少一个数据源含当天内容」时才自动推送；否则跳过并给出原因。
+     只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
+     但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
   3. 页面内容重新加入 YouTube 财经资讯与新闻频道（RSS 无需 API Key）。
-  4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮，
+  4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
+  5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
+     含「检验未通过」告警发送失败）都以退出码 1 结束：GitHub Actions 会显红并触发
+     失败通知，杜绝“推送失败却显示成功”的假象。
+
+退出码约定：
+  0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
+  1 = 应当推送却失败，或用法错误。
 
 用法:
   python3 output/pipeline.py                  # 全流程（当天检验通过才推送）
@@ -21,6 +29,8 @@
   python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报（当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list           # 列出日报
+
+退出码：0 = 正常完成；1 = 应当推送却失败 / 用法错误（GitHub Actions 据此标红）。
 """
 import os
 import sys
@@ -938,16 +948,17 @@ def generate_report(data, date_display, date_str):
 # ============================================================
 # PushPlus 推送
 # ============================================================
-def push_to_wechat(title, content_html, token=None):
-    """通过 PushPlus 推送消息到微信"""
+def push_to_wechat(title, content_html, token=None, template="html"):
+    """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。"""
     token = token or PUSHPLUS_TOKEN
 
     if not token:
         print("⚠️ 未设置 PUSHPLUS_TOKEN，跳过推送")
         print("   请设置环境变量: export PUSHPLUS_TOKEN=你的token")
+        print("   （在 GitHub Actions 中请确认仓库 Settings → Secrets → PUSHPLUS_TOKEN 已配置）")
         return False
 
-    print(f"📤 正在推送到微信 (PushPlus)...")
+    print(f"📤 正在推送到微信 (PushPlus, template={template})...")
 
     try:
         resp = requests.post(
@@ -956,7 +967,7 @@ def push_to_wechat(title, content_html, token=None):
                 "token": token,
                 "title": title,
                 "content": content_html,
-                "template": "html",
+                "template": template,
             },
             timeout=30,
         )
@@ -972,6 +983,50 @@ def push_to_wechat(title, content_html, token=None):
     except Exception as e:
         print(f"  ❌ 推送异常: {e}")
         return False
+
+
+def build_no_push_alert_text(reason, data, report_path=None):
+    """生成「当天检验未通过」纯文本告警正文（列出每个来源的当天/非当天/无数据状态）。"""
+    items = [(k, v) for k, v in (data or {}).items() if isinstance(v, dict)]
+    total = len(items)
+    content_n = sum(1 for _, v in items if v.get("status") == "success")
+    lines = [
+        f"📅 当天内容检验未通过（{_now()} 北京时间）",
+        f"原因：{reason}",
+        f"数据：{content_n}/{total} 个来源抓到内容，且无来源判定为当天，"
+        f"已按防旧内容规则不推送日报。",
+        "",
+        "各来源状态：",
+    ]
+    for name, s in items:
+        if s.get("status") != "success":
+            mark = "⚠️ 无数据"
+        elif s.get("is_today"):
+            mark = "✅ 当天"
+        else:
+            mark = "🕓 非当天"
+        lines.append(f"· {name}：{mark}（数据日期 {s.get('content_date') or '—'}）")
+    lines += [
+        "",
+        "处理建议：",
+        "· 周末/休市/源站维护属预期情况，无需处理；",
+        "· 确需强制推送：Actions 手动运行并勾选 force_push，"
+        "或本地 ./output/manual_push.sh --force。",
+        f"报告文件：{os.path.basename(report_path) if report_path else '—'}",
+    ]
+    return "\n".join(lines)
+
+
+def push_no_push_alert(reason, data, report_path=None, token=None):
+    """推送「当天检验未通过」纯文本告警。
+
+    返回 True/False；返回 False 时调用方应以退出码 1 结束，
+    确保 token 缺失 / 接口异常在 Actions 上显红而不是静默。
+    """
+    print("📣 正在推送「检验未通过」纯文本告警（避免彻底沉默）...")
+    title = f"🐙 日报未推送提醒 {datetime.now(CST).strftime('%m/%d')}"
+    return push_to_wechat(title, build_no_push_alert_text(reason, data, report_path),
+                          token=token, template="txt")
 
 
 # ============================================================
@@ -1162,8 +1217,11 @@ def main():
             return 1
 
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, html)
-        return 0
+        if push_to_wechat(title, html):
+            print("\n🎉 全部完成！")
+            return 0
+        print("\n❌ 推送未成功（退出码 1；在 GitHub Actions 中将标红提醒）。")
+        return 1
 
     # 正常流程
     mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
@@ -1198,36 +1256,49 @@ def main():
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
 
-    # 5. 推送决策：先做「当天内容检验」，再决定是否推送
+    # 5. 推送决策：先做「当天内容检验」，再决定是否推送。
+    #    约定：任何「应当推送却失败」的情况都返回退出码 1（GitHub Actions 将标红），
+    #    不再出现“推送失败但 workflow 显示成功”的静默问题。
     can_push, reason = check_push_eligibility(data)
+
+    def _finish(ok, ok_msg="🎉 全部完成！",
+                fail_msg="❌ 流程完成，但推送未成功（见上方原因；Actions 将标红提醒）"):
+        print(f"\n{ok_msg if ok else fail_msg}")
+        return 0 if ok else 1
 
     if args.no_push:
         print(f"\n⏭️ 已跳过推送（--no-push）。当天检验: {reason}")
         print(f"   日报已保存: {output_path}")
-    elif not can_push and not args.force_push and not args.allow_incomplete_push:
-        print(f"\n⏭️ 当天检验未通过，本次不推送。")
-        print(f"   原因: {reason}")
-        print("   日报已保存（带状态标记），可在确认后使用:")
-        print("     python3 output/pipeline.py --manual --force-push   # 强制手动推送")
-        print("     python3 output/pipeline.py --push-only output/latest.html")
-    elif not can_push and args.force_push:
-        print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
-        print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, push_html)
-    elif not can_push and args.allow_incomplete_push:
-        print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
-        print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, push_html)
-    else:
+        return _finish(True)
+
+    if can_push:
         print(f"\n📤 当天检验通过：{reason}")
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
-        push_to_wechat(title, push_html)
+        return _finish(push_to_wechat(title, push_html))
 
-    print("\n🎉 全部完成！")
-    return 0
+    if args.force_push:
+        print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
+        print(f"   原因: {reason}")
+        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d')}"
+        return _finish(push_to_wechat(title, push_html))
+
+    if args.allow_incomplete_push:
+        print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
+        print(f"   原因: {reason}")
+        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d')}"
+        return _finish(push_to_wechat(title, push_html))
+
+    # 当天检验未通过且不强制：不推日报，但推一条纯文本告警，避免彻底沉默。
+    print(f"\n⏸️ 当天检验未通过，本次不推送日报。")
+    print(f"   原因: {reason}")
+    print("   日报已保存（带状态标记），可在确认后使用:")
+    print("     python3 output/pipeline.py --manual --force-push   # 强制手动推送")
+    print("     python3 output/pipeline.py --push-only output/latest.html")
+    if push_no_push_alert(reason, data, output_path):
+        return _finish(True, ok_msg="🎉 全部完成（日报未推，已发出检验未通过告警）！")
+    print("   ⚠️ 告警也发送失败。若是 token 未配置/失效，本次将以失败结束以便在 Actions 中发现。")
+    return _finish(False)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,10 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
 **每次运行都会重新抓取数据、原子更新日报；新版规则：**
 - **没有数据的区块不会出现在页面里，也不推送空内容**；
 - 每个区块标注 **✅ 当天 / 🕓 非当天 / ⚠️ 无数据**，页面顶部有「📅 当天内容检验」横幅；
-- **只有至少一个数据源抓到「当天」内容才自动推送**，否则只保存日报并说明原因；
+- **只有至少一个数据源抓到「当天」内容才自动推送日报**；否则不推日报，但会向你推一条
+  **「检验未通过」纯文本告警**（含各来源状态与处理建议），避免彻底沉默；
+- **推送失败绝不静默**：PushPlus 报错、未配置 `PUSHPLUS_TOKEN` 或告警发送失败时，流程以
+  **退出码 1** 结束，GitHub Actions 会显红并触发失败通知，不再出现“运行成功却没推送”的假象；
 - 页面内容已重新加入 **YouTube 财经资讯与新闻频道**（RSS 抓取，无需 API Key）；
 - 全部数据源不可用时生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。
 
@@ -39,12 +42,16 @@ python3 output/pipeline.py --list               # 列出已生成的日报
 ./output/manual_push.sh --no-push    # 只重新生成日报，不推送
 ```
 
-也可以在 GitHub 仓库的 **Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow** 点按钮手动触发。
-> 仓库内 `manual.yml` 为原版（无 force_push 选项）；带 `force_push` 勾选的新版见
-> `output/manual_push_workflow.yml.example`，复制到 `.github/workflows/manual.yml` 即可启用
-> （需仓库具备 workflows 权限的 token）。
+也可以在 GitHub 仓库的 **Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow** 点按钮手动触发，
+支持两个勾选项：**no_push**（仅生成不推送）与 **force_push**（当天检验未通过也强制推送，谨慎）。
 
-## ⏰ 定时自动运行（cron）
+## ⏰ 定时自动运行
+
+**GitHub Actions**：`.github/workflows/octopus-daily.yml` 每天两班——北京时间 **08:00** 与
+**21:00**。注意 GitHub 定时任务在高负载时可能延迟（极端情况数小时），属平台行为；
+推送失败工作流会显红并通知，不会再静默通过。
+
+**自有服务器 crontab**：
 
 ```bash
 crontab -e
