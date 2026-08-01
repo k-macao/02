@@ -5,29 +5,50 @@
 
 ```bash
 cd /path/to/02
-python3 output/push.py           # ①采集 → ②分析 → ③生成日报 → ④推送到微信
+python3 output/push.py           # ①采集 → ②分析 → ③生成日报 → ④当天检验 → ⑤推送到微信
 ```
 
-**每次运行都会重新抓取数据、原子更新日报；全部数据源不可用时会生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。**
+**每次运行都会重新抓取数据、原子更新日报；新版规则：**
+- **没有数据的区块不会出现在页面里，也不推送空内容**；
+- 每个区块标注 **✅ 当天 / 🕓 非当天 / ⚠️ 无数据**，页面顶部有「📅 当天内容检验」横幅；
+- **只有至少一个数据源抓到「当天」内容才自动推送**，否则只保存日报并说明原因；
+- 页面内容已重新加入 **YouTube 财经资讯与新闻频道**（RSS 抓取，无需 API Key）；
+- 全部数据源不可用时生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。
 
 ## 🎛️ 高级用法
 
 ```bash
-python3 output/pipeline.py                  # 全流程
-python3 output/pipeline.py --no-push        # 只生成日报，不推送
-python3 output/pipeline.py --dry-run        # 采集+预览，不推送
-python3 output/pipeline.py -o custom.html   # 指定输出路径
-python3 output/pipeline.py --push-only             # 推送实际最后更新的 HTML（即使 latest.html 被锁定）
-python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 推送指定的带新鲜度标记文件
-python3 output/pipeline.py --allow-incomplete-push # 全部数据源故障时仍推送“数据暂缺”状态报告（默认不推送）
-python3 output/push.py --list               # 列出已生成的日报
+python3 output/pipeline.py                      # 全流程（当天检验通过才推送）
+python3 output/pipeline.py --no-push            # 只生成日报，不推送
+python3 output/pipeline.py --dry-run            # 采集+预览，不推送
+python3 output/pipeline.py -o custom.html       # 指定输出路径
+python3 output/pipeline.py --manual             # 手动推送模式（重新抓取→生成→当天检验→推送）
+python3 output/pipeline.py --manual --force-push # 手动强制推送（内容非当天也推，谨慎）
+python3 output/pipeline.py --push-only          # 推送实际最后更新的 HTML（再次执行当天检验）
+python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 推送指定文件（非当天会被拒绝）
+python3 output/pipeline.py --force-push-old     # 允许 --push-only 推送不带新鲜度标记的旧版文件（不推荐）
+python3 output/pipeline.py --allow-incomplete-push # 全部数据源故障时仍推送“数据暂缺”状态报告
+python3 output/pipeline.py --list               # 列出已生成的日报
 ```
+
+## 🖐 手动推送
+
+```bash
+./output/manual_push.sh              # 手动推送：当天检验通过才推送
+./output/manual_push.sh --force      # 手动强制推送（内容非当天也推送，谨慎）
+./output/manual_push.sh --no-push    # 只重新生成日报，不推送
+```
+
+也可以在 GitHub 仓库的 **Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow** 点按钮手动触发。
+> 仓库内 `manual.yml` 为原版（无 force_push 选项）；带 `force_push` 勾选的新版见
+> `output/manual_push_workflow.yml.example`，复制到 `.github/workflows/manual.yml` 即可启用
+> （需仓库具备 workflows 权限的 token）。
 
 ## ⏰ 定时自动运行（cron）
 
 ```bash
 crontab -e
-# 每天早 8 点自动采集+生成+推送
+# 每天早 8 点自动采集+生成+推送（当天检验通过才会推）
 0 8 * * * cd /path/to/02 && ./output/auto_push.sh >> /tmp/octopus.log 2>&1
 ```
 
@@ -35,29 +56,33 @@ crontab -e
 
 ```
 🌐 全网数据源                     📄 本地输出
-┌──────────────┐              ┌─────────────────────┐
-│ Reddit WSB   │──┐           │ daily_report_*.html │
-│ Yahoo Finance│──┤  ①采集     │ latest.html         │
-│ 新浪财经      │──┼─────────→ │                     │
-│ TradingKey   │──┤  ②分析     └─────────┬───────────┘
-│ Bloomberg    │──┘  ③生成              │ ④推送
-│ SCMP         │                         │
-└──────────────┘                    ┌────▼─────┐
-                                    │ PushPlus │
-                                    │   微信   │
-                                    └──────────┘
+┌──────────────────────┐      ┌─────────────────────┐
+│ YouTube 财经频道(RSS) │──┐   │ daily_report_*.html │
+│ Reddit WSB           │──┤   │ latest.html         │
+│ Yahoo Finance        │──┼──→│                     │
+│ 新浪财经              │──┤ ②分析 └─────────┬───────────┘
+│ TradingKey           │──┤ ③生成              │
+│ Bloomberg / CNBC     │──┘  ④当天检验        │
+└──────────────────────┘                  ┌────▼─────┐
+                                          │ PushPlus │
+                                          │   微信   │
+                                          └──────────┘
 ```
 
 ## 📁 文件结构
 
 ```
 output/
-├── pipeline.py          ← 🧠 核心引擎（采集→分析→生成→推送）
+├── pipeline.py          ← 🧠 核心引擎（采集→分析→生成→当天检验→推送）
 ├── push.py              ← 🚀 快捷入口（= pipeline.py）
 ├── auto_push.sh         ← 🔁 Bash 版（cron 用）
+├── manual_push.sh       ← 🖐 手动推送脚本（当天检验，--force 可强制）
 ├── daily_report_*.html  ← 📰 每日生成的日报
 └── latest.html          ← 📎 最新一份日报的副本
 ```
+
+> YouTube 财经频道列表在 `output/pipeline.py` 顶部的 `YOUTUBE_CHANNELS` 中配置，
+> 每个频道可填 `channel_id`（最稳）或 `handle`（运行时自动解析，解析失败标记暂缺）。
 
 ## 📜 版权
 

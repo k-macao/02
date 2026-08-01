@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """
 🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
-每次运行都重新抓取全网最新数据 → 分析 → 生成 → 推送
+每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
+
+核心规则（2026-08-01 新版）：
+  1. 没有数据的区块不出现在页面里，也不推送空内容。
+  2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
+     只有当「至少一个数据源含当天内容」时才自动推送；否则跳过并给出原因。
+  3. 页面内容重新加入 YouTube 财经资讯与新闻频道（RSS 无需 API Key）。
+  4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮，
+     内容非当天时可用 --force-push 强制推送（谨慎）。
 
 用法:
-  python3 output/pipeline.py                  # 全流程
+  python3 output/pipeline.py                  # 全流程（当天检验通过才推送）
   python3 output/pipeline.py --no-push        # 只生成，不推送
   python3 output/pipeline.py --dry-run        # 采集+预览，不推送
   python3 output/pipeline.py -o custom.html   # 指定输出路径
-  python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报
+  python3 output/pipeline.py --manual         # 手动推送模式
+  python3 output/pipeline.py --manual --force-push   # 手动强制推送（内容非当天）
+  python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报（当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list           # 列出日报
 """
@@ -19,6 +29,7 @@ import time
 import argparse
 import re
 import glob
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -34,8 +45,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPORT_DIR = SCRIPT_DIR
 
 # 时区
-CST = timezone(timedelta(hours=8))  # 北京时间
-MACAU = timezone(timedelta(hours=8))  # 澳门时间（同东八区）
+CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
 
 # PushPlus 配置
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
@@ -46,6 +56,24 @@ DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+# ------------------------------------------------------------
+# YouTube 财经资讯与新闻频道（RSS 订阅，无需 API Key）
+# 每个频道可配置 channel_id（最稳）或 handle（运行时自动解析，解析失败标记暂缺）。
+# 需要增删频道时直接改这个列表即可。
+# ------------------------------------------------------------
+YOUTUBE_CHANNELS = [
+    {"name": "CNBC 财经新闻（美）", "channel_id": "UCrp_UI8XtuYfpiqluWLD7Lw"},
+    {"name": "Bloomberg 彭博电视（美）", "channel_id": "UCIALMKvObZNtJ6AmdCLP7Lg"},
+    {"name": "Yahoo Finance（美）", "handle": "@YahooFinance"},
+    {"name": "华尔街电视 WallStTV（中文·纽约）", "handle": "@WallStTV"},
+    {"name": "第一财经 Yicai Global（中国）", "handle": "@YicaiGlobal"},
+]
+
+YT_NS = {
+    "a": "http://www.w3.org/2005/Atom",
+    "yt": "http://www.youtube.com/xml/schemas/2015",
 }
 
 # ============================================================
@@ -59,6 +87,11 @@ def _now():
 def _today_str():
     """返回今天日期字符串 YYYYMMDD"""
     return datetime.now(CST).strftime("%Y%m%d")
+
+
+def _today_display():
+    """返回今天的日期字符串 YYYY-MM-DD"""
+    return datetime.now(CST).strftime("%Y-%m-%d")
 
 
 def _date_display():
@@ -79,6 +112,22 @@ def _esc(s):
               .replace("'", "&#x27;"))
 
 
+def _cst_from_iso(iso_str):
+    """把 ISO8601 时间转为北京时间 datetime；失败返回 None。"""
+    if not iso_str:
+        return None
+    try:
+        iso = iso_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(iso).astimezone(CST)
+    except Exception:
+        return None
+
+
+def _date_is_today(dt):
+    """判断某个 datetime 是否属于今天（北京时间）。"""
+    return bool(dt and dt.strftime("%Y%m%d") == _today_str())
+
+
 def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
     """安全请求，失败返回 None"""
     try:
@@ -96,9 +145,17 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
 # ============================================================
 # 数据新鲜度与实时行情
 # ============================================================
-def _source_result(source, status, **payload):
-    """统一记录来源、抓取时间和失败状态；绝不把历史文案伪装成实时数据。"""
-    return {"source": source, "status": status, "fetched_at": _now(), **payload}
+def _source_result(source, status, is_today=False, content_date=None, **payload):
+    """统一记录来源、抓取时间、当天标记和失败状态；绝不把历史文案伪装成实时数据。
+
+    is_today      —— 该来源的内容是否属于「当天」（按北京时间判断）
+    content_date  —— 该来源最新内容的日期（如最后收盘日 / 最新视频发布日），用于展示
+    """
+    return {
+        "source": source, "status": status, "fetched_at": _now(),
+        "is_today": bool(is_today), "content_date": content_date,
+        **payload,
+    }
 
 
 def _source_note(item):
@@ -106,7 +163,7 @@ def _source_note(item):
     if item.get("status") == "success":
         return f"✅ {item.get('source', '数据源')} · 抓取于 {item.get('fetched_at', '—')}"
     detail = _esc(item.get("error", "暂时不可用"))
-    return f"⚠️ {item.get('source', '数据源')} 暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
+    return f"⚠️ {item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
 
 
 def fetch_market_snapshot():
@@ -118,7 +175,7 @@ def fetch_market_snapshot():
         ("上证指数", "000001.SS"), ("深证成指", "399001.SZ"),
         ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
     ]
-    quotes, failures = {}, []
+    quotes, failures, last_dates = {}, [], []
     for label, symbol in specs:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
         data = safe_request(url)
@@ -130,14 +187,23 @@ def fetch_market_snapshot():
             price, previous = closes[-1], closes[-2]
             quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
                              "currency": result.get("meta", {}).get("currency", "")}
+            # 最后收盘日期（用于当天检验；非交易时段为最近交易日）
+            ts_list = result.get("timestamp") or []
+            if ts_list:
+                last = datetime.fromtimestamp(ts_list[-1], CST).strftime("%Y-%m-%d")
+                last_dates.append(last)
         except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
             failures.append(f"{label}: {exc}")
     status = "success" if quotes else "unavailable"
+    content_date = max(last_dates) if last_dates else None
+    is_today = content_date == _today_display()
     if quotes:
-        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情")
+        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情（数据日期 {content_date}）")
     else:
         print("  ⚠️ 实时行情暂不可用；日报将明确显示数据暂缺")
-    return _source_result("Yahoo Finance Chart", status, quotes=quotes,
+    return _source_result("Yahoo Finance Chart", status,
+                          is_today=is_today, content_date=content_date,
+                          quotes=quotes,
                           error="；".join(failures[:2]) or None,
                           partial=len(quotes) != len(specs))
 
@@ -159,24 +225,27 @@ def _quote_value(market, label, precision=2):
 def fetch_wsb():
     """抓取 r/wallstreetbets 热门帖子，提取股票提及"""
     print("📡 正在抓取 Reddit WSB...")
-    
+
     url = "https://www.reddit.com/r/wallstreetbets/hot.json"
     params = {"limit": 100}
     headers = {**DEFAULT_HEADERS, "Accept": "application/json"}
-    
+
     data = safe_request(url, headers=headers, params=params)
-    
+
     stocks = []
     stock_mentions = {}
-    is_fallback = False
-    
+    post_utcs = []
+
     if data and "data" in data and "children" in data["data"]:
         for child in data["data"]["children"]:
             post = child.get("data", {})
             title = post.get("title", "")
             selftext = post.get("selftext", "")
             text = title + " " + selftext
-            
+            created = post.get("created_utc")
+            if created:
+                post_utcs.append(created)
+
             # 排除常见非股票代码
             exclude_words = {"THE", "AND", "FOR", "ARE", "BUT", "NOT", "YOU", "ALL", "CAN", "HER",
                            "WAS", "ONE", "OUR", "OUT", "DAY", "GET", "HAS", "HIM", "HIS", "HOW",
@@ -190,25 +259,30 @@ def fetch_wsb():
                            "Q1", "Q2", "Q3", "Q4", "FY", "YTD", "MoM", "YoY", "APR", "IRR",
                            "IMO", "IMHO", "TBH", "BTBC", "FWIW", "ELI5", "TL;DR", "EDIT",
                            "SOURCE", "PERMALINK", "CROSSPOST", "REPOST"}
-            
+
             # 匹配 $SYMBOL 或纯大写代码
             symbols = re.findall(r'\$([A-Z]{1,5})\b', text)
             symbols += re.findall(r'\b([A-Z]{2,5})\b', text)
-            
+
             for sym in symbols:
                 if sym not in exclude_words and len(sym) >= 2:
                     stock_mentions[sym] = stock_mentions.get(sym, 0) + 1
-        
+
         # 排序取 Top 10
         sorted_stocks = sorted(stock_mentions.items(), key=lambda x: x[1], reverse=True)[:10]
         for symbol, mentions in sorted_stocks:
             stocks.append({"symbol": symbol, "name": "", "mentions": mentions})
-    
+
     if not stocks:
         print("  ⚠️ Reddit 暂不可用，不显示历史兜底榜单")
         return _source_result("Reddit WSB", "unavailable", stocks=[], error="未取得有效帖子")
-    print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票")
-    return _source_result("Reddit WSB", "success", stocks=stocks)
+
+    newest_dt = datetime.fromtimestamp(max(post_utcs), CST) if post_utcs else None
+    content_date = newest_dt.strftime("%Y-%m-%d") if newest_dt else None
+    print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票（最新帖 {content_date}）")
+    return _source_result("Reddit WSB", "success",
+                          is_today=_date_is_today(newest_dt), content_date=content_date,
+                          stocks=stocks)
 
 
 # ============================================================
@@ -217,26 +291,25 @@ def fetch_wsb():
 def fetch_yahoo_headlines():
     """抓取 Yahoo Finance 热门新闻标题"""
     print("📡 正在抓取 Yahoo Finance 头条...")
-    
+
     headlines = []
-    is_fallback = False
-    
+
     # 尝试抓取新闻页面
     news_url = "https://finance.yahoo.com/topic/stock-market-news/"
     html = safe_request(news_url, is_json=False)
-    
+
     if html:
         # 提取标题
         titles = re.findall(r'"headline":"([^"]+)"', html)
         if not titles:
             titles = re.findall(r'<h3[^>]*>([^<]{20,200})</h3>', html)
-        
+
         for t in titles[:15]:
             clean = t.encode().decode('unicode_escape') if '\\u' in t else t
             clean = re.sub(r'<[^>]+>', '', clean).strip()
             if clean and len(clean) > 10:
                 headlines.append(clean)
-    
+
     # 兜底 RSS
     if not headlines:
         rss_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
@@ -247,12 +320,14 @@ def fetch_yahoo_headlines():
                 clean = re.sub(r'<[^>]+>', '', item).strip()
                 if clean:
                     headlines.append(clean)
-    
+
     if not headlines:
         print("  ⚠️ Yahoo 暂不可用，不显示历史兜底头条")
         return _source_result("Yahoo Finance News", "unavailable", headlines=[], error="未取得有效新闻")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条头条")
-    return _source_result("Yahoo Finance News", "success", headlines=headlines[:8])
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条头条（本次抓取 = 当天内容）")
+    return _source_result("Yahoo Finance News", "success",
+                          is_today=True, content_date=_today_display(),
+                          headlines=headlines[:8])
 
 
 # ============================================================
@@ -261,10 +336,9 @@ def fetch_yahoo_headlines():
 def fetch_sina_headlines():
     """抓取新浪财经 A 股资讯"""
     print("📡 正在抓取 A 股资讯...")
-    
+
     headlines = []
-    is_fallback = False
-    
+
     # 新浪滚动新闻 API
     url = "https://feed.mix.sina.com.cn/api/roll/get"
     params = {
@@ -273,15 +347,15 @@ def fetch_sina_headlines():
         "num": "20",
         "page": "1",
     }
-    
+
     data = safe_request(url, params=params)
-    
+
     if data and "result" in data and "data" in data["result"]:
         for item in data["result"]["data"][:10]:
             title = item.get("title", "") or item.get("intro", "")
             if title:
                 headlines.append(title.strip())
-    
+
     # 首页兜底
     if not headlines:
         sina_url = "https://finance.sina.com.cn/"
@@ -292,12 +366,14 @@ def fetch_sina_headlines():
                 clean = t.strip()
                 if clean and not clean.startswith("http"):
                     headlines.append(clean)
-    
+
     if not headlines:
         print("  ⚠️ 新浪财经暂不可用，不显示历史兜底资讯")
         return _source_result("新浪财经", "unavailable", headlines=[], error="未取得有效资讯")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯")
-    return _source_result("新浪财经", "success", headlines=headlines[:5])
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯（本次抓取 = 当天内容）")
+    return _source_result("新浪财经", "success",
+                          is_today=True, content_date=_today_display(),
+                          headlines=headlines[:5])
 
 
 # ============================================================
@@ -306,19 +382,18 @@ def fetch_sina_headlines():
 def fetch_kospi_headlines():
     """抓取韩股和半导体相关资讯"""
     print("📡 正在抓取韩股 & 半导体资讯...")
-    
+
     headlines = []
-    is_fallback = False
-    
+
     # Naver 财经 API
     url = "https://api.stock.naver.com/news/world/stock/KOSPI"
     params = {
         "pageSize": "20",
         "page": "1",
     }
-    
+
     data = safe_request(url, params=params)
-    
+
     if data and isinstance(data, list):
         for item in data[:10]:
             title = item.get("title", "") or item.get("content", "")
@@ -326,7 +401,7 @@ def fetch_kospi_headlines():
                 clean = re.sub(r'<[^>]+>', '', title).strip()
                 if clean:
                     headlines.append(clean)
-    
+
     # Yahoo 韩股新闻兜底
     if not headlines:
         kr_url = "https://finance.yahoo.com/quote/%5EKS11/news/"
@@ -336,12 +411,107 @@ def fetch_kospi_headlines():
             for t in titles[:10]:
                 clean = t.encode().decode('unicode_escape') if '\\u' in t else t
                 headlines.append(clean.strip())
-    
+
     if not headlines:
         print("  ⚠️ Naver/Yahoo 韩股资讯暂不可用，不显示历史兜底资讯")
         return _source_result("Naver / Yahoo Korea", "unavailable", headlines=[], error="未取得有效资讯")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯")
-    return _source_result("Naver / Yahoo Korea", "success", headlines=headlines[:5])
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯（本次抓取 = 当天内容）")
+    return _source_result("Naver / Yahoo Korea", "success",
+                          is_today=True, content_date=_today_display(),
+                          headlines=headlines[:5])
+
+
+# ============================================================
+# 数据源 5：YouTube 财经资讯与新闻频道
+# ============================================================
+def resolve_channel_id(channel):
+    """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
+    cid = channel.get("channel_id")
+    if cid:
+        return cid
+    handle = (channel.get("handle") or "").lstrip("@")
+    if not handle:
+        return None
+    html = safe_request(f"https://www.youtube.com/@{handle}", is_json=False, timeout=12)
+    if not html:
+        return None
+    m = re.search(r'"channelId":"(UC[0-9A-Za-z_-]{22})"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'"externalId":"(UC[0-9A-Za-z_-]{22})"', html)
+    return m.group(1) if m else None
+
+
+def fetch_youtube_finance():
+    """抓取 YouTube 财经资讯与新闻频道的最新视频（RSS，无需 API Key）。
+
+    返回每个频道最近若干视频，包含发布时间（北京时间）与「是否当天」标记。
+    """
+    print("📡 正在抓取 YouTube 财经资讯与新闻频道...")
+    channels, failures = [], []
+    for ch in YOUTUBE_CHANNELS:
+        name = ch.get("name", "?")
+        cid = resolve_channel_id(ch)
+        if not cid:
+            failures.append(f"{name}: 无法解析频道 ID")
+            continue
+        xml_text = safe_request(
+            f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}",
+            is_json=False, timeout=12,
+        )
+        videos = []
+        try:
+            root = ET.fromstring(xml_text or "")
+            entries = root.findall("a:entry", YT_NS)
+            for entry in entries[:8]:
+                title = (entry.findtext("a:title", "", YT_NS) or "").strip()
+                published = entry.findtext("a:published", "", YT_NS) or ""
+                vid = entry.findtext("yt:videoId", "", YT_NS) or ""
+                if not title:
+                    continue
+                pub_cst = _cst_from_iso(published)
+                videos.append({
+                    "title": title,
+                    "video_id": vid,
+                    "url": f"https://www.youtube.com/watch?v={vid}" if vid else "",
+                    "published": published,
+                    "published_cst": pub_cst.strftime("%Y-%m-%d %H:%M") if pub_cst else "—",
+                    "is_today": _date_is_today(pub_cst),
+                })
+        except Exception as exc:
+            failures.append(f"{name}: {exc}")
+
+        if videos:
+            handle = (ch.get("handle") or "").lstrip("@")
+            channel_url = f"https://www.youtube.com/@{handle}" if handle else \
+                          f"https://www.youtube.com/channel/{cid}"
+            channels.append({
+                "name": name,
+                "url": channel_url,
+                "videos": videos,
+                "is_today": any(v["is_today"] for v in videos),
+                "newest_date": next((v["published_cst"] for v in videos if v["is_today"]),
+                                    videos[0]["published_cst"]),
+            })
+        else:
+            failures.append(f"{name}: 未取得视频")
+
+    if not channels:
+        print("  ⚠️ YouTube 财经频道暂不可用，不显示历史视频兜底")
+        return _source_result("YouTube 财经频道", "unavailable", channels=[],
+                              error="；".join(failures[:2]) or "未取得有效视频")
+
+    # 全部频道中最新视频的日期（用于当天检验）
+    all_dates = [v["published_cst"][:10] for ch in channels for v in ch["videos"]]
+    newest_date = max(all_dates) if all_dates else None
+    is_today = any(ch["is_today"] for ch in channels)
+    print(f"  ✅ 成功抓取 {len(channels)}/{len(YOUTUBE_CHANNELS)} 个财经频道"
+          + (f"（含当天视频）" if is_today else f"（最新视频日期 {newest_date}）"))
+    return _source_result("YouTube 财经频道", "success",
+                          is_today=is_today, content_date=newest_date,
+                          channels=channels,
+                          error="；".join(failures[:2]) or None,
+                          partial=len(channels) != len(YOUTUBE_CHANNELS))
 
 
 # ============================================================
@@ -352,21 +522,23 @@ def collect_all_data():
     print("\n" + "=" * 50)
     print("🔍 开始全网数据采集")
     print("=" * 50)
-    
+
     data = {}
     data["实时行情"] = fetch_market_snapshot()
     time.sleep(0.5)
+    data["YouTube财经频道"] = fetch_youtube_finance()
+    time.sleep(0.5)
     data["Reddit WSB热议"] = fetch_wsb()
     time.sleep(0.5)
-    
+
     data["Yahoo头条"] = fetch_yahoo_headlines()
     time.sleep(0.5)
-    
+
     data["A股资讯"] = fetch_sina_headlines()
     time.sleep(0.5)
-    
+
     data["韩股半导体"] = fetch_kospi_headlines()
-    
+
     print("\n✅ 数据采集完成！")
     return data
 
@@ -378,19 +550,34 @@ def collect_all_data():
 C_RED = "#d93025"
 C_GREEN = "#188038"
 C_BLUE = "#002FA7"
+C_AMBER = "#8a5300"
 C_DASH = "#e8e8e8"
 C_ALERT_R = "#fce8e6"
 C_ALERT_G = "#e6f4ea"
+C_ALERT_A = "#fdf3d9"
 FONT = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
 
 
-def _card(icon, title, content):
-    """生成卡片 HTML"""
+def _card(icon, title, content, badge_html=""):
+    """生成卡片 HTML（可附带新鲜度徽标）"""
     return f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;">
 <tr><td style="padding:12px 10px;border-bottom:1px solid #ebebeb;">
-<div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:6px;">{icon} {title}</div>
+<div style="font-size:17px;font-weight:700;color:{C_BLUE};padding-bottom:6px;">{icon} {title} {badge_html}</div>
 {content}
 </td></tr></table>'''
+
+
+def _badge(text, kind="ok"):
+    """生成小徽标：ok=绿(当天) / warn=黄(非当天) / bad=红(无数据)"""
+    styles = {
+        "ok": (C_GREEN, C_ALERT_G, "✅"),
+        "warn": (C_AMBER, C_ALERT_A, "🕓"),
+        "bad": (C_RED, C_ALERT_R, "⚠️"),
+    }
+    color, bg, icon = styles.get(kind, styles["ok"])
+    return (f'<span style="display:inline-block;background:{bg};color:{color};'
+            f'padding:1px 8px;margin-left:4px;font-size:11px;font-weight:700;'
+            f'border-radius:8px;vertical-align:2px;">{icon} {_esc(text)}</span>')
 
 
 def _alert(text, color=C_RED, bg=C_ALERT_R):
@@ -465,12 +652,125 @@ def _tags_html(tags):
     )
 
 
+def _source_badge(item):
+    """根据数据源的 status / is_today 生成新鲜度徽标。"""
+    if item.get("status") != "success":
+        return _badge("无数据", "bad")
+    if item.get("is_today"):
+        return _badge("当天", "ok")
+    return _badge(f"非当天（{item.get('content_date') or '—'}）", "warn")
+
+
+def _item_row(icon, text, sub=""):
+    """生成列表项"""
+    sub_html = f'<div style="font-size:11px;color:#8899c0;">{sub}</div>' if sub else ""
+    return (f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};'
+            f'color:{C_BLUE};line-height:1.6;">{icon} {text}{sub_html}</div>')
+
+
+def _youtube_channel_block(ch):
+    """生成单个 YouTube 频道的视频列表块"""
+    ch_today = ch.get("is_today", False)
+    badge = _badge("当天", "ok") if ch_today else _badge("非当天", "warn")
+    url = ch.get("url", "")
+    name = _esc(ch.get("name", "?"))
+    rows = []
+    for v in ch.get("videos", [])[:5]:
+        title = _esc(v.get("title", "")[:110])
+        pub = _esc(v.get("published_cst", ""))
+        today_tag = (' <span style="display:inline-block;background:#e6f4ea;color:#0b6e34;'
+                     'padding:0 6px;font-size:10px;font-weight:700;border-radius:6px;">🆕 当天</span>'
+                     if v.get("is_today") else "")
+        link = f'<a href="{v.get("url","#")}" style="color:{C_BLUE};text-decoration:none;">{title}</a>'
+        rows.append(f'<div style="font-size:13px;padding:4px 0;border-bottom:1px dashed {C_DASH};'
+                    f'color:{C_BLUE};line-height:1.6;">▶️ {link}<br>'
+                    f'<span style="font-size:11px;color:#8899c0;">发布于 {pub}</span>{today_tag}</div>')
+    return f'''<div style="margin:8px 0 4px;padding:8px;background:#f5f7fb;border:1px solid #dfe5f2;">
+<div style="font-size:14px;font-weight:700;color:{C_BLUE};">
+<a href="{_esc(url)}" style="color:{C_BLUE};text-decoration:none;">📺 {name}</a> {badge}
+</div>
+{"".join(rows)}
+</div>'''
+
+
+def _freshness_banner(sources):
+    """生成「当天内容检验」横幅。sources: [(名称, item), ...]"""
+    total = len(sources)
+    today_n = sum(1 for _, s in sources if s.get("is_today"))
+    no_data = sum(1 for _, s in sources if s.get("status") != "success")
+    ok = today_n > 0
+
+    chips = "".join(
+        f'<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;'
+        f'margin:2px 3px;font-size:11px;color:#fff;">{_esc(name)} {_source_badge(s)}</span>'
+        for name, s in sources
+    )
+
+    if ok:
+        headline = f"✅ {today_n}/{total} 个数据源含当天内容，本次满足推送条件"
+        color, bg = C_GREEN, C_ALERT_G
+    else:
+        headline = (f"⏸️ 本次没有任何数据源含当天内容（{today_n}/{total}），默认不推送"
+                    if no_data < total else
+                    f"❌ 本次全部数据源均未抓到内容（0/{total}），不会推送")
+        color, bg = C_AMBER, C_ALERT_A if no_data < total else (C_RED, C_ALERT_R)
+
+    return f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:6px;background:{bg};">
+<tr><td style="padding:8px 10px;">
+<div style="font-size:14px;font-weight:700;color:{color};">📅 当天内容检验</div>
+<div style="font-size:13px;color:{color};font-weight:600;padding:2px 0;">{headline}</div>
+<div style="padding:4px 0;">{chips}</div>
+</td></tr></table>'''
+
+
+def _status_footer(sources):
+    """生成页脚数据源状态清单（含无数据源，便于审计）"""
+    lines = []
+    for name, s in sources:
+        if s.get("status") == "success":
+            lines.append(f'✅ {_esc(name)} · {_source_badge(s)} · 抓取于 {_esc(s.get("fetched_at","—"))}')
+        else:
+            detail = _esc(s.get("error", "暂时不可用"))
+            lines.append(f'⚠️ {_esc(name)} 数据暂缺（{detail}）· 抓取于 {_esc(s.get("fetched_at","—"))}')
+    return "<br>".join(f'<div style="font-size:11px;padding:2px 0;color:#8899c0;line-height:1.7;">{line}</div>'
+                       for line in lines)
+
+
+def _report_meta(html):
+    """从 HTML 提取日报元信息（生成日期、当天来源数等），供 --push-only 当天检验用。"""
+    def g(name):
+        m = re.search(rf'name="octopus-{name}" content="([^"]+)"', html)
+        return m.group(1) if m else None
+    try:
+        today_sources = int(g("today-sources") or 0)
+    except (TypeError, ValueError):
+        today_sources = 0
+    try:
+        total_sources = int(g("total-sources") or 0)
+    except (TypeError, ValueError):
+        total_sources = 0
+    return {
+        "date": g("report-date"),
+        "generated_at": g("generated-at"),
+        "today_sources": today_sources,
+        "total_sources": total_sources,
+    }
+
+
 # ============================================================
-# 报告生成（核心修复部分）
+# 报告生成（新版排版：只渲染有内容的区块 + 当天检验横幅）
 # ============================================================
 def generate_report(data, date_display, date_str):
-    """生成完整的 HTML 日报"""
-    # 1. 提取所有数据源
+    """生成完整的 HTML 日报（新排版）
+
+    - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
+    - 没有抓到内容的区块不出现在页面主体，仅在页脚状态清单中留痕；
+    - 页面顶部是当天内容检验横幅，直接展示本次是否满足推送条件。
+    """
+    # 1. 提取所有数据源（缺失的键按空处理，兼容旧测试数据）
+    market = data.get("实时行情", {})
+    yt = data.get("YouTube财经频道", {})
+    yt_channels = yt.get("channels", [])
     wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
     yahoo = data.get("Yahoo头条", {})
@@ -480,86 +780,117 @@ def generate_report(data, date_display, date_str):
     kospi = data.get("韩股半导体", {})
     kospi_headlines = kospi.get("headlines", [])
 
-    # 2. 构建 WSB 榜单
-    medals = ["🥇","🥈","🥉","④","⑤","⑥","⑦","⑧","⑨","⑩"]
+    # 2. 数据源清单（顺序即页面展示顺序）
+    source_items = [
+        ("实时行情", market),
+        ("YouTube财经频道", yt),
+        ("Yahoo头条", yahoo),
+        ("A股资讯", sina),
+        ("韩股半导体", kospi),
+        ("Reddit WSB热议", wsb),
+    ]
+
+    # 3. 当天内容检验统计
+    total = len(source_items)
+    today_n = sum(1 for _, s in source_items if s.get("is_today"))
+    content_n = sum(1 for _, s in source_items if s.get("status") == "success")
+
+    # 4. 行情速览（有数据才渲染）
+    card_market = ""
+    if market.get("status") == "success":
+        market_rows = []
+        for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                                 ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
+            value, color = _quote_value(market, label, precision)
+            market_rows.append((label, value, color))
+        astock_rows = []
+        for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
+            value, color = _quote_value(market, label, precision)
+            astock_rows.append((label, value, color))
+        data_date = market.get("content_date") or "—"
+        card_market = _card(
+            "⚡", "行情速览（实时）", _source_badge(market),
+            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(market)} · 数据日期 {data_date}</div>'
+            + _data_table(market_rows + astock_rows)
+            + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
+        )
+
+    # 5. YouTube 财经频道（有数据才渲染）
+    card_yt = ""
+    if yt.get("status") == "success" and yt_channels:
+        blocks = "".join(_youtube_channel_block(ch) for ch in yt_channels[:6])
+        note = (f'本次 {len(yt_channels)}/{len(YOUTUBE_CHANNELS)} 个频道可抓取'
+                + (f'；{yt.get("error")}' if yt.get("error") else ""))
+        card_yt = _card(
+            "📺", "YouTube 财经资讯与新闻频道", _source_badge(yt),
+            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 视频发布最新日期 {_esc(yt.get("content_date") or "—")}</div>'
+            + blocks
+            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的视频发布于今天（北京时间）。")
+        )
+
+    # 6. 其它资讯区块（有数据才渲染）
+    yh_items = "".join(_item_row("📰", _esc(h[:120])) for h in yh_headlines[:8])
+    card_yahoo = _card("📰", "全球头条", _source_badge(yahoo),
+                       f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yahoo)}</div>' + yh_items) \
+        if yh_headlines else ""
+
+    kospi_items = "".join(_item_row("🇰🇷", _esc(h[:120])) for h in kospi_headlines[:5])
+    card_semi = _card("🔌", "半导体&韩股", _source_badge(kospi),
+                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>' + kospi_items) \
+        if kospi_headlines else ""
+
+    sina_items = "".join(_item_row("🇨🇳", _esc(h[:120])) for h in sina_headlines[:5])
+    # 注：A股四指数行情已并入上方「行情速览」卡片，这里只展示新浪资讯
+    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）", _source_badge(sina),
+                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>' + sina_items) \
+        if sina_headlines else ""
+
+    medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
     wsb_rows = []
     for i, s in enumerate(wsb_stocks[:10]):
-        label = f"{medals[i]} {s.get('symbol','?')} {s.get('name','')}"
-        wsb_rows.append((label, f"{s.get('mentions','?')} 次提及"))
+        label = f"{medals[i]} {s.get('symbol', '?')} {s.get('name', '')}"
+        wsb_rows.append((label, f"{s.get('mentions', '?')} 次提及"))
+    card_wsb = _card("🐂", "Reddit WSB热议", _source_badge(wsb),
+                     f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get("content_date") or "—")}</div>'
+                     + (_section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows))) \
+        if wsb_rows else ""
 
-    # 3. 构建各列表项 HTML
-    yh_items = "".join(
-        f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">📰 {_esc(h[:120])}</div>'
-        for h in yh_headlines[:8]
-    ) if yh_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
+    # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
+    content_cards = "".join(c for c in [card_market, card_yt, card_yahoo, card_semi, card_astock, card_wsb] if c)
 
-    kospi_items = "".join(
-        f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">🇰🇷 {_esc(h[:120])}</div>'
-        for h in kospi_headlines[:5]
-    ) if kospi_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
+    # 8. 当天检验横幅 + 数据可用性面板
+    banner = _freshness_banner(source_items)
 
-    sina_items = "".join(
-        f'<div style="font-size:13px;padding:3px 0;border-bottom:1px dashed {C_DASH};color:{C_BLUE};">🇨🇳 {_esc(h[:120])}</div>'
-        for h in sina_headlines[:5]
-    ) if sina_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
+    # 推送策略说明（与 main() 中的实际门禁保持一致）
+    if today_n > 0:
+        push_hint = f"✅ 有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
+        hint_color = C_GREEN
+    else:
+        push_hint = ("⏸️ 无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
+                     if content_n > 0 else
+                     "❌ 无任何抓取内容 → 本次不会推送。")
+        hint_color = C_AMBER if content_n > 0 else C_RED
 
-    # 4. 按本次采集结果构建页面。没有任何常量行情或“历史兜底”内容。
-    market = data.get("实时行情", {})
-    source_items = [market, yahoo, sina, kospi, wsb]
-    source_status = "<br>".join(
-        f'<div style="font-size:11px;padding:2px 0;color:{C_GREEN if x.get("status") == "success" else C_RED};">{_source_note(x)}</div>'
-        for x in source_items
-    )
-    market_rows = []
-    for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
-        value, color = _quote_value(market, label, precision)
-        market_rows.append((label, value, color))
-    astock_rows = []
-    for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
-        value, color = _quote_value(market, label, precision)
-        astock_rows.append((label, value, color))
+    card_focus = _card("🎯", "本次数据可用性 · 当天检验",
+                       _alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
+                              f"所有暂缺项均已明确标注，不会复用旧日报内容。",
+                              C_GREEN if today_n > 0 else hint_color,
+                              C_ALERT_G if today_n > 0 else C_ALERT_A) +
+                       _status_footer(source_items) +
+                       _note(f"{push_hint} 生成、抓取和推送是独立步骤：请以各来源的抓取时间、数据日期和当天标记判断数据新鲜度。")
+                       )
 
-    card_market = _card("⚡", "行情速览（实时）",
-        _alert(_source_note(market), C_GREEN if market.get("status") == "success" else C_RED,
-               C_ALERT_G if market.get("status") == "success" else C_ALERT_R) +
-        _data_table(market_rows) +
-        _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
-    )
-
-    card_yahoo = _card("📰", "全球头条",
-        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yahoo)}</div>' + yh_items)
-
-    card_semi = _card("🔌", "半导体&韩股",
-        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>' +
-        kospi_items
-    )
-
-    card_wsb = _card("🐂", "Reddit WSB热议",
-        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(wsb)}</div>' +
-        ( _section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows)
-          if wsb_rows else '<div style="font-size:13px;color:#888;">暂无实时数据；为避免误导，未展示旧榜单。</div>' )
-    )
-
-    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）",
-        _data_table(astock_rows) +
-        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>' +
-        sina_items
-    )
-
-    successful = sum(1 for item in source_items if item.get("status") == "success")
-    card_focus = _card("🎯", "本次数据可用性",
-        _alert(f"本次运行 {successful}/{len(source_items)} 个数据源可用；所有暂缺项均已明确标注，不会复用旧日报内容。",
-               C_GREEN if successful else C_RED, C_ALERT_G if successful else C_ALERT_R) + source_status +
-        _note("生成、抓取和推送是独立步骤：请以本页各来源的抓取时间和状态判断数据新鲜度。")
-    )
-
-    # 6. 拼接完整 HTML
+    # 9. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
+    generated_at = _now()
     html = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="octopus-report-date" content="{date_str}">
+<meta name="octopus-generated-at" content="{generated_at}">
+<meta name="octopus-today-sources" content="{today_n}">
+<meta name="octopus-total-sources" content="{total}">
 <title>章鱼AI·财经日报</title>
 </head>
 <body style="margin:0;padding:0;background:#f0f0f0;font-family:{FONT};color:#002FA7;font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%;">
@@ -571,19 +902,16 @@ def generate_report(data, date_display, date_str):
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#002FA7;">
 <tr><td style="padding:16px 14px 4px;text-align:center;color:#fff;font-size:13px;">🐙 Octopus AI · 全景分析</td></tr>
 <tr><td style="padding:0 14px 4px;text-align:center;color:#fff;font-size:20px;font-weight:700;">每日财经日报</td></tr>
-<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · 自动生成</td></tr>
+<tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · 自动生成 · 生成时间 {_esc(generated_at)}</td></tr>
 <tr><td style="padding:0 14px 14px;text-align:center;">
 <span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">全球市场</span>
 <span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI科技</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">{_esc(_now())}</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">YouTube 财经频道</span>
 </td></tr>
 </table>
 
-{card_market}
-{card_yahoo}
-{card_semi}
-{card_wsb}
-{card_astock}
+{banner}
+{content_cards}
 {card_focus}
 
 <!-- 页脚 -->
@@ -591,10 +919,10 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:12px 10px;text-align:center;">
 <div style="font-size:11px;color:#8899c0;line-height:1.8;">
 🐙 章鱼AI · 仅供参考，不构成投资建议<br>
-数据来源：Reddit · Yahoo · 新浪财经 · TradingKey
+数据来源：YouTube 财经频道 · Reddit · Yahoo · 新浪财经 · Naver · TradingKey
 </div>
 <div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
-生成时间：{_now()}
+生成时间：{_esc(generated_at)} · 报告日期：{date_str}
 </div>
 </td></tr>
 </table>
@@ -613,14 +941,14 @@ def generate_report(data, date_display, date_str):
 def push_to_wechat(title, content_html, token=None):
     """通过 PushPlus 推送消息到微信"""
     token = token or PUSHPLUS_TOKEN
-    
+
     if not token:
         print("⚠️ 未设置 PUSHPLUS_TOKEN，跳过推送")
         print("   请设置环境变量: export PUSHPLUS_TOKEN=你的token")
         return False
-    
+
     print(f"📤 正在推送到微信 (PushPlus)...")
-    
+
     try:
         resp = requests.post(
             PUSHPLUS_URL,
@@ -634,7 +962,7 @@ def push_to_wechat(title, content_html, token=None):
         )
         resp.raise_for_status()
         result = resp.json()
-        
+
         if result.get("code") == 200:
             print("  ✅ 推送成功！")
             return True
@@ -695,7 +1023,7 @@ def save_report(html, output_path=None, data=None):
         try:
             _atomic_write(output_path, html)
         except OSError as fallback_exc:
-            raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}）") from fallback_exc
+            raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}") from fallback_exc
         print(f"⚠️ 无法覆盖 {requested_path}: {exc}")
         print(f"💾 已改存为新的日期文件: {output_path}")
 
@@ -722,11 +1050,11 @@ def list_reports():
     """列出所有已生成的日报文件"""
     pattern = os.path.join(REPORT_DIR, "daily_report_*.html")
     files = sorted(glob.glob(pattern), reverse=True)
-    
+
     if not files:
         print("暂无日报文件。")
         return 0
-    
+
     print(f"\n共找到 {len(files)} 份日报：\n")
     for idx, filepath in enumerate(files, 1):
         filename = os.path.basename(filepath)
@@ -737,107 +1065,167 @@ def list_reports():
 
 
 # ============================================================
+# 推送前的当天内容检验
+# ============================================================
+def check_push_eligibility(data):
+    """根据采集结果判断是否允许推送。
+
+    返回 (can_push, reason)。
+    规则：
+      - 没有任何来源抓到内容 → 不推送；
+      - 有内容但没有任何来源属于「当天」→ 不推送（防旧内容）；
+      - 否则可推送。
+    """
+    items = [v for v in data.values() if isinstance(v, dict)]
+    content_n = sum(1 for v in items if v.get("status") == "success")
+    today_n = sum(1 for v in items if v.get("is_today"))
+    total = len(items)
+
+    if content_n == 0:
+        return False, f"全部数据源均未抓到内容（0/{total}）"
+    if today_n == 0:
+        return False, f"抓到 {content_n}/{total} 个来源，但没有一个属于当天内容（当天检验未通过）"
+    return True, f"当天检验通过：{today_n}/{total} 个数据源含当天内容"
+
+
+# ============================================================
 # 主函数
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="🐙 章鱼AI · 每日财经日报流水线",
+        description="🐙 章鱼AI · 每日财经日报流水线（当天检验后推送）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python3 output/pipeline.py                  # 全流程
-  python3 output/pipeline.py --no-push        # 只生成，不推送
-  python3 output/pipeline.py --dry-run        # 采集+预览，不推送
-  python3 output/pipeline.py -o custom.html   # 指定输出路径
-  python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报
+  python3 output/pipeline.py                        # 全流程（当天检验通过才推送）
+  python3 output/pipeline.py --no-push              # 只生成，不推送
+  python3 output/pipeline.py --dry-run              # 采集+预览，不推送
+  python3 output/pipeline.py -o custom.html         # 指定输出路径
+  python3 output/pipeline.py --manual               # 手动推送模式（重新抓取并推送）
+  python3 output/pipeline.py --manual --force-push  # 手动强制推送（内容非当天也推，谨慎）
+  python3 output/pipeline.py --push-only            # 推送实际最后更新的一份日报（再次当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
-  python3 output/pipeline.py --list           # 列出日报
+  python3 output/pipeline.py --list                 # 列出日报
         """
     )
-    
+
     parser.add_argument("--no-push", action="store_true",
                        help="只生成日报，不推送到微信")
     parser.add_argument("--dry-run", action="store_true",
                        help="采集数据并预览，不生成文件也不推送")
     parser.add_argument("-o", "--output", type=str, default=None,
                        help="指定输出文件路径")
+    parser.add_argument("--manual", action="store_true",
+                       help="手动推送模式：重新抓取→生成→当天检验→推送")
+    parser.add_argument("--force-push", action="store_true",
+                       help="当天检验未通过时仍强制推送（谨慎）")
     parser.add_argument("--push-only", nargs="?", const="__LATEST__", default=None,
-                       help="推送实际最后更新的日报；也可指定带新鲜度标记的文件")
+                       help="推送实际最后更新的日报；也可指定带新鲜度标记的文件（再次执行当天检验）")
     parser.add_argument("--force-push-old", action="store_true",
                        help="允许 --push-only 推送未带新鲜度标记的旧版日报（不推荐）")
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
-    
+
     args = parser.parse_args()
-    
+
     # --list 模式
     if args.list:
         return list_reports()
-    
-    # --push-only 模式
+
+    # --push-only 模式：推送已有文件，同样执行「当天检验」
     if args.push_only:
         push_path = newest_report_path() if args.push_only == "__LATEST__" else args.push_only
         if not push_path or not os.path.isfile(push_path):
             print(f"❌ 文件不存在: {push_path or '没有可推送的日报'}")
             return 1
-        print(f"📎 本次推送最新 HTML: {push_path}")
+        print(f"📎 本次推送 HTML: {push_path}")
         with open(push_path, "r", encoding="utf-8") as f:
             html = f.read()
-        if "本次数据可用性" not in html and not args.force_push_old:
-            print("❌ 拒绝推送旧版日报：文件没有数据来源/抓取时间标记。")
-            print("   请重新生成，或在确认风险后添加 --force-push-old。")
+
+        meta = _report_meta(html)
+        today = _today_str()
+        forced = args.force_push or args.force_push_old
+        if not meta.get("date") and not forced:
+            # 旧版文件：没有「当天检验」元信息，无法确认是否当天 → 默认拒绝
+            print("❌ 拒绝推送旧版日报：文件没有当天检验元信息（octopus-report-date）。")
+            print("   请先运行 pipeline.py 重新生成，或在确认风险后添加 --force-push / --force-push-old。")
+            return 1
+        if meta["date"] != today and not forced:
+            print(f"❌ 拒绝推送：报告日期 {meta['date']} ≠ 今天 {today}（当天检验未通过）")
+            print("   请重新生成，或使用 --force-push 强制推送。")
+            return 1
+        if meta["today_sources"] < 1 and not forced:
+            print(f"❌ 拒绝推送：该日报 {meta['today_sources']}/{meta['total_sources']} 个数据源为当天内容（当天检验未通过）")
+            print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
         push_to_wechat(title, html)
         return 0
-    
+
     # 正常流程
+    mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
     print("🐙 " + "=" * 48)
-    print("   章鱼 AI · 全网多模型协同 · 每日财经日报")
+    print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
-    
+
     # 1. 采集数据
     data = collect_all_data()
-    
+
     # 2. 生成报告
     print("\n📝 正在生成日报...")
     date_display = _date_display()
     date_str = _today_str()
     html = generate_report(data, date_display, date_str)
     print("  ✅ 日报生成完成")
-    
+
     # 3. dry-run 模式
     if args.dry_run:
         print("\n🔍 预览模式（不推送、不保存）")
-        print(f"   数据源: WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
+        print(f"   数据源: YouTube({len(data.get('YouTube财经频道', {}).get('channels', []))}频道) | "
+              f"WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
               f"Yahoo({len(data.get('Yahoo头条', {}).get('headlines', []))}条) | "
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
               f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条)")
         return 0
-    
+
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
     # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
-    
-    # 5. 推送：所有来源都失败时，不把“数据暂缺”误当日报推送给用户。
-    available_sources = sum(1 for item in data.values()
-                            if isinstance(item, dict) and item.get("status") == "success")
-    if not args.no_push and (available_sources > 0 or args.allow_incomplete_push):
+
+    # 5. 推送决策：先做「当天内容检验」，再决定是否推送
+    can_push, reason = check_push_eligibility(data)
+
+    if args.no_push:
+        print(f"\n⏭️ 已跳过推送（--no-push）。当天检验: {reason}")
+        print(f"   日报已保存: {output_path}")
+    elif not can_push and not args.force_push and not args.allow_incomplete_push:
+        print(f"\n⏭️ 当天检验未通过，本次不推送。")
+        print(f"   原因: {reason}")
+        print("   日报已保存（带状态标记），可在确认后使用:")
+        print("     python3 output/pipeline.py --manual --force-push   # 强制手动推送")
+        print("     python3 output/pipeline.py --push-only output/latest.html")
+    elif not can_push and args.force_push:
+        print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
+        print(f"   原因: {reason}")
+        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d')}"
+        push_to_wechat(title, push_html)
+    elif not can_push and args.allow_incomplete_push:
+        print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
+        print(f"   原因: {reason}")
+        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d')}"
+        push_to_wechat(title, push_html)
+    else:
+        print(f"\n📤 当天检验通过：{reason}")
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
         push_to_wechat(title, push_html)
-    elif not args.no_push:
-        print("\n⏭️ 所有数据源均不可用：已生成带状态标记的报告，但默认不推送。")
-        print("   如需推送状态报告，请添加 --allow-incomplete-push。")
-    else:
-        print("\n⏭️ 已跳过推送（--no-push）")
-    
+
     print("\n🎉 全部完成！")
     return 0
 
