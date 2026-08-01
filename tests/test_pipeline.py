@@ -1,5 +1,6 @@
 """无需网络的日报新鲜度回归测试。"""
 import importlib.util
+import os
 import sys
 import tempfile
 import types
@@ -23,7 +24,7 @@ class ReportFreshnessTests(unittest.TestCase):
                     "标普500": {"price": 6123.45, "change_pct": 1.25, "currency": "USD"}
                 }
             ),
-            "Yahoo头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
+            "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
             "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
             "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
@@ -108,7 +109,7 @@ class ReportFreshnessTests(unittest.TestCase):
                     "note": "微信公众号需登录，暂不支持自动抓取",
                 }],
             ),
-            "Yahoo头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
+            "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
             "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
             "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
@@ -130,7 +131,7 @@ class ReportFreshnessTests(unittest.TestCase):
         data = self._sample_data()
         data["港股名家频道"] = pipeline._source_result("test channels", "unavailable",
                                                       channels=[], unsupported=[], error="offline")
-        data["Yahoo头条"] = pipeline._source_result("test news", "success", is_today=True,
+        data["全球头条"] = pipeline._source_result("test news", "success", is_today=True,
                                                     content_date="2026-08-01",
                                                     headlines=["一则今天的全球头条"])
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
@@ -144,7 +145,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 6)
+        self.assertEqual(meta["total_sources"], 8)
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -157,7 +158,7 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertTrue(can_push)
         # 全部无内容 → 不推送
         empty = {k: pipeline._source_result(k, "unavailable", error="offline")
-                 for k in ["实时行情", "港股名家频道", "Yahoo头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
+                 for k in ["实时行情", "港股名家频道", "全球头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
         can_push, reason = pipeline.check_push_eligibility(empty)
         self.assertFalse(can_push)
         self.assertIn("0/", reason)
@@ -297,6 +298,225 @@ class _FakeResp:
 
     def json(self):
         return {"code": self._code, "msg": self._msg}
+
+
+class _FakeGeminiResp:
+    """模拟 Gemini generateContent HTTP 响应。"""
+
+    def __init__(self, text):
+        self._text = text
+        self.status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"candidates": [{"content": {"parts": [{"text": self._text}]}}]}
+
+
+class GoogleNewsSourceTests(unittest.TestCase):
+    """2026-08-02 新增：全球头条改用 Google News（英文源 + Gemini 翻译 / 中文源降级）。"""
+
+    EN_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>Fed signals rate cut - Reuters</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
+  <item><title>Stocks rally on tech earnings - Bloomberg</title><link>https://news.google.com/b</link><pubDate>Sat, 02 Aug 2026 03:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+    def test_fetch_google_news_uses_en_feed_and_translates_with_key(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
+             patch.object(pipeline, "safe_request", return_value=self.EN_RSS) as req, \
+             patch.object(pipeline, "ai_translate_titles", return_value=[
+                 {"i": 0, "zh": "美联储暗示降息"}, {"i": 1, "zh": "科技股财报推动股市上涨"}]) as tr:
+            result = pipeline.fetch_google_news()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["source"], "Google News")
+        self.assertTrue(result["translated"])
+        self.assertEqual(result["headlines"][0]["zh"], "美联储暗示降息")
+        self.assertEqual(result["headlines"][0]["title"], "Fed signals rate cut")
+        self.assertEqual(result["headlines"][0]["source"], "Reuters")
+        self.assertEqual(result["headlines"][1]["zh"], "科技股财报推动股市上涨")
+        # 配置 Key 时走英文源
+        self.assertIn("hl=en-US", req.call_args[0][0])
+        tr.assert_called_once()
+
+    def test_fetch_google_news_falls_back_to_chinese_feed_without_key(self):
+        zh_rss = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>美联储释放降息信号 - 华尔街见闻</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
+</channel></rss>"""
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
+             patch.object(pipeline, "safe_request", return_value=zh_rss) as req:
+            result = pipeline.fetch_google_news()
+        self.assertEqual(result["status"], "success")
+        self.assertFalse(result["translated"])
+        self.assertIn("hl=zh-CN", req.call_args[0][0])  # 未配置 Key 走中文源
+        self.assertEqual(result["headlines"][0]["title"], "美联储释放降息信号")
+        self.assertEqual(result["headlines"][0]["source"], "华尔街见闻")
+
+    def test_fetch_google_news_unavailable_marks_error(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
+             patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_google_news()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["headlines"], [])
+
+
+class EastmoneySourceTests(unittest.TestCase):
+    """2026-08-02 新增：东方财富快讯（5 条最新新闻）与热门榜单（A股/港股/美股涨幅前十）。"""
+
+    def test_fetch_eastmoney_news_parses_five_items(self):
+        payload = {"data": {"list": [
+            {"title": f"<b>东财新闻{i}</b>", "url": f"https://finance.eastmoney.com/a/{i}.html",
+             "showTime": "2026-08-02 10:00:00", "summary": f"摘要{i}"}
+            for i in range(6)
+        ]}}
+        with patch.object(pipeline, "safe_request", return_value=payload):
+            result = pipeline.fetch_eastmoney_news()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["source"], "东方财富")
+        self.assertEqual(len(result["headlines"]), 5)          # 只取 5 条
+        self.assertNotIn("<b>", result["headlines"][0]["title"])  # 剥掉 HTML 标签
+        self.assertEqual(result["headlines"][0]["summary"], "摘要0")
+
+    def test_fetch_eastmoney_news_unavailable(self):
+        with patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_eastmoney_news()
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_fetch_hot_stocks_parses_three_markets(self):
+        def fake_request(url, params=None, **kw):
+            return {"data": {"diff": [
+                {"f12": f"60000{i}", "f14": f"股票{i}", "f2": "10.5", "f3": "9.87"}
+                for i in range(10)
+            ]}}
+
+        with patch.object(pipeline, "safe_request", side_effect=fake_request):
+            result = pipeline.fetch_hot_stocks()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(set(result["markets"].keys()), {"A股", "港股", "美股"})
+        self.assertEqual(len(result["markets"]["A股"]["stocks"]), 10)
+        self.assertEqual(result["markets"]["港股"]["stocks"][0]["code"], "600000")
+        self.assertEqual(result["markets"]["美股"]["stocks"][9]["change_pct"], "9.87")
+
+    def test_fetch_hot_stocks_unavailable(self):
+        with patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_hot_stocks()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["markets"]["A股"]["stocks"], [])
+
+
+class GeminiAiTests(unittest.TestCase):
+    """2026-08-02 新增：Gemini AI 研判 / 翻译 / 总结。"""
+
+    def test_ai_analyze_section_parses_json(self):
+        def fake_post(url, json=None, timeout=None):
+            self.assertIn("generativelanguage.googleapis.com", url)
+            return _FakeGeminiResp('{"direction":"偏多","probability":68,"reason":"科技股财报超预期"}')
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            analysis = pipeline.ai_analyze_section("全球头条", "内容")
+        self.assertEqual(analysis["direction"], "偏多")
+        self.assertEqual(analysis["probability"], 68)
+        self.assertIn("科技股", analysis["reason"])
+
+    def test_ai_analyze_section_returns_none_without_key(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
+            self.assertIsNone(pipeline.ai_analyze_section("全球头条", "内容"))
+
+    def test_ai_analyze_section_normalizes_bad_direction_and_probability(self):
+        def fake_post(url, json=None, timeout=None):
+            return _FakeGeminiResp('{"direction":"大涨","probability":150,"reason":"x"}')
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            analysis = pipeline.ai_analyze_section("x", "y")
+        self.assertEqual(analysis["direction"], "中性")   # 非法方向归一
+        self.assertEqual(analysis["probability"], 100)    # 概率夹到 0-100
+
+    def test_ai_translate_titles_parses_json_array(self):
+        def fake_post(url, json=None, timeout=None):
+            return _FakeGeminiResp('[{"i":0,"zh":"标题甲"},{"i":1,"zh":"标题乙"}]')
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            result = pipeline.ai_translate_titles([{"i": 0, "title": "A"}, {"i": 1, "title": "B"}])
+        self.assertEqual(result[0]["zh"], "标题甲")
+        self.assertEqual(result[1]["zh"], "标题乙")
+
+    def test_ai_translate_titles_keeps_original_when_parsing_fails(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "gemini_json", return_value=None):
+            result = pipeline.ai_translate_titles([{"i": 0, "title": "Original"}])
+        self.assertIsNone(result)   # 整体失败 → 调用方保留原文
+
+    def test_gemini_json_strips_markdown_code_fence(self):
+        def fake_post(url, json=None, timeout=None):
+            return _FakeGeminiResp('```json\n{"direction":"偏空","probability":55,"reason":"利率上行"}\n```')
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            data = pipeline.gemini_json("prompt")
+        self.assertEqual(data["direction"], "偏空")
+        self.assertEqual(data["probability"], 55)
+
+    def test_ai_overall_summary_parses(self):
+        def fake_post(url, json=None, timeout=None):
+            return _FakeGeminiResp('{"summary":"市场整体偏强，科技板块领涨。"}')
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            summary = pipeline.ai_overall_summary([("全球头条", "偏多", 66, "科技领涨")])
+        self.assertIn("偏强", summary)
+
+
+class NewLayoutRenderingTests(unittest.TestCase):
+    """2026-08-02 新增：AI 总览表 / 东财快讯 / 热门榜单渲染。"""
+
+    def _rich_data(self):
+        data = ReportFreshnessTests()._sample_data()
+        data["全球头条"] = pipeline._source_result(
+            "Google News", "success", is_today=True, content_date="2026-08-02", translated=True,
+            headlines=[{"title": "Fed Holds Rates", "zh": "美联储按兵不动", "source": "Reuters",
+                        "url": "", "published_cst": "2026-08-02 10:00", "is_today": True}])
+        data["东财快讯"] = pipeline._source_result(
+            "东方财富", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": "A股三大指数集体收涨", "url": "", "time": "2026-08-02 15:30",
+                        "summary": "沪指涨1.2%", "is_today": True}])
+        data["热门榜单"] = pipeline._source_result(
+            "东方财富热门榜", "success", is_today=True, content_date="2026-08-02",
+            markets={m: {"desc": f"{m}测试", "stocks": [
+                {"code": f"00000{i}", "name": f"{m}股票{i}", "price": "10.5", "change_pct": "9.87"}
+                for i in range(10)]} for m in ["A股", "港股", "美股"]})
+        return data
+
+    def test_report_renders_new_sections_without_key(self):
+        html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
+        self.assertIn("AI 总览", html)              # AI 总览卡片
+        self.assertIn("GEMINI_API_KEY", html)       # 未配置 Key 的降级提示
+        self.assertIn("东方财富快讯", html)
+        self.assertIn("A股三大指数集体收涨", html)
+        self.assertIn("热门榜单", html)
+        self.assertIn("A股涨幅前十", html)
+        self.assertIn("美股涨幅前十", html)
+        self.assertIn("美联储按兵不动", html)        # Google News 中文标题
+        self.assertIn("原文：Fed Holds Rates", html)  # 原文保留
+        self.assertIn("AI暂缺", html)              # 无 Key → 栏目 AI 徽章降级
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["total_sources"], 8)  # 数据源扩展到 8 个
+
+    def test_report_renders_ai_summary_table_with_key(self):
+        fake_analysis = {"direction": "偏多", "probability": 66, "reason": "科技股领涨"}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+             patch.object(pipeline, "ai_analyze_section", return_value=fake_analysis), \
+             patch.object(pipeline, "ai_overall_summary", return_value="市场整体偏强，关注科技板块。"):
+            html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
+        self.assertIn("AI 总结", html)
+        self.assertIn("市场整体偏强", html)
+        self.assertIn("栏目 AI 研判表", html)
+        self.assertIn("偏多 66%", html)
+        self.assertIn("热门榜·A股", html)          # 热门榜三个市场也进分析表
 
 
 class PushResultTests(unittest.TestCase):
@@ -506,7 +726,7 @@ class PushFailureAlertTests(unittest.TestCase):
 
     def test_failure_alert_text_has_reason_advice_and_file(self):
         data = {
-            "Yahoo头条": pipeline._source_result("n", "success", is_today=True,
+            "全球头条": pipeline._source_result("n", "success", is_today=True,
                                                  content_date="2026-08-01", headlines=["今日头条"]),
             "A股资讯": pipeline._source_result("s", "unavailable", headlines=[], error="offline"),
         }
@@ -543,14 +763,14 @@ class NoPushAlertTests(unittest.TestCase):
         data = {
             "实时行情": pipeline._source_result("q", "success", is_today=False,
                                                 content_date="2026-07-31", quotes={}),
-            "Yahoo头条": pipeline._source_result("n", "unavailable", headlines=[], error="offline"),
+            "全球头条": pipeline._source_result("n", "unavailable", headlines=[], error="offline"),
         }
         text = pipeline.build_no_push_alert_text("抓到 1/2 个来源，但没有一个属于当天内容",
                                                  data, "/tmp/daily_report_20260801.html")
         self.assertIn("当天内容检验未通过", text)
         self.assertIn("抓到 1/2 个来源", text)
         self.assertIn("实时行情：🕓 非当天（数据日期 2026-07-31）", text)
-        self.assertIn("Yahoo头条：⚠️ 无数据", text)
+        self.assertIn("全球头条：⚠️ 无数据", text)
         self.assertIn("force_push", text)                      # 给出人工处理入口
         self.assertIn("daily_report_20260801.html", text)      # 报告文件可追溯
 
@@ -560,7 +780,7 @@ class MainExitCodeTests(unittest.TestCase):
 
     def _today_data(self):
         return {
-            "Yahoo头条": pipeline._source_result("n", "success", is_today=True,
+            "全球头条": pipeline._source_result("n", "success", is_today=True,
                                                  content_date="2026-08-01", headlines=["今日头条"]),
             "A股资讯": pipeline._source_result("s", "unavailable", headlines=[], error="offline"),
         }
