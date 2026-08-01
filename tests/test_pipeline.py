@@ -341,6 +341,87 @@ class PushResultTests(unittest.TestCase):
             self.assertFalse(pipeline.push_to_wechat("t", "body", token=None))
 
 
+class PushTruncationTests(unittest.TestCase):
+    """PushPlus 内容上限 2 万字：超长 HTML 必须按完整标签边界截断、闭合所有标签，
+    并在末尾附截断提示，保证微信端排版正常（2026-08-02 修复整页浅灰/缺内容）。"""
+
+    def _balanced(self, html):
+        """简单校验：所有非 void 标签均成对闭合。"""
+        stack = []
+        for m in pipeline._TAG_RE.finditer(html):
+            tag, closing = m.group("tag").lower(), bool(m.group("close"))
+            if tag in pipeline._VOID_TAGS:
+                continue
+            if closing:
+                if not stack or stack[-1] != tag:
+                    return False
+                stack.pop()
+            else:
+                stack.append(tag)
+        return not stack
+
+    def test_oversized_html_truncated_at_tag_boundary_and_balanced(self):
+        # 模拟日报结构：外层 table 包裹大量内容块，总长超过 2 万字上限
+        block = '<div style="font-size:13px;">段落内容' + "字" * 80 + "</div>"
+        html = ("<!DOCTYPE html><html><body>"
+                "<table><tr><td>"
+                + block * 240
+                + "</td></tr></table></body></html>")
+        self.assertGreater(len(html), 20000)
+
+        out, truncated = pipeline._truncate_html_for_push(html, limit=20000)
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(out), 20000)
+        self.assertTrue(self._balanced(out))
+        self.assertIn("已自动截断", out)
+        # 截断不会丢开头内容
+        self.assertTrue(out.startswith("<!DOCTYPE html><html><body>"))
+
+    def test_html_within_limit_passes_through(self):
+        html = "<html><body><table><tr><td>短内容</td></tr></table></body></html>"
+        out, truncated = pipeline._truncate_html_for_push(html, limit=20000)
+        self.assertFalse(truncated)
+        self.assertEqual(out, html)
+
+    def test_notice_includes_full_report_link_when_report_name_and_repo_known(self):
+        html = "<html><body><table><tr><td>" + "字" * 21000 + "</td></tr></table></body></html>"
+        with patch.dict(pipeline.os.environ, {"GITHUB_REPOSITORY": "k-macao/02"}):
+            out, truncated = pipeline._truncate_html_for_push(
+                html, limit=20000, report_name="daily_report_20260802.html")
+        self.assertTrue(truncated)
+        self.assertIn("daily_report_20260802.html", out)
+        self.assertIn("https://raw.githubusercontent.com/k-macao/02/main/output/daily_report_20260802.html", out)
+        self.assertLessEqual(len(out), 20000)
+
+    def test_push_to_wechat_sends_truncated_content_within_limit(self):
+        calls = {}
+
+        def fake_post(url, json=None, timeout=None):
+            calls["json"] = json
+            return _FakeResp(200)
+
+        big = "<html><body><table><tr><td>" + "<div>段落</div>" * 3000 + "</td></tr></table></body></html>"
+        self.assertGreater(len(big), 20000)
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", 20000), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            ok = pipeline.push_to_wechat("标题", big, token="abc", template="html")
+        self.assertTrue(ok)
+        sent = calls["json"]["content"]
+        self.assertLessEqual(len(sent), 20000)
+        self.assertIn("已自动截断", sent)
+        self.assertTrue(self._balanced(sent))
+
+    def test_member_limit_default_allows_full_report(self):
+        # 账号已升级会员：默认上限 10 万字，当前日报（约 3.3 万字）完整推送、不截断
+        self.assertEqual(pipeline.PUSHPLUS_MAX_CONTENT_CHARS, 100000)
+        html = open(Path(__file__).parents[1] / "output" / "daily_report_20260802.html",
+                    encoding="utf-8").read()
+        self.assertGreater(len(html), 20000)
+        out, truncated = pipeline._truncate_html_for_push(html)
+        self.assertFalse(truncated)
+        self.assertEqual(out, html)
+
+
 class PushRetryTests(unittest.TestCase):
     """可恢复错误按退避重试；配额/凭证/未知业务错误不重试（2026-08-01 Actions 显红修复）。"""
 

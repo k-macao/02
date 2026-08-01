@@ -23,6 +23,10 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
+  8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
+     PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
+     截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
+     始终保留完整版。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -69,6 +73,12 @@ CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
 # PushPlus 配置
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
+# PushPlus 内容长度上限：实名用户 2 万字、会员用户 10 万字（账号已升级会员，默认按 10 万）。
+# 超过上限的内容会被平台截断，截断点常落在标签中间，导致微信端整页排版崩坏
+# （表现为整页只剩浅灰背景、正文缺失）。因此发送前先按完整标签边界截断并闭合标签，
+# 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
+# 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
+PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
 
 # 请求头
 DEFAULT_HEADERS = {
@@ -1190,7 +1200,76 @@ def _push_failure_kind(http_status=None, code=None, msg=""):
     return "unknown"
 
 
-def push_to_wechat(title, content_html, token=None, template="html"):
+# ------------------------------------------------------------
+# PushPlus 内容上限截断
+# ------------------------------------------------------------
+# 自闭合 / void 标签（不会消耗闭合标签）
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+              "link", "meta", "param", "source", "track", "wbr"}
+# 匹配完整标签（含属性中带引号的 > ），用于按标签边界安全截断
+_TAG_RE = re.compile(r"<(?P<close>/)?(?P<tag>[a-zA-Z][a-zA-Z0-9]*)"
+                     r"(?P<attrs>(?:\"[^\"]*\"|'[^']*'|[^>\"'])*)>")
+
+
+def _build_truncate_notice(report_name=None):
+    """生成截断提示条：说明推送被截断、磁盘完整版不受影响，并附完整版链接（如有）。"""
+    link = ""
+    if report_name:
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if repo:
+            url = (f"https://raw.githubusercontent.com/{repo}/main/output/"
+                   f"{report_name}")
+            link = (f'<div style="padding:6px 0 2px;"><a href="{url}" '
+                    f'style="color:#002FA7;font-weight:700;text-decoration:none;">'
+                    f"📄 查看完整日报（{report_name}）</a></div>")
+    fname = f"（完整版文件：{report_name}）" if report_name else ""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;margin-top:8px;background:#fdf3d9;'
+            f'border-left:3px solid #8a5300;"><tr><td '
+            f'style="padding:8px 10px;font-size:12px;color:#8a5300;line-height:1.7;">'
+            f"⚠️ 微信推送有内容长度上限，本消息已自动截断；仓库中的完整日报不受影响{fname}。"
+            f"{link}</td></tr></table>")
+
+
+def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=None):
+    """把 HTML 截断到 PushPlus 内容上限以内：只切在完整标签边界，并逆序补全所有未闭合标签。
+
+    返回 (截断后的 html, 是否发生了截断)。磁盘上的日报文件不会被改动——完整版始终保留，
+    微信推送只发截断后的版本，末尾附完整版链接/文件名，避免平台截断导致整页排版崩坏。
+    """
+    if len(html) <= limit:
+        return html, False
+
+    notice = _build_truncate_notice(report_name)
+
+    stack = []          # 未闭合标签栈
+    candidates = []     # (完整标签结束位置, 该位置时的标签栈快照)
+    for m in _TAG_RE.finditer(html):
+        end = m.end()
+        if end > limit:
+            break
+        tag, closing = m.group("tag").lower(), bool(m.group("close"))
+        if tag not in _VOID_TAGS:
+            if closing:
+                if stack and stack[-1] == tag:
+                    stack.pop()
+                # 不匹配时保持栈不变：由下面的逆序补闭合保证结果合法
+            else:
+                stack.append(tag)
+        candidates.append((end, stack.copy()))
+
+    # 从最后一个候选点向前找：正文 + 截断提示 + 逆序闭合标签 的总长不超过上限。
+    # 越靠前的候选点未闭合标签越少，闭合标签越短，因此总能找到可用点。
+    for end, stack_at_cut in reversed(candidates):
+        closers = "".join(f"</{t}>" for t in reversed(stack_at_cut))
+        if len(html[:end]) + len(notice) + len(closers) <= limit:
+            return html[:end] + notice + closers, True
+
+    # 极端情况：任何截断点都放不下 → 只发截断提示，保证微信端仍能看到说明与完整版入口
+    return notice, True
+
+
+def push_to_wechat(title, content_html, token=None, template="html", report_name=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
@@ -1207,6 +1286,12 @@ def push_to_wechat(title, content_html, token=None, template="html"):
         return False
 
     print(f"📤 正在推送到微信 (PushPlus, template={template})...")
+    if template == "html":
+        content_html, was_truncated = _truncate_html_for_push(
+            content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
+        if was_truncated:
+            print(f"  ⚠️ 日报 HTML 超过 PushPlus 上限 {PUSHPLUS_MAX_CONTENT_CHARS} 字符，"
+                  f"已按完整标签边界截断后推送（磁盘上的完整版不受影响）")
     payload = {
         "token": token,
         "title": title,
@@ -1529,7 +1614,7 @@ def main():
             return 1
 
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
-        if push_to_wechat(title, html):
+        if push_to_wechat(title, html, report_name=os.path.basename(push_path)):
             print("\n🎉 全部完成！")
             return 0
         push_failure_alert("通过 --push-only 推送日报被 PushPlus 拒绝（详见上方 code/msg）",
@@ -1589,7 +1674,7 @@ def main():
         print(f"\n📤 当天检验通过：{reason}")
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
-        if push_to_wechat(title, push_html):
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         # 日报推送失败：再发一条纯文本失败告警，微信侧能直接看到原因；退出码仍为 1。
         push_failure_alert("日报 HTML 多次推送均被 PushPlus 拒绝（详见上方 code/msg）",
@@ -1600,7 +1685,7 @@ def main():
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
         title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
-        if push_to_wechat(title, push_html):
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
                            data=data, report_path=output_path)
@@ -1610,7 +1695,7 @@ def main():
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
         title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
-        if push_to_wechat(title, push_html):
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",
                            data=data, report_path=output_path)
