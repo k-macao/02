@@ -17,7 +17,8 @@ python3 output/pipeline.py                  # 全流程
 python3 output/pipeline.py --no-push        # 只生成日报，不推送
 python3 output/pipeline.py --dry-run        # 采集+预览，不推送
 python3 output/pipeline.py -o custom.html   # 指定输出路径
-python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 只推送带新鲜度标记的已有文件
+python3 output/pipeline.py --push-only             # 推送实际最后更新的 HTML（即使 latest.html 被锁定）
+python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 推送指定的带新鲜度标记文件
 python3 output/pipeline.py --allow-incomplete-push # 全部数据源故障时仍推送“数据暂缺”状态报告（默认不推送）
 python3 output/push.py --list               # 列出已生成的日报
 ```

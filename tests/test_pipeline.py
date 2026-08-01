@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 # pipeline 在导入时只需要 requests 存在；本测试不发出 HTTP 请求。
 sys.modules.setdefault("requests", types.SimpleNamespace())
@@ -46,6 +47,29 @@ class ReportFreshnessTests(unittest.TestCase):
                 pipeline.REPORT_DIR = old_report_dir
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
             self.assertEqual((Path(directory) / "latest.html").read_text(encoding="utf-8"), "new")
+
+    def test_locked_daily_file_creates_new_timestamped_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            requested = str(Path(directory) / "daily_report_20260801.html")
+            original_write = pipeline._atomic_write
+
+            def locked_first_write(path, content):
+                if path == requested:
+                    raise PermissionError("file is locked")
+                return original_write(path, content)
+
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                with patch.object(pipeline, "_atomic_write", side_effect=locked_first_write):
+                    actual = pipeline.save_report("newest", requested, {})
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+
+            self.assertNotEqual(actual, requested)
+            self.assertRegex(Path(actual).name, r"daily_report_20260801_\d{6}(?:_\d+)?\.html")
+            self.assertEqual(Path(actual).read_text(encoding="utf-8"), "newest")
+            self.assertEqual((Path(directory) / "latest.html").read_text(encoding="utf-8"), "newest")
 
 
 if __name__ == "__main__":

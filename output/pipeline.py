@@ -8,7 +8,8 @@
   python3 output/pipeline.py --no-push        # 只生成，不推送
   python3 output/pipeline.py --dry-run        # 采集+预览，不推送
   python3 output/pipeline.py -o custom.html   # 指定输出路径
-  python3 output/pipeline.py --push-only output/daily_report_20260730.html
+  python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报
+  python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list           # 列出日报
 """
 import os
@@ -664,20 +665,52 @@ def _atomic_write(path, content):
             os.unlink(tmp_path)
 
 
-def save_report(html, output_path=None, data=None):
-    """保存本次运行的报告和 latest 副本，绝不静默保留昨天的内容。"""
-    if not output_path:
-        output_path = os.path.join(REPORT_DIR, f"daily_report_{_today_str()}.html")
+def _timestamped_report_path():
+    """目标文件被锁定/不可覆盖时使用的全新日期时间文件名。"""
+    stamp = datetime.now(CST).strftime("%Y%m%d_%H%M%S")
+    candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}.html")
+    sequence = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}_{sequence}.html")
+        sequence += 1
+    return candidate
 
-    _atomic_write(output_path, html)
+
+def newest_report_path():
+    """返回实际最后更新的一份日报，不依赖可能被锁住的 latest.html。"""
+    reports = glob.glob(os.path.join(REPORT_DIR, "daily_report_*.html"))
+    return max(reports, key=os.path.getmtime) if reports else None
+
+
+def save_report(html, output_path=None, data=None):
+    """保存本次报告；目标不能覆盖时创建带日期时间的新 HTML，绝不退回旧文件。"""
+    requested_path = output_path or os.path.join(REPORT_DIR, f"daily_report_{_today_str()}.html")
+    try:
+        _atomic_write(requested_path, html)
+        output_path = requested_path
+        print(f"💾 日报已原子保存: {output_path}")
+    except OSError as exc:
+        # 文件被其它进程锁定、只读或无法替换时，保留旧文件并输出一份可追溯的新报告。
+        output_path = _timestamped_report_path()
+        try:
+            _atomic_write(output_path, html)
+        except OSError as fallback_exc:
+            raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}）") from fallback_exc
+        print(f"⚠️ 无法覆盖 {requested_path}: {exc}")
+        print(f"💾 已改存为新的日期文件: {output_path}")
+
     latest_path = os.path.join(REPORT_DIR, "latest.html")
-    _atomic_write(latest_path, html)
+    try:
+        _atomic_write(latest_path, html)
+        print(f"💾 最新副本已同步: {latest_path}")
+    except OSError as exc:
+        # 推送时始终从 output_path 重读，latest 锁定不会导致推送昨天的内容。
+        print(f"⚠️ 无法更新 {latest_path}: {exc}")
+        print(f"   本次推送将直接使用最新生成文件: {output_path}")
 
     available = sum(1 for item in (data or {}).values()
                     if isinstance(item, dict) and item.get("status") == "success")
     total = sum(1 for item in (data or {}).values() if isinstance(item, dict))
-    print(f"💾 日报已原子保存: {output_path}")
-    print(f"💾 最新副本已同步: {latest_path}")
     print(f"📊 数据源状态: {available}/{total} 可用（不可用项已在报告中标注）")
     return output_path
 
@@ -716,7 +749,8 @@ def main():
   python3 output/pipeline.py --no-push        # 只生成，不推送
   python3 output/pipeline.py --dry-run        # 采集+预览，不推送
   python3 output/pipeline.py -o custom.html   # 指定输出路径
-  python3 output/pipeline.py --push-only output/daily_report_20260730.html
+  python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报
+  python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list           # 列出日报
         """
     )
@@ -727,8 +761,8 @@ def main():
                        help="采集数据并预览，不生成文件也不推送")
     parser.add_argument("-o", "--output", type=str, default=None,
                        help="指定输出文件路径")
-    parser.add_argument("--push-only", type=str, default=None,
-                       help="只推送已有的、带新鲜度标记的日报文件")
+    parser.add_argument("--push-only", nargs="?", const="__LATEST__", default=None,
+                       help="推送实际最后更新的日报；也可指定带新鲜度标记的文件")
     parser.add_argument("--force-push-old", action="store_true",
                        help="允许 --push-only 推送未带新鲜度标记的旧版日报（不推荐）")
     parser.add_argument("--allow-incomplete-push", action="store_true",
@@ -744,11 +778,12 @@ def main():
     
     # --push-only 模式
     if args.push_only:
-        if not os.path.isfile(args.push_only):
-            print(f"❌ 文件不存在: {args.push_only}")
+        push_path = newest_report_path() if args.push_only == "__LATEST__" else args.push_only
+        if not push_path or not os.path.isfile(push_path):
+            print(f"❌ 文件不存在: {push_path or '没有可推送的日报'}")
             return 1
-        
-        with open(args.push_only, "r", encoding="utf-8") as f:
+        print(f"📎 本次推送最新 HTML: {push_path}")
+        with open(push_path, "r", encoding="utf-8") as f:
             html = f.read()
         if "本次数据可用性" not in html and not args.force_push_old:
             print("❌ 拒绝推送旧版日报：文件没有数据来源/抓取时间标记。")
@@ -786,13 +821,17 @@ def main():
     
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
+    # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
+    with open(output_path, "r", encoding="utf-8") as f:
+        push_html = f.read()
     
     # 5. 推送：所有来源都失败时，不把“数据暂缺”误当日报推送给用户。
     available_sources = sum(1 for item in data.values()
                             if isinstance(item, dict) and item.get("status") == "success")
     if not args.no_push and (available_sources > 0 or args.allow_incomplete_push):
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, html)
+        print(f"📎 正在推送本次生成的 HTML: {output_path}")
+        push_to_wechat(title, push_html)
     elif not args.no_push:
         print("\n⏭️ 所有数据源均不可用：已生成带状态标记的报告，但默认不推送。")
         print("   如需推送状态报告，请添加 --allow-incomplete-push。")
