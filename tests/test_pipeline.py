@@ -300,63 +300,28 @@ class _FakeResp:
         return {"code": self._code, "msg": self._msg}
 
 
-class _FakeGeminiResp:
-    """模拟 Gemini generateContent HTTP 响应。"""
-
-    def __init__(self, text):
-        self._text = text
-        self.status_code = 200
-
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return {"candidates": [{"content": {"parts": [{"text": self._text}]}}]}
-
-
 class GoogleNewsSourceTests(unittest.TestCase):
-    """2026-08-02 新增：全球头条改用 Google News（英文源 + Gemini 翻译 / 中文源降级）。"""
+    """2026-08-02 新增：全球头条改用 Google News 中文版。"""
 
-    EN_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+    ZH_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
-  <item><title>Fed signals rate cut - Reuters</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
-  <item><title>Stocks rally on tech earnings - Bloomberg</title><link>https://news.google.com/b</link><pubDate>Sat, 02 Aug 2026 03:00:00 GMT</pubDate></item>
+  <item><title>美联储释放降息信号 - 华尔街见闻</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
+  <item><title>科技股财报推动股市上涨 - 彭博</title><link>https://news.google.com/b</link><pubDate>Sat, 02 Aug 2026 03:00:00 GMT</pubDate></item>
 </channel></rss>"""
 
-    def test_fetch_google_news_uses_en_feed_and_translates_with_key(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-             patch.object(pipeline, "safe_request", return_value=self.EN_RSS) as req, \
-             patch.object(pipeline, "ai_translate_titles", return_value=[
-                 {"i": 0, "zh": "美联储暗示降息"}, {"i": 1, "zh": "科技股财报推动股市上涨"}]) as tr:
+    def test_fetch_google_news_uses_chinese_feed(self):
+        with patch.object(pipeline, "safe_request", return_value=self.ZH_RSS) as req:
             result = pipeline.fetch_google_news()
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["source"], "Google News")
-        self.assertTrue(result["translated"])
-        self.assertEqual(result["headlines"][0]["zh"], "美联储暗示降息")
-        self.assertEqual(result["headlines"][0]["title"], "Fed signals rate cut")
-        self.assertEqual(result["headlines"][0]["source"], "Reuters")
-        self.assertEqual(result["headlines"][1]["zh"], "科技股财报推动股市上涨")
-        # 配置 Key 时走英文源
-        self.assertIn("hl=en-US", req.call_args[0][0])
-        tr.assert_called_once()
-
-    def test_fetch_google_news_falls_back_to_chinese_feed_without_key(self):
-        zh_rss = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-  <item><title>美联储释放降息信号 - 华尔街见闻</title><link>https://news.google.com/a</link><pubDate>Sat, 02 Aug 2026 04:00:00 GMT</pubDate></item>
-</channel></rss>"""
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
-             patch.object(pipeline, "safe_request", return_value=zh_rss) as req:
-            result = pipeline.fetch_google_news()
-        self.assertEqual(result["status"], "success")
-        self.assertFalse(result["translated"])
-        self.assertIn("hl=zh-CN", req.call_args[0][0])  # 未配置 Key 走中文源
         self.assertEqual(result["headlines"][0]["title"], "美联储释放降息信号")
         self.assertEqual(result["headlines"][0]["source"], "华尔街见闻")
+        self.assertEqual(result["headlines"][1]["title"], "科技股财报推动股市上涨")
+        # 直接抓中文源
+        self.assertIn("hl=zh-CN", req.call_args[0][0])
 
     def test_fetch_google_news_unavailable_marks_error(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), \
-             patch.object(pipeline, "safe_request", return_value=None):
+        with patch.object(pipeline, "safe_request", return_value=None):
             result = pipeline.fetch_google_news()
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["headlines"], [])
@@ -406,79 +371,14 @@ class EastmoneySourceTests(unittest.TestCase):
         self.assertEqual(result["markets"]["A股"]["stocks"], [])
 
 
-class GeminiAiTests(unittest.TestCase):
-    """2026-08-02 新增：Gemini AI 研判 / 翻译 / 总结。"""
-
-    def test_ai_analyze_section_parses_json(self):
-        def fake_post(url, json=None, timeout=None):
-            self.assertIn("generativelanguage.googleapis.com", url)
-            return _FakeGeminiResp('{"direction":"偏多","probability":68,"reason":"科技股财报超预期"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            analysis = pipeline.ai_analyze_section("全球头条", "内容")
-        self.assertEqual(analysis["direction"], "偏多")
-        self.assertEqual(analysis["probability"], 68)
-        self.assertIn("科技股", analysis["reason"])
-
-    def test_ai_analyze_section_returns_none_without_key(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
-            self.assertIsNone(pipeline.ai_analyze_section("全球头条", "内容"))
-
-    def test_ai_analyze_section_normalizes_bad_direction_and_probability(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('{"direction":"大涨","probability":150,"reason":"x"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            analysis = pipeline.ai_analyze_section("x", "y")
-        self.assertEqual(analysis["direction"], "中性")   # 非法方向归一
-        self.assertEqual(analysis["probability"], 100)    # 概率夹到 0-100
-
-    def test_ai_translate_titles_parses_json_array(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('[{"i":0,"zh":"标题甲"},{"i":1,"zh":"标题乙"}]')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            result = pipeline.ai_translate_titles([{"i": 0, "title": "A"}, {"i": 1, "title": "B"}])
-        self.assertEqual(result[0]["zh"], "标题甲")
-        self.assertEqual(result[1]["zh"], "标题乙")
-
-    def test_ai_translate_titles_keeps_original_when_parsing_fails(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "gemini_json", return_value=None):
-            result = pipeline.ai_translate_titles([{"i": 0, "title": "Original"}])
-        self.assertIsNone(result)   # 整体失败 → 调用方保留原文
-
-    def test_gemini_json_strips_markdown_code_fence(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('```json\n{"direction":"偏空","probability":55,"reason":"利率上行"}\n```')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            data = pipeline.gemini_json("prompt")
-        self.assertEqual(data["direction"], "偏空")
-        self.assertEqual(data["probability"], 55)
-
-    def test_ai_overall_summary_parses(self):
-        def fake_post(url, json=None, timeout=None):
-            return _FakeGeminiResp('{"summary":"市场整体偏强，科技板块领涨。"}')
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
-            summary = pipeline.ai_overall_summary([("全球头条", "偏多", 66, "科技领涨")])
-        self.assertIn("偏强", summary)
-
-
 class NewLayoutRenderingTests(unittest.TestCase):
-    """2026-08-02 新增：AI 总览表 / 东财快讯 / 热门榜单渲染。"""
+    """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
 
     def _rich_data(self):
         data = ReportFreshnessTests()._sample_data()
         data["全球头条"] = pipeline._source_result(
-            "Google News", "success", is_today=True, content_date="2026-08-02", translated=True,
-            headlines=[{"title": "Fed Holds Rates", "zh": "美联储按兵不动", "source": "Reuters",
+            "Google News", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": "美联储释放降息信号", "source": "华尔街见闻",
                         "url": "", "published_cst": "2026-08-02 10:00", "is_today": True}])
         data["东财快讯"] = pipeline._source_result(
             "东方财富", "success", is_today=True, content_date="2026-08-02",
@@ -491,32 +391,21 @@ class NewLayoutRenderingTests(unittest.TestCase):
                 for i in range(10)]} for m in ["A股", "港股", "美股"]})
         return data
 
-    def test_report_renders_new_sections_without_key(self):
+    def test_report_renders_new_sections(self):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn("AI 总览", html)              # AI 总览卡片
-        self.assertIn("GEMINI_API_KEY", html)       # 未配置 Key 的降级提示
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
         self.assertIn("热门榜单", html)
         self.assertIn("A股涨幅前十", html)
         self.assertIn("美股涨幅前十", html)
-        self.assertIn("美联储按兵不动", html)        # Google News 中文标题
-        self.assertIn("原文：Fed Holds Rates", html)  # 原文保留
-        self.assertIn("AI暂缺", html)              # 无 Key → 栏目 AI 徽章降级
+        self.assertIn("美联储释放降息信号", html)
+        # 不再渲染 AI 总览相关元素
+        self.assertNotIn("AI 总览", html)
+        self.assertNotIn("栏目 AI 研判表", html)
+        self.assertNotIn("Gemini", html)
+        self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["total_sources"], 8)  # 数据源扩展到 8 个
-
-    def test_report_renders_ai_summary_table_with_key(self):
-        fake_analysis = {"direction": "偏多", "probability": 66, "reason": "科技股领涨"}
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
-             patch.object(pipeline, "ai_analyze_section", return_value=fake_analysis), \
-             patch.object(pipeline, "ai_overall_summary", return_value="市场整体偏强，关注科技板块。"):
-            html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn("AI 总结", html)
-        self.assertIn("市场整体偏强", html)
-        self.assertIn("栏目 AI 研判表", html)
-        self.assertIn("偏多 66%", html)
-        self.assertIn("热门榜·A股", html)          # 热门榜三个市场也进分析表
 
 
 class PushResultTests(unittest.TestCase):
@@ -635,8 +524,10 @@ class PushTruncationTests(unittest.TestCase):
     def test_member_limit_default_allows_full_report(self):
         # 账号已升级会员：默认上限 10 万字，当前日报（约 3.3 万字）完整推送、不截断
         self.assertEqual(pipeline.PUSHPLUS_MAX_CONTENT_CHARS, 100000)
-        html = open(Path(__file__).parents[1] / "output" / "daily_report_20260802.html",
-                    encoding="utf-8").read()
+        report_path = Path(__file__).parents[1] / "output" / "daily_report_20260802.html"
+        if not report_path.exists():
+            self.skipTest(f"日报样例文件不存在: {report_path}")
+        html = open(report_path, encoding="utf-8").read()
         self.assertGreater(len(html), 20000)
         out, truncated = pipeline._truncate_html_for_push(html)
         self.assertFalse(truncated)
