@@ -8,7 +8,7 @@ cd /path/to/02
 python3 output/push.py           # ①采集 → ②分析 → ③生成日报 → ④推送到微信
 ```
 
-**每次运行都会重新抓取全网最新数据，再推送。**
+**每次运行都会重新抓取数据、原子更新日报；全部数据源不可用时会生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。**
 
 ## 🎛️ 高级用法
 
@@ -17,7 +17,9 @@ python3 output/pipeline.py                  # 全流程
 python3 output/pipeline.py --no-push        # 只生成日报，不推送
 python3 output/pipeline.py --dry-run        # 采集+预览，不推送
 python3 output/pipeline.py -o custom.html   # 指定输出路径
-python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 只推送已有文件
+python3 output/pipeline.py --push-only             # 推送实际最后更新的 HTML（即使 latest.html 被锁定）
+python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 推送指定的带新鲜度标记文件
+python3 output/pipeline.py --allow-incomplete-push # 全部数据源故障时仍推送“数据暂缺”状态报告（默认不推送）
 python3 output/push.py --list               # 列出已生成的日报
 ```
 
