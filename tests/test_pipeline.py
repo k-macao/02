@@ -402,13 +402,24 @@ class PushTruncationTests(unittest.TestCase):
 
         big = "<html><body><table><tr><td>" + "<div>段落</div>" * 3000 + "</td></tr></table></body></html>"
         self.assertGreater(len(big), 20000)
-        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", 20000), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
             ok = pipeline.push_to_wechat("标题", big, token="abc", template="html")
         self.assertTrue(ok)
         sent = calls["json"]["content"]
         self.assertLessEqual(len(sent), 20000)
         self.assertIn("已自动截断", sent)
         self.assertTrue(self._balanced(sent))
+
+    def test_member_limit_default_allows_full_report(self):
+        # 账号已升级会员：默认上限 10 万字，当前日报（约 3.3 万字）完整推送、不截断
+        self.assertEqual(pipeline.PUSHPLUS_MAX_CONTENT_CHARS, 100000)
+        html = open(Path(__file__).parents[1] / "output" / "daily_report_20260802.html",
+                    encoding="utf-8").read()
+        self.assertGreater(len(html), 20000)
+        out, truncated = pipeline._truncate_html_for_push(html)
+        self.assertFalse(truncated)
+        self.assertEqual(out, html)
 
 
 class PushRetryTests(unittest.TestCase):

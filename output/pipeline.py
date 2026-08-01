@@ -23,8 +23,8 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
-  8. PushPlus 普通（实名）用户内容上限 2 万字（会员 10 万字，可用环境变量
-     PUSHPLUS_MAX_CONTENT_CHARS 调高）。日报 HTML 超过上限时，发送前会按完整标签边界
+  8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
+     PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
      截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
      始终保留完整版。
 
@@ -73,12 +73,12 @@ CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
 # PushPlus 配置
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
-# PushPlus 内容长度上限：实名用户 2 万字、会员用户 10 万字。
+# PushPlus 内容长度上限：实名用户 2 万字、会员用户 10 万字（账号已升级会员，默认按 10 万）。
 # 超过上限的内容会被平台截断，截断点常落在标签中间，导致微信端整页排版崩坏
 # （表现为整页只剩浅灰背景、正文缺失）。因此发送前先按完整标签边界截断并闭合标签，
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
-# 会员可在环境变量 PUSHPLUS_MAX_CONTENT_CHARS 中调高（如 100000）。
-PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "20000"))
+# 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
+PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
 
 # 请求头
 DEFAULT_HEADERS = {
