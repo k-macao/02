@@ -8,7 +8,9 @@
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
      只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
      但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
-  3. 页面内容重新加入 YouTube 财经资讯与新闻频道（RSS 无需 API Key）。
+  3. 页面内容包含「港股名家频道」区块：香港股评人/财经平台的 YouTube 与通用 RSS
+     抓取（无需 API Key），每频道列出最新 3 条；需登录平台明确标注「暂缺」及原因，
+     不伪造内容。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -76,16 +78,97 @@ DEFAULT_HEADERS = {
 }
 
 # ------------------------------------------------------------
-# YouTube 财经资讯与新闻频道（RSS 订阅，无需 API Key）
-# 每个频道可配置 channel_id（最稳）或 handle（运行时自动解析，解析失败标记暂缺）。
-# 需要增删频道时直接改这个列表即可。
+# 港股名家频道（内容渠道配置，2026-08-02 起按用户指定列表）
+# 每个频道可配置：
+#   kind = "youtube"  → YouTube 频道，通过公开 RSS 抓取（无需 API Key），
+#                       填 channel_id（最稳）或 handle（运行时自动解析，失败标记暂缺）
+#   kind = "rss"      → 通用 RSS / Atom 源（如 Medium、Substack）
+#   kind = "manual"   → 需登录 / 平台限制，暂无法自动抓取（页面标注「暂缺」及原因，不伪造内容）
+# 每频道在日报中列出最新 CHANNEL_TOP_N 条内容。
+# 需要增删频道或接入新平台时直接改这个列表即可。
 # ------------------------------------------------------------
-YOUTUBE_CHANNELS = [
-    {"name": "CNBC 财经新闻（美）", "channel_id": "UCrp_UI8XtuYfpiqluWLD7Lw"},
-    {"name": "Bloomberg 彭博电视（美）", "channel_id": "UCIALMKvObZNtJ6AmdCLP7Lg"},
-    {"name": "Yahoo Finance（美）", "handle": "@YahooFinance"},
-    {"name": "华尔街电视 WallStTV（中文·纽约）", "handle": "@WallStTV"},
-    {"name": "第一财经 Yicai Global（中国）", "handle": "@YicaiGlobal"},
+CHANNEL_TOP_N = 3
+
+HK_CHANNELS = [
+    # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
+    {"name": "郭思治（郭Sir）",
+     "desc": "香港著名股評人，專注大盤技術走勢。",
+     "kind": "youtube", "handle": "@KwokSirFinance"},
+
+    # ── 需登录 / 暂未提供可抓取源（明确标注暂缺）────────────
+    {"name": "曾廣標（股票分析）",
+     "desc": "資深股評人，專注細價股與價值挖掘。",
+     "kind": "manual",
+     "note": "暂无官方可抓取频道；旧视频散见于「港股直播室 @hongkongstock」（2023 年后未更新）"},
+    {"name": "陸羽仁（金融肉搏戰）",
+     "desc": "老牌專欄，分析港股大局與政經關係。",
+     "kind": "manual",
+     "note": "信報專欄，非 YouTube；暂不支持自动抓取"},
+    {"name": "青姐（胡孟青）",
+     "desc": "風格辛辣，直擊港股市場痛點與散戶心態。",
+     "kind": "manual",
+     "note": "暂无官方频道；节目「胡孟青拆局」发布于 AASTOCKS 频道（@AASTOCKS_AATV）"},
+    {"name": "智通財經App（微信公众号）",
+     "desc": "每日推送港股早報與板塊機會。",
+     "kind": "manual",
+     "note": "微信公众号需登录，暂不支持自动抓取"},
+    {"name": "港股那點事（格隆匯）（微信公众号）",
+     "desc": "深度剖析港股上市公司實力。",
+     "kind": "manual",
+     "note": "微信公众号需登录，暂不支持自动抓取"},
+    {"name": "球友大白（雪球 KOL）",
+     "desc": "長線跟蹤港股高股息、藍籌股。",
+     "kind": "manual",
+     "note": "雪球需登录 / 反爬限制，暂不支持自动抓取"},
+    {"name": "香港投資筆記（Medium）",
+     "desc": "獨立分析師發表深度個股研究。",
+     "kind": "rss", "feed_url": "",
+     "note": "请提供 Medium 地址后接入 RSS"},
+    {"name": "港股策略通訊（Substack）",
+     "desc": "付費/免費的深度行業趨勢報告。",
+     "kind": "rss", "feed_url": "",
+     "note": "请提供 Substack 地址后接入 RSS"},
+    {"name": "港股交易員（微博大V）",
+     "desc": "實時更新盤中異動與傳聞。",
+     "kind": "manual",
+     "note": "微博需登录 / 反爬限制，暂不支持自动抓取"},
+
+    # ── 第二批（2026-08-02 追加，用户指定）──────────────────
+    {"name": "施凌部署",
+     "desc": "結合宏觀經濟與技術分析的知名財經頻道；施凌部署為「我要做富翁」旗下品牌，於該官方頻道發布。",
+     "kind": "youtube", "handle": "@Money-Tab"},
+    {"name": "BofA Global Research（美銀研究）",
+     "desc": "解讀大行對港股策略的官方影音；BofA Global Research 內容於 Bank of America 官方頻道發布（Must Read Research 系列）。",
+     "kind": "youtube", "handle": "@BankofAmerica"},
+    {"name": "秒投（ShareNews / StockViva）",
+     "desc": "邀請多位香港股評人進行直播分析。",
+     "kind": "youtube", "handle": "@StockViva"},
+    {"name": "C基金 - 李浩德",
+     "desc": "基金經理視角，分析港股大盤與科技股。",
+     "kind": "youtube", "handle": "@CFund_Channel"},
+    {"name": "Finance730",
+     "desc": "探討香港財經、地產及股市走勢的專業網媒。",
+     "kind": "youtube", "handle": "@Finance730hk"},
+    {"name": "紅猴（Red Monkey）",
+     "desc": "深度分析港股價值投資與公司基本面。",
+     "kind": "manual",
+     "note": "未找到独立官方频道；其视频散见于「成家網上投資課程」等第三方频道（多为 2022 年前旧内容）"},
+    {"name": "米高（Michael）的財經頻道",
+     "desc": "專注港股短線操作與期指分析。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「米高 Michael 財經頻道」，请提供频道链接或 handle 后接入"},
+    {"name": "小斯財經",
+     "desc": "用深入淺出的方式講解港股與新股申購。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「小斯財經」频道，请提供频道链接或 handle 后接入"},
+    {"name": "智富同學會",
+     "desc": "分享技術指標與港股實戰策略。",
+     "kind": "manual",
+     "note": "未检索到「智富同學會」独立频道；疑似相关频道「智富財經 Invest Smarter @investsmarter536」，如需接入请确认"},
+    {"name": "港股研究社（Bilibili）",
+     "desc": "面向內地投資者的港股解讀視頻（B站 UP 主，UID 613310838）。",
+     "kind": "rss", "feed_url": "https://rsshub.app/bilibili/user/video/613310838",
+     "note": "通过 RSSHub 抓取 Bilibili 投稿；如公共实例被限流，可更换其他 RSSHub 实例"},
 ]
 
 YT_NS = {
@@ -439,7 +522,7 @@ def fetch_kospi_headlines():
 
 
 # ============================================================
-# 数据源 5：YouTube 财经资讯与新闻频道
+# 数据源 5：港股名家频道（YouTube / 通用 RSS / 需登录平台）
 # ============================================================
 def resolve_channel_id(channel):
     """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
@@ -459,18 +542,112 @@ def resolve_channel_id(channel):
     return m.group(1) if m else None
 
 
-def fetch_youtube_finance():
-    """抓取 YouTube 财经资讯与新闻频道的最新视频（RSS，无需 API Key）。
+def _channel_item(title, url, pub_raw):
+    """把一条频道内容的标题/链接/发布时间整理成统一结构（北京时间 + 是否当天）。"""
+    pub_cst = _cst_from_iso(pub_raw)
+    if pub_cst is None:  # 兼容 RSS 2.0 的 RFC 2822 格式（如 Fri, 01 Aug 2026 12:00:00 +0800）
+        try:
+            from email.utils import parsedate_to_datetime
+            pub_cst = parsedate_to_datetime(pub_raw).astimezone(CST)
+        except Exception:
+            pub_cst = None
+    return {
+        "title": title,
+        "url": url,
+        "published": pub_raw,
+        "published_cst": pub_cst.strftime("%Y-%m-%d %H:%M") if pub_cst else "—",
+        "is_today": _date_is_today(pub_cst),
+    }
 
-    返回每个频道最近若干视频，包含发布时间（北京时间）与「是否当天」标记。
+
+def _parse_rss_items(xml_text, limit=8):
+    """解析通用 RSS 2.0 / Atom 源，返回 [{title,url,published_cst,is_today}, ...]。"""
+    items = []
+    try:
+        root = ET.fromstring(xml_text or "")
+    except Exception:
+        return []
+    # RSS 2.0
+    if root.tag == "rss":
+        channel = root.find("channel")
+        if channel is not None:
+            for item in channel.findall("item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub = (item.findtext("pubDate")
+                       or item.findtext("dc:date", namespaces={"dc": "http://purl.org/dc/elements/1.1/"})
+                       or "")
+                if title:
+                    items.append(_channel_item(title, link, pub))
+                if len(items) >= limit:
+                    break
+    # Atom
+    elif root.tag.endswith("feed"):
+        for entry in root.findall("a:entry", YT_NS):
+            title = (entry.findtext("a:title", "", YT_NS) or "").strip()
+            link = ""
+            for ln in entry.findall("a:link", YT_NS):
+                if (ln.get("rel") or "alternate") == "alternate":
+                    link = ln.get("href") or ""
+                    break
+            pub = (entry.findtext("a:published", "", YT_NS)
+                   or entry.findtext("a:updated", "", YT_NS) or "")
+            if title:
+                items.append(_channel_item(title, link, pub))
+            if len(items) >= limit:
+                break
+    return items
+
+
+def fetch_hk_channels():
+    """抓取「港股名家频道」的最新内容。
+
+    - kind="youtube"：YouTube 频道 RSS（无需 API Key），返回最新视频；
+    - kind="rss"    ：通用 RSS / Atom 源（Medium、Substack 等）；
+    - kind="manual" ：需登录 / 未配置来源，放入 unsupported（页面标注「暂缺」及原因，
+                      绝不伪造内容）。
+
+    返回 _source_result：channels=已抓取频道、unsupported=需登录/未配置频道。
     """
-    print("📡 正在抓取 YouTube 财经资讯与新闻频道...")
-    channels, failures = [], []
-    for ch in YOUTUBE_CHANNELS:
+    print("📡 正在抓取港股名家频道...")
+    channels, unsupported, failures = [], [], []
+    for ch in HK_CHANNELS:
         name = ch.get("name", "?")
+        kind = ch.get("kind", "youtube")
+
+        if kind == "manual":
+            unsupported.append({"name": name, "desc": ch.get("desc", ""),
+                                "note": ch.get("note", "平台需登录，暂不支持自动抓取")})
+            continue
+
+        if kind == "rss":
+            feed_url = (ch.get("feed_url") or "").strip()
+            if not feed_url:
+                unsupported.append({"name": name, "desc": ch.get("desc", ""),
+                                    "note": ch.get("note", "未配置 feed 地址")})
+                continue
+            xml_text = safe_request(feed_url, is_json=False, timeout=12)
+            items = _parse_rss_items(xml_text, limit=8)
+            if items:
+                channels.append({
+                    "name": name, "desc": ch.get("desc", ""), "source": "RSS",
+                    "url": feed_url, "videos": items,
+                    "is_today": any(v["is_today"] for v in items),
+                    "newest_date": next((v["published_cst"] for v in items if v["is_today"]),
+                                        items[0]["published_cst"]),
+                })
+            else:
+                msg = "自动抓取失败（源可能需登录/被限流，或地址无效），暂缺"
+                unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+                failures.append(f"{name}: {msg}")
+            continue
+
+        # kind == "youtube"
         cid = resolve_channel_id(ch)
         if not cid:
-            failures.append(f"{name}: 无法解析频道 ID")
+            msg = "无法解析频道 ID（handle 可能不存在或页面结构变化），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
             continue
         xml_text = safe_request(
             f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}",
@@ -479,8 +656,7 @@ def fetch_youtube_finance():
         videos = []
         try:
             root = ET.fromstring(xml_text or "")
-            entries = root.findall("a:entry", YT_NS)
-            for entry in entries[:8]:
+            for entry in root.findall("a:entry", YT_NS)[:8]:
                 title = (entry.findtext("a:title", "", YT_NS) or "").strip()
                 published = entry.findtext("a:published", "", YT_NS) or ""
                 vid = entry.findtext("yt:videoId", "", YT_NS) or ""
@@ -503,32 +679,42 @@ def fetch_youtube_finance():
             channel_url = f"https://www.youtube.com/@{handle}" if handle else \
                           f"https://www.youtube.com/channel/{cid}"
             channels.append({
-                "name": name,
-                "url": channel_url,
-                "videos": videos,
+                "name": name, "desc": ch.get("desc", ""), "source": "YouTube",
+                "url": channel_url, "videos": videos,
                 "is_today": any(v["is_today"] for v in videos),
                 "newest_date": next((v["published_cst"] for v in videos if v["is_today"]),
                                     videos[0]["published_cst"]),
             })
         else:
-            failures.append(f"{name}: 未取得视频")
+            msg = "自动抓取失败（RSS 暂无内容或网络异常），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
 
-    if not channels:
-        print("  ⚠️ YouTube 财经频道暂不可用，不显示历史视频兜底")
-        return _source_result("YouTube 财经频道", "unavailable", channels=[],
-                              error="；".join(failures[:2]) or "未取得有效视频")
-
-    # 全部频道中最新视频的日期（用于当天检验）
+    # 全部已抓取频道中最新内容的日期（用于当天检验）
     all_dates = [v["published_cst"][:10] for ch in channels for v in ch["videos"]]
     newest_date = max(all_dates) if all_dates else None
     is_today = any(ch["is_today"] for ch in channels)
-    print(f"  ✅ 成功抓取 {len(channels)}/{len(YOUTUBE_CHANNELS)} 个财经频道"
-          + (f"（含当天视频）" if is_today else f"（最新视频日期 {newest_date}）"))
-    return _source_result("YouTube 财经频道", "success",
-                          is_today=is_today, content_date=newest_date,
-                          channels=channels,
-                          error="；".join(failures[:2]) or None,
-                          partial=len(channels) != len(YOUTUBE_CHANNELS))
+
+    if channels:
+        print(f"  ✅ 成功抓取 {len(channels)}/{len(HK_CHANNELS)} 个频道"
+              + (f"（含当天内容）" if is_today else f"（最新内容日期 {newest_date}）"))
+        if unsupported:
+            print(f"  🕐 {len(unsupported)} 个频道需登录/未配置，标注暂缺："
+                  + "、".join(u["name"] for u in unsupported))
+        return _source_result("港股名家频道", "success",
+                              is_today=is_today, content_date=newest_date,
+                              channels=channels, unsupported=unsupported,
+                              error="；".join(failures[:3]) or None,
+                              partial=len(channels) + len(unsupported) != len(HK_CHANNELS))
+
+    if unsupported:
+        print("  ⚠️ 暂无可自动抓取的频道；需登录/未配置：" + "、".join(u["name"] for u in unsupported))
+        return _source_result("港股名家频道", "unavailable", channels=[], unsupported=unsupported,
+                              error="；".join(failures[:3]) or "全部频道需登录或未配置自动抓取源")
+
+    print("  ⚠️ 港股名家频道暂不可用，不显示历史内容兜底")
+    return _source_result("港股名家频道", "unavailable", channels=[], unsupported=[],
+                          error="；".join(failures[:3]) or "未取得有效内容")
 
 
 # ============================================================
@@ -543,7 +729,7 @@ def collect_all_data():
     data = {}
     data["实时行情"] = fetch_market_snapshot()
     time.sleep(0.5)
-    data["YouTube财经频道"] = fetch_youtube_finance()
+    data["港股名家频道"] = fetch_hk_channels()
     time.sleep(0.5)
     data["Reddit WSB热议"] = fetch_wsb()
     time.sleep(0.5)
@@ -685,14 +871,22 @@ def _item_row(icon, text, sub=""):
             f'color:{C_BLUE};line-height:1.6;">{icon} {text}{sub_html}</div>')
 
 
-def _youtube_channel_block(ch):
-    """生成单个 YouTube 频道的视频列表块"""
-    ch_today = ch.get("is_today", False)
-    badge = _badge("当天", "ok") if ch_today else _badge("非当天", "warn")
-    url = ch.get("url", "")
+def _channel_block(ch):
+    """生成单个频道的内容块：有内容时列出最新 CHANNEL_TOP_N 条；无内容（需登录/未配置）标注暂缺原因。"""
     name = _esc(ch.get("name", "?"))
+    desc = _esc(ch.get("desc", ""))
+    url = ch.get("url", "")
+    videos = ch.get("videos") or []
+    if not videos:
+        note = _esc(ch.get("note") or "平台需登录，暂不支持自动抓取")
+        return f'''<div style="margin:8px 0 4px;padding:8px;background:#fdf6ec;border:1px solid #f0ddb8;">
+<div style="font-size:14px;font-weight:700;color:{C_BLUE};">📺 {name} {_badge("暂缺", "bad")}</div>
+<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
+<div style="font-size:12px;color:#8a5300;line-height:1.6;">{note}</div>
+</div>'''
+    badge = _badge("当天", "ok") if ch.get("is_today") else _badge("非当天", "warn")
     rows = []
-    for v in ch.get("videos", [])[:5]:
+    for v in videos[:CHANNEL_TOP_N]:
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
         today_tag = (' <span style="display:inline-block;background:#e6f4ea;color:#0b6e34;'
@@ -706,6 +900,7 @@ def _youtube_channel_block(ch):
 <div style="font-size:14px;font-weight:700;color:{C_BLUE};">
 <a href="{_esc(url)}" style="color:{C_BLUE};text-decoration:none;">📺 {name}</a> {badge}
 </div>
+<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
 {"".join(rows)}
 </div>'''
 
@@ -786,8 +981,9 @@ def generate_report(data, date_display, date_str):
     """
     # 1. 提取所有数据源（缺失的键按空处理，兼容旧测试数据）
     market = data.get("实时行情", {})
-    yt = data.get("YouTube财经频道", {})
-    yt_channels = yt.get("channels", [])
+    yt = data.get("港股名家频道", {})
+    yt_live = yt.get("channels", [])        # 已抓取到内容的频道
+    yt_missing = yt.get("unsupported", [])  # 需登录/未配置的频道（带暂缺原因）
     wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
     yahoo = data.get("Yahoo头条", {})
@@ -800,7 +996,7 @@ def generate_report(data, date_display, date_str):
     # 2. 数据源清单（顺序即页面展示顺序）
     source_items = [
         ("实时行情", market),
-        ("YouTube财经频道", yt),
+        ("港股名家频道", yt),
         ("Yahoo头条", yahoo),
         ("A股资讯", sina),
         ("韩股半导体", kospi),
@@ -832,17 +1028,19 @@ def generate_report(data, date_display, date_str):
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
         )
 
-    # 5. YouTube 财经频道（有数据才渲染）
+    # 5. 港股名家频道（已抓取频道 + 需登录/未配置的暂缺频道，均展示来源状态）
     card_yt = ""
-    if yt.get("status") == "success" and yt_channels:
-        blocks = "".join(_youtube_channel_block(ch) for ch in yt_channels[:6])
-        note = (f'本次 {len(yt_channels)}/{len(YOUTUBE_CHANNELS)} 个频道可抓取'
+    if yt_live or yt_missing:
+        blocks = "".join(_channel_block(ch) for ch in (yt_live + yt_missing))
+        note = (f'本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取'
                 + (f'；{yt.get("error")}' if yt.get("error") else ""))
         card_yt = _card(
-            "📺", "YouTube 财经资讯与新闻频道", _source_badge(yt),
-            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 视频发布最新日期 {_esc(yt.get("content_date") or "—")}</div>'
+            "📺", "港股名家频道",
+            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 内容最新日期 {_esc(yt.get("content_date") or "—")}</div>'
             + blocks
-            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的视频发布于今天（北京时间）。")
+            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的内容发布于今天（北京时间）；"
+                    f"每个频道列出最新 {CHANNEL_TOP_N} 条。需登录或未配置的频道标注「暂缺」及原因，不伪造内容。"),
+            _source_badge(yt),
         )
 
     # 6. 其它资讯区块（有数据才渲染）
@@ -923,7 +1121,7 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:0 14px 14px;text-align:center;">
 <span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">全球市场</span>
 <span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI科技</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">YouTube 财经频道</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">港股名家频道</span>
 </td></tr>
 </table>
 
@@ -936,7 +1134,7 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:12px 10px;text-align:center;">
 <div style="font-size:11px;color:#8899c0;line-height:1.8;">
 🐙 章鱼AI · 仅供参考，不构成投资建议<br>
-数据来源：YouTube 财经频道 · Reddit · Yahoo · 新浪财经 · Naver · TradingKey
+数据来源：港股名家频道(YouTube/RSS) · Reddit · Yahoo · 新浪财经 · Naver · TradingKey
 </div>
 <div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
 生成时间：{_esc(generated_at)} · 报告日期：{date_str}
@@ -1359,7 +1557,7 @@ def main():
     # 3. dry-run 模式
     if args.dry_run:
         print("\n🔍 预览模式（不推送、不保存）")
-        print(f"   数据源: YouTube({len(data.get('YouTube财经频道', {}).get('channels', []))}频道) | "
+        print(f"   数据源: 港股名家频道({len(data.get('港股名家频道', {}).get('channels', []))}频道可抓取) | "
               f"WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
               f"Yahoo({len(data.get('Yahoo头条', {}).get('headlines', []))}条) | "
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
