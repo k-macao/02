@@ -93,6 +93,66 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
 
 
 # ============================================================
+# 数据新鲜度与实时行情
+# ============================================================
+def _source_result(source, status, **payload):
+    """统一记录来源、抓取时间和失败状态；绝不把历史文案伪装成实时数据。"""
+    return {"source": source, "status": status, "fetched_at": _now(), **payload}
+
+
+def _source_note(item):
+    """供 HTML 使用的数据来源状态。"""
+    if item.get("status") == "success":
+        return f"✅ {item.get('source', '数据源')} · 抓取于 {item.get('fetched_at', '—')}"
+    detail = _esc(item.get("error", "暂时不可用"))
+    return f"⚠️ {item.get('source', '数据源')} 暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
+
+
+def fetch_market_snapshot():
+    """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。"""
+    print("📡 正在抓取全球/A股实时行情...")
+    specs = [
+        ("道琼斯指数", "%5EDJI"), ("标普500", "%5EGSPC"), ("纳斯达克", "%5EIXIC"),
+        ("WTI 原油", "CL=F"), ("微软 MSFT", "MSFT"), ("Meta META", "META"),
+        ("上证指数", "000001.SS"), ("深证成指", "399001.SZ"),
+        ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
+    ]
+    quotes, failures = {}, []
+    for label, symbol in specs:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
+        data = safe_request(url)
+        try:
+            result = data["chart"]["result"][0]
+            closes = [x for x in result["indicators"]["quote"][0]["close"] if x is not None]
+            if len(closes) < 2:
+                raise ValueError("报价记录不足")
+            price, previous = closes[-1], closes[-2]
+            quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
+                             "currency": result.get("meta", {}).get("currency", "")}
+        except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
+            failures.append(f"{label}: {exc}")
+    status = "success" if quotes else "unavailable"
+    if quotes:
+        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情")
+    else:
+        print("  ⚠️ 实时行情暂不可用；日报将明确显示数据暂缺")
+    return _source_result("Yahoo Finance Chart", status, quotes=quotes,
+                          error="；".join(failures[:2]) or None,
+                          partial=len(quotes) != len(specs))
+
+
+def _quote_value(market, label, precision=2):
+    quote = market.get("quotes", {}).get(label)
+    if not quote:
+        return '<span style="color:#888;">数据暂缺</span>', "#888"
+    price = quote["price"]
+    pct = quote["change_pct"]
+    color = C_GREEN if pct >= 0 else C_RED
+    # 股指/原油精度不同不影响新鲜度；保留可审计的真实数值和涨跌幅。
+    return (f'<span style="color:{color};">{price:,.{precision}f} {pct:+.2f}%</span>', color)
+
+
+# ============================================================
 # 数据源 1：Reddit WSB 热议
 # ============================================================
 def fetch_wsb():
@@ -143,18 +203,11 @@ def fetch_wsb():
         for symbol, mentions in sorted_stocks:
             stocks.append({"symbol": symbol, "name": "", "mentions": mentions})
     
-    # 兜底数据
     if not stocks:
-        is_fallback = True
-        default_symbols = ["NVDA", "AAPL", "MSFT", "META", "AMZN", "TSLA", "GOOGL", "AMD", "GME", "AMC"]
-        for i, sym in enumerate(default_symbols):
-            stocks.append({"symbol": sym, "name": "", "mentions": max(1, 10 - i)})
-    
-    if is_fallback:
-        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(stocks)} 只热门股票)")
-    else:
-        print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票")
-    return {"stocks": stocks, "is_fallback": is_fallback}
+        print("  ⚠️ Reddit 暂不可用，不显示历史兜底榜单")
+        return _source_result("Reddit WSB", "unavailable", stocks=[], error="未取得有效帖子")
+    print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票")
+    return _source_result("Reddit WSB", "success", stocks=stocks)
 
 
 # ============================================================
@@ -194,22 +247,11 @@ def fetch_yahoo_headlines():
                 if clean:
                     headlines.append(clean)
     
-    # 最终兜底
     if not headlines:
-        is_fallback = True
-        headlines = [
-            "US stocks mixed as investors weigh earnings and economic data",
-            "Microsoft soars on strong Azure AI revenue growth",
-            "Meta shares drop despite revenue beat on high capex concerns",
-            "Oil prices surge on geopolitical tensions",
-            "Fed holds rates steady, signals patience on inflation",
-        ]
-    
-    if is_fallback:
-        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条头条)")
-    else:
-        print(f"  ✅ 成功抓取到 {len(headlines)} 条头条")
-    return {"headlines": headlines[:8], "is_fallback": is_fallback}
+        print("  ⚠️ Yahoo 暂不可用，不显示历史兜底头条")
+        return _source_result("Yahoo Finance News", "unavailable", headlines=[], error="未取得有效新闻")
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条头条")
+    return _source_result("Yahoo Finance News", "success", headlines=headlines[:8])
 
 
 # ============================================================
@@ -250,22 +292,11 @@ def fetch_sina_headlines():
                 if clean and not clean.startswith("http"):
                     headlines.append(clean)
     
-    # 最终兜底
     if not headlines:
-        is_fallback = True
-        headlines = [
-            "A股三大指数集体上涨，大消费板块领涨",
-            "半导体板块承压，科创50逆势下跌",
-            "两市成交额突破2万亿，市场情绪回暖",
-            "乳业、食品饮料板块表现强势",
-            "北向资金净流入超50亿元",
-        ]
-    
-    if is_fallback:
-        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条 A 股资讯)")
-    else:
-        print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯")
-    return {"headlines": headlines[:5], "is_fallback": is_fallback}
+        print("  ⚠️ 新浪财经暂不可用，不显示历史兜底资讯")
+        return _source_result("新浪财经", "unavailable", headlines=[], error="未取得有效资讯")
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯")
+    return _source_result("新浪财经", "success", headlines=headlines[:5])
 
 
 # ============================================================
@@ -305,22 +336,11 @@ def fetch_kospi_headlines():
                 clean = t.encode().decode('unicode_escape') if '\\u' in t else t
                 headlines.append(clean.strip())
     
-    # 最终兜底
     if not headlines:
-        is_fallback = True
-        headlines = [
-            "KOSPI 三连跌，外资持续流出",
-            "三星电子 Q2 利润同比暴增 1814%",
-            "SK 海力士三日跌 27%，存储板块承压",
-            "费城半导体指数进入熊市，跌幅超 20%",
-            "韩国收紧杠杆 ETF 监管规则",
-        ]
-    
-    if is_fallback:
-        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条韩股资讯)")
-    else:
-        print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯")
-    return {"headlines": headlines[:5], "is_fallback": is_fallback}
+        print("  ⚠️ Naver/Yahoo 韩股资讯暂不可用，不显示历史兜底资讯")
+        return _source_result("Naver / Yahoo Korea", "unavailable", headlines=[], error="未取得有效资讯")
+    print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯")
+    return _source_result("Naver / Yahoo Korea", "success", headlines=headlines[:5])
 
 
 # ============================================================
@@ -333,7 +353,8 @@ def collect_all_data():
     print("=" * 50)
     
     data = {}
-    
+    data["实时行情"] = fetch_market_snapshot()
+    time.sleep(0.5)
     data["Reddit WSB热议"] = fetch_wsb()
     time.sleep(0.5)
     
@@ -481,74 +502,55 @@ def generate_report(data, date_display, date_str):
         for h in sina_headlines[:5]
     ) if sina_headlines else '<div style="font-size:13px;color:#888;">暂无实时数据</div>'
 
-    # 4. 话题标签
-    topics = [
-        "Fed利率决议", "微软财报", "Meta财报",
-        "30年期国债", "中东局势", "原油大涨",
-        "存储半导体", "滞胀预期", "核心PCE",
-        "AI资本开支", "苹果财报", "亚马逊财报",
-    ]
+    # 4. 按本次采集结果构建页面。没有任何常量行情或“历史兜底”内容。
+    market = data.get("实时行情", {})
+    source_items = [market, yahoo, sina, kospi, wsb]
+    source_status = "<br>".join(
+        f'<div style="font-size:11px;padding:2px 0;color:{C_GREEN if x.get("status") == "success" else C_RED};">{_source_note(x)}</div>'
+        for x in source_items
+    )
+    market_rows = []
+    for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
+        value, color = _quote_value(market, label, precision)
+        market_rows.append((label, value, color))
+    astock_rows = []
+    for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
+        value, color = _quote_value(market, label, precision)
+        astock_rows.append((label, value, color))
 
-    # 5. 逐个构建卡片
-    card_market = _card("⚡", "行情速览",
-        _alert("Fed维持利率 · 长债收益率新高 · 地缘局势紧张") +
-        _data_table([
-            ("道琼斯指数", f'<span style="color:{C_RED};">51,618 -2.19%</span>', C_RED),
-            ("标普500", f'<span style="color:{C_RED};">7,317 -1.52%</span>', C_RED),
-            ("纳斯达克", f'<span style="color:{C_RED};">24,460 -1.74%</span>', C_RED),
-            ("30年期国债", f'<span style="color:{C_RED};">5.24% 2007年新高</span>', C_RED),
-            ("WTI原油", f'<span style="color:{C_RED};">$84.9 +7.2%</span>', C_RED),
-            ("核心PCE同比", f'<span style="color:{C_GREEN};">3.3% 低于预期</span>', C_GREEN),
-        ]) +
-        _vs_box("微软 MSFT", "+11%", "Azure营收破千亿<br>AI业务增长123%",
-                "Meta META", "-9%", "EPS不及预期<br>自由现金流暴跌91%") +
-        _note("<b>市场共识</b>：AI行情分化加剧，有盈利兑现的标的走强，纯烧钱模式承压。关注晚间苹果、亚马逊财报。")
+    card_market = _card("⚡", "行情速览（实时）",
+        _alert(_source_note(market), C_GREEN if market.get("status") == "success" else C_RED,
+               C_ALERT_G if market.get("status") == "success" else C_ALERT_R) +
+        _data_table(market_rows) +
+        _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
     )
 
-    card_yahoo = _card("📰", "全球头条", yh_items)
+    card_yahoo = _card("📰", "全球头条",
+        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yahoo)}</div>' + yh_items)
 
     card_semi = _card("🔌", "半导体&韩股",
-        _alert("存储周期分歧加剧，三星盈利创新高", C_GREEN, C_ALERT_G) +
-        _mini_table([
-            ("KOSPI指数", f'<span style="color:{C_RED};">5,594 -1.23%</span>'),
-            ("三星电子", f'<span style="color:{C_GREEN};">+0.7% 利润+1814%</span>'),
-            ("SK海力士", f'<span style="color:{C_RED};">-5.6% 三日跌27%</span>'),
-            ("费城半导体SOX", f'<span style="color:{C_RED};">-20% 进入熊市</span>'),
-        ]) +
-        kospi_items +
-        _note("韩国收紧杠杆ETF监管，防范市场过度波动；存储板块估值处于历史低位，需关注需求复苏节奏。")
+        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>' +
+        kospi_items
     )
 
     card_wsb = _card("🐂", "Reddit WSB热议",
-        f'<div style="font-size:13px;color:#888;padding-bottom:4px;">过去24小时美股散户讨论热度</div>' +
-        _section_title("Top 10 提及榜", 15) +
-        _mini_table(wsb_rows) +
-        _section_title("热门话题") +
-        f'<div style="margin:4px 0;line-height:28px;">{_tags_html(topics)}</div>' +
-        _note("<b>散户情绪</b>：资金从高位AI标的分流，转向周期复苏和防御板块，做空情绪有所上升。")
+        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(wsb)}</div>' +
+        ( _section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows)
+          if wsb_rows else '<div style="font-size:13px;color:#888;">暂无实时数据；为避免误导，未展示旧榜单。</div>' )
     )
 
-    card_astock = _card("🇨🇳", "A股市场",
-        _data_table([
-            ("上证指数", f'<span style="color:{C_GREEN};">3,813 +0.40%</span>', C_GREEN),
-            ("深证成指", f'<span style="color:{C_GREEN};">+1.10%</span>', C_GREEN),
-            ("创业板指", f'<span style="color:{C_GREEN};">+1.55%</span>', C_GREEN),
-            ("科创50", f'<span style="color:{C_RED};">-0.87%</span>', C_RED),
-            ("两市成交额", "2.31万亿元"),
-        ]) +
-        sina_items +
-        _note("大消费板块领涨，乳业、食品饮料表现强势；半导体板块承压，科创50逆势下跌。")
+    card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）",
+        _data_table(astock_rows) +
+        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>' +
+        sina_items
     )
 
-    card_focus = _card("🎯", "今日关注",
-        _mini_table([
-            ("重点财报", "苹果 AAPL · 亚马逊 AMZN（盘后）"),
-            ("经济数据", "美国非农就业数据 · 初请失业金"),
-            ("地缘事件", "中东局势进展 · 原油供应变化"),
-            ("央行动态", "美联储官员讲话 · 降息预期变化"),
-            ("技术关口", "纳指关键支撑位 · 美债收益率走势"),
-        ]) +
-        _note("<b>操作建议</b>：财报季波动加大，控制仓位，关注业绩兑现能力，规避纯题材炒作标的。")
+    successful = sum(1 for item in source_items if item.get("status") == "success")
+    card_focus = _card("🎯", "本次数据可用性",
+        _alert(f"本次运行 {successful}/{len(source_items)} 个数据源可用；所有暂缺项均已明确标注，不会复用旧日报内容。",
+               C_GREEN if successful else C_RED, C_ALERT_G if successful else C_ALERT_R) + source_status +
+        _note("生成、抓取和推送是独立步骤：请以本页各来源的抓取时间和状态判断数据新鲜度。")
     )
 
     # 6. 拼接完整 HTML
@@ -646,58 +648,37 @@ def push_to_wechat(title, content_html, token=None):
 # ============================================================
 # 文件保存
 # ============================================================
-def save_report(html, output_path=None, data=None):
-    """保存日报到文件"""
-    if not output_path:
-        date_str = _today_str()
-        output_path = os.path.join(REPORT_DIR, f"daily_report_{date_str}.html")
-    
-    # 检查采集结果是否全是旧的兜底数据
-    is_all_fallback = True
-    if data:
-        for source_name, source_data in data.items():
-            if isinstance(source_data, dict) and not source_data.get("is_fallback", False):
-                is_all_fallback = False
-                break
-    else:
-        is_all_fallback = False # 无法确定时默认非兜底
-        
-    # 如果采集的数据全是兜底，且目标文件已经存在，并且已经包含真实抓取的数据，则跳过覆盖
-    if is_all_fallback and os.path.isfile(output_path):
-        try:
-            with open(output_path, "r", encoding="utf-8") as f:
-                existing_content = f.read()
-            # 这里的 "US stocks mixed as investors" 是雅虎新闻兜底的第一条新闻
-            # 如果已有文件里没有这一句，说明已有文件是使用真实数据生成的，不应该覆盖！
-            if "US stocks mixed as investors" not in existing_content:
-                print(f"⚠️ [安全保护] 检测到新采集的数据全部为旧的兜底数据，而本地已有包含真实最新数据的日报 {output_path}。")
-                print("   为了防止用旧的兜底数据覆盖真实的最新日报，本次生成将不覆盖已有文件！")
-                
-                # 同步更新 latest.html (如果 latest.html 也是旧的兜底，可以用真实日报内容覆盖它，保持最新副本最新)
-                latest_path = os.path.join(REPORT_DIR, "latest.html")
-                if os.path.isfile(latest_path):
-                    with open(latest_path, "r", encoding="utf-8") as f:
-                        latest_content = f.read()
-                    if "US stocks mixed as investors" in latest_content:
-                        with open(latest_path, "w", encoding="utf-8") as f:
-                            f.write(existing_content)
-                return output_path
-        except Exception as e:
-            print(f"  ⚠️ 检查已有文件时发生异常: {e}")
+def _atomic_write(path, content):
+    """原子替换文件，避免定时任务被中断后留下旧文件或半个 HTML。"""
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
-    # 确保目录存在
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    
-    # 同步更新 latest.html
+
+def save_report(html, output_path=None, data=None):
+    """保存本次运行的报告和 latest 副本，绝不静默保留昨天的内容。"""
+    if not output_path:
+        output_path = os.path.join(REPORT_DIR, f"daily_report_{_today_str()}.html")
+
+    _atomic_write(output_path, html)
     latest_path = os.path.join(REPORT_DIR, "latest.html")
-    with open(latest_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    
-    print(f"💾 日报已保存: {output_path}")
-    print(f"💾 最新副本: {latest_path}")
+    _atomic_write(latest_path, html)
+
+    available = sum(1 for item in (data or {}).values()
+                    if isinstance(item, dict) and item.get("status") == "success")
+    total = sum(1 for item in (data or {}).values() if isinstance(item, dict))
+    print(f"💾 日报已原子保存: {output_path}")
+    print(f"💾 最新副本已同步: {latest_path}")
+    print(f"📊 数据源状态: {available}/{total} 可用（不可用项已在报告中标注）")
     return output_path
 
 
@@ -747,7 +728,11 @@ def main():
     parser.add_argument("-o", "--output", type=str, default=None,
                        help="指定输出文件路径")
     parser.add_argument("--push-only", type=str, default=None,
-                       help="只推送已有的日报文件")
+                       help="只推送已有的、带新鲜度标记的日报文件")
+    parser.add_argument("--force-push-old", action="store_true",
+                       help="允许 --push-only 推送未带新鲜度标记的旧版日报（不推荐）")
+    parser.add_argument("--allow-incomplete-push", action="store_true",
+                       help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
     
@@ -765,7 +750,11 @@ def main():
         
         with open(args.push_only, "r", encoding="utf-8") as f:
             html = f.read()
-        
+        if "本次数据可用性" not in html and not args.force_push_old:
+            print("❌ 拒绝推送旧版日报：文件没有数据来源/抓取时间标记。")
+            print("   请重新生成，或在确认风险后添加 --force-push-old。")
+            return 1
+
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
         push_to_wechat(title, html)
         return 0
@@ -798,10 +787,15 @@ def main():
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
     
-    # 5. 推送
-    if not args.no_push:
+    # 5. 推送：所有来源都失败时，不把“数据暂缺”误当日报推送给用户。
+    available_sources = sum(1 for item in data.values()
+                            if isinstance(item, dict) and item.get("status") == "success")
+    if not args.no_push and (available_sources > 0 or args.allow_incomplete_push):
         title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
         push_to_wechat(title, html)
+    elif not args.no_push:
+        print("\n⏭️ 所有数据源均不可用：已生成带状态标记的报告，但默认不推送。")
+        print("   如需推送状态报告，请添加 --allow-incomplete-push。")
     else:
         print("\n⏭️ 已跳过推送（--no-push）")
     
