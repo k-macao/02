@@ -719,5 +719,160 @@ class MainExitCodeTests(unittest.TestCase):
             self._run_main(["pipeline.py", "--force-push"], self._stale_data(), False), 1)
 
 
+class CleanOldReportsTests(unittest.TestCase):
+    """2026-08-02 新增：手动/自动推送前必须清理历史 HTML 报告。
+
+    避免历史残留文件（含旧版本特征）被 latest.html 引用或被 --push-only 误推。
+    清理函数 clean_old_html_reports 是 main() 正常流程的第一步（--dry-run 跳过）。
+    """
+
+    def _seed_reports(self, directory):
+        """在测试目录里放几份旧报告 + latest.html，返回它们的路径。"""
+        files = [
+            "daily_report_20260801.html",
+            "daily_report_20260802_20260802_069.html",
+            "daily_report_20260802_20260802_098.html",
+            "daily_report_20260802_20260802_243.html",
+            "latest.html",
+        ]
+        created = []
+        for name in files:
+            p = Path(directory) / name
+            p.write_text(f"OLD-CONTENT-{name}", encoding="utf-8")
+            created.append(p)
+        return created
+
+    def test_clean_old_html_reports_removes_daily_reports_and_latest(self):
+        """默认行为：删除全部 daily_report_*.html 和 latest.html。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 4)
+            self.assertTrue(latest_deleted)
+            # 目录里现在应只剩 pipeline 自身的非 HTML 文件
+            remaining = list(Path(directory).glob("*.html"))
+            self.assertEqual(remaining, [], f"应无 HTML 残留，实际: {remaining}")
+
+    def test_clean_old_html_reports_keep_latest_keeps_latest(self):
+        """keep_latest=True 时保留 latest.html，仅清 daily_report_*.html。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports(keep_latest=True)
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 4)
+            self.assertFalse(latest_deleted)
+            # latest.html 仍存在
+            self.assertTrue((Path(directory) / "latest.html").is_file())
+            self.assertTrue((Path(directory) / "latest.html").read_text(
+                encoding="utf-8").startswith("OLD-CONTENT-latest.html"))
+
+    def test_clean_old_html_reports_on_empty_directory(self):
+        """空目录：不报错，返回 (0, False)。"""
+        with tempfile.TemporaryDirectory() as directory:
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                deleted, latest_deleted = pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            self.assertEqual(deleted, 0)
+            self.assertFalse(latest_deleted)
+
+    def test_clean_old_html_reports_ignores_non_html_files(self):
+        """清理只匹配 .html，不动其他扩展名文件。"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "daily_report_20260801.html").write_text("old", encoding="utf-8")
+            (Path(directory) / "notes.txt").write_text("keep me", encoding="utf-8")
+            (Path(directory) / "data.json").write_text("{}", encoding="utf-8")
+            old_report_dir = pipeline.REPORT_DIR
+            try:
+                pipeline.REPORT_DIR = directory
+                pipeline.clean_old_html_reports()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+            # HTML 被清，txt/json 保留
+            self.assertFalse((Path(directory) / "daily_report_20260801.html").exists())
+            self.assertTrue((Path(directory) / "notes.txt").exists())
+            self.assertTrue((Path(directory) / "data.json").exists())
+
+    def test_main_normal_flow_calls_clean_before_collect(self):
+        """main() 正常流程：必须在 collect_all_data 之前调用 clean_old_html_reports。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            call_order = []
+
+            original_collect = pipeline.collect_all_data
+            original_clean = pipeline.clean_old_html_reports
+
+            def tracking_clean(*a, **kw):
+                call_order.append("clean")
+                return original_clean(*a, **kw)
+
+            def tracking_collect():
+                call_order.append("collect")
+                return original_collect()
+
+            def fake_save(html, output_path=None, data=None):
+                p = Path(directory) / "daily_report_test.html"
+                p.write_text(html, encoding="utf-8")
+                return str(p)
+
+            try:
+                pipeline.REPORT_DIR = directory
+                with patch.object(sys, "argv", ["pipeline.py"]), \
+                     patch.object(pipeline, "collect_all_data",
+                                  side_effect=tracking_collect), \
+                     patch.object(pipeline, "clean_old_html_reports",
+                                  side_effect=tracking_clean), \
+                     patch.object(pipeline, "generate_report",
+                                  return_value="<html>ok</html>"), \
+                     patch.object(pipeline, "save_report", side_effect=fake_save), \
+                     patch.object(pipeline, "push_to_wechat", return_value=True):
+                    pipeline.main()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+
+            self.assertEqual(call_order, ["clean", "collect"],
+                             "清理必须在采集之前执行，避免最新报告被旧文件污染")
+
+    def test_main_dry_run_skips_clean(self):
+        """--dry-run 模式：不清理（不写文件，清理无意义且会产生空目录警告）。"""
+        with tempfile.TemporaryDirectory() as directory:
+            self._seed_reports(directory)
+            old_report_dir = pipeline.REPORT_DIR
+            original_clean = pipeline.clean_old_html_reports
+            clean_called = []
+
+            def tracking_clean(*a, **kw):
+                clean_called.append(True)
+                return original_clean(*a, **kw)
+
+            try:
+                pipeline.REPORT_DIR = directory
+                with patch.object(sys, "argv", ["pipeline.py", "--dry-run"]), \
+                     patch.object(pipeline, "collect_all_data", return_value={}), \
+                     patch.object(pipeline, "clean_old_html_reports",
+                                  side_effect=tracking_clean):
+                    pipeline.main()
+            finally:
+                pipeline.REPORT_DIR = old_report_dir
+
+            self.assertEqual(clean_called, [],
+                             "--dry-run 不应调用 clean_old_html_reports")
+            # 旧文件应原封不动
+            self.assertTrue((Path(directory) / "daily_report_20260801.html").exists())
+            self.assertTrue((Path(directory) / "latest.html").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,10 @@
 
 核心规则（2026-08-02 新版，当天修订）：
   1. 没有数据的区块不出现在页面里，也不推送空内容。
+  1.1 手动 / 自动推送前先清理 output/ 目录下的全部历史 HTML 报告（含
+      daily_report_*.html 与 latest.html），再抓取数据并生成新报告；
+      避免历史残留文件（含旧版本特征）被误推或被 latest.html 引用。
+      --push-only / --list / --dry-run 不清理（前者基于旧文件，后两者不写文件）。
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
      只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
      但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
@@ -1776,6 +1780,52 @@ def list_reports():
 
 
 # ============================================================
+# 清理旧的 HTML 报告
+# ============================================================
+def clean_old_html_reports(keep_latest=False):
+    """清理 output/ 目录下的所有旧 HTML 报告（daily_report_*.html + latest.html）。
+
+    在手动/自动推送前调用，确保本次生成的日报是"最新且唯一"的内容，
+    避免历史残留文件（特别是含旧版本特征的报告）被误推或被 latest.html 引用。
+
+    参数:
+        keep_latest: True 时保留 latest.html（仅清 daily_report_*.html）；
+                     默认 False：两个都清。
+    返回:
+        (删除的 daily_report 数, 是否删了 latest.html)
+    """
+    deleted = 0
+    latest_deleted = False
+
+    # 1) 清理 daily_report_*.html
+    pattern = os.path.join(REPORT_DIR, "daily_report_*.html")
+    for filepath in glob.glob(pattern):
+        try:
+            os.remove(filepath)
+            deleted += 1
+        except OSError as exc:
+            print(f"⚠️ 清理失败: {filepath} ({exc})")
+
+    # 2) 清理 latest.html（除非显式保留）
+    latest_path = os.path.join(REPORT_DIR, "latest.html")
+    if not keep_latest and os.path.isfile(latest_path):
+        try:
+            os.remove(latest_path)
+            latest_deleted = True
+        except OSError as exc:
+            print(f"⚠️ 清理失败: {latest_path} ({exc})")
+
+    if deleted or latest_deleted:
+        parts = []
+        if deleted:
+            parts.append(f"{deleted} 份 daily_report_*.html")
+        if latest_deleted:
+            parts.append("latest.html")
+        print(f"🧹 已清理历史 HTML 报告: {', '.join(parts)}")
+    return deleted, latest_deleted
+
+
+# ============================================================
 # 推送前的当天内容检验
 # ============================================================
 def check_push_eligibility(data):
@@ -1887,6 +1937,12 @@ def main():
     print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
+
+    # 0. 清理历史 HTML 报告（手动/自动推送前必做）：
+    #    避免历史残留文件（含旧版本特征的报告）被推送或被 latest.html 引用。
+    #    --dry-run 不写文件，所以跳过清理。
+    if not args.dry_run:
+        clean_old_html_reports()
 
     # 1. 采集数据
     data = collect_all_data()
