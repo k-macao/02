@@ -107,6 +107,7 @@ def fetch_wsb():
     
     stocks = []
     stock_mentions = {}
+    is_fallback = False
     
     if data and "data" in data and "children" in data["data"]:
         for child in data["data"]["children"]:
@@ -144,12 +145,16 @@ def fetch_wsb():
     
     # 兜底数据
     if not stocks:
+        is_fallback = True
         default_symbols = ["NVDA", "AAPL", "MSFT", "META", "AMZN", "TSLA", "GOOGL", "AMD", "GME", "AMC"]
         for i, sym in enumerate(default_symbols):
             stocks.append({"symbol": sym, "name": "", "mentions": max(1, 10 - i)})
     
-    print(f"  ✅ 抓取到 {len(stocks)} 只热门股票")
-    return {"stocks": stocks}
+    if is_fallback:
+        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(stocks)} 只热门股票)")
+    else:
+        print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票")
+    return {"stocks": stocks, "is_fallback": is_fallback}
 
 
 # ============================================================
@@ -160,6 +165,7 @@ def fetch_yahoo_headlines():
     print("📡 正在抓取 Yahoo Finance 头条...")
     
     headlines = []
+    is_fallback = False
     
     # 尝试抓取新闻页面
     news_url = "https://finance.yahoo.com/topic/stock-market-news/"
@@ -190,6 +196,7 @@ def fetch_yahoo_headlines():
     
     # 最终兜底
     if not headlines:
+        is_fallback = True
         headlines = [
             "US stocks mixed as investors weigh earnings and economic data",
             "Microsoft soars on strong Azure AI revenue growth",
@@ -198,8 +205,11 @@ def fetch_yahoo_headlines():
             "Fed holds rates steady, signals patience on inflation",
         ]
     
-    print(f"  ✅ 抓取到 {len(headlines)} 条头条")
-    return {"headlines": headlines[:8]}
+    if is_fallback:
+        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条头条)")
+    else:
+        print(f"  ✅ 成功抓取到 {len(headlines)} 条头条")
+    return {"headlines": headlines[:8], "is_fallback": is_fallback}
 
 
 # ============================================================
@@ -210,6 +220,7 @@ def fetch_sina_headlines():
     print("📡 正在抓取 A 股资讯...")
     
     headlines = []
+    is_fallback = False
     
     # 新浪滚动新闻 API
     url = "https://feed.mix.sina.com.cn/api/roll/get"
@@ -241,6 +252,7 @@ def fetch_sina_headlines():
     
     # 最终兜底
     if not headlines:
+        is_fallback = True
         headlines = [
             "A股三大指数集体上涨，大消费板块领涨",
             "半导体板块承压，科创50逆势下跌",
@@ -249,8 +261,11 @@ def fetch_sina_headlines():
             "北向资金净流入超50亿元",
         ]
     
-    print(f"  ✅ 抓取到 {len(headlines)} 条 A 股资讯")
-    return {"headlines": headlines[:5]}
+    if is_fallback:
+        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条 A 股资讯)")
+    else:
+        print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯")
+    return {"headlines": headlines[:5], "is_fallback": is_fallback}
 
 
 # ============================================================
@@ -261,6 +276,7 @@ def fetch_kospi_headlines():
     print("📡 正在抓取韩股 & 半导体资讯...")
     
     headlines = []
+    is_fallback = False
     
     # Naver 财经 API
     url = "https://api.stock.naver.com/news/world/stock/KOSPI"
@@ -291,6 +307,7 @@ def fetch_kospi_headlines():
     
     # 最终兜底
     if not headlines:
+        is_fallback = True
         headlines = [
             "KOSPI 三连跌，外资持续流出",
             "三星电子 Q2 利润同比暴增 1814%",
@@ -299,8 +316,11 @@ def fetch_kospi_headlines():
             "韩国收紧杠杆 ETF 监管规则",
         ]
     
-    print(f"  ✅ 抓取到 {len(headlines)} 条韩股资讯")
-    return {"headlines": headlines[:5]}
+    if is_fallback:
+        print(f"  ⚠️ 抓取失败，使用兜底/历史数据(共 {len(headlines)} 条韩股资讯)")
+    else:
+        print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯")
+    return {"headlines": headlines[:5], "is_fallback": is_fallback}
 
 
 # ============================================================
@@ -626,12 +646,45 @@ def push_to_wechat(title, content_html, token=None):
 # ============================================================
 # 文件保存
 # ============================================================
-def save_report(html, output_path=None):
+def save_report(html, output_path=None, data=None):
     """保存日报到文件"""
     if not output_path:
         date_str = _today_str()
         output_path = os.path.join(REPORT_DIR, f"daily_report_{date_str}.html")
     
+    # 检查采集结果是否全是旧的兜底数据
+    is_all_fallback = True
+    if data:
+        for source_name, source_data in data.items():
+            if isinstance(source_data, dict) and not source_data.get("is_fallback", False):
+                is_all_fallback = False
+                break
+    else:
+        is_all_fallback = False # 无法确定时默认非兜底
+        
+    # 如果采集的数据全是兜底，且目标文件已经存在，并且已经包含真实抓取的数据，则跳过覆盖
+    if is_all_fallback and os.path.isfile(output_path):
+        try:
+            with open(output_path, "r", encoding="utf-8") as f:
+                existing_content = f.read()
+            # 这里的 "US stocks mixed as investors" 是雅虎新闻兜底的第一条新闻
+            # 如果已有文件里没有这一句，说明已有文件是使用真实数据生成的，不应该覆盖！
+            if "US stocks mixed as investors" not in existing_content:
+                print(f"⚠️ [安全保护] 检测到新采集的数据全部为旧的兜底数据，而本地已有包含真实最新数据的日报 {output_path}。")
+                print("   为了防止用旧的兜底数据覆盖真实的最新日报，本次生成将不覆盖已有文件！")
+                
+                # 同步更新 latest.html (如果 latest.html 也是旧的兜底，可以用真实日报内容覆盖它，保持最新副本最新)
+                latest_path = os.path.join(REPORT_DIR, "latest.html")
+                if os.path.isfile(latest_path):
+                    with open(latest_path, "r", encoding="utf-8") as f:
+                        latest_content = f.read()
+                    if "US stocks mixed as investors" in latest_content:
+                        with open(latest_path, "w", encoding="utf-8") as f:
+                            f.write(existing_content)
+                return output_path
+        except Exception as e:
+            print(f"  ⚠️ 检查已有文件时发生异常: {e}")
+
     # 确保目录存在
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
@@ -743,7 +796,7 @@ def main():
         return 0
     
     # 4. 保存文件
-    output_path = save_report(html, args.output)
+    output_path = save_report(html, args.output, data)
     
     # 5. 推送
     if not args.no_push:

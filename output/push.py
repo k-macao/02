@@ -9,7 +9,7 @@ import subprocess
 import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PIPELINE = os.path.join(SCRIPT_DIR, "output", "pipeline.py")
+PIPELINE = os.path.join(SCRIPT_DIR, "pipeline.py")
 # 日报输出目录与pipeline保持一致：pipeline.py所在的目录
 REPORT_DIR = os.path.dirname(PIPELINE)
 
