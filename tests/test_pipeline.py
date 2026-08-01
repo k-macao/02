@@ -67,12 +67,12 @@ class ReportFreshnessTests(unittest.TestCase):
                 pipeline.REPORT_DIR = old_report_dir
 
             self.assertNotEqual(actual, requested)
-            self.assertRegex(Path(actual).name, r"daily_report_20260801_\d{6}(?:_\d+)?\.html")
+            self.assertRegex(Path(actual).name, r"daily_report_\d{8}_\d{6}(?:_\d+)?\.html")
             self.assertEqual(Path(actual).read_text(encoding="utf-8"), "newest")
             self.assertEqual((Path(directory) / "latest.html").read_text(encoding="utf-8"), "newest")
 
     # ------------------------------------------------------------------
-    # 新版：YouTube 财经频道 + 空区块不渲染 + 当天检验
+    # 新版：港股名家频道 + 空区块不渲染 + 当天检验 + 每频道前 3 条
     # ------------------------------------------------------------------
     def _sample_data(self, yt_today=True, market_today=True):
         data = {
@@ -83,11 +83,12 @@ class ReportFreshnessTests(unittest.TestCase):
                     "上证指数": {"price": 3813.5, "change_pct": 0.4, "currency": "CNY"},
                 },
             ),
-            "YouTube财经频道": pipeline._source_result(
-                "test yt", "success", is_today=yt_today, content_date="2026-08-01",
+            "港股名家频道": pipeline._source_result(
+                "test channels", "success", is_today=yt_today, content_date="2026-08-01",
                 channels=[{
-                    "name": "测试财经频道",
-                    "url": "https://www.youtube.com/@test",
+                    "name": "郭思治（郭Sir）",
+                    "desc": "香港著名股評人，專注大盤技術走勢。",
+                    "url": "https://www.youtube.com/@KwokSirFinance",
                     "is_today": yt_today,
                     "newest_date": "2026-08-01 10:00",
                     "videos": [{
@@ -99,6 +100,11 @@ class ReportFreshnessTests(unittest.TestCase):
                         "is_today": yt_today,
                     }],
                 }],
+                unsupported=[{
+                    "name": "智通財經App（微信公众号）",
+                    "desc": "每日推送港股早報與板塊機會。",
+                    "note": "微信公众号需登录，暂不支持自动抓取",
+                }],
             ),
             "Yahoo头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
@@ -107,23 +113,29 @@ class ReportFreshnessTests(unittest.TestCase):
         }
         return data
 
-    def test_new_layout_renders_youtube_section_and_badges(self):
+    def test_new_layout_renders_channels_section_and_badges(self):
         html = pipeline.generate_report(self._sample_data(), "2026年8月1日 · 周六", "20260801")
-        self.assertIn("YouTube 财经资讯与新闻频道", html)
-        self.assertIn("测试财经频道", html)
+        self.assertIn("港股名家频道", html)
+        self.assertIn("郭思治（郭Sir）", html)
         self.assertIn("今日市场解读", html)
         self.assertIn("当天", html)          # 当天徽标
         self.assertIn("当天内容检验", html)   # 检验横幅
+        # 需登录的频道在卡片内标注「暂缺」及原因，不伪造内容
+        self.assertIn("智通財經App（微信公众号）", html)
+        self.assertIn("暂缺", html)
+        self.assertIn("微信公众号需登录", html)
 
     def test_new_layout_omits_empty_sections_and_keeps_meta(self):
         data = self._sample_data()
-        data["YouTube财经频道"] = pipeline._source_result("test yt", "unavailable", channels=[], error="offline")
+        data["港股名家频道"] = pipeline._source_result("test channels", "unavailable",
+                                                      channels=[], unsupported=[], error="offline")
         data["Yahoo头条"] = pipeline._source_result("test news", "success", is_today=True,
                                                     content_date="2026-08-01",
                                                     headlines=["一则今天的全球头条"])
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
-        # 没有数据的 YouTube 区块不渲染主体卡片
-        self.assertNotIn("YouTube 财经资讯与新闻频道", html)
+        # 没有数据也没有需登录频道的卡片不渲染主体
+        self.assertNotIn("郭思治（郭Sir）", html)
+        self.assertNotIn("每个频道列出最新", html)
         # 页脚状态清单仍留痕（含“数据暂缺”字样）
         self.assertIn("数据暂缺", html)
         self.assertIn("本次数据可用性", html)
@@ -144,10 +156,83 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertTrue(can_push)
         # 全部无内容 → 不推送
         empty = {k: pipeline._source_result(k, "unavailable", error="offline")
-                 for k in ["实时行情", "YouTube财经频道", "Yahoo头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
+                 for k in ["实时行情", "港股名家频道", "Yahoo头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
         can_push, reason = pipeline.check_push_eligibility(empty)
         self.assertFalse(can_push)
         self.assertIn("0/", reason)
+
+    def test_channel_block_shows_only_top3(self):
+        ch = {
+            "name": "郭思治（郭Sir）", "url": "https://www.youtube.com/@KwokSirFinance",
+            "is_today": True, "desc": "測試",
+            "videos": [{"title": f"视频{i}", "url": f"https://x/{i}",
+                        "published_cst": "2026-08-01 10:00", "is_today": True} for i in range(5)],
+        }
+        html = pipeline._channel_block(ch)
+        self.assertEqual(html.count("▶️"), pipeline.CHANNEL_TOP_N)  # 每频道只列前 3 条
+        self.assertIn("视频0", html)
+        self.assertIn("视频2", html)
+        self.assertNotIn("视频3", html)  # 第 4/5 条不展示
+
+    def test_unsupported_channel_block_marks_zhanque(self):
+        ch = {"name": "港股交易員（微博大V）", "desc": "測試",
+              "note": "微博需登录 / 反爬限制，暂不支持自动抓取"}
+        html = pipeline._channel_block(ch)
+        self.assertIn("暂缺", html)
+        self.assertIn("微博需登录", html)
+        self.assertNotIn("▶️", html)  # 没有伪造内容
+
+    def test_fetch_hk_channels_marks_manual_as_unsupported(self):
+        # 全部为 manual 频道时：不发起任何请求，返回 unavailable + unsupported 列表
+        manual = [{"name": "测试公众号", "desc": "", "kind": "manual",
+                   "note": "需登录"}]
+        with patch.object(pipeline, "HK_CHANNELS", manual), \
+             patch.object(pipeline, "safe_request", return_value=None) as req:
+            result = pipeline.fetch_hk_channels()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["channels"], [])
+        self.assertEqual(len(result["unsupported"]), 1)
+        self.assertEqual(result["unsupported"][0]["name"], "测试公众号")
+        req.assert_not_called()  # manual 频道不产生网络请求
+
+    def test_fetch_hk_channels_youtube_and_rss_kinds(self):
+        # kind="rss"：safe_request 返回一个 RSS 2.0 文档 → 成功解析
+        from datetime import datetime, timedelta
+        now_cst = datetime.now(pipeline.CST)
+        today_rfc = (now_cst - timedelta(hours=4)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+        rss_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>今日深度报告</title><link>https://example.com/a</link><pubDate>{today_rfc}</pubDate></item>
+  <item><title>第二篇</title><link>https://example.com/b</link><pubDate>{today_rfc}</pubDate></item>
+</channel></rss>"""
+        conf = [
+            {"name": "郭思治（郭Sir）", "desc": "", "kind": "youtube", "handle": "@KwokSirFinance"},
+            {"name": "港股策略通訊（Substack）", "desc": "", "kind": "rss",
+             "feed_url": "https://example.com/feed"},
+            {"name": "青姐（胡孟青）", "desc": "", "kind": "manual", "note": "需登录"},
+        ]
+        with patch.object(pipeline, "HK_CHANNELS", conf), \
+             patch.object(pipeline, "resolve_channel_id", return_value=None), \
+             patch.object(pipeline, "safe_request", return_value=rss_xml):
+            result = pipeline.fetch_hk_channels()
+        # youtube 频道解析失败 → 不计入成功；rss 成功 1 个；manual 进入 unsupported
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["channels"]), 1)
+        self.assertEqual(result["channels"][0]["name"], "港股策略通訊（Substack）")
+        self.assertEqual(len(result["channels"][0]["videos"]), 2)
+        self.assertEqual(len(result["unsupported"]), 1)
+        self.assertEqual(result["unsupported"][0]["name"], "青姐（胡孟青）")
+
+    def test_rss2_pubdate_parsing(self):
+        items = pipeline._parse_rss_items("""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>报告A</title><link>https://a/1</link><pubDate>Fri, 01 Aug 2026 12:00:00 +0800</pubDate></item>
+  <item><title>报告B</title><link>https://a/2</link></item>
+</channel></rss>""")
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["title"], "报告A")
+        self.assertEqual(items[0]["published_cst"], "2026-08-01 12:00")
+        self.assertEqual(items[1]["published_cst"], "—")  # 无时间字段不崩溃
 
     def test_youtube_rss_parser_marks_today(self):
         # 用 RSS 文本验证解析逻辑（不联网）；日期动态生成，保证任何一天都能跑
