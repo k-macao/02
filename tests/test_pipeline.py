@@ -184,5 +184,118 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertFalse(videos[1]["is_today"])  # 昨天视频
 
 
+class _FakeResp:
+    """模拟 PushPlus HTTP 响应。"""
+
+    def __init__(self, code):
+        self._code = code
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"code": self._code, "msg": "fake-msg"}
+
+
+class PushResultTests(unittest.TestCase):
+    """推送结果必须明确返回 True/False，且支持 txt/html 模板参数。"""
+
+    def test_push_to_wechat_passes_template_and_returns_true_on_code_200(self):
+        calls = {}
+
+        def fake_post(url, json=None, timeout=None):
+            calls["url"] = url
+            calls["json"] = json
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            ok = pipeline.push_to_wechat("标题", "正文", token="abc", template="txt")
+        self.assertTrue(ok)
+        self.assertEqual(calls["json"]["template"], "txt")
+        self.assertEqual(calls["json"]["token"], "abc")
+        self.assertEqual(calls["json"]["title"], "标题")
+
+    def test_push_to_wechat_returns_false_on_error_code(self):
+        with patch.object(pipeline, "requests",
+                          types.SimpleNamespace(post=lambda **kw: _FakeResp(500))):
+            self.assertFalse(pipeline.push_to_wechat("t", "body", token="abc"))
+
+    def test_push_to_wechat_returns_false_when_token_missing(self):
+        with patch.object(pipeline, "PUSHPLUS_TOKEN", ""):
+            self.assertFalse(pipeline.push_to_wechat("t", "body", token=None))
+
+
+class NoPushAlertTests(unittest.TestCase):
+    """当天检验未通过时的纯文本告警内容。"""
+
+    def test_alert_text_lists_each_source_and_manual_actions(self):
+        data = {
+            "实时行情": pipeline._source_result("q", "success", is_today=False,
+                                                content_date="2026-07-31", quotes={}),
+            "Yahoo头条": pipeline._source_result("n", "unavailable", headlines=[], error="offline"),
+        }
+        text = pipeline.build_no_push_alert_text("抓到 1/2 个来源，但没有一个属于当天内容",
+                                                 data, "/tmp/daily_report_20260801.html")
+        self.assertIn("当天内容检验未通过", text)
+        self.assertIn("抓到 1/2 个来源", text)
+        self.assertIn("实时行情：🕓 非当天（数据日期 2026-07-31）", text)
+        self.assertIn("Yahoo头条：⚠️ 无数据", text)
+        self.assertIn("force_push", text)                      # 给出人工处理入口
+        self.assertIn("daily_report_20260801.html", text)      # 报告文件可追溯
+
+
+class MainExitCodeTests(unittest.TestCase):
+    """main() 退出码：应推未推成 → 1；有意跳过 / 推送成功 / 告警送达 → 0。"""
+
+    def _today_data(self):
+        return {
+            "Yahoo头条": pipeline._source_result("n", "success", is_today=True,
+                                                 content_date="2026-08-01", headlines=["今日头条"]),
+            "A股资讯": pipeline._source_result("s", "unavailable", headlines=[], error="offline"),
+        }
+
+    def _stale_data(self):
+        return {
+            "实时行情": pipeline._source_result("q", "success", is_today=False,
+                                                content_date="2026-07-31", quotes={}),
+        }
+
+    def _run_main(self, argv, data, push_result):
+        with tempfile.TemporaryDirectory() as directory:
+            def fake_save(html, output_path=None, data=None):
+                path = Path(directory) / "daily_report_test.html"
+                path.write_text(html, encoding="utf-8")
+                return str(path)
+
+            with patch.object(sys, "argv", argv), \
+                 patch.object(pipeline, "collect_all_data", return_value=data), \
+                 patch.object(pipeline, "generate_report", return_value="<html>ok</html>"), \
+                 patch.object(pipeline, "save_report", side_effect=fake_save), \
+                 patch.object(pipeline, "push_to_wechat", return_value=push_result):
+                return pipeline.main()
+
+    def test_push_success_returns_zero(self):
+        self.assertEqual(self._run_main(["pipeline.py"], self._today_data(), True), 0)
+
+    def test_push_failure_returns_one(self):
+        self.assertEqual(self._run_main(["pipeline.py"], self._today_data(), False), 1)
+
+    def test_no_push_flag_returns_zero_even_if_push_would_fail(self):
+        self.assertEqual(
+            self._run_main(["pipeline.py", "--no-push"], self._today_data(), False), 0)
+
+    def test_check_failed_but_alert_delivered_returns_zero(self):
+        # 检验未通过 → 不发日报；告警（同样走 push_to_wechat 的 mock）送达 → 0
+        self.assertEqual(self._run_main(["pipeline.py"], self._stale_data(), True), 0)
+
+    def test_check_failed_and_alert_failed_returns_one(self):
+        # 检验未通过且告警也发不出去（例如 token 未配置）→ 1，Actions 标红
+        self.assertEqual(self._run_main(["pipeline.py"], self._stale_data(), False), 1)
+
+    def test_force_push_failure_returns_one(self):
+        self.assertEqual(
+            self._run_main(["pipeline.py", "--force-push"], self._stale_data(), False), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
