@@ -3,13 +3,43 @@
 🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
-核心规则（2026-08-01 新版）：
+核心规则（2026-08-02 新版，当天修订）：
   1. 没有数据的区块不出现在页面里，也不推送空内容。
+  1.1 手动 / 自动推送前先清理 output/ 目录下的全部历史 HTML 报告（含
+      daily_report_*.html 与 latest.html），再抓取数据并生成新报告；
+      避免历史残留文件（含旧版本特征）被误推或被 latest.html 引用。
+      --push-only / --list / --dry-run 不清理（前者基于旧文件，后两者不写文件）。
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
-     只有当「至少一个数据源含当天内容」时才自动推送；否则跳过并给出原因。
-  3. 页面内容重新加入 YouTube 财经资讯与新闻频道（RSS 无需 API Key）。
-  4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮，
+     只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
+     但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
+  3. 页面内容包含「港股名家频道」区块：香港股评人/财经平台的 YouTube 与通用 RSS
+     抓取（无需 API Key），每频道列出最新 3 条；需登录平台明确标注「暂缺」及原因，
+     不伪造内容。
+  4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
+     Google News 中文版，标题本身即中文，无需翻译。
+  5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
+  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 涨幅前十
+     （东方财富 push2 免费接口）。
+  4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
+  5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
+     含「检验未通过」告警发送失败）都以退出码 1 结束：GitHub Actions 会显红并触发
+     失败通知，杜绝“推送失败却显示成功”的假象。
+  6. PushPlus 推送对「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」
+     等可恢复错误按 10s→30s→60s 退避自动重试（最多 4 次）；对「当日配额已达上限、
+     token 失效、内容违规」等重试无意义的错误不重试、立即失败。日报多次推送仍失败时
+     会再发一条纯文本「推送失败」告警（含 PushPlus 返回的 code/msg 与处理建议），
+     让微信侧也能感知原因，而不是只看到 Actions 变红。
+  7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
+     触发反垃圾/去重拦截，也便于区分每一次推送。
+  8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
+     PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
+     截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
+     始终保留完整版。
+
+退出码约定：
+  0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
+  1 = 应当推送却失败，或用法错误。
 
 用法:
   python3 output/pipeline.py                  # 全流程（当天检验通过才推送）
@@ -21,12 +51,14 @@
   python3 output/pipeline.py --push-only              # 推送实际最后更新的一份日报（当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list           # 列出日报
+
+退出码：0 = 正常完成；1 = 应当推送却失败 / 用法错误（GitHub Actions 据此标红）。
 """
 import os
 import sys
-import json
 import time
 import argparse
+import random
 import re
 import glob
 import xml.etree.ElementTree as ET
@@ -50,6 +82,12 @@ CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
 # PushPlus 配置
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
+# PushPlus 内容长度上限：实名用户 2 万字、会员用户 10 万字（账号已升级会员，默认按 10 万）。
+# 超过上限的内容会被平台截断，截断点常落在标签中间，导致微信端整页排版崩坏
+# （表现为整页只剩浅灰背景、正文缺失）。因此发送前先按完整标签边界截断并闭合标签，
+# 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
+# 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
+PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
 
 # 请求头
 DEFAULT_HEADERS = {
@@ -59,16 +97,97 @@ DEFAULT_HEADERS = {
 }
 
 # ------------------------------------------------------------
-# YouTube 财经资讯与新闻频道（RSS 订阅，无需 API Key）
-# 每个频道可配置 channel_id（最稳）或 handle（运行时自动解析，解析失败标记暂缺）。
-# 需要增删频道时直接改这个列表即可。
+# 港股名家频道（内容渠道配置，2026-08-02 起按用户指定列表）
+# 每个频道可配置：
+#   kind = "youtube"  → YouTube 频道，通过公开 RSS 抓取（无需 API Key），
+#                       填 channel_id（最稳）或 handle（运行时自动解析，失败标记暂缺）
+#   kind = "rss"      → 通用 RSS / Atom 源（如 Medium、Substack）
+#   kind = "manual"   → 需登录 / 平台限制，暂无法自动抓取（页面标注「暂缺」及原因，不伪造内容）
+# 每频道在日报中列出最新 CHANNEL_TOP_N 条内容。
+# 需要增删频道或接入新平台时直接改这个列表即可。
 # ------------------------------------------------------------
-YOUTUBE_CHANNELS = [
-    {"name": "CNBC 财经新闻（美）", "channel_id": "UCrp_UI8XtuYfpiqluWLD7Lw"},
-    {"name": "Bloomberg 彭博电视（美）", "channel_id": "UCIALMKvObZNtJ6AmdCLP7Lg"},
-    {"name": "Yahoo Finance（美）", "handle": "@YahooFinance"},
-    {"name": "华尔街电视 WallStTV（中文·纽约）", "handle": "@WallStTV"},
-    {"name": "第一财经 Yicai Global（中国）", "handle": "@YicaiGlobal"},
+CHANNEL_TOP_N = 3
+
+HK_CHANNELS = [
+    # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
+    {"name": "郭思治（郭Sir）",
+     "desc": "香港著名股評人，專注大盤技術走勢。",
+     "kind": "youtube", "handle": "@KwokSirFinance"},
+
+    # ── 需登录 / 暂未提供可抓取源（明确标注暂缺）────────────
+    {"name": "曾廣標（股票分析）",
+     "desc": "資深股評人，專注細價股與價值挖掘。",
+     "kind": "manual",
+     "note": "暂无官方可抓取频道；旧视频散见于「港股直播室 @hongkongstock」（2023 年后未更新）"},
+    {"name": "陸羽仁（金融肉搏戰）",
+     "desc": "老牌專欄，分析港股大局與政經關係。",
+     "kind": "manual",
+     "note": "信報專欄，非 YouTube；暂不支持自动抓取"},
+    {"name": "青姐（胡孟青）",
+     "desc": "風格辛辣，直擊港股市場痛點與散戶心態。",
+     "kind": "manual",
+     "note": "暂无官方频道；节目「胡孟青拆局」发布于 AASTOCKS 频道（@AASTOCKS_AATV）"},
+    {"name": "智通財經App（微信公众号）",
+     "desc": "每日推送港股早報與板塊機會。",
+     "kind": "manual",
+     "note": "微信公众号需登录，暂不支持自动抓取"},
+    {"name": "港股那點事（格隆匯）（微信公众号）",
+     "desc": "深度剖析港股上市公司實力。",
+     "kind": "manual",
+     "note": "微信公众号需登录，暂不支持自动抓取"},
+    {"name": "球友大白（雪球 KOL）",
+     "desc": "長線跟蹤港股高股息、藍籌股。",
+     "kind": "manual",
+     "note": "雪球需登录 / 反爬限制，暂不支持自动抓取"},
+    {"name": "香港投資筆記（Medium）",
+     "desc": "獨立分析師發表深度個股研究。",
+     "kind": "rss", "feed_url": "",
+     "note": "请提供 Medium 地址后接入 RSS"},
+    {"name": "港股策略通訊（Substack）",
+     "desc": "付費/免費的深度行業趨勢報告。",
+     "kind": "rss", "feed_url": "",
+     "note": "请提供 Substack 地址后接入 RSS"},
+    {"name": "港股交易員（微博大V）",
+     "desc": "實時更新盤中異動與傳聞。",
+     "kind": "manual",
+     "note": "微博需登录 / 反爬限制，暂不支持自动抓取"},
+
+    # ── 第二批（2026-08-02 追加，用户指定）──────────────────
+    {"name": "施凌部署",
+     "desc": "結合宏觀經濟與技術分析的知名財經頻道；施凌部署為「我要做富翁」旗下品牌，於該官方頻道發布。",
+     "kind": "youtube", "handle": "@Money-Tab"},
+    {"name": "BofA Global Research（美銀研究）",
+     "desc": "解讀大行對港股策略的官方影音；BofA Global Research 內容於 Bank of America 官方頻道發布（Must Read Research 系列）。",
+     "kind": "youtube", "handle": "@BankofAmerica"},
+    {"name": "秒投（ShareNews / StockViva）",
+     "desc": "邀請多位香港股評人進行直播分析。",
+     "kind": "youtube", "handle": "@StockViva"},
+    {"name": "C基金 - 李浩德",
+     "desc": "基金經理視角，分析港股大盤與科技股。",
+     "kind": "youtube", "handle": "@CFund_Channel"},
+    {"name": "Finance730",
+     "desc": "探討香港財經、地產及股市走勢的專業網媒。",
+     "kind": "youtube", "handle": "@Finance730hk"},
+    {"name": "紅猴（Red Monkey）",
+     "desc": "深度分析港股價值投資與公司基本面。",
+     "kind": "manual",
+     "note": "未找到独立官方频道；其视频散见于「成家網上投資課程」等第三方频道（多为 2022 年前旧内容）"},
+    {"name": "米高（Michael）的財經頻道",
+     "desc": "專注港股短線操作與期指分析。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「米高 Michael 財經頻道」，请提供频道链接或 handle 后接入"},
+    {"name": "小斯財經",
+     "desc": "用深入淺出的方式講解港股與新股申購。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「小斯財經」频道，请提供频道链接或 handle 后接入"},
+    {"name": "智富同學會",
+     "desc": "分享技術指標與港股實戰策略。",
+     "kind": "manual",
+     "note": "未检索到「智富同學會」独立频道；疑似相关频道「智富財經 Invest Smarter @investsmarter536」，如需接入请确认"},
+    {"name": "港股研究社（Bilibili）",
+     "desc": "面向內地投資者的港股解讀視頻（B站 UP 主，UID 613310838）。",
+     "kind": "rss", "feed_url": "https://rsshub.app/bilibili/user/video/613310838",
+     "note": "通过 RSSHub 抓取 Bilibili 投稿；如公共实例被限流，可更换其他 RSSHub 实例"},
 ]
 
 YT_NS = {
@@ -286,48 +405,184 @@ def fetch_wsb():
 
 
 # ============================================================
-# 数据源 2：Yahoo Finance 头条
+# 数据源 2：全球头条（Google News 中文版）
 # ============================================================
-def fetch_yahoo_headlines():
-    """抓取 Yahoo Finance 热门新闻标题"""
-    print("📡 正在抓取 Yahoo Finance 头条...")
+GOOGLE_NEWS_RSS = {
+    "zh": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+}
 
-    headlines = []
 
-    # 尝试抓取新闻页面
-    news_url = "https://finance.yahoo.com/topic/stock-market-news/"
-    html = safe_request(news_url, is_json=False)
+def _rfc2822_cst(pub_raw):
+    """解析 RFC 2822 时间（如 Google News pubDate）为北京时间 datetime；失败返回 None。"""
+    if not pub_raw:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(pub_raw).astimezone(CST)
+    except Exception:
+        return None
 
-    if html:
-        # 提取标题
-        titles = re.findall(r'"headline":"([^"]+)"', html)
-        if not titles:
-            titles = re.findall(r'<h3[^>]*>([^<]{20,200})</h3>', html)
 
-        for t in titles[:15]:
-            clean = t.encode().decode('unicode_escape') if '\\u' in t else t
-            clean = re.sub(r'<[^>]+>', '', clean).strip()
-            if clean and len(clean) > 10:
-                headlines.append(clean)
+def fetch_google_news():
+    """抓取 Google News 商业/财经头条（替换原 Yahoo Finance News 数据源）。
 
-    # 兜底 RSS
-    if not headlines:
-        rss_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US"
-        rss_html = safe_request(rss_url, is_json=False)
-        if rss_html:
-            items = re.findall(r'<title>(.*?)</title>', rss_html)
-            for item in items[1:10]:
-                clean = re.sub(r'<[^>]+>', '', item).strip()
-                if clean:
-                    headlines.append(clean)
+    直接抓 Google News 中文版，标题本身即中文，无需翻译；
+    每条返回 {title, source, url, published_cst, is_today}。
+    """
+    print("📡 正在抓取 Google News 全球头条...")
+    url = GOOGLE_NEWS_RSS["zh"]
+    xml_text = safe_request(url, is_json=False, timeout=15)
 
-    if not headlines:
-        print("  ⚠️ Yahoo 暂不可用，不显示历史兜底头条")
-        return _source_result("Yahoo Finance News", "unavailable", headlines=[], error="未取得有效新闻")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条头条（本次抓取 = 当天内容）")
-    return _source_result("Yahoo Finance News", "success",
-                          is_today=True, content_date=_today_display(),
-                          headlines=headlines[:8])
+    items = []
+    if xml_text:
+        try:
+            root = ET.fromstring(xml_text)
+            for item in root.findall("channel/item")[:12]:
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub = (item.findtext("pubDate") or "").strip()
+                if not title:
+                    continue
+                # Google News 标题形如「原标题 - 来源名」，拆出来源
+                src = ""
+                m = re.search(r"\s+-\s+([^-]+)$", title)
+                if m:
+                    src = m.group(1).strip()
+                    title = title[: m.start()].strip()
+                pub_dt = _rfc2822_cst(pub)
+                items.append({
+                    "title": title,
+                    "source": src,
+                    "url": link,
+                    "published": pub,
+                    "published_cst": pub_dt.strftime("%Y-%m-%d %H:%M") if pub_dt else "—",
+                    "is_today": _date_is_today(pub_dt),
+                })
+        except Exception as exc:
+            print(f"  ⚠️ Google News RSS 解析失败: {exc}")
+
+    if not items:
+        print("  ⚠️ Google News 暂不可用，不显示历史兜底头条")
+        return _source_result("Google News", "unavailable", headlines=[], error="未取得有效新闻")
+
+    content_date = max((it["published_cst"][:10] for it in items if it["published_cst"] != "—"), default=None)
+    is_today = any(it["is_today"] for it in items)
+    print(f"  ✅ 成功抓取 {len(items)} 条全球头条（中文源，最新 {content_date}）")
+    return _source_result("Google News", "success",
+                          is_today=is_today, content_date=content_date,
+                          headlines=items[:8])
+
+
+# ============================================================
+# 数据源 6：东方财富快讯（免费 API，5 条最新新闻）
+# ============================================================
+EASTMONEY_NEWS_URLS = [
+    "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns",
+    "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
+]
+
+
+def fetch_eastmoney_news():
+    """抓取东方财富最新财经新闻（免费接口，无 API Key，取 5 条）。"""
+    print("📡 正在抓取东方财富快讯...")
+    params = {
+        "client": "web", "biz": "web_news_col", "column": "350",
+        "order": "1", "needInteractData": "0",
+        "page_index": "1", "page_size": "10",
+    }
+    news, content_dates = [], []
+    for url in EASTMONEY_NEWS_URLS:
+        data = safe_request(url, params=params, timeout=12)
+        if not data:
+            continue
+        try:
+            lst = ((data.get("data") or {}).get("list")) or []
+        except AttributeError:
+            lst = []
+        for it in lst[:10]:
+            title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
+            if not title:
+                continue
+            raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
+            news.append({
+                "title": title[:120],
+                "url": it.get("url") or it.get("articleUrl") or "",
+                "time": raw_time[:16],
+                "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
+                "is_today": raw_time[:10] == _today_display(),
+            })
+            if raw_time[:10]:
+                content_dates.append(raw_time[:10])
+        if news:
+            break
+
+    if not news:
+        print("  ⚠️ 东方财富快讯暂不可用，不显示历史兜底资讯")
+        return _source_result("东方财富", "unavailable", headlines=[], error="未取得有效资讯")
+    content_date = max(content_dates) if content_dates else None
+    is_today = any(n["is_today"] for n in news)
+    print(f"  ✅ 成功抓取 {len(news)} 条东财快讯（最新 {content_date or '—'}）")
+    return _source_result("东方财富", "success",
+                          is_today=is_today, content_date=content_date,
+                          headlines=news[:5])
+
+
+# ============================================================
+# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
+# ============================================================
+HOT_STOCK_MARKETS = {
+    "A股": {"fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23", "desc": "沪深京 A 股"},
+    "港股": {"fs": "m:128+t:3,m:128+t:4,m:128+t:1,m:128+t:2", "desc": "港股主板"},
+    "美股": {"fs": "m:105,m:106,m:107", "desc": "美股（纽交所/纳斯达克/美交所）"},
+}
+
+
+def fetch_hot_stocks():
+    """抓取最近一个交易日收盘后的 A股/港股/美股涨幅前十（东方财富 push2 免费接口）。
+
+    返回 _source_result：markets={市场名: {"desc", "stocks":[{code,name,price,change_pct}]}}
+    """
+    print("📡 正在抓取 A股/港股/美股热门前十...")
+    markets = {}
+    any_stock = False
+    for label, cfg in HOT_STOCK_MARKETS.items():
+        params = {
+            "pn": "1", "pz": "10", "po": "1", "np": "1", "fltt": "2", "invt": "2",
+            "fid": "f3", "fs": cfg["fs"], "fields": "f2,f3,f4,f12,f14",
+        }
+        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
+                            params=params, timeout=12)
+        stocks = []
+        try:
+            diff = ((data or {}).get("data") or {}).get("diff") or []
+            for it in diff[:10]:
+                name = str(it.get("f14") or "").strip()
+                if not name:
+                    continue
+                stocks.append({
+                    "code": str(it.get("f12") or ""),
+                    "name": name,
+                    "price": it.get("f2"),
+                    "change_pct": it.get("f3"),
+                })
+        except Exception:
+            stocks = []
+        markets[label] = {"desc": cfg["desc"], "stocks": stocks}
+        if stocks:
+            any_stock = True
+        print(f"  {'✅' if stocks else '⚠️'} {label}涨幅前十: {len(stocks)} 只")
+
+    if not any_stock:
+        print("  ⚠️ 热门榜单暂不可用，不显示历史兜底榜单")
+        return _source_result("东方财富热门榜", "unavailable", markets=markets,
+                              error="push2 接口未返回有效数据")
+
+    # 榜单即最近交易日收盘数据；标注数据日期为最近交易日（无法从接口取得时用当天）
+    content_date = _today_display()
+    print("  ✅ 热门榜单抓取完成（数据为最近交易日收盘后）")
+    return _source_result("东方财富热门榜", "success",
+                          is_today=True, content_date=content_date,
+                          markets=markets)
 
 
 # ============================================================
@@ -422,7 +677,7 @@ def fetch_kospi_headlines():
 
 
 # ============================================================
-# 数据源 5：YouTube 财经资讯与新闻频道
+# 数据源 5：港股名家频道（YouTube / 通用 RSS / 需登录平台）
 # ============================================================
 def resolve_channel_id(channel):
     """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
@@ -442,18 +697,112 @@ def resolve_channel_id(channel):
     return m.group(1) if m else None
 
 
-def fetch_youtube_finance():
-    """抓取 YouTube 财经资讯与新闻频道的最新视频（RSS，无需 API Key）。
+def _channel_item(title, url, pub_raw):
+    """把一条频道内容的标题/链接/发布时间整理成统一结构（北京时间 + 是否当天）。"""
+    pub_cst = _cst_from_iso(pub_raw)
+    if pub_cst is None:  # 兼容 RSS 2.0 的 RFC 2822 格式（如 Fri, 01 Aug 2026 12:00:00 +0800）
+        try:
+            from email.utils import parsedate_to_datetime
+            pub_cst = parsedate_to_datetime(pub_raw).astimezone(CST)
+        except Exception:
+            pub_cst = None
+    return {
+        "title": title,
+        "url": url,
+        "published": pub_raw,
+        "published_cst": pub_cst.strftime("%Y-%m-%d %H:%M") if pub_cst else "—",
+        "is_today": _date_is_today(pub_cst),
+    }
 
-    返回每个频道最近若干视频，包含发布时间（北京时间）与「是否当天」标记。
+
+def _parse_rss_items(xml_text, limit=8):
+    """解析通用 RSS 2.0 / Atom 源，返回 [{title,url,published_cst,is_today}, ...]。"""
+    items = []
+    try:
+        root = ET.fromstring(xml_text or "")
+    except Exception:
+        return []
+    # RSS 2.0
+    if root.tag == "rss":
+        channel = root.find("channel")
+        if channel is not None:
+            for item in channel.findall("item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub = (item.findtext("pubDate")
+                       or item.findtext("dc:date", namespaces={"dc": "http://purl.org/dc/elements/1.1/"})
+                       or "")
+                if title:
+                    items.append(_channel_item(title, link, pub))
+                if len(items) >= limit:
+                    break
+    # Atom
+    elif root.tag.endswith("feed"):
+        for entry in root.findall("a:entry", YT_NS):
+            title = (entry.findtext("a:title", "", YT_NS) or "").strip()
+            link = ""
+            for ln in entry.findall("a:link", YT_NS):
+                if (ln.get("rel") or "alternate") == "alternate":
+                    link = ln.get("href") or ""
+                    break
+            pub = (entry.findtext("a:published", "", YT_NS)
+                   or entry.findtext("a:updated", "", YT_NS) or "")
+            if title:
+                items.append(_channel_item(title, link, pub))
+            if len(items) >= limit:
+                break
+    return items
+
+
+def fetch_hk_channels():
+    """抓取「港股名家频道」的最新内容。
+
+    - kind="youtube"：YouTube 频道 RSS（无需 API Key），返回最新视频；
+    - kind="rss"    ：通用 RSS / Atom 源（Medium、Substack 等）；
+    - kind="manual" ：需登录 / 未配置来源，放入 unsupported（页面标注「暂缺」及原因，
+                      绝不伪造内容）。
+
+    返回 _source_result：channels=已抓取频道、unsupported=需登录/未配置频道。
     """
-    print("📡 正在抓取 YouTube 财经资讯与新闻频道...")
-    channels, failures = [], []
-    for ch in YOUTUBE_CHANNELS:
+    print("📡 正在抓取港股名家频道...")
+    channels, unsupported, failures = [], [], []
+    for ch in HK_CHANNELS:
         name = ch.get("name", "?")
+        kind = ch.get("kind", "youtube")
+
+        if kind == "manual":
+            unsupported.append({"name": name, "desc": ch.get("desc", ""),
+                                "note": ch.get("note", "平台需登录，暂不支持自动抓取")})
+            continue
+
+        if kind == "rss":
+            feed_url = (ch.get("feed_url") or "").strip()
+            if not feed_url:
+                unsupported.append({"name": name, "desc": ch.get("desc", ""),
+                                    "note": ch.get("note", "未配置 feed 地址")})
+                continue
+            xml_text = safe_request(feed_url, is_json=False, timeout=12)
+            items = _parse_rss_items(xml_text, limit=8)
+            if items:
+                channels.append({
+                    "name": name, "desc": ch.get("desc", ""), "source": "RSS",
+                    "url": feed_url, "videos": items,
+                    "is_today": any(v["is_today"] for v in items),
+                    "newest_date": next((v["published_cst"] for v in items if v["is_today"]),
+                                        items[0]["published_cst"]),
+                })
+            else:
+                msg = "自动抓取失败（源可能需登录/被限流，或地址无效），暂缺"
+                unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+                failures.append(f"{name}: {msg}")
+            continue
+
+        # kind == "youtube"
         cid = resolve_channel_id(ch)
         if not cid:
-            failures.append(f"{name}: 无法解析频道 ID")
+            msg = "无法解析频道 ID（handle 可能不存在或页面结构变化），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
             continue
         xml_text = safe_request(
             f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}",
@@ -462,8 +811,7 @@ def fetch_youtube_finance():
         videos = []
         try:
             root = ET.fromstring(xml_text or "")
-            entries = root.findall("a:entry", YT_NS)
-            for entry in entries[:8]:
+            for entry in root.findall("a:entry", YT_NS)[:8]:
                 title = (entry.findtext("a:title", "", YT_NS) or "").strip()
                 published = entry.findtext("a:published", "", YT_NS) or ""
                 vid = entry.findtext("yt:videoId", "", YT_NS) or ""
@@ -486,32 +834,42 @@ def fetch_youtube_finance():
             channel_url = f"https://www.youtube.com/@{handle}" if handle else \
                           f"https://www.youtube.com/channel/{cid}"
             channels.append({
-                "name": name,
-                "url": channel_url,
-                "videos": videos,
+                "name": name, "desc": ch.get("desc", ""), "source": "YouTube",
+                "url": channel_url, "videos": videos,
                 "is_today": any(v["is_today"] for v in videos),
                 "newest_date": next((v["published_cst"] for v in videos if v["is_today"]),
                                     videos[0]["published_cst"]),
             })
         else:
-            failures.append(f"{name}: 未取得视频")
+            msg = "自动抓取失败（RSS 暂无内容或网络异常），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
 
-    if not channels:
-        print("  ⚠️ YouTube 财经频道暂不可用，不显示历史视频兜底")
-        return _source_result("YouTube 财经频道", "unavailable", channels=[],
-                              error="；".join(failures[:2]) or "未取得有效视频")
-
-    # 全部频道中最新视频的日期（用于当天检验）
+    # 全部已抓取频道中最新内容的日期（用于当天检验）
     all_dates = [v["published_cst"][:10] for ch in channels for v in ch["videos"]]
     newest_date = max(all_dates) if all_dates else None
     is_today = any(ch["is_today"] for ch in channels)
-    print(f"  ✅ 成功抓取 {len(channels)}/{len(YOUTUBE_CHANNELS)} 个财经频道"
-          + (f"（含当天视频）" if is_today else f"（最新视频日期 {newest_date}）"))
-    return _source_result("YouTube 财经频道", "success",
-                          is_today=is_today, content_date=newest_date,
-                          channels=channels,
-                          error="；".join(failures[:2]) or None,
-                          partial=len(channels) != len(YOUTUBE_CHANNELS))
+
+    if channels:
+        print(f"  ✅ 成功抓取 {len(channels)}/{len(HK_CHANNELS)} 个频道"
+              + (f"（含当天内容）" if is_today else f"（最新内容日期 {newest_date}）"))
+        if unsupported:
+            print(f"  🕐 {len(unsupported)} 个频道需登录/未配置，标注暂缺："
+                  + "、".join(u["name"] for u in unsupported))
+        return _source_result("港股名家频道", "success",
+                              is_today=is_today, content_date=newest_date,
+                              channels=channels, unsupported=unsupported,
+                              error="；".join(failures[:3]) or None,
+                              partial=len(channels) + len(unsupported) != len(HK_CHANNELS))
+
+    if unsupported:
+        print("  ⚠️ 暂无可自动抓取的频道；需登录/未配置：" + "、".join(u["name"] for u in unsupported))
+        return _source_result("港股名家频道", "unavailable", channels=[], unsupported=unsupported,
+                              error="；".join(failures[:3]) or "全部频道需登录或未配置自动抓取源")
+
+    print("  ⚠️ 港股名家频道暂不可用，不显示历史内容兜底")
+    return _source_result("港股名家频道", "unavailable", channels=[], unsupported=[],
+                          error="；".join(failures[:3]) or "未取得有效内容")
 
 
 # ============================================================
@@ -526,18 +884,24 @@ def collect_all_data():
     data = {}
     data["实时行情"] = fetch_market_snapshot()
     time.sleep(0.5)
-    data["YouTube财经频道"] = fetch_youtube_finance()
+    data["港股名家频道"] = fetch_hk_channels()
     time.sleep(0.5)
     data["Reddit WSB热议"] = fetch_wsb()
     time.sleep(0.5)
 
-    data["Yahoo头条"] = fetch_yahoo_headlines()
+    data["全球头条"] = fetch_google_news()
     time.sleep(0.5)
 
     data["A股资讯"] = fetch_sina_headlines()
     time.sleep(0.5)
 
     data["韩股半导体"] = fetch_kospi_headlines()
+    time.sleep(0.5)
+
+    data["东财快讯"] = fetch_eastmoney_news()
+    time.sleep(0.5)
+
+    data["热门榜单"] = fetch_hot_stocks()
 
     print("\n✅ 数据采集完成！")
     return data
@@ -597,11 +961,12 @@ def _data_table(rows):
 
 
 def _mini_table(rows):
-    """生成迷你表格"""
+    """生成迷你表格（支持可选第三元组为数值颜色）"""
     html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">'
-    for label, value in rows:
+    for label, value, *color in rows:
+        val_color = color[0] if color else C_RED
         html += f'<tr><td style="padding:4px 0;color:{C_BLUE};border-bottom:1px dashed {C_DASH};">{label}</td>'
-        html += f'<td style="padding:4px 0;text-align:right;font-weight:700;border-bottom:1px dashed {C_DASH};">{value}</td></tr>'
+        html += f'<td style="padding:4px 0;text-align:right;font-weight:700;color:{val_color};border-bottom:1px dashed {C_DASH};">{value}</td></tr>'
     html += '</table>'
     return html
 
@@ -668,14 +1033,72 @@ def _item_row(icon, text, sub=""):
             f'color:{C_BLUE};line-height:1.6;">{icon} {text}{sub_html}</div>')
 
 
-def _youtube_channel_block(ch):
-    """生成单个 YouTube 频道的视频列表块"""
-    ch_today = ch.get("is_today", False)
-    badge = _badge("当天", "ok") if ch_today else _badge("非当天", "warn")
-    url = ch.get("url", "")
-    name = _esc(ch.get("name", "?"))
+def _headline_row(it):
+    """Google News 头条行：中文标题 + 来源/时间小字。"""
+    display = it.get("title") if isinstance(it, dict) else it
+    sub = ""
+    if isinstance(it, dict):
+        parts = []
+        if it.get("source"):
+            parts.append(it["source"])
+        if it.get("published_cst") and it["published_cst"] != "—":
+            parts.append(it["published_cst"])
+        sub = " · ".join(parts)
+    return _item_row("📰", _esc(display[:120]), _esc(sub[:140]))
+
+
+def _em_news_row(it):
+    """东方财富快讯行：标题 + 时间/摘要小字（兼容字符串与 dict 两种结构）。"""
+    if isinstance(it, dict):
+        title = it.get("title") or ""
+        sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
+        return _item_row("📈", _esc(title[:120]), _esc(sub[:110]))
+    return _item_row("📈", _esc(it[:120]))
+
+
+def _hot_market_block(market, mdata):
+    """热门榜单单个市场：涨幅前十迷你表。"""
+    stocks = (mdata or {}).get("stocks", [])
+    medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
     rows = []
-    for v in ch.get("videos", [])[:5]:
+    for i, s in enumerate(stocks[:10]):
+        pct = s.get("change_pct")
+        try:
+            pct_f = float(pct)
+            pct_display = f"{pct_f:+.2f}%"
+            val_color = C_GREEN if pct_f >= 0 else C_RED
+        except (TypeError, ValueError):
+            pct_display = str(pct or "—")
+            val_color = C_RED
+        price = s.get("price")
+        if price is None:
+            price = "—"
+        rows.append((f"{medals[i]} {s.get('name', '?')} {s.get('code', '')}",
+                     f"{price} {pct_display}", val_color))
+    block = _section_title(f"🔥 {market}涨幅前十（{_esc((mdata or {}).get('desc', ''))}）", 14)
+    if rows:
+        block += _mini_table(rows)
+    else:
+        block += '<div style="font-size:12px;color:#8899c0;">暂无数据</div>'
+    return block
+
+
+def _channel_block(ch):
+    """生成单个频道的内容块：有内容时列出最新 CHANNEL_TOP_N 条；无内容（需登录/未配置）标注暂缺原因。"""
+    name = _esc(ch.get("name", "?"))
+    desc = _esc(ch.get("desc", ""))
+    url = ch.get("url", "")
+    videos = ch.get("videos") or []
+    if not videos:
+        note = _esc(ch.get("note") or "平台需登录，暂不支持自动抓取")
+        return f'''<div style="margin:8px 0 4px;padding:8px;background:#fdf6ec;border:1px solid #f0ddb8;">
+<div style="font-size:14px;font-weight:700;color:{C_BLUE};">📺 {name} {_badge("暂缺", "bad")}</div>
+<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
+<div style="font-size:12px;color:#8a5300;line-height:1.6;">{note}</div>
+</div>'''
+    badge = _badge("当天", "ok") if ch.get("is_today") else _badge("非当天", "warn")
+    rows = []
+    for v in videos[:CHANNEL_TOP_N]:
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
         today_tag = (' <span style="display:inline-block;background:#e6f4ea;color:#0b6e34;'
@@ -689,6 +1112,7 @@ def _youtube_channel_block(ch):
 <div style="font-size:14px;font-weight:700;color:{C_BLUE};">
 <a href="{_esc(url)}" style="color:{C_BLUE};text-decoration:none;">📺 {name}</a> {badge}
 </div>
+<div style="font-size:11px;color:#8899c0;padding:2px 0;">{desc}</div>
 {"".join(rows)}
 </div>'''
 
@@ -769,25 +1193,32 @@ def generate_report(data, date_display, date_str):
     """
     # 1. 提取所有数据源（缺失的键按空处理，兼容旧测试数据）
     market = data.get("实时行情", {})
-    yt = data.get("YouTube财经频道", {})
-    yt_channels = yt.get("channels", [])
+    yt = data.get("港股名家频道", {})
+    yt_live = yt.get("channels", [])        # 已抓取到内容的频道
+    yt_missing = yt.get("unsupported", [])  # 需登录/未配置的频道（带暂缺原因）
     wsb = data.get("Reddit WSB热议", {})
     wsb_stocks = wsb.get("stocks", [])
-    yahoo = data.get("Yahoo头条", {})
-    yh_headlines = yahoo.get("headlines", [])
+    google = data.get("全球头条", {})
+    gh_headlines = google.get("headlines", [])
     sina = data.get("A股资讯", {})
     sina_headlines = sina.get("headlines", [])
     kospi = data.get("韩股半导体", {})
     kospi_headlines = kospi.get("headlines", [])
+    em = data.get("东财快讯", {})
+    em_headlines = em.get("headlines", [])
+    hot = data.get("热门榜单", {})
+    hot_markets = hot.get("markets", {})
 
     # 2. 数据源清单（顺序即页面展示顺序）
     source_items = [
         ("实时行情", market),
-        ("YouTube财经频道", yt),
-        ("Yahoo头条", yahoo),
+        ("港股名家频道", yt),
+        ("全球头条", google),
         ("A股资讯", sina),
         ("韩股半导体", kospi),
         ("Reddit WSB热议", wsb),
+        ("东财快讯", em),
+        ("热门榜单", hot),
     ]
 
     # 3. 当天内容检验统计
@@ -815,34 +1246,44 @@ def generate_report(data, date_display, date_str):
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
         )
 
-    # 5. YouTube 财经频道（有数据才渲染）
+    # 5. 港股名家频道：只显示实际抓取到内容的频道；暂缺/未配置项不渲染到日报。
     card_yt = ""
-    if yt.get("status") == "success" and yt_channels:
-        blocks = "".join(_youtube_channel_block(ch) for ch in yt_channels[:6])
-        note = (f'本次 {len(yt_channels)}/{len(YOUTUBE_CHANNELS)} 个频道可抓取'
-                + (f'；{yt.get("error")}' if yt.get("error") else ""))
+    if yt_live:
+        blocks = "".join(_channel_block(ch) for ch in yt_live)
+        note = f'本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取'
         card_yt = _card(
-            "📺", "YouTube 财经资讯与新闻频道", _source_badge(yt),
-            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 视频发布最新日期 {_esc(yt.get("content_date") or "—")}</div>'
+            "📺", "港股名家频道",
+            f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yt)} · 内容最新日期 {_esc(yt.get("content_date") or "—")}</div>'
             + blocks
-            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的视频发布于今天（北京时间）。")
+            + _note(f"数据来自各频道公开 RSS；{note}。带 🆕 当天 标记的内容发布于今天（北京时间）；"
+                    f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
+            _source_badge(yt),
         )
 
     # 6. 其它资讯区块（有数据才渲染）
-    yh_items = "".join(_item_row("📰", _esc(h[:120])) for h in yh_headlines[:8])
-    card_yahoo = _card("📰", "全球头条", _source_badge(yahoo),
-                       f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(yahoo)}</div>' + yh_items) \
-        if yh_headlines else ""
+    gh_items = "".join(_headline_row(it) for it in gh_headlines[:8])
+    card_google = _card("📰", "全球头条", _source_badge(google),
+                        f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(google)}</div>'
+                        + gh_items) \
+        if gh_headlines else ""
+
+    em_items = "".join(_em_news_row(it) for it in em_headlines[:5])
+    card_em = _card("📈", "东方财富快讯", _source_badge(em),
+                    f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(em)} · 免费公开数据源</div>'
+                    + em_items) \
+        if em_headlines else ""
 
     kospi_items = "".join(_item_row("🇰🇷", _esc(h[:120])) for h in kospi_headlines[:5])
     card_semi = _card("🔌", "半导体&韩股", _source_badge(kospi),
-                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>' + kospi_items) \
+                      f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(kospi)}</div>'
+                      + kospi_items) \
         if kospi_headlines else ""
 
     sina_items = "".join(_item_row("🇨🇳", _esc(h[:120])) for h in sina_headlines[:5])
     # 注：A股四指数行情已并入上方「行情速览」卡片，这里只展示新浪资讯
     card_astock = _card("🇨🇳", "A股市场（实时行情 + 资讯）", _source_badge(sina),
-                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>' + sina_items) \
+                        f'<div style="font-size:11px;color:#666;padding:6px 0 3px;">{_source_note(sina)}</div>'
+                        + sina_items) \
         if sina_headlines else ""
 
     medals = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
@@ -855,11 +1296,29 @@ def generate_report(data, date_display, date_str):
                      + (_section_title("Top 10 提及榜", 15) + _mini_table(wsb_rows))) \
         if wsb_rows else ""
 
-    # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
-    content_cards = "".join(c for c in [card_market, card_yt, card_yahoo, card_semi, card_astock, card_wsb] if c)
+    # 6.5 热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
+    card_hot = ""
+    if hot.get("status") == "success":
+        hot_blocks = []
+        for mlabel in ["A股", "港股", "美股"]:
+            mdata = hot_markets.get(mlabel) or {}
+            if not mdata.get("stocks"):
+                continue
+            hot_blocks.append(_hot_market_block(mlabel, mdata))
+        if hot_blocks:
+            card_hot = _card(
+                "🔥", "热门榜单 · 最近交易日收盘", _source_badge(hot),
+                f'<div style="font-size:11px;color:#666;padding-bottom:4px;">{_source_note(hot)} · '
+                f'涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）</div>'
+                + "".join(hot_blocks)
+                + _note("榜单为最近交易日收盘后的涨幅排名。"),
+            )
 
-    # 8. 当天检验横幅 + 数据可用性面板
-    banner = _freshness_banner(source_items)
+    # 7. 有内容的区块拼接（没有数据的区块不会出现在主体）
+    content_cards = "".join(c for c in [card_market, card_yt, card_google, card_em,
+                                        card_semi, card_astock, card_wsb, card_hot] if c)
+
+    # 8. 数据可用性面板（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
 
     # 推送策略说明（与 main() 中的实际门禁保持一致）
     if today_n > 0:
@@ -905,12 +1364,11 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:0 14px 12px;text-align:center;color:#fff;font-size:12px;">{_esc(date_display)} · 自动生成 · 生成时间 {_esc(generated_at)}</td></tr>
 <tr><td style="padding:0 14px 14px;text-align:center;">
 <span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">全球市场</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">AI科技</span>
-<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">YouTube 财经频道</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">多源数据</span>
+<span style="display:inline-block;background:rgba(255,255,255,.2);padding:2px 8px;margin:2px;font-size:11px;color:#fff;">港股名家频道</span>
 </td></tr>
 </table>
 
-{banner}
 {content_cards}
 {card_focus}
 
@@ -919,7 +1377,7 @@ def generate_report(data, date_display, date_str):
 <tr><td style="padding:12px 10px;text-align:center;">
 <div style="font-size:11px;color:#8899c0;line-height:1.8;">
 🐙 章鱼AI · 仅供参考，不构成投资建议<br>
-数据来源：YouTube 财经频道 · Reddit · Yahoo · 新浪财经 · Naver · TradingKey
+数据来源：港股名家频道(YouTube/RSS) · Google News · 东方财富 · Reddit · 新浪财经 · Naver
 </div>
 <div style="font-size:10px;color:#99aacc;margin-top:4px;line-height:1.6;">
 生成时间：{_esc(generated_at)} · 报告日期：{date_str}
@@ -938,40 +1396,267 @@ def generate_report(data, date_display, date_str):
 # ============================================================
 # PushPlus 推送
 # ============================================================
-def push_to_wechat(title, content_html, token=None):
-    """通过 PushPlus 推送消息到微信"""
+# 可恢复错误的退避重试节奏：首次 + 3 次重试（共最多 4 次尝试）
+PUSH_RETRY_BACKOFF = (10, 30, 60)
+
+# 配额/凭证/内容类错误关键字：重试无意义，立即失败，避免浪费仅剩的额度。
+_PUSH_FATAL_KEYWORDS = (
+    "已达上限", "已用完", "超出今日", "超过今日", "今日已达", "发送次数",
+    "token错误", "token 错误", "token 无效", "token无效", "用户不存在",
+    "敏感", "违规",
+)
+
+# 频率/服务器类错误关键字：稍等重试通常可以恢复。
+_PUSH_RETRYABLE_KEYWORDS = (
+    "频繁", "太快", "频率", "稍后再试", "稍后重试", "请重试", "繁忙",
+    "too many", "frequent", "rate limit", "busy", "retry", "timeout", "超时",
+)
+
+
+def _push_failure_kind(http_status=None, code=None, msg=""):
+    """把一次推送失败分类：
+
+    transient —— 频率/服务器/网络类，按 PUSH_RETRY_BACKOFF 重试；
+    fatal     —— 配额/凭证/内容类，重试无意义，立即失败；
+    unknown   —— 无法归类的业务错误，不重试，立即失败并把 code/msg 打进日志。
+    """
+    if isinstance(http_status, int) and (http_status == 429 or http_status >= 500):
+        return "transient"
+    if isinstance(http_status, int) and 400 <= http_status < 500:
+        return "fatal"
+    low = (msg or "").lower()
+    # 先看致命关键字，避免「已达上限，请稍后再试」被误判成可重试
+    if any(k in low for k in _PUSH_FATAL_KEYWORDS):
+        return "fatal"
+    if any(k in low for k in _PUSH_RETRYABLE_KEYWORDS):
+        return "transient"
+    return "unknown"
+
+
+# ------------------------------------------------------------
+# PushPlus 内容上限截断
+# ------------------------------------------------------------
+# 自闭合 / void 标签（不会消耗闭合标签）
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+              "link", "meta", "param", "source", "track", "wbr"}
+# 匹配完整标签（含属性中带引号的 > ），用于按标签边界安全截断
+_TAG_RE = re.compile(r"<(?P<close>/)?(?P<tag>[a-zA-Z][a-zA-Z0-9]*)"
+                     r"(?P<attrs>(?:\"[^\"]*\"|'[^']*'|[^>\"'])*)>")
+
+
+def _build_truncate_notice(report_name=None):
+    """生成截断提示条：说明推送被截断、磁盘完整版不受影响，并附完整版链接（如有）。"""
+    link = ""
+    if report_name:
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if repo:
+            url = (f"https://raw.githubusercontent.com/{repo}/main/output/"
+                   f"{report_name}")
+            link = (f'<div style="padding:6px 0 2px;"><a href="{url}" '
+                    f'style="color:#002FA7;font-weight:700;text-decoration:none;">'
+                    f"📄 查看完整日报（{report_name}）</a></div>")
+    fname = f"（完整版文件：{report_name}）" if report_name else ""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;margin-top:8px;background:#fdf3d9;'
+            f'border-left:3px solid #8a5300;"><tr><td '
+            f'style="padding:8px 10px;font-size:12px;color:#8a5300;line-height:1.7;">'
+            f"⚠️ 微信推送有内容长度上限，本消息已自动截断；仓库中的完整日报不受影响{fname}。"
+            f"{link}</td></tr></table>")
+
+
+def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=None):
+    """把 HTML 截断到 PushPlus 内容上限以内：只切在完整标签边界，并逆序补全所有未闭合标签。
+
+    返回 (截断后的 html, 是否发生了截断)。磁盘上的日报文件不会被改动——完整版始终保留，
+    微信推送只发截断后的版本，末尾附完整版链接/文件名，避免平台截断导致整页排版崩坏。
+    """
+    if len(html) <= limit:
+        return html, False
+
+    notice = _build_truncate_notice(report_name)
+
+    stack = []          # 未闭合标签栈
+    candidates = []     # (完整标签结束位置, 该位置时的标签栈快照)
+    for m in _TAG_RE.finditer(html):
+        end = m.end()
+        if end > limit:
+            break
+        tag, closing = m.group("tag").lower(), bool(m.group("close"))
+        if tag not in _VOID_TAGS:
+            if closing:
+                if stack and stack[-1] == tag:
+                    stack.pop()
+                # 不匹配时保持栈不变：由下面的逆序补闭合保证结果合法
+            else:
+                stack.append(tag)
+        candidates.append((end, stack.copy()))
+
+    # 从最后一个候选点向前找：正文 + 截断提示 + 逆序闭合标签 的总长不超过上限。
+    # 越靠前的候选点未闭合标签越少，闭合标签越短，因此总能找到可用点。
+    for end, stack_at_cut in reversed(candidates):
+        closers = "".join(f"</{t}>" for t in reversed(stack_at_cut))
+        if len(html[:end]) + len(notice) + len(closers) <= limit:
+            return html[:end] + notice + closers, True
+
+    # 极端情况：任何截断点都放不下 → 只发截断提示，保证微信端仍能看到说明与完整版入口
+    return notice, True
+
+
+def push_to_wechat(title, content_html, token=None, template="html", report_name=None):
+    """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
+
+    - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
+      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
+    - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
+    - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
+    """
     token = token or PUSHPLUS_TOKEN
 
     if not token:
         print("⚠️ 未设置 PUSHPLUS_TOKEN，跳过推送")
         print("   请设置环境变量: export PUSHPLUS_TOKEN=你的token")
+        print("   （在 GitHub Actions 中请确认仓库 Settings → Secrets → PUSHPLUS_TOKEN 已配置）")
         return False
 
-    print(f"📤 正在推送到微信 (PushPlus)...")
+    print(f"📤 正在推送到微信 (PushPlus, template={template})...")
+    if template == "html":
+        content_html, was_truncated = _truncate_html_for_push(
+            content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
+        if was_truncated:
+            print(f"  ⚠️ 日报 HTML 超过 PushPlus 上限 {PUSHPLUS_MAX_CONTENT_CHARS} 字符，"
+                  f"已按完整标签边界截断后推送（磁盘上的完整版不受影响）")
+    payload = {
+        "token": token,
+        "title": title,
+        "content": content_html,
+        "template": template,
+    }
+    attempts = (0, *PUSH_RETRY_BACKOFF)
+    last_error = "未知错误"
 
-    try:
-        resp = requests.post(
-            PUSHPLUS_URL,
-            json={
-                "token": token,
-                "title": title,
-                "content": content_html,
-                "template": "html",
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-
-        if result.get("code") == 200:
-            print("  ✅ 推送成功！")
-            return True
+    for attempt, wait in enumerate(attempts, 1):
+        if wait:
+            print(f"  ⏳ 等待 {wait}s 后进行第 {attempt}/{len(attempts)} 次尝试...")
+            time.sleep(wait)
+        http_status = None
+        try:
+            resp = requests.post(PUSHPLUS_URL, json=payload, timeout=30)
+            http_status = getattr(resp, "status_code", None)
+            result = resp.json()
+        except Exception as exc:
+            last_error = f"网络/请求异常: {exc}"
+            if http_status is not None:
+                kind = _push_failure_kind(http_status, None, str(exc))
+            elif isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+                # requests 的网络异常（含 SSL/超时/连接重置）都是 OSError 子类，可重试
+                kind = "transient"
+            else:
+                # 编程错误等非网络异常：重试无意义，立即失败并暴露原因
+                kind = "unknown"
         else:
-            print(f"  ❌ 推送失败: {result.get('msg', '未知错误')}")
-            return False
-    except Exception as e:
-        print(f"  ❌ 推送异常: {e}")
+            code = result.get("code") if isinstance(result, dict) else None
+            msg = str(result.get("msg", "未知错误")) if isinstance(result, dict) else "返回数据格式错误"
+            if code == 200:
+                print("  ✅ 推送成功！" if attempt == 1 else f"  ✅ 推送成功！（第 {attempt} 次尝试）")
+                return True
+            last_error = f"PushPlus code={code} msg={msg}"
+            kind = _push_failure_kind(http_status, code, msg)
+
+        remaining = len(attempts) - attempt
+        if kind == "transient" and remaining > 0:
+            print(f"  ⚠️ 第 {attempt}/{len(attempts)} 次推送失败（可重试错误）: {last_error}")
+            continue
+        if kind == "fatal":
+            print(f"  ❌ 推送失败（配额/凭证/内容类错误，重试无意义）: {last_error}")
+        else:
+            print(f"  ❌ 推送失败: {last_error}")
         return False
+
+    print(f"  ❌ 推送最终失败（已重试 {len(attempts) - 1} 次）: {last_error}")
+    return False
+
+
+def build_no_push_alert_text(reason, data, report_path=None):
+    """生成「当天检验未通过」纯文本告警正文（列出每个来源的当天/非当天/无数据状态）。"""
+    items = [(k, v) for k, v in (data or {}).items() if isinstance(v, dict)]
+    total = len(items)
+    content_n = sum(1 for _, v in items if v.get("status") == "success")
+    lines = [
+        f"📅 当天内容检验未通过（{_now()} 北京时间）",
+        f"原因：{reason}",
+        f"数据：{content_n}/{total} 个来源抓到内容，且无来源判定为当天，"
+        f"已按防旧内容规则不推送日报。",
+        "",
+        "各来源状态：",
+    ]
+    for name, s in items:
+        if s.get("status") != "success":
+            mark = "⚠️ 无数据"
+        elif s.get("is_today"):
+            mark = "✅ 当天"
+        else:
+            mark = "🕓 非当天"
+        lines.append(f"· {name}：{mark}（数据日期 {s.get('content_date') or '—'}）")
+    lines += [
+        "",
+        "处理建议：",
+        "· 周末/休市/源站维护属预期情况，无需处理；",
+        "· 确需强制推送：Actions 手动运行并勾选 force_push，"
+        "或本地 ./output/manual_push.sh --force。",
+        f"报告文件：{os.path.basename(report_path) if report_path else '—'}",
+    ]
+    return "\n".join(lines)
+
+
+def push_no_push_alert(reason, data, report_path=None, token=None):
+    """推送「当天检验未通过」纯文本告警。
+
+    返回 True/False；返回 False 时调用方应以退出码 1 结束，
+    确保 token 缺失 / 接口异常在 Actions 上显红而不是静默。
+    """
+    print("📣 正在推送「检验未通过」纯文本告警（避免彻底沉默）...")
+    title = f"🐙 日报未推送提醒 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+    return push_to_wechat(title, build_no_push_alert_text(reason, data, report_path),
+                          token=token, template="txt")
+
+
+def build_push_failure_alert_text(reason, data=None, report_path=None):
+    """生成「日报推送失败」兜底告警正文：日报已生成但被 PushPlus 拒绝时，
+    让微信侧也能直接看到失败原因和处理建议，而不是只看到 Actions 变红。"""
+    lines = [
+        f"⚠️ 日报已生成，但推送到微信失败（{_now()} 北京时间）",
+        f"原因：{reason}",
+        "",
+    ]
+    if data:
+        items = [v for v in data.values() if isinstance(v, dict)]
+        today_n = sum(1 for v in items if v.get("is_today"))
+        lines.append(f"数据状态：{today_n}/{len(items)} 个来源为当天内容，日报内容本身无问题。")
+        lines.append("")
+    lines += [
+        "处理建议：",
+        "· 若日志提示「发送频繁 / 稍后再试 / 服务器繁忙」：属 PushPlus 频率限制，"
+        "稍等片刻后在 Actions 重跑一次即可；",
+        "· 若提示「发送次数已达上限 / 已用完」：今日 PushPlus 额度已耗尽，次日零点恢复，"
+        "或在 PushPlus 升级套餐后更新 Secrets；",
+        "· 若提示 token 无效 / 已失效：到 pushplus.plus 重新获取，"
+        "并更新仓库 Settings → Secrets → PUSHPLUS_TOKEN；",
+        "· 手动重新推送：Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow，"
+        "或本地 ./output/manual_push.sh --force。",
+        f"报告文件：{os.path.basename(report_path) if report_path else '—'}",
+    ]
+    return "\n".join(lines)
+
+
+def push_failure_alert(reason, data=None, report_path=None, token=None):
+    """日报推送失败后的兜底告警（template=txt）。
+
+    返回 True/False；本告警只负责「让微信侧感知失败」，不改变调用方的退出码——
+    日报未送达，调用方仍应以退出码 1 结束（Actions 显红）。"""
+    print("📣 正在发送「推送失败」兜底告警（让微信侧也能看到失败原因）...")
+    title = f"🐙 日报推送失败提醒 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+    return push_to_wechat(title, build_push_failure_alert_text(reason, data, report_path),
+                          token=token, template="txt")
 
 
 # ============================================================
@@ -993,15 +1678,39 @@ def _atomic_write(path, content):
             os.unlink(tmp_path)
 
 
+def _unique_report_path(requested_path):
+    """返回不重复的 HTML 路径。
+
+    自动和手动运行都可能在同一天执行多次；日报不能因同名而覆盖上一份。
+    冲突时统一追加澳门日期（YYYYMMDD）和三位随机数，例如：
+    ``daily_report_20260802_417.html``。循环检查可避免随机数碰撞。
+    """
+    if not os.path.exists(requested_path):
+        return requested_path
+
+    directory = os.path.dirname(os.path.abspath(requested_path))
+    extension = os.path.splitext(requested_path)[1] or ".html"
+    stem = os.path.splitext(os.path.basename(requested_path))[0]
+    date = _today_str()
+    for _ in range(1000):
+        suffix = f"{random.SystemRandom().randint(0, 999):03d}"
+        candidate = os.path.join(directory, f"{stem}_{date}_{suffix}{extension}")
+        if not os.path.exists(candidate):
+            return candidate
+
+    raise RuntimeError(f"无法为 {requested_path} 找到不重复的日期随机文件名")
+
+
 def _timestamped_report_path():
-    """目标文件被锁定/不可覆盖时使用的全新日期时间文件名。"""
-    stamp = datetime.now(CST).strftime("%Y%m%d_%H%M%S")
-    candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}.html")
-    sequence = 1
-    while os.path.exists(candidate):
-        candidate = os.path.join(REPORT_DIR, f"daily_report_{stamp}_{sequence}.html")
-        sequence += 1
-    return candidate
+    """目标文件被锁定/不可覆盖时使用的全新日期随机文件名。"""
+    directory = os.path.abspath(REPORT_DIR)
+    date = _today_str()
+    for _ in range(1000):
+        suffix = f"{random.SystemRandom().randint(0, 999):03d}"
+        candidate = os.path.join(directory, f"daily_report_{date}_{suffix}.html")
+        if not os.path.exists(candidate):
+            return candidate
+    raise RuntimeError("无法为锁定的日报找到不重复的日期随机文件名")
 
 
 def newest_report_path():
@@ -1011,20 +1720,26 @@ def newest_report_path():
 
 
 def save_report(html, output_path=None, data=None):
-    """保存本次报告；目标不能覆盖时创建带日期时间的新 HTML，绝不退回旧文件。"""
+    """保存本次报告；同名或无法覆盖时创建日期+三位随机数的新 HTML。"""
     requested_path = output_path or os.path.join(REPORT_DIR, f"daily_report_{_today_str()}.html")
+    # 先检查文件名是否已存在，避免自动/手动重复运行覆盖既有日报。
+    target_path = _unique_report_path(requested_path)
+    if target_path != requested_path:
+        print(f"⚠️ 输出文件已存在: {requested_path}")
+        print(f"   本次改用不重复文件: {target_path}")
+
     try:
-        _atomic_write(requested_path, html)
-        output_path = requested_path
+        _atomic_write(target_path, html)
+        output_path = target_path
         print(f"💾 日报已原子保存: {output_path}")
     except OSError as exc:
-        # 文件被其它进程锁定、只读或无法替换时，保留旧文件并输出一份可追溯的新报告。
+        # 文件在检查后被其它进程锁定或抢先创建时，再生成一个日期随机文件。
         output_path = _timestamped_report_path()
         try:
             _atomic_write(output_path, html)
         except OSError as fallback_exc:
-            raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}") from fallback_exc
-        print(f"⚠️ 无法覆盖 {requested_path}: {exc}")
+            raise RuntimeError(f"无法保存日报（原路径: {exc}；新日期文件: {fallback_exc}）") from fallback_exc
+        print(f"⚠️ 无法写入 {target_path}: {exc}")
         print(f"💾 已改存为新的日期文件: {output_path}")
 
     latest_path = os.path.join(REPORT_DIR, "latest.html")
@@ -1062,6 +1777,52 @@ def list_reports():
         mtime = datetime.fromtimestamp(os.path.getmtime(filepath), CST)
         print(f"  {idx:2d}. {filename}  ({size:,} 字节)  [{mtime.strftime('%Y-%m-%d %H:%M')}]")
     return 0
+
+
+# ============================================================
+# 清理旧的 HTML 报告
+# ============================================================
+def clean_old_html_reports(keep_latest=False):
+    """清理 output/ 目录下的所有旧 HTML 报告（daily_report_*.html + latest.html）。
+
+    在手动/自动推送前调用，确保本次生成的日报是"最新且唯一"的内容，
+    避免历史残留文件（特别是含旧版本特征的报告）被误推或被 latest.html 引用。
+
+    参数:
+        keep_latest: True 时保留 latest.html（仅清 daily_report_*.html）；
+                     默认 False：两个都清。
+    返回:
+        (删除的 daily_report 数, 是否删了 latest.html)
+    """
+    deleted = 0
+    latest_deleted = False
+
+    # 1) 清理 daily_report_*.html
+    pattern = os.path.join(REPORT_DIR, "daily_report_*.html")
+    for filepath in glob.glob(pattern):
+        try:
+            os.remove(filepath)
+            deleted += 1
+        except OSError as exc:
+            print(f"⚠️ 清理失败: {filepath} ({exc})")
+
+    # 2) 清理 latest.html（除非显式保留）
+    latest_path = os.path.join(REPORT_DIR, "latest.html")
+    if not keep_latest and os.path.isfile(latest_path):
+        try:
+            os.remove(latest_path)
+            latest_deleted = True
+        except OSError as exc:
+            print(f"⚠️ 清理失败: {latest_path} ({exc})")
+
+    if deleted or latest_deleted:
+        parts = []
+        if deleted:
+            parts.append(f"{deleted} 份 daily_report_*.html")
+        if latest_deleted:
+            parts.append("latest.html")
+        print(f"🧹 已清理历史 HTML 报告: {', '.join(parts)}")
+    return deleted, latest_deleted
 
 
 # ============================================================
@@ -1161,9 +1922,14 @@ def main():
             print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, html)
-        return 0
+        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        if push_to_wechat(title, html, report_name=os.path.basename(push_path)):
+            print("\n🎉 全部完成！")
+            return 0
+        push_failure_alert("通过 --push-only 推送日报被 PushPlus 拒绝（详见上方 code/msg）",
+                           report_path=push_path)
+        print("\n❌ 推送未成功（退出码 1；在 GitHub Actions 中将标红提醒）。")
+        return 1
 
     # 正常流程
     mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
@@ -1171,6 +1937,12 @@ def main():
     print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
+
+    # 0. 清理历史 HTML 报告（手动/自动推送前必做）：
+    #    避免历史残留文件（含旧版本特征的报告）被推送或被 latest.html 引用。
+    #    --dry-run 不写文件，所以跳过清理。
+    if not args.dry_run:
+        clean_old_html_reports()
 
     # 1. 采集数据
     data = collect_all_data()
@@ -1185,11 +1957,13 @@ def main():
     # 3. dry-run 模式
     if args.dry_run:
         print("\n🔍 预览模式（不推送、不保存）")
-        print(f"   数据源: YouTube({len(data.get('YouTube财经频道', {}).get('channels', []))}频道) | "
+        print(f"   数据源: 港股名家频道({len(data.get('港股名家频道', {}).get('channels', []))}频道可抓取) | "
               f"WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
-              f"Yahoo({len(data.get('Yahoo头条', {}).get('headlines', []))}条) | "
+              f"全球头条({len(data.get('全球头条', {}).get('headlines', []))}条) | "
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
-              f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条)")
+              f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条) | "
+              f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
+              f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只)")
         return 0
 
     # 4. 保存文件
@@ -1198,36 +1972,62 @@ def main():
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
 
-    # 5. 推送决策：先做「当天内容检验」，再决定是否推送
+    # 5. 推送决策：先做「当天内容检验」，再决定是否推送。
+    #    约定：任何「应当推送却失败」的情况都返回退出码 1（GitHub Actions 将标红），
+    #    不再出现“推送失败但 workflow 显示成功”的静默问题。
     can_push, reason = check_push_eligibility(data)
+
+    def _finish(ok, ok_msg="🎉 全部完成！",
+                fail_msg="❌ 流程完成，但推送未成功（见上方原因；Actions 将标红提醒）"):
+        print(f"\n{ok_msg if ok else fail_msg}")
+        return 0 if ok else 1
 
     if args.no_push:
         print(f"\n⏭️ 已跳过推送（--no-push）。当天检验: {reason}")
         print(f"   日报已保存: {output_path}")
-    elif not can_push and not args.force_push and not args.allow_incomplete_push:
-        print(f"\n⏭️ 当天检验未通过，本次不推送。")
-        print(f"   原因: {reason}")
-        print("   日报已保存（带状态标记），可在确认后使用:")
-        print("     python3 output/pipeline.py --manual --force-push   # 强制手动推送")
-        print("     python3 output/pipeline.py --push-only output/latest.html")
-    elif not can_push and args.force_push:
+        return _finish(True)
+
+    if can_push:
+        print(f"\n📤 当天检验通过：{reason}")
+        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        print(f"📎 正在推送本次生成的 HTML: {output_path}")
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
+            return _finish(True)
+        # 日报推送失败：再发一条纯文本失败告警，微信侧能直接看到原因；退出码仍为 1。
+        push_failure_alert("日报 HTML 多次推送均被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
+
+    if args.force_push:
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, push_html)
-    elif not can_push and args.allow_incomplete_push:
+        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
+            return _finish(True)
+        push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
+
+    if args.allow_incomplete_push:
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d')}"
-        push_to_wechat(title, push_html)
-    else:
-        print(f"\n📤 当天检验通过：{reason}")
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d')}"
-        print(f"📎 正在推送本次生成的 HTML: {output_path}")
-        push_to_wechat(title, push_html)
+        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
+            return _finish(True)
+        push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",
+                           data=data, report_path=output_path)
+        return _finish(False)
 
-    print("\n🎉 全部完成！")
-    return 0
+    # 当天检验未通过且不强制：不推日报，但推一条纯文本告警，避免彻底沉默。
+    print(f"\n⏸️ 当天检验未通过，本次不推送日报。")
+    print(f"   原因: {reason}")
+    print("   日报已保存（带状态标记），可在确认后使用:")
+    print("     python3 output/pipeline.py --manual --force-push   # 强制手动推送")
+    print("     python3 output/pipeline.py --push-only output/latest.html")
+    if push_no_push_alert(reason, data, output_path):
+        return _finish(True, ok_msg="🎉 全部完成（日报未推，已发出检验未通过告警）！")
+    print("   ⚠️ 告警也发送失败。若是 token 未配置/失效，本次将以失败结束以便在 Actions 中发现。")
+    return _finish(False)
 
 
 if __name__ == "__main__":

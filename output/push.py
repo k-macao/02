@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 🐙 章鱼 AI · 一键推送
-每次运行都先抓取最新数据 → 分析 → 生成 → 当天检验 → 推送。
+每次运行都先清理历史 HTML 报告 → 抓取最新数据 → 分析 → 生成 → 当天检验 → 推送。
 
 常用:
   python3 output/push.py                        # 全流程（当天检验通过才推送）
   python3 output/push.py --manual               # 手动推送模式
   python3 output/push.py --manual --force-push  # 手动强制推送（内容非当天也推）
-  python3 output/push.py --push-only            # 推送实际最后更新的日报
-  python3 output/push.py --list                 # 列出已生成的日报
+  python3 output/push.py --push-only            # 推送实际最后更新的日报（不清理）
+  python3 output/push.py --list                 # 列出已生成的日报（不清理）
 """
 import os
 import sys
@@ -28,7 +28,7 @@ def list_reports():
     if not files:
         print("暂无日报文件。")
         return 0
-    
+
     print(f"共找到 {len(files)} 份日报：\n")
     for idx, filepath in enumerate(files, 1):
         filename = os.path.basename(filepath)
@@ -56,7 +56,7 @@ def main():
     if returncode < 0:
         print(f"\n⚠️  进程被信号终止，信号码：{-returncode}")
         sys.exit(1)
-    
+
     sys.exit(returncode)
 
 
