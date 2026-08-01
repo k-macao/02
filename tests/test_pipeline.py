@@ -215,13 +215,27 @@ class ReportFreshnessTests(unittest.TestCase):
              patch.object(pipeline, "resolve_channel_id", return_value=None), \
              patch.object(pipeline, "safe_request", return_value=rss_xml):
             result = pipeline.fetch_hk_channels()
-        # youtube 频道解析失败 → 不计入成功；rss 成功 1 个；manual 进入 unsupported
+        # rss 成功 1 个；youtube 解析失败进入暂缺；manual 进入暂缺
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["channels"]), 1)
         self.assertEqual(result["channels"][0]["name"], "港股策略通訊（Substack）")
         self.assertEqual(len(result["channels"][0]["videos"]), 2)
+        self.assertEqual(len(result["unsupported"]), 2)
+        unsupported_names = {u["name"] for u in result["unsupported"]}
+        self.assertEqual(unsupported_names, {"青姐（胡孟青）", "郭思治（郭Sir）"})
+        self.assertTrue(any("暂缺" in u["note"] for u in result["unsupported"]))
+
+    def test_failed_rss_feed_marks_unsupported_not_silent(self):
+        # RSS 源抓取失败 → 进入 unsupported（页面标注暂缺），不会从页面消失
+        conf = [{"name": "港股研究社（Bilibili）", "desc": "", "kind": "rss",
+                 "feed_url": "https://rsshub.example/bilibili/user/video/1"}]
+        with patch.object(pipeline, "HK_CHANNELS", conf), \
+             patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_hk_channels()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["channels"], [])
         self.assertEqual(len(result["unsupported"]), 1)
-        self.assertEqual(result["unsupported"][0]["name"], "青姐（胡孟青）")
+        self.assertIn("暂缺", result["unsupported"][0]["note"])
 
     def test_rss2_pubdate_parsing(self):
         items = pipeline._parse_rss_items("""<?xml version="1.0"?>

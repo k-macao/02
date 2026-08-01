@@ -132,6 +132,43 @@ HK_CHANNELS = [
      "desc": "實時更新盤中異動與傳聞。",
      "kind": "manual",
      "note": "微博需登录 / 反爬限制，暂不支持自动抓取"},
+
+    # ── 第二批（2026-08-02 追加，用户指定）──────────────────
+    {"name": "施凌部署",
+     "desc": "結合宏觀經濟與技術分析的知名財經頻道；施凌部署為「我要做富翁」旗下品牌，於該官方頻道發布。",
+     "kind": "youtube", "handle": "@Money-Tab"},
+    {"name": "BofA Global Research（美銀研究）",
+     "desc": "解讀大行對港股策略的官方影音；BofA Global Research 內容於 Bank of America 官方頻道發布（Must Read Research 系列）。",
+     "kind": "youtube", "handle": "@BankofAmerica"},
+    {"name": "秒投（ShareNews / StockViva）",
+     "desc": "邀請多位香港股評人進行直播分析。",
+     "kind": "youtube", "handle": "@StockViva"},
+    {"name": "C基金 - 李浩德",
+     "desc": "基金經理視角，分析港股大盤與科技股。",
+     "kind": "youtube", "handle": "@CFund_Channel"},
+    {"name": "Finance730",
+     "desc": "探討香港財經、地產及股市走勢的專業網媒。",
+     "kind": "youtube", "handle": "@Finance730hk"},
+    {"name": "紅猴（Red Monkey）",
+     "desc": "深度分析港股價值投資與公司基本面。",
+     "kind": "manual",
+     "note": "未找到独立官方频道；其视频散见于「成家網上投資課程」等第三方频道（多为 2022 年前旧内容）"},
+    {"name": "米高（Michael）的財經頻道",
+     "desc": "專注港股短線操作與期指分析。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「米高 Michael 財經頻道」，请提供频道链接或 handle 后接入"},
+    {"name": "小斯財經",
+     "desc": "用深入淺出的方式講解港股與新股申購。",
+     "kind": "manual",
+     "note": "未能在 YouTube 检索到明确的「小斯財經」频道，请提供频道链接或 handle 后接入"},
+    {"name": "智富同學會",
+     "desc": "分享技術指標與港股實戰策略。",
+     "kind": "manual",
+     "note": "未检索到「智富同學會」独立频道；疑似相关频道「智富財經 Invest Smarter @investsmarter536」，如需接入请确认"},
+    {"name": "港股研究社（Bilibili）",
+     "desc": "面向內地投資者的港股解讀視頻（B站 UP 主，UID 613310838）。",
+     "kind": "rss", "feed_url": "https://rsshub.app/bilibili/user/video/613310838",
+     "note": "通过 RSSHub 抓取 Bilibili 投稿；如公共实例被限流，可更换其他 RSSHub 实例"},
 ]
 
 YT_NS = {
@@ -600,13 +637,17 @@ def fetch_hk_channels():
                                         items[0]["published_cst"]),
                 })
             else:
-                failures.append(f"{name}: 未取得内容")
+                msg = "自动抓取失败（源可能需登录/被限流，或地址无效），暂缺"
+                unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+                failures.append(f"{name}: {msg}")
             continue
 
         # kind == "youtube"
         cid = resolve_channel_id(ch)
         if not cid:
-            failures.append(f"{name}: 无法解析频道 ID")
+            msg = "无法解析频道 ID（handle 可能不存在或页面结构变化），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
             continue
         xml_text = safe_request(
             f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}",
@@ -645,7 +686,9 @@ def fetch_hk_channels():
                                     videos[0]["published_cst"]),
             })
         else:
-            failures.append(f"{name}: 未取得视频")
+            msg = "自动抓取失败（RSS 暂无内容或网络异常），暂缺"
+            unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
+            failures.append(f"{name}: {msg}")
 
     # 全部已抓取频道中最新内容的日期（用于当天检验）
     all_dates = [v["published_cst"][:10] for ch in channels for v in ch["videos"]]
