@@ -41,6 +41,10 @@
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
      截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
      始终保留完整版。
+  9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股/韩股头条、
+     Reddit WSB、港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
+     信号分 + 置信度、板块热度、技术速读、风险提示、明日关注清单）。无需大模型 API、
+     可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -951,7 +955,7 @@ def _sq(color=C_ACCENT, size=8):
 
 def _badge(text, kind="ok"):
     """状态徽标：直角描边（非填充药丸）。ok=绿(当天) / warn=黄(非当天) / bad=红(无数据)"""
-    colors = {"ok": C_GREEN, "warn": C_AMBER, "bad": C_RED}
+    colors = {"ok": C_GREEN, "warn": C_AMBER, "bad": C_RED, "ai": C_ACCENT}
     color = colors.get(kind, C_GREEN)
     return (f'<span style="display:inline-block;border:1px solid {color};color:{color};'
             f'background:#fff;padding:0 5px;margin-left:6px;font-size:10px;font-weight:700;'
@@ -1212,6 +1216,342 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 # 报告生成（Swiss × 杂志排版：刊头 + 编号栏目 + 审计栏 + 版权页）
 # ——只渲染有内容的区块；每个区块带来源、抓取时间与「当天/非当天/无数据」徽标
 # ============================================================
+# ============================================================
+# AI 盘研判（规则 / 启发式合成，无需大模型 API）
+# ------------------------------------------------------------
+# 基于当日已抓取的多源信号（实时行情、热门榜单、全球/东财/A股/韩股头条、
+# Reddit WSB、港股名家频道观点）做确定性合成，输出一个跨市场综合研判：
+#   情绪定调（多/空/中性 + 信号分 + 置信度）、板块热度、技术速读、
+#   风险提示、明日关注清单。全部由规则计算，可复现、不调外部大模型、
+#   不伪造内容；明确标注「非投资建议」。
+# 如需接大模型，可在 build_ai_analysis 内增加 LLM 分支（保留本规则作兜底）。
+# ============================================================
+AI_ANALYSIS_ENABLED = True
+
+# 板块关键词：从行情/榜单/头条文本中识别板块提及热度
+AI_SECTOR_KEYWORDS = {
+    "半导体/芯片": ["半导体", "芯片", "集成电路", "晶圆", "中芯", "寒武纪", "北方华创",
+                   "韦尔", "兆易", "设备", "光刻"],
+    "AI/算力": ["AI", "人工智能", "算力", "大模型", "英伟达", "NVIDIA", "GPU",
+                "光模块", "CPO", "服务器", "数据中心"],
+    "新能源/锂电": ["新能源", "锂电", "电池", "光伏", "储能", "宁德", "比亚迪",
+                    "逆变器", "氢能"],
+    "医药/生物": ["医药", "生物", "创新药", "疫苗", "CRO", "制药", "医疗", "器械"],
+    "地产/基建": ["地产", "房地产", "物业", "基建", "建材", "水泥", "建筑", "新城"],
+    "金融/银行": ["银行", "券商", "保险", "证券", "信托", "金控", "信贷"],
+    "消费": ["消费", "白酒", "食品", "饮料", "零售", "家电", "免税", "餐饮"],
+    "黄金/有色": ["黄金", "有色", "铜", "铝", "稀土", "金属", "矿业", "锂矿"],
+    "军工": ["军工", "国防", "航空", "船舶", "卫星", "航天"],
+    "汽车": ["汽车", "整车", "零部件", "特斯拉", "理想", "蔚来", "小鹏", "小米汽车"],
+}
+
+# 舆情多/空关键词（子串匹配，叠加计数）
+_AI_BULL_WORDS = ["涨", "升", "新高", "利好", "反弹", "回暖", "走强", "突破",
+                  "创新高", "提振", "超预期", "上扬", "收涨", "飘红", "乐观",
+                  "复苏", "宽松", "加码", "扩容"]
+_AI_BEAR_WORDS = ["跌", "崩", "暴跌", "下挫", "走弱", "回落", "风险", "危机",
+                  "警告", "抛售", "利空", "制裁", "衰退", "违约", "加息",
+                  "缩表", "监管", "承压", "亏损", "爆雷", "破位", "跳水", "低迷"]
+# 风险/宏观风险关键词（用于风险舆情与承压板块识别）
+_AI_RISK_KEYWORDS = ["风险", "危机", "警告", "崩", "暴跌", "制裁", "衰退", "违约",
+                     "加息", "缩表", "监管", "爆雷", "破位", "跳水", "利空",
+                     "承压", "亏损", "诉讼", "调查", "处罚", "关税", "地缘",
+                     "降级", "做空", "冻结", "停牌"]
+# 风险否定词：标题同时含这些词时，往往「利空出尽/风险偏好走强」，不计入风险项
+_AI_RISK_NEGATION = ["利好", "走强", "回暖", "收涨", "飘红", "超预期", "出尽",
+                     "消退", "缓解", "复苏", "反弹", "宽松", "加码"]
+
+
+def _ai_is_risk_title(title):
+    """标题含风险关键词但同时又含利好/走强等否定词时，视为非风险项。"""
+    if not any(k in title for k in _AI_RISK_KEYWORDS):
+        return False
+    return not any(n in title for n in _AI_RISK_NEGATION)
+
+
+def _ai_label(points):
+    """把信号分映射为情绪标签（中文 + 英文 kicker）。"""
+    if points >= 25:
+        return "偏多", "BULLISH-LEANING"
+    if points > 8:
+        return "温和偏多", "MILDLY BULLISH"
+    if points >= -8:
+        return "中性", "NEUTRAL"
+    if points > -25:
+        return "温和偏空", "MILDLY BEARISH"
+    return "偏空", "BEARISH"
+
+
+def _ai_band(pct):
+    """把单指数涨跌幅映射到动能档位（中文 + 语义色）。"""
+    if pct >= 2:
+        return "强势", C_GREEN
+    if pct >= 0.5:
+        return "偏强", C_GREEN
+    if pct > -0.5:
+        return "震荡", C_AMBER
+    if pct > -2:
+        return "偏弱", C_RED
+    return "弱势", C_RED
+
+
+def build_ai_analysis(data):
+    """规则合成跨市场综合研判（A股 + 港股 + 美股）。
+
+    返回 dict；available=False 时调用方不渲染该区块（避免空分析）。
+    纯确定性计算：不调用任何大模型 API，可复现，不伪造内容。
+    """
+    market = data.get("实时行情", {}) or {}
+    quotes = market.get("quotes", {}) or {}
+    hot = data.get("热门榜单", {}) or {}
+    hot_markets = hot.get("markets", {}) or {}
+    google = data.get("全球头条", {}) or {}
+    em = data.get("东财快讯", {}) or {}
+    sina = data.get("A股资讯", {}) or {}
+    kospi = data.get("韩股半导体", {}) or {}
+    wsb = data.get("Reddit WSB热议", {}) or {}
+    yt = data.get("港股名家频道", {}) or {}
+
+    google_headlines = google.get("headlines", []) or []
+    em_headlines = em.get("headlines", []) or []
+    sina_headlines = sina.get("headlines", []) or []
+    kospi_headlines = kospi.get("headlines", []) or []
+    wsb_stocks = wsb.get("stocks", []) or []
+    yt_channels = yt.get("channels", []) or []
+
+    # —— 1. 文本与结构化信号汇总 ——
+    texts = []
+    for it in google_headlines:
+        if isinstance(it, dict):
+            texts.append(it.get("title", ""))
+    for it in em_headlines:
+        if isinstance(it, dict):
+            texts.append(it.get("title", ""))
+            texts.append(it.get("summary", ""))
+    texts += [h for h in sina_headlines if isinstance(h, str)]
+    texts += [h for h in kospi_headlines if isinstance(h, str)]
+    for ch in yt_channels:
+        for v in ch.get("videos", []) or []:
+            texts.append(v.get("title", ""))
+    all_text = " ".join(t for t in texts if t)
+
+    # 结构化头条（标题 + 来源），用于风险项展示
+    headlines_struct = []
+    for it in google_headlines:
+        if isinstance(it, dict):
+            headlines_struct.append((it.get("title", ""), it.get("source", "")))
+    for it in em_headlines:
+        if isinstance(it, dict):
+            headlines_struct.append((it.get("title", ""), ""))
+    for h in sina_headlines:
+        if isinstance(h, str):
+            headlines_struct.append((h, "新浪财经"))
+    for h in kospi_headlines:
+        if isinstance(h, str):
+            headlines_struct.append((h, "韩股/半导体"))
+    for ch in yt_channels:
+        for v in ch.get("videos", []) or []:
+            headlines_struct.append((v.get("title", ""), ch.get("name", "")))
+
+    # 热门榜单个股名（用于板块/关注）
+    stock_names = []
+    for m, md in hot_markets.items():
+        for s in (md or {}).get("stocks", []) or []:
+            stock_names.append(s.get("name", ""))
+
+    # —— 2. 情绪打分 ——
+    changes = []
+    for q in quotes.values():
+        try:
+            changes.append(float(q["change_pct"]))
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    present = [m for m, md in hot_markets.items() if (md or {}).get("stocks")]
+
+    bull = sum(all_text.count(w) for w in _AI_BULL_WORDS)
+    bear = sum(all_text.count(w) for w in _AI_BEAR_WORDS)
+    net = bull - bear
+
+    points = 0.0
+    signals = 0
+    if changes:
+        avg = sum(changes) / len(changes)
+        points += max(-40, min(40, avg * 6))
+        signals += 1
+    if present:
+        points += {3: 6, 2: 3, 1: 1}.get(len(present), 0)
+        signals += 1
+    if all_text:
+        points += max(-20, min(20, net * 2))
+        signals += 1
+    if wsb_stocks:
+        points += 3
+        signals += 1
+    points = max(-100, min(100, round(points)))
+
+    has_data = bool(changes) or bool(present) or bool(all_text) or bool(wsb_stocks)
+    if not has_data or not AI_ANALYSIS_ENABLED:
+        return {"available": False}
+
+    sentiment_label, sentiment_en = _ai_label(points)
+    sentiment_color = C_GREEN if points > 8 else (C_RED if points < -8 else C_AMBER)
+    confidence = {3: "高", 2: "中", 1: "低"}.get(signals, "低")
+
+    reason_parts = []
+    if changes:
+        reason_parts.append(f"主要指数平均{sum(changes) / len(changes):+.2f}%")
+    if present:
+        reason_parts.append(f"{len(present)} 个市场榜单活跃")
+    if all_text:
+        tone = "多" if net > 0 else ("空" if net < 0 else "平")
+        reason_parts.append(f"舆情净{tone}（利好 {int(bull)} / 利空 {int(bear)}）")
+    if wsb_stocks:
+        reason_parts.append("Reddit 散户热议")
+    reason = "；".join(reason_parts) + "。" if reason_parts else "信号不足。"
+
+    # —— 3. 板块热度 ——
+    sector_counts = {}
+    for sec, kws in AI_SECTOR_KEYWORDS.items():
+        c = sum(all_text.count(k) for k in kws)
+        if c:
+            sector_counts[sec] = c
+    sectors_strong = sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:4]
+
+    # 承压板块：出现在真正风险舆情中的板块
+    risk_titles = [t for t, _ in headlines_struct if _ai_is_risk_title(t)]
+    risk_joined = " ".join(risk_titles)
+    sectors_weak = [sec for sec, kws in AI_SECTOR_KEYWORDS.items()
+                   if any(k in risk_joined for k in kws)][:3]
+
+    # —— 4. 技术速读 ——
+    tech_rows = []
+    for label, q in quotes.items():
+        try:
+            pct = float(q["change_pct"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        band, bcolor = _ai_band(pct)
+        tech_rows.append((label, f"{pct:+.2f}%", band, bcolor))
+    ups = sum(1 for p in changes if p > 0)
+    downs = sum(1 for p in changes if p < 0)
+    if ups > downs:
+        tech_read = "多数指数上行，动能偏强，留意上方整数关口与前高。"
+    elif downs > ups:
+        tech_read = "多数指数承压，短线偏弱，关注近期支撑与量能变化。"
+    else:
+        tech_read = "指数分化/震荡，方向待明朗，宜控制仓位、等待确认。"
+
+    # —— 5. 风险提示 ——
+    risks = [(t, src) for t, src in headlines_struct if t and _ai_is_risk_title(t)][:5]
+
+    # —— 6. 关注清单 ——
+    watch = []
+    for m, md in hot_markets.items():
+        for s in (md or {}).get("stocks", []) or []:
+            nm = s.get("name", "")
+            if nm:
+                watch.append((nm, m))
+    for s in wsb_stocks[:5]:
+        sym = s.get("symbol", "")
+        if sym:
+            watch.append((sym, "WSB"))
+    seen, uniq = set(), []
+    for nm, tag in watch:
+        if nm and nm not in seen:
+            seen.add(nm)
+            uniq.append((nm, tag))
+    watch = uniq[:8]
+    themes = "、".join(sec for sec, _ in sectors_strong[:3])
+
+    return {
+        "available": True,
+        "score": int(points),
+        "confidence": confidence,
+        "sentiment_label": sentiment_label,
+        "sentiment_en": sentiment_en,
+        "sentiment_color": sentiment_color,
+        "reason": reason,
+        "sectors_strong": sectors_strong,
+        "sectors_weak": sectors_weak,
+        "tech_rows": tech_rows,
+        "tech_read": tech_read,
+        "risks": risks,
+        "watch": watch,
+        "themes": themes,
+    }
+
+
+def _ai_analysis_block(res):
+    """渲染「AI 盘研判」栏目内容（Swiss × 杂志风格，复用既有组件）。"""
+    color = res["sentiment_color"]
+    hero = (
+        f'<div style="border:1px solid {C_HAIR};border-left:3px solid {color};'
+        f'background:{C_ZEBRA};padding:12px 14px;">'
+        f'<div style="font-size:10px;font-weight:700;color:{C_MUTED};letter-spacing:2px;">'
+        f'AI 盘研判 · 综合定调</div>'
+        f'<div style="font-size:22px;font-weight:800;color:{color};letter-spacing:1px;'
+        f'padding:4px 0 2px;">{_esc(res["sentiment_label"])}</div>'
+        f'<div style="font-size:11px;color:{C_MUTED};letter-spacing:1px;">'
+        f'{_esc(res["sentiment_en"])} · 信号分 {res["score"]:+d} · 置信度 {_esc(res["confidence"])}</div>'
+        f'<div style="font-size:12px;color:#3A3A3E;line-height:1.85;padding-top:6px;">'
+        f'{_esc(res["reason"])}</div></div>'
+    )
+
+    # 板块热度
+    if res["sectors_strong"]:
+        sec_rows = [(f"{_sq(C_ACCENT, 7)} {sec}", f"{cnt} 提及", C_INK)
+                    for sec, cnt in res["sectors_strong"]]
+        sectors_html = _subsection("板块热度（信号提及）") + _mini_table(sec_rows)
+    else:
+        sectors_html = (_subsection("板块热度（信号提及）")
+                        + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
+                          f'暂无明显板块信号</div>')
+    if res["sectors_weak"]:
+        sectors_html += (f'<div style="font-size:11px;color:{C_RED};padding-top:4px;'
+                         f'line-height:1.7;">承压板块：'
+                         f'{" · ".join(_esc(s) for s in res["sectors_weak"])}</div>')
+
+    # 技术速读
+    if res["tech_rows"]:
+        tech_rows = [(label, f"{pct} · {band}", c)
+                     for label, pct, band, c in res["tech_rows"]]
+        tech_html = _subsection("技术速读（指数动能）") + _data_table(tech_rows)
+    else:
+        tech_html = (_subsection("技术速读（指数动能）")
+                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">无行情数据</div>')
+    tech_html += (f'<div style="font-size:11px;color:{C_MUTED};padding-top:4px;'
+                  f'line-height:1.8;">{_esc(res["tech_read"])}</div>')
+
+    # 风险提示
+    if res["risks"]:
+        risk_html = _subsection("风险提示（来自舆情）") + "".join(
+            _item_row("⚠", _esc(t), _esc(src)) for t, src in res["risks"])
+    else:
+        risk_html = (_subsection("风险提示（来自舆情）")
+                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
+                       f'未检出显著风险舆情</div>')
+
+    # 关注清单
+    if res["watch"]:
+        watch_html = _subsection("明日关注清单") + "".join(
+            _item_row(f"{i + 1:02d}",
+                      f'<b>{_esc(n)}</b> <span style="color:{C_MUTED};font-size:11px;">{_esc(tag)}</span>')
+            for i, (n, tag) in enumerate(res["watch"]))
+    else:
+        watch_html = (_subsection("明日关注清单")
+                      + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
+                        f'暂无可提炼的关注标的</div>')
+    if res["themes"]:
+        watch_html += (f'<div style="font-size:11px;color:{C_ACCENT};padding-top:4px;'
+                       f'font-weight:700;line-height:1.7;">主题关注：{_esc(res["themes"])}</div>')
+
+    note_html = _note("AI 盘研判由多源公开信号经确定性规则合成，非投资建议，亦不构成任何买卖依据；"
+                      "具体决策请结合自身风险偏好与独立判断。")
+
+    return hero + sectors_html + tech_html + risk_html + watch_html + note_html
+
+
 def generate_report(data, date_display, date_str):
     """生成完整的 HTML 日报
 
@@ -1348,6 +1688,17 @@ def generate_report(data, date_display, date_str):
                 f"{_source_note(hot)} · 涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）",
             ))
 
+    # 4.9 AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    if AI_ANALYSIS_ENABLED:
+        ai_result = build_ai_analysis(data)
+        if ai_result.get("available"):
+            ai_block = _ai_analysis_block(ai_result)
+            sections.insert(0, (
+                "AI READ", "AI 盘研判",
+                ai_block, _badge("AI 合成", "ai"),
+                "章鱼AI · 多源信号规则合成（非投资建议）",
+            ))
+
     # 5. 数据审计栏（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
     if today_n > 0:
         push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
@@ -1428,7 +1779,7 @@ def generate_report(data, date_display, date_str):
 <div style="font-size:11px;color:{C_MUTED};line-height:1.9;padding-top:8px;">
 仅供投资参考，不构成投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动缺席，不以历史内容充数。</div>
 <div style="font-size:10px;color:{C_FAINT};letter-spacing:.5px;line-height:1.8;padding-top:4px;">
-DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富 · Reddit · 新浪财经 · NAVER<br>
+DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富 · Reddit · 新浪财经 · NAVER · AI 盘研判（规则合成）<br>
 生成时间 {_esc(generated_at)} · 报告日期 {date_str} · 章鱼AI 自动出品</div>
 </div>
 
