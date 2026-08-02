@@ -693,6 +693,7 @@ class MainExitCodeTests(unittest.TestCase):
                  patch.object(pipeline, "collect_all_data", return_value=data), \
                  patch.object(pipeline, "generate_report", return_value="<html>ok</html>"), \
                  patch.object(pipeline, "save_report", side_effect=fake_save), \
+                 patch.object(pipeline, "clean_old_html_reports", return_value=(0, False)), \
                  patch.object(pipeline, "push_to_wechat", return_value=push_result):
                 return pipeline.main()
 
