@@ -18,7 +18,7 @@
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
      Google News 中文版，标题本身即中文，无需翻译。
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
-  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 涨幅前十
+  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前十
      （东方财富 push2 免费接口）。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
@@ -273,6 +273,19 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
 # ============================================================
 # 数据新鲜度与实时行情
 # ============================================================
+def _format_amount(val):
+    """格式化成交额：显示亿/万，保留两位小数"""
+    try:
+        v = float(val)
+        if v >= 1e8:
+            return f"{v/1e8:.2f}亿"
+        if v >= 1e4:
+            return f"{v/1e4:.2f}万"
+        return f"{v:.2f}"
+    except (TypeError, ValueError):
+        return str(val or "—")
+
+
 def _source_result(source, status, is_today=False, content_date=None, **payload):
     """统一记录来源、抓取时间、当天标记和失败状态；绝不把历史文案伪装成实时数据。
 
@@ -537,7 +550,7 @@ def fetch_eastmoney_news():
 
 
 # ============================================================
-# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
+# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前十）
 # ============================================================
 HOT_STOCK_MARKETS = {
     "A股": {"fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23", "desc": "沪深京 A 股"},
@@ -547,17 +560,17 @@ HOT_STOCK_MARKETS = {
 
 
 def fetch_hot_stocks():
-    """抓取最近一个交易日收盘后的 A股/港股/美股涨幅前十（东方财富 push2 免费接口）。
+    """抓取最近一个交易日收盘后的 A股/港股/美股成交量前十（东方财富 push2 免费接口）。
 
-    返回 _source_result：markets={市场名: {"desc", "stocks":[{code,name,price,change_pct}]}}
+    返回 _source_result：markets={市场名: {"desc", "stocks":[{code,name,price,amount}]}}
     """
-    print("📡 正在抓取 A股/港股/美股热门前十...")
+    print("📡 正在抓取 A股/港股/美股成交量前十...")
     markets = {}
     any_stock = False
     for label, cfg in HOT_STOCK_MARKETS.items():
         params = {
             "pn": "1", "pz": "10", "po": "1", "np": "1", "fltt": "2", "invt": "2",
-            "fid": "f3", "fs": cfg["fs"], "fields": "f2,f3,f4,f12,f14",
+            "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f4,f6,f12,f14",
         }
         data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
                             params=params, timeout=12)
@@ -573,13 +586,14 @@ def fetch_hot_stocks():
                     "name": name,
                     "price": it.get("f2"),
                     "change_pct": it.get("f3"),
+                    "amount": it.get("f6"),
                 })
         except Exception:
             stocks = []
         markets[label] = {"desc": cfg["desc"], "stocks": stocks}
         if stocks:
             any_stock = True
-        print(f"  {'✅' if stocks else '⚠️'} {label}涨幅前十: {len(stocks)} 只")
+        print(f"  {'✅' if stocks else '⚠️'} {label}成交量前十: {len(stocks)} 只")
 
     if not any_stock:
         print("  ⚠️ 热门榜单暂不可用，不显示历史兜底榜单")
@@ -1058,33 +1072,6 @@ def _rank_span(i):
     """榜单序号：00 起始的等宽小编号，杂志索引式。"""
     return (f'<span style="color:{C_ACCENT};font-weight:800;'
             f'font-variant-numeric:tabular-nums;">{i + 1:02d}</span>')
-
-
-def _hot_market_block(market, mdata):
-    """热门榜单单个市场：涨幅前十迷你表（编号 + 名称/代码 + 价与涨跌幅）。"""
-    stocks = (mdata or {}).get("stocks", [])
-    rows = []
-    for i, s in enumerate(stocks[:10]):
-        pct = s.get("change_pct")
-        try:
-            pct_f = float(pct)
-            pct_display = f"{pct_f:+.2f}%"
-            val_color = C_GREEN if pct_f >= 0 else C_RED
-        except (TypeError, ValueError):
-            pct_display = str(pct or "—")
-            val_color = C_RED
-        price = s.get("price")
-        if price is None:
-            price = "—"
-        label = (f'{_rank_span(i)}&nbsp; {_esc(s.get("name", "?"))} '
-                 f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
-        rows.append((label, f"{price} {pct_display}", val_color))
-    block = _subsection(f"{market}涨幅前十（{_esc((mdata or {}).get('desc', ''))}）")
-    if rows:
-        block += _mini_table(rows)
-    else:
-        block += f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">暂无数据</div>'
-    return block
 
 
 def _channel_block(ch):
@@ -1672,20 +1659,28 @@ def generate_report(data, date_display, date_str):
             f"{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get('content_date') or '—')}",
         ))
 
-    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 涨幅前十）
+    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 成交量前十）
+    # 一对一模式：每个市场独立成一个栏目（三个排行榜）
     if hot.get("status") == "success":
-        hot_blocks = []
-        for mlabel in ["A股", "港股", "美股"]:
+        for mlabel, m_en in [("A股", "A-SHARES"), ("港股", "HK-STOCKS"), ("美股", "US-STOCKS")]:
             mdata = hot_markets.get(mlabel) or {}
-            if not mdata.get("stocks"):
+            stocks = mdata.get("stocks", [])
+            if not stocks:
                 continue
-            hot_blocks.append(_hot_market_block(mlabel, mdata))
-        if hot_blocks:
+
+            rows = []
+            for i, s in enumerate(stocks[:10]):
+                amount_display = _format_amount(s.get("amount"))
+                label = (f'{_rank_span(i)}&nbsp; {_esc(s.get("name", "?"))} '
+                         f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
+                rows.append((label, amount_display, C_INK))
+
+            content = _mini_table(rows) + _note(f"榜单为最近交易日收盘后的{mlabel}成交量排名。")
             sections.append((
-                "HOT LIST", "热门榜单 · 最近交易日收盘",
-                "".join(hot_blocks) + _note("榜单为最近交易日收盘后的涨幅排名。"),
+                f"{m_en} RANK", f"{mlabel}成交量前十",
+                content,
                 _source_badge(hot),
-                f"{_source_note(hot)} · 涨幅前十（东方财富免费接口，最近一个交易日收盘后数据）",
+                f"{_source_note(hot)} · {mlabel}成交量前十"
             ))
 
     # 4.9 AI 盘研判（规则合成综合研判，作为导读首位栏目）
