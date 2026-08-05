@@ -36,11 +36,11 @@
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
   7.1 页面风格（2026-08-05 起）：可爱日系漫画杂志风（Kawaii Manga Funzine）——
-     马卡龙色板（樱花粉主色 + 奶油纸面 + 香芋紫/薄荷/柠檬点缀）、圆体字优先的
-     字体栈（Hiragino Maru Gothic / 华文圆体 / 幼圆）、星☆/花✿/心♡ 漫画图标、
-     粉色双线/点线分隔 + 圆角贴纸徽标 + 对话框式注释，刊头为漫画杂志封面式
-     （刊名行 / 大标题 / 导语 / 期号元信息栅格）+ 编号栏目（贴纸号码）+ 数据审计栏
-     + 版权页；栏目结构与一对一排行榜保持不变，仅换肤。
+     马卡龙粉色系（胭脂粉底 + 奶油纸面 + 树莓粉/贝壳粉/深玫瑰粉主调，香芋紫/柠檬/
+     薄荷作小点缀）、圆体字优先的字体栈（Hiragino Maru Gothic / 华文圆体 / 幼圆）、
+     星☆/花✿/心♡ 漫画图标、粉色双线/点线分隔 + 圆角贴纸徽标 + 对话框式注释，
+     刊头为漫画杂志封面式（刊名行 / 大标题 / 导语 / 期号元信息栅格）+ 编号栏目
+     （贴纸号码）+ 数据审计栏 + 版权页；栏目结构与一对一排行榜保持不变，仅换肤。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
@@ -357,7 +357,7 @@ def fetch_market_snapshot():
 def _quote_value(market, label, precision=2):
     quote = market.get("quotes", {}).get(label)
     if not quote:
-        return '<span style="color:#C9AEBE;">数据暂缺</span>', "#C9AEBE"
+        return f'<span style="color:{C_FAINT};">数据暂缺</span>', C_FAINT
     price = quote["price"]
     pct = quote["change_pct"]
     color = C_GREEN if pct >= 0 else C_RED
@@ -1134,8 +1134,8 @@ def collect_all_data():
 # ------------------------------------------------------------
 # 版式语言：
 #   · 全程左对齐（flush-left）+ 圆角卡片分组；
-#   · 樱花粉 #FF5E8E（品牌色）为主强调色，香芋紫 / 柠檬黄 / 薄荷绿作点缀；
-#     红 / 绿 / 琥珀仅作「涨跌与数据状态」语义色，不参与装饰；
+#   · 马卡龙粉色系：树莓粉 #D97796（品牌色）为主强调，贝壳粉描边、深玫瑰粉标题、
+#     香芋紫 / 柠檬黄 / 薄荷绿作点缀；红 / 绿 / 琥珀仅作「涨跌与数据状态」语义色；
 #   · 粉色双线 / 点线分隔「栏目」，粉色发丝线（1px）分隔条目；
 #   · 漫画杂志封面式刊头（masthead）：刊名行 → 大标题 → 对话框导语 → 期号元信息栅格；
 #   · 栏目带贴纸式编号 kicker（01 · MARKET SNAPSHOT），如漫画杂志连载栏目；
@@ -1144,26 +1144,27 @@ def collect_all_data():
 # 渲染硬约束：全部使用「内联样式 + 表格布局」——微信 / PushPlus 会剥离
 # <style> 标签与 class 选择器，外部样式表与类名排版会在微信端整体失效。
 # ============================================================
-# 可爱日系漫画杂志风（2026-08-05 改版）：马卡龙色板 + 圆体字 + 星/花/爱心图标，
+# 可爱日系漫画杂志风（2026-08-05 改版）：马卡龙粉色系 + 圆体字 + 星/花/爱心图标，
 # 版面结构（栏目、一对一排行榜、数据审计栏）保持原样，仅换肤。
-C_INK = "#4A3440"      # 深梅子墨色正文（比纯黑更柔和）
-C_PAPER = "#FFFDF8"    # 奶油纸面
-C_BG = "#FFF0F5"       # 页面底色（樱花粉）
-C_ACCENT = "#FF5E8E"   # 樱花粉：主强调色（品牌色）
-C_ACCENT_SOFT = "#FFB7D0"  # 浅樱花粉（虚线/装饰描边）
-C_VIOLET = "#9B7EDE"   # 香芋紫（英文 kicker / AI 徽标）
-C_MUTED = "#A58B99"    # 灰粉（来源说明 / caption）
-C_FAINT = "#C9AEBE"    # 浅灰粉（刊头小字）
-C_HAIR = "#FFE3EE"     # 粉色发丝分隔线
-C_ZEBRA = "#FFF5FA"    # 花瓣粉底（注释盒 / 暂缺盒）
-C_LEMON = "#FFD96B"    # 柠檬黄（点缀）
-C_MINT = "#7FDCC0"     # 薄荷绿（点缀）
+C_INK = "#59434E"          # 可可玫瑰深棕（正文，柔和不刺眼）
+C_PAPER = "#FFFCFA"        # 奶油马卡龙（纸面）
+C_BG = "#FDF0F4"           # 胭脂粉（页面底色）
+C_ACCENT = "#D97796"       # 树莓粉：主强调色（品牌色，链接/数字/图标）
+C_ACCENT_DEEP = "#C46185"  # 深玫瑰粉（大标题 / 贴纸底）
+C_ACCENT_SOFT = "#F8C6D6"  # 贝壳粉（虚线 / 描边 / 双线分隔）
+C_VIOLET = "#B79CD6"       # 香芋紫（英文 kicker / AI 徽标）
+C_MUTED = "#B2909F"        # 灰粉（来源说明 / caption）
+C_FAINT = "#D4B7C3"        # 浅灰粉（刊头小字）
+C_HAIR = "#FADCE6"         # 粉色发丝分隔线
+C_ZEBRA = "#FDF2F6"        # 花瓣粉底（注释盒 / 暂缺盒）
+C_LEMON = "#FFE6A7"        # 柠檬黄马卡龙（点缀）
+C_MINT = "#A9DCC7"         # 薄荷绿马卡龙（点缀）
 # 数据语义色（沿用既有语义：红跌绿涨；另保留琥珀色表示「非当天」）
 # ——仅用于数值与状态标识，不作版式装饰
-C_RED = "#FF5B77"
-C_GREEN = "#2BBE8C"
-C_AMBER = "#E59B2C"
-C_BLUE = C_ACCENT      # 兼容别名
+C_RED = "#E7657E"          # 草莓粉（跌 / 无数据）
+C_GREEN = "#2FA87E"        # 薄荷绿（涨 / 当天）
+C_AMBER = "#C98F2E"        # 柠檬黄（非当天）
+C_BLUE = C_ACCENT          # 兼容别名
 # 圆体字优先的可爱字体栈：Hiragino Maru Gothic（日系漫画圆体）→ 华文圆体/幼圆 →
 # 系统回退；微信端若缺圆体会回退到系统默认，不影响阅读。
 FONT = ("Hiragino Maru Gothic ProN, Yuanti SC, YouYuan, 幼圆, "
@@ -1192,12 +1193,12 @@ def _flower(color=C_ACCENT_SOFT, size=9):
 
 
 def _badge(text, kind="ok"):
-    """状态徽标：圆角贴纸（药丸）。ok=薄荷绿(当天) / warn=蜂蜜黄(非当天) / bad=珊瑚红(无数据) / ai=香芋紫"""
+    """状态徽标：马卡龙圆角贴纸（药丸）。ok=薄荷(当天) / warn=柠檬(非当天) / bad=草莓(无数据) / ai=香芋紫"""
     styles = {
-        "ok":   (C_GREEN, "#E3F8F0", "#9FE3C9"),
-        "warn": (C_AMBER, "#FFF6DE", "#F2CE7E"),
-        "bad":  (C_RED,   "#FFECEF", "#FFB1BF"),
-        "ai":   (C_VIOLET, "#F0EBFF", "#CBB9F2"),
+        "ok":   (C_GREEN, "#E0F6EE", "#9BDCBE"),
+        "warn": (C_AMBER, "#FDF2D8", "#EFD690"),
+        "bad":  (C_RED,   "#FDE7EB", "#F5B4C2"),
+        "ai":   (C_VIOLET, "#F1EBFB", "#CFBAEF"),
     }
     color, bg, border = styles.get(kind, styles["ok"])
     return (f'<span style="display:inline-block;border:1px solid {border};color:{color};'
@@ -1207,10 +1208,10 @@ def _badge(text, kind="ok"):
 
 
 def _alert(text, color=C_AMBER, bg=None):
-    """状态提示条：圆角软盒 + 浅色填充 + 彩色文字（漫画「注意書き」风）。"""
+    """状态提示条：马卡龙圆角软盒 + 粉彩填充 + 彩色文字（漫画「注意書き」风）。"""
     bg_color = bg or {
-        C_GREEN: "#E3F8F0", C_AMBER: "#FFF6DE", C_RED: "#FFECEF",
-    }.get(color, "#FFF5FA")
+        C_GREEN: "#E0F6EE", C_AMBER: "#FDF2D8", C_RED: "#FDE7EB",
+    }.get(color, "#FDF2F6")
     return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
             f'margin-bottom:8px;border:1px solid {C_ACCENT_SOFT};border-radius:12px;'
             f'background:{bg_color};">'
@@ -1425,11 +1426,11 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 <div style="border-top:3px double {C_ACCENT_SOFT};margin-top:26px;padding-top:10px;">
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#fff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:800;letter-spacing:.5px;line-height:17px;">{num}</span><span style="font-size:10px;font-weight:800;color:{C_VIOLET};letter-spacing:2px;padding-left:8px;">{kicker_en}</span></td>
+<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT_DEEP};color:#fff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:800;letter-spacing:.5px;line-height:17px;">{num}</span><span style="font-size:10px;font-weight:800;color:{C_VIOLET};letter-spacing:2px;padding-left:8px;">{kicker_en}</span></td>
 {badge_cell}
 </tr>
 </table>
-<div style="font-size:17px;font-weight:900;color:#E84A7A;letter-spacing:1px;padding-top:5px;">{_heart(C_ACCENT, 10)}&nbsp;{title}</div>
+<div style="font-size:17px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;padding-top:5px;">{_heart(C_ACCENT, 10)}&nbsp;{title}</div>
 {caption_html}
 {content}
 </div>'''
@@ -2046,7 +2047,7 @@ def generate_report(data, date_display, date_str):
 </tr>
 </table>
 
-<div style="font-size:30px;font-weight:900;color:#E84A7A;letter-spacing:2px;line-height:1.3;padding-top:14px;">{_star(C_LEMON, 16)} 每日财经日报 {_star(C_MINT, 16)}</div>
+<div style="font-size:30px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:2px;line-height:1.3;padding-top:14px;">{_star(C_ACCENT, 16)} 每日财经日报 {_star(C_ACCENT, 16)}</div>
 <div style="font-size:10px;font-weight:800;color:{C_VIOLET};letter-spacing:2px;padding-top:6px;">わくわく♡きょうのマーケット · DAILY FINANCE FUNZINE · UTC+8</div>
 <div style="border-bottom:4px double {C_ACCENT_SOFT};margin-top:12px;font-size:0;line-height:0;">&nbsp;</div>
 
