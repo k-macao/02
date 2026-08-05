@@ -19,7 +19,10 @@
      Google News 中文版，标题本身即中文，无需翻译。
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
   6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前十
-     （东方财富 push2 免费接口）。
+     （东方财富 push2 免费接口），按市场一对一独立成栏展示。
+  6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
+      TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
+      资金定性和成交额锚点；规则合成，可复现，非投资建议。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -609,6 +612,197 @@ def fetch_hot_stocks():
 
 
 # ============================================================
+# 数据源 8：A股 / 港股最近收盘流动性报告（AI 量化）
+# ============================================================
+LIQUIDITY_SAMPLE_SIZE = int(os.environ.get("OCTOPUS_LIQUIDITY_SAMPLE_SIZE", "300"))
+LIQUIDITY_MARKETS = {
+    "A股": {"fs": HOT_STOCK_MARKETS["A股"]["fs"], "desc": "沪深京 A 股"},
+    "港股": {"fs": HOT_STOCK_MARKETS["港股"]["fs"], "desc": "港股主板"},
+}
+
+
+def _to_float(v, default=0.0):
+    """把东方财富返回的数字/横线转为 float。"""
+    try:
+        if v in (None, "", "-"):
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _median(values):
+    vals = sorted(float(v) for v in values if v is not None)
+    if not vals:
+        return 0.0
+    n = len(vals)
+    mid = n // 2
+    return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
+
+
+def _liquidity_score_and_label(stats):
+    """按成交集中度、涨跌扩散、金额加权动能与换手率生成可复现的流动性评分。"""
+    score = 50.0
+    top10_share = stats.get("top10_share", 0.0)
+    adv_dec_ratio = stats.get("adv_dec_ratio", 1.0)
+    weighted_change = stats.get("weighted_change", 0.0)
+    avg_turnover = stats.get("avg_turnover", 0.0)
+
+    # 头部成交占比越低，说明流动性越分散；过高则说明抱团/集中。
+    if top10_share < 0.22:
+        score += 12
+    elif top10_share < 0.35:
+        score += 6
+    elif top10_share > 0.55:
+        score -= 12
+    elif top10_share > 0.45:
+        score -= 6
+
+    # 上涨/下跌家数扩散度。
+    if adv_dec_ratio >= 1.5:
+        score += 12
+    elif adv_dec_ratio >= 1.1:
+        score += 6
+    elif adv_dec_ratio <= 0.55:
+        score -= 12
+    elif adv_dec_ratio <= 0.9:
+        score -= 6
+
+    # 成交金额加权涨跌：资金买入方向更重要。
+    if weighted_change >= 1.0:
+        score += 10
+    elif weighted_change >= 0.25:
+        score += 5
+    elif weighted_change <= -1.0:
+        score -= 10
+    elif weighted_change <= -0.25:
+        score -= 5
+
+    # 平均换手代表活跃度，但只作为温和修正，避免小票高换手过度影响。
+    if avg_turnover >= 4:
+        score += 6
+    elif avg_turnover >= 2:
+        score += 3
+    elif avg_turnover and avg_turnover < 0.8:
+        score -= 4
+
+    score = max(0, min(100, round(score)))
+    if score >= 72:
+        label, tone = "放量活跃", "资金扩散"
+    elif score >= 58:
+        label, tone = "温和活跃", "结构性流入"
+    elif score >= 42:
+        label, tone = "中性震荡", "存量博弈"
+    else:
+        label, tone = "缩量偏弱", "防御收缩"
+    if top10_share > 0.5:
+        tone = "头部集中"
+    return score, label, tone
+
+
+def _analyze_liquidity_market(label, stocks):
+    """对单个市场最近收盘样本做 AI 量化流动性分析。"""
+    amounts = [_to_float(s.get("amount")) for s in stocks]
+    total_amount = sum(amounts)
+    top10_amount = sum(amounts[:10])
+    changes = [_to_float(s.get("change_pct")) for s in stocks]
+    turnovers = [_to_float(s.get("turnover")) for s in stocks if _to_float(s.get("turnover")) > 0]
+    advancers = sum(1 for c in changes if c > 0)
+    decliners = sum(1 for c in changes if c < 0)
+    flats = max(0, len(changes) - advancers - decliners)
+    adv_dec_ratio = advancers / decliners if decliners else float(advancers or 1)
+    weighted_change = (sum(c * a for c, a in zip(changes, amounts)) / total_amount) if total_amount else 0.0
+    avg_turnover = (sum(turnovers) / len(turnovers)) if turnovers else 0.0
+    stats = {
+        "market": label,
+        "sample_count": len(stocks),
+        "total_amount": total_amount,
+        "median_amount": _median(amounts),
+        "top10_amount": top10_amount,
+        "top10_share": (top10_amount / total_amount) if total_amount else 0.0,
+        "advancers": advancers,
+        "decliners": decliners,
+        "flats": flats,
+        "adv_dec_ratio": adv_dec_ratio,
+        "weighted_change": weighted_change,
+        "avg_turnover": avg_turnover,
+        "high_turnover_count": sum(1 for t in turnovers if t >= 5),
+        "top_stocks": stocks[:10],
+    }
+    score, level, tone = _liquidity_score_and_label(stats)
+    stats.update({"score": score, "level": level, "tone": tone})
+    return stats
+
+
+def fetch_liquidity_report():
+    """抓取最近收盘 A股与港股流动性，并做规则型 AI 量化分析。
+
+    使用东方财富 push2 免费接口按成交额降序拉取样本，聚合成交额、头部集中度、
+    上涨/下跌扩散、成交额加权涨跌与换手率，形成可审计、可复现的流动性报告。
+    """
+    print("📡 正在抓取 A股/港股最近收盘流动性...")
+    markets = {}
+    errors = []
+    for label, cfg in LIQUIDITY_MARKETS.items():
+        params = {
+            "pn": "1", "pz": str(LIQUIDITY_SAMPLE_SIZE), "po": "1", "np": "1", "fltt": "2", "invt": "2",
+            "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f6,f8,f12,f14",
+        }
+        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get", params=params, timeout=15)
+        stocks = []
+        try:
+            diff = ((data or {}).get("data") or {}).get("diff") or []
+            for it in diff:
+                name = str(it.get("f14") or "").strip()
+                if not name:
+                    continue
+                stocks.append({
+                    "code": str(it.get("f12") or ""),
+                    "name": name,
+                    "price": it.get("f2"),
+                    "change_pct": _to_float(it.get("f3")),
+                    "amount": _to_float(it.get("f6")),
+                    "turnover": _to_float(it.get("f8")),
+                })
+        except Exception as exc:
+            errors.append(f"{label}: {exc}")
+            stocks = []
+
+        if stocks:
+            markets[label] = {"desc": cfg["desc"], **_analyze_liquidity_market(label, stocks)}
+            print(f"  ✅ {label}流动性样本: {len(stocks)} 只，成交额 {_format_amount(markets[label]['total_amount'])}")
+        else:
+            markets[label] = {"desc": cfg["desc"], "sample_count": 0, "top_stocks": []}
+            errors.append(f"{label}: 未返回有效样本")
+            print(f"  ⚠️ {label}流动性暂不可用")
+
+    available = [m for m in markets.values() if m.get("sample_count")]
+    if not available:
+        return _source_result("东方财富流动性", "unavailable", markets=markets,
+                              error="；".join(errors[:3]) or "未取得有效流动性样本")
+
+    # 生成跨市场简述：只比较 A股/港股可用样本。
+    a, hk = markets.get("A股", {}), markets.get("港股", {})
+    if a.get("sample_count") and hk.get("sample_count"):
+        stronger = "A股" if a.get("score", 0) >= hk.get("score", 0) else "港股"
+        concentration = "A股" if a.get("top10_share", 0) > hk.get("top10_share", 0) else "港股"
+        summary = (f"{stronger}流动性评分相对领先；{concentration}头部成交集中度更高。"
+                   f"A股成交额加权涨跌 {a.get('weighted_change', 0):+.2f}%，"
+                   f"港股 {hk.get('weighted_change', 0):+.2f}%。")
+    else:
+        only = next((k for k, v in markets.items() if v.get("sample_count")), "A/H")
+        summary = f"本次仅取得{only}有效样本，跨市场比较暂缺。"
+
+    print("  ✅ A股/港股流动性 AI 量化分析完成")
+    return _source_result("东方财富流动性", "success",
+                          is_today=True, content_date=_today_display(),
+                          markets=markets, summary=summary,
+                          sample_size=LIQUIDITY_SAMPLE_SIZE,
+                          error="；".join(errors[:3]) or None,
+                          partial=bool(errors))
+
+
+# ============================================================
 # 数据源 3：A股资讯（新浪财经）
 # ============================================================
 def fetch_sina_headlines():
@@ -925,6 +1119,9 @@ def collect_all_data():
     time.sleep(0.5)
 
     data["热门榜单"] = fetch_hot_stocks()
+    time.sleep(0.5)
+
+    data["A港流动性"] = fetch_liquidity_report()
 
     print("\n✅ 数据采集完成！")
     return data
@@ -1539,6 +1736,53 @@ def _ai_analysis_block(res):
     return hero + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
+
+
+def _liquidity_market_block(label, stats):
+    """渲染单个市场的 AI 量化流动性分析。"""
+    if not stats.get("sample_count"):
+        return (f'<div style="margin:8px 0;border:1px dashed {C_FAINT};background:{C_ZEBRA};'
+                f'padding:10px 12px;font-size:12px;color:{C_MUTED};">'
+                f'{_esc(label)} 流动性样本暂缺</div>')
+    score = int(stats.get("score", 0))
+    color = C_GREEN if score >= 58 else (C_RED if score < 42 else C_AMBER)
+    rows = [
+        ("样本成交额", _format_amount(stats.get("total_amount")), C_INK),
+        ("TOP10 成交占比", f"{stats.get('top10_share', 0) * 100:.1f}%", C_INK),
+        ("涨/跌/平家数", f"{stats.get('advancers', 0)} / {stats.get('decliners', 0)} / {stats.get('flats', 0)}", C_INK),
+        ("涨跌扩散比", f"{stats.get('adv_dec_ratio', 0):.2f}x", C_INK),
+        ("成交额加权涨跌", f"{stats.get('weighted_change', 0):+.2f}%", color),
+        ("平均换手率", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
+    ]
+    top = "".join(
+        _item_row(f"{i:02d}",
+                  f'<b>{_esc(s.get("name", "?"))}</b> '
+                  f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>',
+                  f'成交额 {_format_amount(s.get("amount"))} · 涨跌 {float(s.get("change_pct", 0)):+.2f}% · 换手 {float(s.get("turnover", 0)):.2f}%')
+        for i, s in enumerate((stats.get("top_stocks") or [])[:5], 1)
+    )
+    return (
+        f'<div style="margin:10px 0;border:1px solid {C_HAIR};border-left:3px solid {color};padding:11px 13px;">'
+        f'<div style="font-size:10px;font-weight:700;color:{C_MUTED};letter-spacing:2px;">{_esc(label)} · LIQUIDITY SCORE</div>'
+        f'<div style="font-size:20px;font-weight:800;color:{color};padding:3px 0;">{score} / 100 · {_esc(stats.get("level", "—"))}</div>'
+        f'<div style="font-size:11px;color:{C_MUTED};line-height:1.7;">AI 定性：{_esc(stats.get("tone", "—"))} · 样本 {stats.get("sample_count", 0)} 只</div>'
+        f'{_mini_table(rows)}'
+        f'{_subsection("成交额前五（流动性锚点）")}{top}'
+        f'</div>'
+    )
+
+
+def _liquidity_report_block(liq):
+    """渲染 A股/港股最近收盘流动性报告。"""
+    markets = liq.get("markets", {}) or {}
+    blocks = "".join(_liquidity_market_block(label, markets.get(label) or {})
+                     for label in ("A股", "港股"))
+    summary = _esc(liq.get("summary") or "A股与港股最近收盘流动性量化对比。")
+    note = _note("流动性评分由成交额、TOP10 集中度、涨跌扩散比、成交额加权涨跌与换手率规则合成；"
+                 "使用最近收盘公开行情快照，非投资建议。")
+    return (f'<div style="border:1px solid {C_HAIR};border-left:3px solid {C_ACCENT};'
+            f'background:{C_ZEBRA};padding:10px 12px;font-size:12px;color:#3A3A3E;'
+            f'line-height:1.85;">{summary}</div>' + blocks + note)
 def generate_report(data, date_display, date_str):
     """生成完整的 HTML 日报
 
@@ -1562,6 +1806,7 @@ def generate_report(data, date_display, date_str):
     em_headlines = em.get("headlines", [])
     hot = data.get("热门榜单", {})
     hot_markets = hot.get("markets", {})
+    liq = data.get("A港流动性", {})
 
     # 2. 数据源清单（顺序即页面展示顺序）
     source_items = [
@@ -1573,6 +1818,7 @@ def generate_report(data, date_display, date_str):
         ("Reddit WSB热议", wsb),
         ("东财快讯", em),
         ("热门榜单", hot),
+        ("A港流动性", liq),
     ]
 
     # 3. 当天内容检验统计
@@ -1683,7 +1929,16 @@ def generate_report(data, date_display, date_str):
                 f"{_source_note(hot)} · {mlabel}成交量前十"
             ))
 
-    # 4.9 AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    # 4.9 A股 / 港股最近收盘流动性报告（AI 量化）
+    if liq.get("status") == "success":
+        sections.append((
+            "A/H LIQUIDITY", "AI 量化 · A股与港股最近收盘流动性报告",
+            _liquidity_report_block(liq),
+            _source_badge(liq),
+            f"{_source_note(liq)} · 最近收盘样本 {liq.get('sample_size', LIQUIDITY_SAMPLE_SIZE)} 只/市场",
+        ))
+
+    # 4.10 AI 盘研判（规则合成综合研判，作为导读首位栏目）
     if AI_ANALYSIS_ENABLED:
         ai_result = build_ai_analysis(data)
         if ai_result.get("available"):
@@ -1774,7 +2029,7 @@ def generate_report(data, date_display, date_str):
 <div style="font-size:11px;color:{C_MUTED};line-height:1.9;padding-top:8px;">
 仅供投资参考，不构成投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动缺席，不以历史内容充数。</div>
 <div style="font-size:10px;color:{C_FAINT};letter-spacing:.5px;line-height:1.8;padding-top:4px;">
-DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富 · Reddit · 新浪财经 · NAVER · AI 盘研判（规则合成）<br>
+DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富（快讯/榜单/流动性） · Reddit · 新浪财经 · NAVER · AI 盘研判（规则合成）<br>
 生成时间 {_esc(generated_at)} · 报告日期 {date_str} · 章鱼AI 自动出品</div>
 </div>
 
@@ -2359,7 +2614,8 @@ def main():
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
               f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条) | "
               f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
-              f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只)")
+              f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只) | "
+              f"A港流动性({sum((m.get('sample_count') or 0) for m in data.get('A港流动性', {}).get('markets', {}).values())}只样本)")
         return 0
 
     # 4. 保存文件
