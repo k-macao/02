@@ -145,7 +145,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 8)
+        self.assertEqual(meta["total_sources"], 9)
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -371,6 +371,53 @@ class EastmoneySourceTests(unittest.TestCase):
         self.assertEqual(result["markets"]["A股"]["stocks"], [])
 
 
+
+
+class LiquidityReportTests(unittest.TestCase):
+    """新增：AI 量化分析最近收盘 A股与港股流动性报告。"""
+
+    def _liquidity_data(self):
+        markets = {}
+        for label in ["A股", "港股"]:
+            stocks = [{
+                "code": f"000{i:03d}", "name": f"{label}股票{i}", "price": 10 + i,
+                "change_pct": 1.0 if i % 3 else -0.5,
+                "amount": 100000000 - i * 1000000,
+                "turnover": 2.5 + i * 0.1,
+            } for i in range(12)]
+            markets[label] = {"desc": label, **pipeline._analyze_liquidity_market(label, stocks)}
+        return pipeline._source_result(
+            "东方财富流动性", "success", is_today=True, content_date="2026-08-02",
+            markets=markets, summary="A股流动性评分相对领先；港股头部成交集中度更高。",
+            sample_size=300)
+
+    def test_fetch_liquidity_report_parses_a_and_hk(self):
+        def fake_request(url, params=None, **kw):
+            return {"data": {"diff": [
+                {"f12": f"00{i:04d}", "f14": f"样本{i}", "f2": 10 + i,
+                 "f3": 1.2 if i % 2 else -0.3, "f6": 50000000 - i * 100000,
+                 "f8": 2.0 + i * 0.01}
+                for i in range(20)
+            ]}}
+
+        with patch.object(pipeline, "safe_request", side_effect=fake_request):
+            result = pipeline.fetch_liquidity_report()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(set(result["markets"].keys()), {"A股", "港股"})
+        self.assertEqual(result["markets"]["A股"]["sample_count"], 20)
+        self.assertIn("score", result["markets"]["港股"])
+        self.assertIn("summary", result)
+
+    def test_liquidity_report_renders_in_generate_report(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A港流动性"] = self._liquidity_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        self.assertIn("AI 量化 · A股与港股最近收盘流动性报告", html)
+        self.assertIn("LIQUIDITY SCORE", html)
+        self.assertIn("A股股票0", html)
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["total_sources"], 9)
+
 class NewLayoutRenderingTests(unittest.TestCase):
     """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
 
@@ -396,8 +443,8 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
         self.assertIn("热门榜单", html)
-        self.assertIn("A股涨幅前十", html)
-        self.assertIn("美股涨幅前十", html)
+        self.assertIn("A股成交量前十", html)
+        self.assertIn("美股成交量前十", html)
         self.assertIn("美联储释放降息信号", html)
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)
@@ -405,7 +452,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 8)  # 数据源扩展到 8 个
+        self.assertEqual(meta["total_sources"], 9)  # 数据源扩展到 9 个（含 A港流动性）
 
 
 class PushResultTests(unittest.TestCase):
