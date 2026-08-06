@@ -52,7 +52,7 @@
      始终保留完整版。
   9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股头条、
      港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
-     信号分 + 置信度、板块热度、技术速读、风险提示、明日关注清单）。无需大模型 API、
+     信号分 + 置信度、板块热度、技术速读、风险提示、明日关注主题）。无需大模型 API、
      可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
 
 退出码约定：
@@ -1411,8 +1411,10 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 # 基于当日已抓取的多源信号（实时行情、热门榜单、全球/东财/A股头条、
 # 港股名家频道观点）做确定性合成，输出一个跨市场综合研判：
 #   情绪定调（多/空/中性 + 信号分 + 置信度）、板块热度、技术速读、
-#   风险提示、明日关注清单。全部由规则计算，可复现、不调外部大模型、
+#   风险提示、明日关注主题。全部由规则计算，可复现、不调外部大模型、
 #   不伪造内容；明确标注「非投资建议」。
+# 2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股，只保留主题行；
+# 个股仅作为板块热度与交投研判的输入。
 # 如需接大模型，可在 build_ai_analysis 内增加 LLM 分支（保留本规则作兜底）。
 # ============================================================
 AI_ANALYSIS_ENABLED = True
@@ -1534,11 +1536,8 @@ def build_ai_analysis(data):
         for v in ch.get("videos", []) or []:
             headlines_struct.append((v.get("title", ""), ch.get("name", "")))
 
-    # 热门榜单个股名（用于板块/关注）
-    stock_names = []
-    for m, md in hot_markets.items():
-        for s in (md or {}).get("stocks", []) or []:
-            stock_names.append(s.get("name", ""))
+    # 热门榜单个股不再单独列入关注清单（2026-08-06 起 WATCH LIST 只保留主题行）；
+    # 个股仍作为 AI 研判输入：板块热度识别与「AI 研判 · 成交量与流动性分析」的活跃标的提及。
 
     # —— 2. 情绪打分 ——
     changes = []
@@ -1621,19 +1620,9 @@ def build_ai_analysis(data):
     # —— 5. 风险提示 ——
     risks = [(t, src) for t, src in headlines_struct if t and _ai_is_risk_title(t)][:5]
 
-    # —— 6. 关注清单 ——
-    watch = []
-    for m, md in hot_markets.items():
-        for s in (md or {}).get("stocks", []) or []:
-            nm = s.get("name", "")
-            if nm:
-                watch.append((nm, m))
-    seen, uniq = set(), []
-    for nm, tag in watch:
-        if nm and nm not in seen:
-            seen.add(nm)
-            uniq.append((nm, tag))
-    watch = uniq[:8]
+    # —— 6. 明日关注 ——
+    # 2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股（原最多 8 只），
+    # 只保留「主题关注」一行：主题来自板块热度前列，个股仅作为研判输入不单独展示。
     themes = "、".join(sec for sec, _ in sectors_strong[:3])
 
     return {
@@ -1649,7 +1638,6 @@ def build_ai_analysis(data):
         "tech_rows": tech_rows,
         "tech_read": tech_read,
         "risks": risks,
-        "watch": watch,
         "themes": themes,
     }
 
@@ -1757,21 +1745,14 @@ def _ai_analysis_block(res):
                      f'font-family:{FONT_MONO};font-weight:900;">✓ CLEAR // 未检出显著风险舆情</div>')
     risk_html = _pixel_panel("RISK LOG // 风险提示", risk_body, C_RED, "!")
 
-    if res["watch"]:
-        watch_body = "".join(
-            _item_row("◆", f'<b>{_esc(n)}</b> '
-                      f'<span style="display:inline-block;color:{C_LEMON};font-size:9px;'
-                      f'font-family:{FONT_MONO};border:1px solid {C_LEMON};padding:0 4px;">'
-                      f'{_esc(tag)}</span>', icon_color=C_LEMON)
-            for n, tag in res["watch"]
-        )
+    # 明日关注：2026-08-06 起不再列出榜单个股，面板只保留主题行（THEME UNLOCKED）。
+    if res["themes"]:
+        watch_body = (f'<div style="font-size:12px;color:{C_BG};font-weight:900;line-height:1.7;'
+                      f'font-family:{FONT_MONO};background:{C_LEMON};padding:7px 9px;'
+                      f'box-shadow:3px 3px 0 #000;">★ THEME UNLOCKED // {_esc(res["themes"])}</div>')
     else:
         watch_body = (f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;'
-                      f'font-family:{FONT_MONO};">■ WATCH LIST EMPTY</div>')
-    if res["themes"]:
-        watch_body += (f'<div style="font-size:12px;color:{C_BG};font-weight:900;line-height:1.7;'
-                       f'font-family:{FONT_MONO};background:{C_LEMON};padding:7px 9px;margin-top:8px;'
-                       f'box-shadow:3px 3px 0 #000;">★ THEME UNLOCKED // {_esc(res["themes"])}</div>')
+                      f'font-family:{FONT_MONO};">■ NO WATCH THEME</div>')
     watch_html = _pixel_panel("WATCH LIST // 明日关注", watch_body, C_LEMON, "⌖")
 
     note_html = _note("AI 盘研判由公开数据经确定性规则合成 // RULESET v3 // 非投资建议，决策需独立判断")
@@ -2084,7 +2065,7 @@ def generate_report(data, date_display, date_str):
 
     # 4.6 热门榜单（A股/港股/美股 成交量前五）
     # 2026-08-06 起：不再单独渲染三个成交量榜单栏目（原始榜单不再占版面）。
-    # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 关注清单 / 「N 个市场
+    # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 明日关注主题 / 「N 个市场
     # 榜单活跃」结论）与数据审计栏的信号源；榜单的 AI 研判结果由「AI 盘研判」与
     # 「AI 研判 · 最近 A股、港股、美股成交量与流动性分析」呈现。
 

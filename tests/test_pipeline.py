@@ -427,8 +427,8 @@ class LiquidityReportTests(unittest.TestCase):
         # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
         self.assertNotIn("TOP5 VOLUME", html)
         self.assertNotIn("流动性锚点", html)
-        # 榜单个股只作为 AI 研判的输入：出现在 AI 盘研判「明日关注」清单与交投研判中，
-        # 而不是以排名表形式出现。
+        # 榜单个股只作为 AI 研判的输入：不再出现在「WATCH LIST // 明日关注」个股清单
+        # （2026-08-06 起该面板只保留主题行），仅作为交投研判中活跃标的的提及。
         self.assertIn("A股股票0", html)
         self.assertIn("港股股票0", html)
         self.assertIn("美股股票0", html)
@@ -541,6 +541,24 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
+
+    def test_watch_list_keeps_theme_only_and_omits_stock_rows(self):
+        """2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股，只保留主题行。"""
+        data = NewLayoutRenderingTests()._rich_data()
+        # 让舆情命中板块关键词，保证有「明日主题」可展示
+        data["全球头条"]["headlines"].append({
+            "title": "英伟达AI芯片需求超预期", "source": "测试源",
+            "url": "", "published_cst": "2026-08-02 11:00", "is_today": True,
+        })
+        res = pipeline.build_ai_analysis(data)
+        self.assertTrue(res["available"])
+        self.assertNotIn("watch", res)          # 不再产出个股清单
+        self.assertIn("AI/算力", res["themes"])  # 主题行保留
+        html = pipeline._ai_analysis_block(res)
+        self.assertIn("WATCH LIST // 明日关注", html)
+        self.assertIn("★ THEME UNLOCKED // AI/算力、半导体/芯片", html)
+        # 个股不再以「关注清单」形式渲染（榜单股名为 A股股票0 等）
+        self.assertNotIn("<b>A股股票", html)
 
 
 class PushResultTests(unittest.TestCase):
