@@ -378,11 +378,11 @@ class EastmoneySourceTests(unittest.TestCase):
 
 
 class LiquidityReportTests(unittest.TestCase):
-    """新增：AI 量化分析最近收盘 A股与港股流动性报告。"""
+    """新增：AI 研判分析最近收盘 A股、港股、美股成交量与流动性报告。"""
 
     def _liquidity_data(self):
         markets = {}
-        for label in ["A股", "港股"]:
+        for label in ["A股", "港股", "美股"]:
             stocks = [{
                 "code": f"000{i:03d}", "name": f"{label}股票{i}", "price": 10 + i,
                 "change_pct": 1.0 if i % 3 else -0.5,
@@ -392,7 +392,7 @@ class LiquidityReportTests(unittest.TestCase):
             markets[label] = {"desc": label, **pipeline._analyze_liquidity_market(label, stocks)}
         return pipeline._source_result(
             "东方财富流动性", "success", is_today=True, content_date="2026-08-02",
-            markets=markets, summary="A股流动性评分相对领先；港股头部成交集中度更高。",
+            markets=markets, summary="A股流动性评分相对领先；美股头部成交集中度最高。",
             sample_size=300)
 
     def test_fetch_liquidity_report_parses_a_and_hk(self):
@@ -407,26 +407,67 @@ class LiquidityReportTests(unittest.TestCase):
         with patch.object(pipeline, "safe_request", side_effect=fake_request):
             result = pipeline.fetch_liquidity_report()
         self.assertEqual(result["status"], "success")
-        self.assertEqual(set(result["markets"].keys()), {"A股", "港股"})
+        self.assertEqual(set(result["markets"].keys()), {"A股", "港股", "美股"})
         self.assertEqual(result["markets"]["A股"]["sample_count"], 20)
         self.assertIn("score", result["markets"]["港股"])
+        self.assertIn("score", result["markets"]["美股"])
         self.assertIn("summary", result)
 
     def test_liquidity_report_renders_in_generate_report(self):
         data = NewLayoutRenderingTests()._rich_data()
-        data["A港流动性"] = self._liquidity_data()
+        data["A港美流动性"] = self._liquidity_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        self.assertIn("AI 量化 · A股与港股最近收盘流动性报告", html)
+        self.assertIn("AI 研判 · 最近 A股、港股、美股成交量与流动性分析", html)
+        self.assertIn("AI FLOW & VOLUME SCAN", html)
+        self.assertIn("◆ A股成交量与流动性研判：", html)
+        self.assertIn("◆ 港股成交量与流动性研判：", html)
+        self.assertIn("◆ 美股成交量与流动性研判：", html)
         self.assertIn("LIQUIDITY SCORE", html)
         self.assertIn("AI 定性", html)
         # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
         self.assertNotIn("TOP5 VOLUME", html)
         self.assertNotIn("流动性锚点", html)
-        # 榜单个股只作为 AI 研判的输入：出现在 AI 盘研判「明日关注」清单，
+        # 榜单个股只作为 AI 研判的输入：出现在 AI 盘研判「明日关注」清单与交投研判中，
         # 而不是以排名表形式出现。
         self.assertIn("A股股票0", html)
+        self.assertIn("港股股票0", html)
+        self.assertIn("美股股票0", html)
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
+
+    def test_volume_and_liquidity_analysis_html_synthesizes_hot_and_liq(self):
+        liq = self._liquidity_data()
+        hot = NewLayoutRenderingTests()._rich_data()["热门榜单"]
+        html_block = pipeline._build_volume_and_liquidity_analysis_html(liq, hot)
+        self.assertIn("◆ A股成交量与流动性研判：", html_block)
+        self.assertIn("◆ 港股成交量与流动性研判：", html_block)
+        self.assertIn("◆ 美股成交量与流动性研判：", html_block)
+        self.assertIn("A股股票0", html_block)
+        self.assertIn("流动性评分", html_block)
+        self.assertIn("头部前十成交集中度", html_block)
+
+    def test_multi_factor_ai_conclusions_include_yahoo_and_four_100word_conclusions(self):
+        liq = self._liquidity_data()
+        hot = NewLayoutRenderingTests()._rich_data()["热门榜单"]
+        market = pipeline._source_result(
+            "Yahoo Finance Chart", "success", is_today=True, content_date="2026-08-02",
+            quotes={"标普500": {"price": 6000.0, "change_pct": 1.0, "volume": 12000000},
+                    "上证指数": {"price": 3100.0, "change_pct": 0.5, "volume": 350000000},
+                    "恒生指数": {"price": 18000.0, "change_pct": 1.2, "volume": 150000000}})
+        data = NewLayoutRenderingTests()._rich_data()
+        html = pipeline._build_multi_factor_ai_conclusions_html(liq, hot, market, data)
+        self.assertIn("◆ 整体市场 · 雅虎行情、环境·政治·地缘 多因子 AI 结论", html)
+        self.assertIn("◆ A股 · 雅虎行情、成交量、流动性与多因子 AI 结论", html)
+        self.assertIn("◆ 港股 · 雅虎行情、成交量、流动性与多因子 AI 结论", html)
+        self.assertIn("◆ 美股 · 雅虎行情、成交量、流动性与多因子 AI 结论", html)
+        self.assertIn("雅虎", html)
+        self.assertIn("环境", html)
+        self.assertIn("政治", html)
+        self.assertIn("地缘", html)
+        self.assertIn("观点一", html)
+        self.assertIn("观点二", html)
+        self.assertIn("观点三", html)
+        self.assertIn("每观点一句话", html)
 
 class NewLayoutRenderingTests(unittest.TestCase):
     """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
