@@ -26,8 +26,6 @@ class ReportFreshnessTests(unittest.TestCase):
             ),
             "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
-            "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
-            "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
         }
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
         self.assertIn("6,123", html)
@@ -111,8 +109,6 @@ class ReportFreshnessTests(unittest.TestCase):
             ),
             "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
-            "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
-            "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
         }
         return data
 
@@ -145,7 +141,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 9)
+        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -158,7 +154,7 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertTrue(can_push)
         # 全部无内容 → 不推送
         empty = {k: pipeline._source_result(k, "unavailable", error="offline")
-                 for k in ["实时行情", "港股名家频道", "全球头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
+                 for k in ["实时行情", "港股名家频道", "全球头条", "A股资讯"]}
         can_push, reason = pipeline.check_push_eligibility(empty)
         self.assertFalse(can_push)
         self.assertIn("0/", reason)
@@ -430,7 +426,7 @@ class LiquidityReportTests(unittest.TestCase):
         # 而不是以排名表形式出现。
         self.assertIn("A股股票0", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 9)
+        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
 
 class NewLayoutRenderingTests(unittest.TestCase):
     """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
@@ -468,7 +464,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 9)  # 数据源扩展到 9 个（含 A港流动性）
+        self.assertEqual(meta["total_sources"], 7)  # 数据源共 7 个（Reddit / 韩股已移除）
 
 
 class RetroPixelVisualTests(unittest.TestCase):
