@@ -171,7 +171,10 @@ class ReportFreshnessTests(unittest.TestCase):
                         "published_cst": "2026-08-01 10:00", "is_today": True} for i in range(5)],
         }
         html = pipeline._channel_block(ch)
-        self.assertEqual(html.count("▶️"), pipeline.CHANNEL_TOP_N)  # 每频道只列前 3 条
+        # Retro Pixel 风格：每频道只列前 3 条，图标改为 cyber [>> FEED] / >> / ▶ / ■ 等
+        # 兼容旧 ▶️ 计数与新风格：以实际渲染的视频标题数量为准
+        rendered = sum(1 for i in range(5) if f"视频{i}" in html)
+        self.assertEqual(rendered, pipeline.CHANNEL_TOP_N)
         self.assertIn("视频0", html)
         self.assertIn("视频2", html)
         self.assertNotIn("视频3", html)  # 第 4/5 条不展示
@@ -182,7 +185,8 @@ class ReportFreshnessTests(unittest.TestCase):
         html = pipeline._channel_block(ch)
         self.assertIn("暂缺", html)
         self.assertIn("微博需登录", html)
-        self.assertNotIn("▶️", html)  # 没有伪造内容
+        # Retro Pixel 风格：无内容时不伪造视频行，Badge 显示 [● 暂缺]
+        self.assertNotIn("视频", html)
 
     def test_fetch_hk_channels_marks_manual_as_unsupported(self):
         # 全部为 manual 频道时：不发起任何请求，返回 unavailable + unsupported 列表
