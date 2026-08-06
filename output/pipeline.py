@@ -35,13 +35,13 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
-  7.1 页面风格：复古像素游戏 + Cyber 霓虹风（RETRO 8-BIT × CYBER）——
-     暗色终端底 #070A14 / 卡纸 #121526 / 霓虹青 #00FFA3 / 品红 #FF2D92 / 电光蓝 #00E5FF，
-     纯直角像素块 + 3px 硬描边 + 4px 实色阴影，像 8-bit 游戏卡带与街机计分板；等宽像素字体
-     栈（Courier New / Lucida Console / monospace，回退苹方/雅黑），图标全换成 Cyber 像素符号
-     ■ ◆ ⚡ ✚ ☠ ⌖ ⟁ ▓ ▲ ◉；栏目头改成 LVL 关卡编号，Badge 像终端指示灯 [● LIVE]/[× OFF]，
-     注释用代码注释风格 /* ... */，刊头做成窗口标题栏 OCTOPUS_OS v2；栏目结构与一对一排行榜
-     保持不变，仅换肤。
+  7.1 页面风格：复古像素游戏（RETRO PIXEL MARKET QUEST v3）——
+     暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
+     等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
+     章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
+     编码，并覆盖行情、成交榜和流动性锚点。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
+     置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
+     升级为 OCTOPUS_OS v3。栏目结构与一对一排行榜保持不变。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
@@ -358,12 +358,15 @@ def fetch_market_snapshot():
 def _quote_value(market, label, precision=2):
     quote = market.get("quotes", {}).get(label)
     if not quote:
-        return f'<span style="color:{C_FAINT};">数据暂缺</span>', C_FAINT
+        return f'<span style="color:{C_FAINT};">■ 数据暂缺</span>', C_FAINT
     price = quote["price"]
-    pct = quote["change_pct"]
-    color = C_GREEN if pct >= 0 else C_RED
-    # 股指/原油精度不同不影响新鲜度；保留可审计的真实数值和涨跌幅。
-    return (f'<span style="color:{color};">{price:,.{precision}f} {pct:+.2f}%</span>', color)
+    pct = float(quote["change_pct"])
+    color = C_GREEN if pct > 0 else (C_RED if pct < 0 else C_AMBER)
+    # 数值用白色、涨跌用带箭头的高对比色块；即使用户存在色觉差异，也能靠 ▲/▼/■ 判断。
+    value = (f'<span style="display:inline-block;color:{C_INK};font-size:13px;font-weight:900;'
+             f'font-family:{FONT_MONO};padding-right:6px;">{price:,.{precision}f}</span>'
+             f'{_trend_badge(pct)}')
+    return value, color
 
 
 # ============================================================
@@ -1131,67 +1134,189 @@ def collect_all_data():
 
 
 # ============================================================
-# HTML 组件（设计系统：复古像素游戏 + Cyber 霓虹）
+# HTML 组件（设计系统：复古像素游戏 · MARKET QUEST v3）
 # ------------------------------------------------------------
 # 版式语言：
-#  · 暗色终端底 #070A14 + 卡片 #121526，霓虹青 #00FFA3 / 品红 #FF2D92 / 电光蓝 #00E5FF
-#  · 纯直角像素风：0 圆角、3px 硬描边 + 4px 实色阴影，像 8-bit 卡带界面
-#  · 等宽像素字体栈，中文回退苹方/雅黑，标题全大写像素感
-#  · 图标全部 Cyber 像素符号：■ ◆ ▲ ◉ ⟁ ⚡ ☠ ⌖ ⟡ ▓，不用圆润 Emoji
-#  · 关卡式栏目头 LVL / STAGE，Badge 像终端指示灯 [● ONLINE]
-#  · 注释 = 代码注释风格 /* ... */
+#  · 暗色街机终端底 + 霓虹青 / 品红 / 电光蓝 / 像素黄
+#  · 纯直角像素风：0 圆角、3px 硬描边 + 实色阴影，像 8-bit 卡带界面
+#  · 等宽像素字体栈，中文回退苹方/雅黑；不依赖外部字体、图片或 SVG
+#  · 纯 HTML 像素章鱼 + 每栏独立 44px 图标砖，图标始终先于文字建立层级
+#  · 涨跌 = 高对比颜色底块 + ▲/▼/■ + 涨/跌/平，兼顾色觉差异
+#  · AI = 首屏主控卡 + 关键指标计分板 + 大字号主结论 + 四个独立面板
 # 硬约束：仍全部内联样式 + 表格布局，兼容微信/PushPlus
 # ============================================================
-# 复古游戏 + Cyber 霓虹调色板
-C_BG = "#070A14"
-C_PAPER = "#121526"
-C_INK = "#DDE3FF"
-C_ACCENT = "#00FFA3"
+# 复古游戏像素调色板
+C_BG = "#050711"
+C_PAPER = "#101426"
+C_INK = "#F4F7FF"
+C_ACCENT = "#39FFB6"
 C_ACCENT_DEEP = "#FFFFFF"
-C_ACCENT_SOFT = "#26304E"
-C_ACCENT_MAGENTA = "#FF2D92"
-C_CYAN = "#00E5FF"
-C_VIOLET = "#7C5CFF"
-C_MUTED = "#8A8EAA"
-C_FAINT = "#4A4E6B"
-C_HAIR = "#212840"
-C_ZEBRA = "#1A1E33"
-C_LEMON = "#FFE600"
-C_MINT = "#00FFA3"
-C_RED = "#FF3B5A"
-C_GREEN = "#00FF85"
-C_AMBER = "#FFC93C"
-C_BLUE = "#00E5FF"
-C_MAGENTA = "#FF2D92"
+C_ACCENT_SOFT = "#303A60"
+C_ACCENT_MAGENTA = "#FF3CAC"
+C_CYAN = "#22DFFF"
+C_VIOLET = "#A98CFF"
+C_MUTED = "#A6AEC9"
+C_FAINT = "#747D9F"
+C_HAIR = "#29314E"
+C_ZEBRA = "#181D34"
+C_LEMON = "#FFE66D"
+C_MINT = "#39FFB6"
+# 涨跌色不仅靠文字色区分，还配合 ▲/▼、深色底块与硬描边，保证微信深色页面中一眼可辨。
+C_RED = "#FF5576"
+C_GREEN = "#35F29A"
+C_AMBER = "#FFD166"
+C_BLUE = "#22DFFF"
+C_MAGENTA = "#FF3CAC"
+C_UP_BG = "#082B22"
+C_DOWN_BG = "#34131F"
+C_FLAT_BG = "#302711"
+C_AI_BG = "#17152F"
 FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
         "PingFang SC, Microsoft YaHei, sans-serif")
 FONT_MONO = "'Courier New', Courier, monospace"
 
+
 def _sq(color=C_ACCENT, size=8):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">■</span>'
+
 
 def _star(color=C_ACCENT, size=10):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">◆</span>'
 
+
 def _heart(color=C_ACCENT_MAGENTA, size=10):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">⚡</span>'
+
 
 def _flower(color=C_CYAN, size=10):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">✚</span>'
 
+
+def _percent_number(value):
+    """把数字 / ``+1.23%`` 文本转成 float；无法转换时返回 None。"""
+    try:
+        if isinstance(value, str):
+            value = value.replace("%", "").replace(",", "").strip()
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trend_badge(value, compact=False):
+    """渲染高辨识度涨跌像素徽标：颜色、箭头和文字三重编码。"""
+    pct = _percent_number(value)
+    if pct is None:
+        return (f'<span style="display:inline-block;border:2px solid {C_FAINT};background:{C_ZEBRA};'
+                f'color:{C_FAINT};padding:1px 6px;font-size:10px;font-weight:900;'
+                f'font-family:{FONT_MONO};box-shadow:2px 2px 0 #000;white-space:nowrap;">■ --</span>')
+    if pct > 0:
+        color, bg, arrow, word = C_GREEN, C_UP_BG, "▲", "涨"
+    elif pct < 0:
+        color, bg, arrow, word = C_RED, C_DOWN_BG, "▼", "跌"
+    else:
+        color, bg, arrow, word = C_AMBER, C_FLAT_BG, "■", "平"
+    label = f"{arrow} {pct:+.2f}%" if compact else f"{arrow} {word} {pct:+.2f}%"
+    if pct == 0:
+        label = f"{arrow} 0.00%" if compact else f"{arrow} {word} 0.00%"
+    return (f'<span style="display:inline-block;border:2px solid {color};background:{bg};'
+            f'color:{color};padding:1px 6px;font-size:10px;font-weight:900;line-height:17px;'
+            f'font-family:{FONT_MONO};box-shadow:2px 2px 0 #000;white-space:nowrap;">{label}</span>')
+
+
+def _signal_meter(value, maximum, color=C_CYAN, cells=5):
+    """用实体像素格显示信号强度，不依赖 CSS 渐变或外部图标。"""
+    maximum = max(1, int(maximum or 1))
+    lit = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
+    return (f'<span style="color:{color};font-family:{FONT_MONO};font-size:10px;letter-spacing:1px;">'
+            f'{"■" * lit}</span><span style="color:{C_ACCENT_SOFT};font-family:{FONT_MONO};'
+            f'font-size:10px;letter-spacing:1px;">{"□" * (cells - lit)}</span>')
+
+
+def _pixel_octopus(pixel=4):
+    """纯 HTML 8-bit 章鱼图标；无需图片资源，PushPlus/微信可直接渲染。"""
+    pattern = (
+        "00111100",
+        "01111110",
+        "11211211",
+        "11111111",
+        "01111110",
+        "01011010",
+        "11011011",
+        "10000001",
+    )
+    cells = []
+    for row in pattern:
+        tds = []
+        for bit in row:
+            bg = C_ACCENT if bit == "1" else (C_BG if bit == "2" else "")
+            # bgcolor / width / height 是邮件客户端兼容性最高的表格像素写法，也比重复长 style 更省推送字数。
+            bg_attr = f' bgcolor="{bg}"' if bg else ""
+            tds.append(f'<td width="{pixel}" height="{pixel}"{bg_attr}>&nbsp;</td>')
+        cells.append("<tr>" + "".join(tds) + "</tr>")
+    return (f'<table role="img" aria-label="章鱼像素图标" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;margin:0 auto;font-size:0;line-height:0;">'
+            f'{"".join(cells)}</table>')
+
 def _badge(text, kind="ok"):
     styles = {
-        "ok":   (C_GREEN, "#0E231B", C_GREEN),
-        "warn": (C_AMBER, "#2A2412", C_AMBER),
-        "bad":  (C_RED, "#28131A", C_RED),
-        "ai":   (C_VIOLET, "#1D1A2E", C_VIOLET),
+        "ok":   (C_GREEN, C_UP_BG, C_GREEN),
+        "warn": (C_AMBER, C_FLAT_BG, C_AMBER),
+        "bad":  (C_RED, C_DOWN_BG, C_RED),
+        "ai":   (C_LEMON, C_AI_BG, C_VIOLET),
     }
     color, bg, border = styles.get(kind, styles["ok"])
+    dot = "◆" if kind == "ai" else "●"
     return (f'<span style="display:inline-block;border:2px solid {border};color:{color};'
-            f'background:{bg};padding:0 6px;margin-left:6px;font-size:10px;font-weight:900;'
-            f'font-family:{FONT_MONO};letter-spacing:1px;line-height:16px;'
+            f'background:{bg};padding:1px 7px;margin-left:6px;font-size:10px;font-weight:900;'
+            f'font-family:{FONT_MONO};letter-spacing:1px;line-height:17px;'
             f'box-shadow:2px 2px 0 #000;vertical-align:middle;'
-            f'white-space:nowrap;">[● {_esc(text)}]</span>')
+            f'white-space:nowrap;">[{dot} {_esc(text)}]</span>')
+
+
+_SECTION_ICON_META = {
+    "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
+    "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
+    "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
+    "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
+    "EASTMONEY WIRE": ("!", "WIRE", C_AMBER, C_FLAT_BG),
+    "SEMIS & KOSPI": ("◆", "CHIP", C_VIOLET, C_AI_BG),
+    "A-SHARE DESK": ("¥", "CN", C_RED, C_DOWN_BG),
+    "WSB HEAT": ("#", "WSB", C_MAGENTA, "#301226"),
+    "A-SHARES RANK": ("1P", "TOP", C_RED, C_DOWN_BG),
+    "HK-STOCKS RANK": ("2P", "TOP", C_CYAN, "#092836"),
+    "US-STOCKS RANK": ("3P", "TOP", C_VIOLET, C_AI_BG),
+    "A/H LIQUIDITY": ("≈", "FLOW", C_CYAN, "#092836"),
+    "DATA AUDIT": ("✓", "LOG", C_GREEN, C_UP_BG),
+}
+
+
+def _section_visual(kicker):
+    """返回栏目像素图标、短标签与强调色。"""
+    return _SECTION_ICON_META.get(kicker, ("■", "DATA", C_ACCENT, C_UP_BG))
+
+
+def _pixel_icon(kicker, size=44):
+    """大尺寸栏目图标砖；ASCII/几何符号在微信字体回退时仍清晰。"""
+    glyph, label, color, bg = _section_visual(kicker)
+    glyph_size = max(20, round(size * 0.43))
+    return (f'<table width="{size}" height="{size}" cellpadding="0" cellspacing="0" '
+            f'style="width:{size}px;height:{size}px;border-collapse:collapse;border:3px solid {color};'
+            f'background:{bg};box-shadow:4px 4px 0 #000;">'
+            f'<tr><td align="center" valign="middle" style="padding:2px;color:{color};'
+            f'font-family:{FONT_MONO};font-weight:900;line-height:1;">'
+            f'<div style="font-size:{glyph_size}px;line-height:{glyph_size}px;">{glyph}</div>'
+            f'<div style="font-size:8px;line-height:10px;letter-spacing:.5px;">{label}</div>'
+            f'</td></tr></table>')
+
+
+def _pixel_panel(title, body, color=C_CYAN, icon="■"):
+    """AI 等重点内容使用的 8-bit 面板：高对比标题条 + 硬边框。"""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+            f'margin-top:12px;border:2px solid {color};background:#0C1122;box-shadow:4px 4px 0 #000;">'
+            f'<tr><td style="padding:5px 9px;background:{color};color:{C_BG};font-size:10px;'
+            f'font-weight:900;font-family:{FONT_MONO};letter-spacing:1px;">{icon} {title}</td></tr>'
+            f'<tr><td style="padding:8px 10px;">{body}</td></tr></table>')
+
 
 def _alert(text, color=C_AMBER, bg=None):
     bg_color = bg or "#1A1E33"
@@ -1243,14 +1368,15 @@ def _source_badge(item):
         return _badge("LIVE", "ok")
     return _badge(f"LAG {item.get('content_date') or '-'}", "warn")
 
-def _item_row(icon, text, sub=""):
+def _item_row(icon, text, sub="", icon_color=C_ACCENT, row_bg="transparent"):
     sub_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
-                f'padding-top:2px;line-height:1.5;font-family:{FONT_MONO};">{sub}</div>' if sub else "")
-    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
-            f'<tr><td width="28" valign="top" style="padding:7px 0;border-bottom:1px solid {C_HAIR};'
-            f'font-size:10px;font-weight:900;color:{C_ACCENT};line-height:1.6;'
+                f'padding-top:3px;line-height:1.6;font-family:{FONT_MONO};">{sub}</div>' if sub else "")
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+            f'background:{row_bg};">'
+            f'<tr><td width="32" valign="top" style="padding:8px 4px 8px 0;border-bottom:1px solid {C_HAIR};'
+            f'font-size:11px;font-weight:900;color:{icon_color};line-height:1.6;'
             f'font-family:{FONT_MONO};">{icon}</td>'
-            f'<td style="padding:7px 0;border-bottom:1px solid {C_HAIR};font-size:12px;'
+            f'<td style="padding:8px 0;border-bottom:1px solid {C_HAIR};font-size:12px;'
             f'color:{C_INK};line-height:1.7;font-family:{FONT_MONO};">{text}{sub_html}</td></tr></table>')
 
 def _headline_row(it, index=None):
@@ -1275,9 +1401,13 @@ def _em_news_row(it, index=None):
     return _item_row(f"[{marker}]", _esc(it[:120]))
 
 def _rank_span(i):
-    return (f'<span style="color:{C_ACCENT};font-weight:900;font-family:{FONT_MONO};'
-            f'background:#0E231B;border:1px solid {C_ACCENT};padding:0 4px;'
-            f'font-variant-numeric:tabular-nums;">{i + 1:02d}</span>')
+    colors = (C_LEMON, C_CYAN, C_MAGENTA)
+    color = colors[i] if i < len(colors) else C_ACCENT
+    bg = C_FLAT_BG if i == 0 else ("#092836" if i == 1 else ("#301226" if i == 2 else C_UP_BG))
+    mark = "★" if i == 0 else "■"
+    return (f'<span style="display:inline-block;color:{color};font-weight:900;font-family:{FONT_MONO};'
+            f'background:{bg};border:2px solid {color};padding:0 4px;box-shadow:2px 2px 0 #000;'
+            f'font-variant-numeric:tabular-nums;">{mark}{i + 1:02d}</span>')
 
 def _channel_block(ch):
     name = _esc(ch.get("name", "?"))
@@ -1362,19 +1492,26 @@ def _masthead_cell(label, value, value_color=C_INK, first=False):
             f'font-family:{FONT_MONO};font-variant-numeric:tabular-nums;">{value}</div></div></td>')
 
 def _section(num, kicker_en, title, content, badge_html="", caption=""):
-    badge_cell = (f'<td align="right" valign="bottom">{badge_html}</td>' if badge_html else "")
+    """栏目头使用独立大图标砖；AI 栏目以黄色关卡色单独强调。"""
+    _, _, section_color, _ = _section_visual(kicker_en)
+    badge_cell = (f'<td align="right" valign="middle" style="padding-left:6px;">{badge_html}</td>'
+                  if badge_html else "")
     caption_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
-                    f'padding:4px 0 8px;line-height:1.6;font-family:{FONT_MONO};">> {caption}</div>'
-                    if caption else '<div style="padding-bottom:6px;"></div>')
+                    f'padding:7px 0 8px 56px;line-height:1.6;font-family:{FONT_MONO};">'
+                    f'<span style="color:{section_color};">└─</span> {caption}</div>'
+                    if caption else '<div style="padding-bottom:7px;"></div>')
     return f'''
-<div style="border-top:3px solid {C_ACCENT};margin-top:24px;padding-top:10px;">
+<div style="border-top:4px solid {section_color};margin-top:28px;padding-top:12px;">
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#000;padding:2px 6px;font-size:11px;font-weight:900;letter-spacing:1px;line-height:14px;font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">LVL {num}</span><span style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:2px;padding-left:8px;font-family:{FONT_MONO};">{kicker_en}</span></td>
+<td width="52" valign="middle" style="padding-right:10px;">{_pixel_icon(kicker_en)}</td>
+<td valign="middle">
+<div style="font-family:{FONT_MONO};font-size:9px;font-weight:900;color:{section_color};letter-spacing:1px;line-height:1.3;">LVL {num} // {kicker_en}</div>
+<div style="font-size:17px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;padding-top:4px;line-height:1.35;font-family:{FONT_MONO};">{title}<span style="color:{section_color};">_</span></div>
+</td>
 {badge_cell}
 </tr>
 </table>
-<div style="font-size:16px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;padding-top:8px;font-family:{FONT_MONO};text-transform:uppercase;">{ _heart(C_ACCENT, 12) } {title} <span style="color:{C_ACCENT};">_</span></div>
 {caption_html}
 {content}
 </div>'''
@@ -1651,110 +1788,188 @@ def build_ai_analysis(data):
 
 
 def _ai_analysis_block(res):
-    """渲染「AI 盘研判」栏目：复古终端 + 霓虹信号灯"""
+    """渲染「AI 盘研判」：AI 主结论优先、指标卡分层、内容使用独立像素面板。"""
     color = res["sentiment_color"]
+    score = int(res["score"])
+
+    def metric_cell(label, value, value_color, first=False):
+        border = "" if first else f"border-left:2px solid {C_ACCENT_SOFT};"
+        return (f'<td width="33%" valign="top" style="padding:8px 6px;{border}text-align:center;">'
+                f'<div style="font-size:8px;color:{C_MUTED};font-family:{FONT_MONO};font-weight:900;'
+                f'letter-spacing:1px;">{label}</div>'
+                f'<div style="font-size:15px;color:{value_color};font-family:{FONT_MONO};font-weight:900;'
+                f'padding-top:3px;line-height:1.25;">{value}</div></td>')
+
+    # AI 主控卡：大图标 + 情绪结论 + 三个关键指标，先于所有明细出现。
     hero = (
-        f'<div style="border:3px solid {C_ACCENT};background:#0E1528;padding:12px 14px;box-shadow:6px 6px 0 #000;">'
-        f'<div style="font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;font-family:{FONT_MONO};">'
-        f'[ AI.SYS // LVL_ANALYSIS ] ▶ 综合定调</div>'
-        f'<div style="font-size:22px;font-weight:900;color:{color};letter-spacing:1px;'
-        f'padding:6px 0 2px;font-family:{FONT_MONO};text-transform:uppercase;">'
-        f'{_heart(color, 14)} {_esc(res["sentiment_label"])} <span style="color:{color};font-size:10px;vertical-align:middle;border:1px solid {color};padding:0 4px;">LVL {res["score"]:+d}</span></div>'
-        f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:1px;font-family:{FONT_MONO};">'
-        f'{_esc(res["sentiment_en"])} :: SIGNAL {res["score"]:+d} :: CONF {_esc(res["confidence"])} :: [SCANLINE]</div>'
-        f'<div style="font-size:11px;color:{C_INK};line-height:1.8;padding-top:8px;font-family:{FONT_MONO};border-top:2px dashed {C_ACCENT_SOFT};margin-top:8px;">'
-        f'> {_esc(res["reason"])}</div></div>'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'border:4px solid {C_VIOLET};background:{C_AI_BG};box-shadow:7px 7px 0 #000;">'
+        f'<tr><td colspan="2" style="padding:5px 9px;background:{C_VIOLET};color:{C_BG};'
+        f'font-size:10px;font-weight:900;font-family:{FONT_MONO};letter-spacing:1px;">'
+        f'◆ AI CORE OUTPUT // 章鱼 AI 主控台</td></tr>'
+        f'<tr><td width="68" valign="middle" style="padding:12px 4px 10px 12px;">'
+        f'{_pixel_icon("AI READ", 54)}</td>'
+        f'<td valign="middle" style="padding:12px 12px 10px 8px;">'
+        f'<div style="font-size:9px;color:{C_LEMON};font-family:{FONT_MONO};font-weight:900;'
+        f'letter-spacing:2px;">MARKET BIAS // 市场倾向</div>'
+        f'<div style="font-size:28px;color:{color};font-family:{FONT_MONO};font-weight:900;'
+        f'line-height:1.15;padding-top:4px;text-shadow:2px 2px 0 #000;">'
+        f'{_esc(res["sentiment_label"])} <span style="font-size:14px;">{("▲" if score > 8 else ("▼" if score < -8 else "■"))}</span></div>'
+        f'<div style="font-size:9px;color:{C_MUTED};font-family:{FONT_MONO};font-weight:900;'
+        f'letter-spacing:1px;padding-top:4px;">{_esc(res["sentiment_en"])} // RULESET v3</div>'
+        f'</td></tr>'
+        f'<tr><td colspan="2" style="padding:0 10px 11px;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'border:2px solid {C_ACCENT_SOFT};background:#0A0E1D;"><tr>'
+        f'{metric_cell("DIRECTION / 方向", _esc(res["sentiment_label"]), color, True)}'
+        f'{metric_cell("SIGNAL / 信号分", f"{score:+d}", color)}'
+        f'{metric_cell("CONF / 置信度", _esc(res["confidence"]), C_LEMON)}'
+        f'</tr></table>'
+        f'<div style="padding-top:8px;font-size:9px;color:{C_MUTED};font-family:{FONT_MONO};">'
+        f'SIGNAL POWER&nbsp; {_signal_meter(abs(score), 100, color, 10)}</div>'
+        f'</td></tr></table>'
     )
 
-    # 板块热度
+    # 主结论使用高亮黄框与更大的正文，避免被后续表格淹没。
+    conclusion_body = (
+        f'<div style="font-size:9px;color:{C_LEMON};font-weight:900;font-family:{FONT_MONO};'
+        f'letter-spacing:1px;">READ THIS FIRST // 先看结论</div>'
+        f'<div style="font-size:14px;color:{C_INK};font-weight:900;line-height:1.9;'
+        f'font-family:{FONT_MONO};padding-top:4px;">{_esc(res["reason"])}</div>'
+    )
+    conclusion_html = _pixel_panel("AI 主结论 // CORE THESIS", conclusion_body, C_LEMON, "◆")
+
+    # 板块热度：命中数同时用像素能量条编码。
     if res["sectors_strong"]:
-        sec_rows = [(f"{_flower()} {sec}", f"{cnt} HIT", C_INK)
-                    for sec, cnt in res["sectors_strong"]]
-        sectors_html = _subsection("SECTOR SCAN [板块热度]") + _mini_table(sec_rows)
+        max_hits = max(cnt for _, cnt in res["sectors_strong"])
+        sec_rows = [
+            (f'<span style="color:{C_CYAN};font-weight:900;">✚</span> {_esc(sec)}',
+             f'{_signal_meter(cnt, max_hits, C_CYAN)} '
+             f'<span style="color:{C_INK};font-size:10px;">{cnt} HIT</span>', C_INK)
+            for sec, cnt in res["sectors_strong"]
+        ]
+        sectors_body = _mini_table(sec_rows)
     else:
-        sectors_html = (_subsection("SECTOR SCAN [板块热度]")
-                        + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">> NO SIGNAL</div>')
+        sectors_body = (f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;'
+                        f'font-family:{FONT_MONO};">■ NO SECTOR SIGNAL</div>')
     if res["sectors_weak"]:
-        sectors_html += (f'<div style="font-size:10px;color:{C_RED};padding-top:4px;'
-                         f'line-height:1.7;font-family:{FONT_MONO};">[x WEAK]: '
-                         f'{" | ".join(_esc(s) for s in res["sectors_weak"])}</div>')
+        sectors_body += (f'<div style="font-size:11px;color:{C_RED};margin-top:8px;padding:6px 8px;'
+                         f'line-height:1.7;font-family:{FONT_MONO};font-weight:900;border:2px solid {C_RED};'
+                         f'background:{C_DOWN_BG};">▼ 承压板块 // '
+                         f'{" / ".join(_esc(s) for s in res["sectors_weak"])}</div>')
+    sectors_html = _pixel_panel("SECTOR SCAN // 板块热度", sectors_body, C_CYAN, "✚")
 
-    # 技术速读
+    # 技术速读：每一项都显示 ▲/▼/■ 高对比徽标，不再只靠文字颜色。
     if res["tech_rows"]:
-        tech_rows = [(label, f"{pct} / {band}", c)
-                     for label, pct, band, c in res["tech_rows"]]
-        tech_html = _subsection("TECH READ [指数动能]") + _data_table(tech_rows)
+        tech_rows = [
+            (_esc(label),
+             f'{_trend_badge(pct, compact=True)} '
+             f'<span style="display:inline-block;color:{c};font-size:10px;font-weight:900;'
+             f'padding-left:5px;">{_esc(band)}</span>', c)
+            for label, pct, band, c in res["tech_rows"]
+        ]
+        tech_body = _data_table(tech_rows)
     else:
-        tech_html = (_subsection("TECH READ [指数动能]")
-                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">> NO DATA</div>')
-    tech_html += (f'<div style="font-size:10px;color:{C_MUTED};padding-top:4px;'
-                  f'line-height:1.7;font-family:{FONT_MONO};">> {_esc(res["tech_read"])}</div>')
+        tech_body = (f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;'
+                     f'font-family:{FONT_MONO};">■ NO MARKET DATA</div>')
+    tech_body += (f'<div style="font-size:12px;color:{C_INK};padding:8px 8px 2px;'
+                  f'line-height:1.8;font-family:{FONT_MONO};font-weight:700;">'
+                  f'<span style="color:{C_VIOLET};font-weight:900;">◆ AI 解读：</span>'
+                  f'{_esc(res["tech_read"])}</div>')
+    tech_html = _pixel_panel("TECH READ // 指数动能", tech_body, C_VIOLET, "▲")
 
-    # 风险提示
+    # 风险与关注分别用红色、黄色面板，视觉层级与语义一致。
     if res["risks"]:
-        risk_html = _subsection("RISK LOG [风险提示]") + "".join(
-            _item_row("[!]", _esc(t), _esc(src)) for t, src in res["risks"])
+        risk_body = "".join(
+            _item_row("!", _esc(t), _esc(src), icon_color=C_RED,
+                      row_bg=C_DOWN_BG if i % 2 == 0 else "transparent")
+            for i, (t, src) in enumerate(res["risks"])
+        )
     else:
-        risk_html = (_subsection("RISK LOG [风险提示]")
-                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">'
-                       f'> CLEAR :: NO RISK FLAGGED</div>')
+        risk_body = (f'<div style="font-size:11px;color:{C_GREEN};padding:4px 0;'
+                     f'font-family:{FONT_MONO};font-weight:900;">✓ CLEAR // 未检出显著风险舆情</div>')
+    risk_html = _pixel_panel("RISK LOG // 风险提示", risk_body, C_RED, "!")
 
-    # 关注清单
     if res["watch"]:
-        watch_html = _subsection("WATCH LIST [明日关注]") + "".join(
-            _item_row(f"[{i + 1:02d}]",
-                      f'<b>{_esc(n)}</b> <span style="color:{C_MUTED};font-size:10px;font-family:{FONT_MONO};">[{_esc(tag)}]</span>')
-            for i, (n, tag) in enumerate(res["watch"]))
+        watch_body = "".join(
+            _item_row("◆", f'<b>{_esc(n)}</b> '
+                      f'<span style="display:inline-block;color:{C_LEMON};font-size:9px;'
+                      f'font-family:{FONT_MONO};border:1px solid {C_LEMON};padding:0 4px;">'
+                      f'{_esc(tag)}</span>', icon_color=C_LEMON)
+            for n, tag in res["watch"]
+        )
     else:
-        watch_html = (_subsection("WATCH LIST [明日关注]")
-                      + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">'
-                        f'> EMPTY</div>')
+        watch_body = (f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;'
+                      f'font-family:{FONT_MONO};">■ WATCH LIST EMPTY</div>')
     if res["themes"]:
-        watch_html += (f'<div style="font-size:10px;color:{C_ACCENT};padding-top:6px;'
-                       f'font-weight:900;line-height:1.7;font-family:{FONT_MONO};border:2px solid {C_ACCENT};background:#0E231B;padding:6px 8px;margin-top:6px;box-shadow:3px 3px 0 #000;">THEME_UNLOCKED: {_esc(res["themes"])} [◆]</div>')
+        watch_body += (f'<div style="font-size:12px;color:{C_BG};font-weight:900;line-height:1.7;'
+                       f'font-family:{FONT_MONO};background:{C_LEMON};padding:7px 9px;margin-top:8px;'
+                       f'box-shadow:3px 3px 0 #000;">★ THEME UNLOCKED // {_esc(res["themes"])}</div>')
+    watch_html = _pixel_panel("WATCH LIST // 明日关注", watch_body, C_LEMON, "⌖")
 
-    note_html = _note("AI 盘研判由规则引擎合成 // CYBER RULESET v2 // 非投资建议，决策需独立判断 [<b>8-BIT</b>]")
-
-    return hero + sectors_html + tech_html + risk_html + watch_html + note_html
-
-
+    note_html = _note("AI 盘研判由公开数据经确定性规则合成 // RULESET v3 // 非投资建议，决策需独立判断")
+    return hero + conclusion_html + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
 def _liquidity_market_block(label, stats):
-    """渲染单个市场的 AI 量化流动性分析：像素计分板"""
+    """渲染单个市场的 AI 量化流动性分析：像素计分板 + 明确涨跌符号。"""
     if not stats.get("sample_count"):
         return (f'<div style="margin:10px 0;border:2px solid {C_FAINT};background:{C_ZEBRA};'
-                f'padding:10px 12px;font-size:11px;color:{C_MUTED};font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">'
-                f'{_heart(C_FAINT, 10)} {_esc(label)} :: LIQUIDITY = NULL [NO SIGNAL]</div>')
+                f'padding:10px 12px;font-size:11px;color:{C_MUTED};font-family:{FONT_MONO};'
+                f'box-shadow:3px 3px 0 #000;">■ {_esc(label)} :: LIQUIDITY = NULL [NO SIGNAL]</div>')
     score = int(stats.get("score", 0))
     color = C_GREEN if score >= 58 else (C_RED if score < 42 else C_AMBER)
+    breadth = (f'<span style="color:{C_GREEN};font-weight:900;">▲ {stats.get("advancers", 0)}</span> / '
+               f'<span style="color:{C_RED};font-weight:900;">▼ {stats.get("decliners", 0)}</span> / '
+               f'<span style="color:{C_AMBER};font-weight:900;">■ {stats.get("flats", 0)}</span>')
     rows = [
         ("SAMPLE_VOL", _format_amount(stats.get("total_amount")), C_INK),
         ("TOP10_SHARE", f"{stats.get('top10_share', 0) * 100:.1f}%", C_INK),
-        ("ADV/DEC/FLAT", f"{stats.get('advancers', 0)}/{stats.get('decliners', 0)}/{stats.get('flats', 0)}", C_INK),
+        ("ADV / DEC / FLAT", breadth, C_INK),
         ("DIFFUSE_RATIO", f"{stats.get('adv_dec_ratio', 0):.2f}x", C_INK),
-        ("WEIGHTED_CHG", f"{stats.get('weighted_change', 0):+.2f}%", color),
+        ("WEIGHTED_CHG", _trend_badge(stats.get("weighted_change", 0)), color),
         ("AVG_TURNOVER", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
     ]
-    top = "".join(
-        _item_row(f"[{i:02d}]",
-                  f'<b>{_esc(s.get("name", "?"))}</b> '
-                  f'<span style="font-size:9px;color:{C_FAINT};font-family:{FONT_MONO};">[{_esc(str(s.get("code", "")))}]</span>',
-                  f'VOL {_format_amount(s.get("amount"))} | CHG {float(s.get("change_pct", 0)):+.2f}% | TURN {float(s.get("turnover", 0)):.2f}%')
-        for i, s in enumerate((stats.get("top_stocks") or [])[:5], 1)
-    )
+
+    top_rows = []
+    for i, stock in enumerate((stats.get("top_stocks") or [])[:5], 1):
+        pct = float(stock.get("change_pct", 0) or 0)
+        pct_color = C_GREEN if pct > 0 else (C_RED if pct < 0 else C_AMBER)
+        top_rows.append(_item_row(
+            f"{i:02d}",
+            f'<b>{_esc(stock.get("name", "?"))}</b> '
+            f'<span style="font-size:9px;color:{C_FAINT};font-family:{FONT_MONO};">'
+            f'[{_esc(str(stock.get("code", "")))}]</span>',
+            f'成交额 {_format_amount(stock.get("amount"))}&nbsp;&nbsp;'
+            f'{_trend_badge(pct, compact=True)}&nbsp;&nbsp;换手 {float(stock.get("turnover", 0) or 0):.2f}%',
+            icon_color=pct_color,
+        ))
+    top = "".join(top_rows)
+
+    score_bar = _signal_meter(score, 100, color, 10)
     return (
-        f'<div style="margin:12px 0;border:3px solid {C_ACCENT_SOFT};background:#0F1222;padding:12px 14px;box-shadow:5px 5px 0 #000;">'
-        f'<div style="font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;font-family:{FONT_MONO};">{_flower()} {_esc(label)} // LIQUIDITY SCORE // [▓]</div>'
-        f'<div style="font-size:20px;font-weight:900;color:{color};padding:4px 0;font-family:{FONT_MONO};">'
-        f'<span style="display:inline-block;background:{color};color:#000;'
-        f'padding:2px 8px;font-size:12px;font-weight:900;line-height:18px;box-shadow:2px 2px 0 #000;margin-right:8px;">{score} PTS</span>{_esc(stats.get("level", "—"))}</div>'
-        f'<div style="font-size:10px;color:{C_MUTED};line-height:1.6;font-family:{FONT_MONO};">> STATE: {_esc(stats.get("tone", "—"))} | SAMPLE {stats.get("sample_count", 0)} UNITS</div>'
+        f'<div style="margin:14px 0;border:3px solid {color};background:#0F1428;'
+        f'padding:12px 14px;box-shadow:6px 6px 0 #000;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+        f'<tr><td width="48" valign="middle">'
+        f'<table width="40" height="40" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'border:3px solid {color};background:#090D1A;box-shadow:3px 3px 0 #000;">'
+        f'<tr><td align="center" style="color:{color};font-size:18px;font-family:{FONT_MONO};'
+        f'font-weight:900;">≈</td></tr></table></td>'
+        f'<td valign="middle"><div style="font-size:9px;font-weight:900;color:{C_MUTED};'
+        f'letter-spacing:1px;font-family:{FONT_MONO};">{_esc(label)} // LIQUIDITY SCORE</div>'
+        f'<div style="font-size:21px;font-weight:900;color:{color};padding-top:2px;'
+        f'font-family:{FONT_MONO};">{score} PTS · {_esc(stats.get("level", "—"))}</div></td></tr></table>'
+        f'<div style="font-size:9px;color:{C_MUTED};padding:8px 0 5px;font-family:{FONT_MONO};">'
+        f'POWER&nbsp; {score_bar}</div>'
+        f'<div style="font-size:11px;color:{C_INK};line-height:1.6;font-family:{FONT_MONO};'
+        f'border:2px solid {C_ACCENT_SOFT};background:#090D1A;padding:6px 8px;">'
+        f'◆ AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b> '
+        f'// 样本 {stats.get("sample_count", 0)} 只</div>'
         f'{_mini_table(rows)}'
-        f'{_subsection("TOP5_VOLUME [锚点]")}{top}'
+        f'{_pixel_panel("TOP5 VOLUME // 流动性锚点", top, color, "⌖")}'
         f'</div>'
     )
-
 
 
 def _liquidity_report_block(liq):
@@ -1763,11 +1978,12 @@ def _liquidity_report_block(liq):
     blocks = "".join(_liquidity_market_block(label, markets.get(label) or {})
                      for label in ("A股", "港股"))
     summary = _esc(liq.get("summary") or "A股与港股最近收盘流动性量化对比。")
-    note = _note("LIQUIDITY FORMULA: TOP10_SHARE + DIFFUSE + WEIGHTED_CHG + TURNOVER :: RULESET v2 :: 非投资建议 [8-BIT]")
-    return (f'<div style="border:3px solid {C_CYAN};background:#0E1528;'
-            f'padding:10px 12px;font-size:11px;color:{C_CYAN};'
-            f'line-height:1.7;font-family:{FONT_MONO};box-shadow:4px 4px 0 #000;">'
-            f'[ LIQUIDITY_SCAN ] > {summary} <span style="color:{C_ACCENT};">█▓▒</span></div>' + blocks + note)
+    note = _note("LIQUIDITY FORMULA: TOP10_SHARE + DIFFUSE + WEIGHTED_CHG + TURNOVER :: RULESET v3 :: 非投资建议")
+    summary_body = (f'<div style="font-size:9px;color:{C_CYAN};font-weight:900;'
+                    f'font-family:{FONT_MONO};letter-spacing:1px;">AI FLOW SUMMARY // 资金扫描结论</div>'
+                    f'<div style="font-size:14px;color:{C_INK};font-weight:900;line-height:1.9;'
+                    f'font-family:{FONT_MONO};padding-top:4px;">{summary}</div>')
+    return _pixel_panel("LIQUIDITY SCAN // AI 流动性结论", summary_body, C_CYAN, "≈") + blocks + note
 
 
 def generate_report(data, date_display, date_str):
@@ -1904,9 +2120,15 @@ def generate_report(data, date_display, date_str):
             rows = []
             for i, s in enumerate(stocks[:10]):
                 amount_display = _format_amount(s.get("amount"))
-                label = (f'{_rank_span(i)}&nbsp; {_esc(s.get("name", "?"))} '
+                pct = _percent_number(s.get("change_pct"))
+                trend = _trend_badge(pct, compact=True)
+                trend_color = (C_GREEN if (pct or 0) > 0 else
+                               (C_RED if (pct or 0) < 0 else C_AMBER))
+                label = (f'{_rank_span(i)}&nbsp; <b>{_esc(s.get("name", "?"))}</b> '
                          f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
-                rows.append((label, amount_display, C_INK))
+                value = (f'<span style="display:block;color:{C_INK};font-weight:900;">'
+                         f'{amount_display}</span><span style="display:block;padding-top:4px;">{trend}</span>')
+                rows.append((label, value, trend_color))
 
             content = _mini_table(rows) + _note(f"榜单为最近交易日收盘后的{mlabel}成交量排名。")
             sections.append((
@@ -1972,7 +2194,7 @@ def generate_report(data, date_display, date_str):
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
-<title>章鱼AI · 每日财经日报 | RETRO CYBER EDITION</title>
+<title>章鱼AI · 财经作战日志 | RETRO PIXEL EDITION</title>
 </head>
 <body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
 
@@ -1985,30 +2207,42 @@ def generate_report(data, date_display, date_str):
 
 <!-- 标题栏：像 8-bit 窗口 title bar -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_ACCENT};"><tr>
-<td style="padding:4px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;letter-spacing:1px;">OCTOPUS_OS v2.0 // RETRO.CYBER.EDITION</td>
-<td align="right" style="padding:4px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;">[■][■][×]</td>
+<td style="padding:5px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;letter-spacing:1px;">OCTOPUS_OS v3.0 // PIXEL.MARKET.QUEST</td>
+<td align="right" style="padding:5px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;">[−][□][×]</td>
 </tr></table>
 
 <div style="padding:18px 18px 20px;">
 
-<!-- 刊头 masthead：像素大标题 -->
+<!-- 刊头 masthead：纯 HTML 像素章鱼 + 游戏卡带标题 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#000;padding:2px 6px;font-size:11px;font-weight:900;letter-spacing:1px;font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">OCTOPUS</span><span style="font-size:10px;color:{C_CYAN};letter-spacing:2px;padding-left:8px;font-family:{FONT_MONO};">[ CYBER // FINANCE // 8-BIT ]</span></td>
-<td align="right" valign="bottom"><span style="font-size:8px;font-weight:900;color:{C_ACCENT_MAGENTA};letter-spacing:3px;font-family:{FONT_MONO};border:1px solid {C_ACCENT_MAGENTA};padding:1px 4px;background:#2A1320;">RETRO GAME ZINE</span></td>
+<td width="56" valign="middle" style="padding-right:10px;">
+<table width="48" height="48" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:3px solid {C_ACCENT};background:#080C18;box-shadow:5px 5px 0 #000;"><tr><td align="center" valign="middle">{_pixel_octopus(4)}</td></tr></table>
+</td>
+<td valign="middle"><div style="font-size:11px;color:{C_ACCENT};font-weight:900;letter-spacing:2px;font-family:{FONT_MONO};">OCTOPUS AI</div><div style="font-size:9px;color:{C_CYAN};letter-spacing:1px;font-family:{FONT_MONO};padding-top:3px;">[ RETRO FINANCE CARTRIDGE ]</div></td>
+<td align="right" valign="middle"><span style="font-size:8px;font-weight:900;color:{C_ACCENT_MAGENTA};letter-spacing:2px;font-family:{FONT_MONO};border:2px solid {C_ACCENT_MAGENTA};padding:2px 5px;background:#301226;box-shadow:2px 2px 0 #000;">PLAYER 01</span></td>
 </tr>
 </table>
 
-<div style="font-size:26px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;line-height:1.2;padding-top:14px;font-family:{FONT_MONO};text-transform:uppercase;text-shadow:2px 2px 0 {C_ACCENT_SOFT};">DAILY FINANCE LOG<span style="color:{C_ACCENT};">_</span></div>
-<div style="font-size:9px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:6px;font-family:{FONT_MONO};">MARKETS · PORTFOLIO · SIGNAL · LVL UP · UTC+8</div>
-<div style="border-top:2px solid {C_ACCENT};border-bottom:2px solid {C_ACCENT_MAGENTA};margin-top:12px;height:4px;background:repeating-linear-gradient(90deg,{C_ACCENT} 0 8px,transparent 8px 16px);font-size:0;line-height:0;">&nbsp;</div>
+<div style="font-size:27px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;line-height:1.3;padding-top:16px;font-family:{FONT_MONO};text-shadow:3px 3px 0 {C_ACCENT_SOFT};">财经作战日志<span style="color:{C_ACCENT};">_</span></div>
+<div style="font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:5px;font-family:{FONT_MONO};">DAILY MARKET QUEST // SIGNAL · AI · FLOW · UTC+8</div>
+<div style="margin-top:12px;border-top:3px solid {C_ACCENT};border-bottom:3px solid {C_ACCENT_MAGENTA};height:5px;font-size:0;line-height:0;"><span style="color:{C_ACCENT};">■■■■</span></div>
 
 <!-- 导语：终端开机文字 -->
-<div style="margin-top:14px;border:2px solid {C_CYAN};background:#0E1528;padding:10px 12px;font-size:11px;color:{C_CYAN};line-height:1.8;font-family:{FONT_MONO};box-shadow:4px 4px 0 #000;">
-<span style="color:{C_ACCENT};">></span> BOOT SEQUENCE... OK<br>
-<span style="color:{C_ACCENT};">></span> FETCHING GLOBAL MARKETS [8-BIT ENCRYPTED]<br>
-<span style="color:{C_ACCENT_MAGENTA};">></span> MODE: <b>RETRO PIXEL + CYBER ICONS</b> // 只有 LIVE 数据才渲染，无数据栏目自动隐藏 [<span style="color:{C_GREEN};">●</span>]
+<div style="margin-top:14px;border:3px solid {C_CYAN};background:#091321;padding:10px 12px;font-size:11px;color:{C_INK};line-height:1.8;font-family:{FONT_MONO};box-shadow:5px 5px 0 #000;">
+<span style="color:{C_ACCENT};font-weight:900;">▶ BOOT</span> MARKET DATA LOADED<br>
+<span style="color:{C_LEMON};font-weight:900;">◆ AI</span> CORE ANALYSIS READY<br>
+<span style="color:{C_ACCENT_MAGENTA};font-weight:900;">■ MODE</span> RETRO PIXEL // 仅渲染有效数据，无数据关卡自动隐藏
 </div>
+
+<!-- 视觉图例：颜色 + 方向符号双重编码 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:12px;border:2px solid {C_ACCENT_SOFT};background:#090D1A;box-shadow:3px 3px 0 #000;">
+<tr>
+<td width="33%" align="center" style="padding:7px 3px;border-right:1px solid {C_ACCENT_SOFT};font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_GREEN};">▲ 涨 / UP</td>
+<td width="33%" align="center" style="padding:7px 3px;border-right:1px solid {C_ACCENT_SOFT};font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_RED};">▼ 跌 / DOWN</td>
+<td width="34%" align="center" style="padding:7px 3px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_LEMON};">◆ AI / CORE</td>
+</tr>
+</table>
 
 <!-- 期号元信息栅格：像状态栏 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:3px solid {C_ACCENT_SOFT};border-bottom:3px solid {C_ACCENT_SOFT};margin-top:14px;background:#0F1222;">
@@ -2027,12 +2261,12 @@ def generate_report(data, date_display, date_str):
 <div style="font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;">{ _heart(C_ACCENT, 10) } OCTOPUS-CHAN // SYSTEM SHUTDOWN</div>
 <div style="font-size:10px;color:{C_MUTED};line-height:1.8;padding-top:6px;font-family:{FONT_MONO};">
 > 仅供投资参考，非投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动隐藏，不以历史内容充数。<br>
-> RENDER MODE: RETRO PIXEL 8-BIT + CYBER NEON (■ ◆ ⚡ ✚ ⌖)<br>
-> ICON SET: [■ BLOCK] [◆ DIAMOND] [⚡ VOLT] [✚ CROSS] [⌖ TARGET] [⟁ CHIP]
+> RENDER MODE: RETRO PIXEL 8-BIT // 大图标关卡卡牌 // AI CORE 高亮<br>
+> TREND KEY: [▲ 涨 / UP] [▼ 跌 / DOWN] [■ 平 / FLAT] [◆ AI CORE]
 </div>
 <div style="font-size:9px;color:{C_FAINT};letter-spacing:.5px;line-height:1.6;padding-top:6px;font-family:{FONT_MONO};">
 DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Rank/Liquid) · Reddit · Sina · NAVER · AI_RULE<br>
-SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-8BIT-CYBER v2<br>
+SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-PIXEL-QUEST v3<br>
 <span style="color:{C_ACCENT};">█</span><span style="color:{C_CYAN};">▓</span><span style="color:{C_ACCENT_MAGENTA};">▒</span> PRESS START TO CONTINUE
 </div>
 </div>
