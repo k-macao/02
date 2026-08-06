@@ -35,12 +35,13 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
-  7.1 页面风格：POP 财经杂志风（POP Finance Zine）——
-     高饱和蓝 / 桃红 / 柠檬黄（胭脂粉底 + 奶油纸面 + 树莓粉/贝壳粉/深玫瑰粉主调，香芋紫/柠檬/
-     薄荷作小点缀）、圆体字优先的字体栈（Hiragino Maru Gothic / 华文圆体 / 幼圆）、
-     星☆/花✿/心♡ 漫画图标、粉色双线/点线分隔 + 圆角贴纸徽标 + 对话框式注释，
-     刊头为漫画杂志封面式（刊名行 / 大标题 / 导语 / 期号元信息栅格）+ 编号栏目
-     （贴纸号码）+ 数据审计栏 + 版权页；栏目结构与一对一排行榜保持不变，仅换肤。
+  7.1 页面风格：复古像素游戏 + Cyber 霓虹风（RETRO 8-BIT × CYBER）——
+     暗色终端底 #070A14 / 卡纸 #121526 / 霓虹青 #00FFA3 / 品红 #FF2D92 / 电光蓝 #00E5FF，
+     纯直角像素块 + 3px 硬描边 + 4px 实色阴影，像 8-bit 游戏卡带与街机计分板；等宽像素字体
+     栈（Courier New / Lucida Console / monospace，回退苹方/雅黑），图标全换成 Cyber 像素符号
+     ■ ◆ ⚡ ✚ ☠ ⌖ ⟁ ▓ ▲ ◉；栏目头改成 LVL 关卡编号，Badge 像终端指示灯 [● LIVE]/[× OFF]，
+     注释用代码注释风格 /* ... */，刊头做成窗口标题栏 OCTOPUS_OS v2；栏目结构与一对一排行榜
+     保持不变，仅换肤。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
@@ -1130,156 +1131,130 @@ def collect_all_data():
 
 
 # ============================================================
-# HTML 组件（设计系统：POP 财经杂志风）
+# HTML 组件（设计系统：复古像素游戏 + Cyber 霓虹）
 # ------------------------------------------------------------
 # 版式语言：
-#   · 全程左对齐（flush-left）+ 圆角卡片分组；
-#   · 高饱和蓝 / 桃红 / 柠檬黄：树莓粉 #D97796（品牌色）为主强调，贝壳粉描边、深玫瑰粉标题、
-#     香芋紫 / 柠檬黄 / 薄荷绿作点缀；红 / 绿 / 琥珀仅作「涨跌与数据状态」语义色；
-#   · 粉色双线 / 点线分隔「栏目」，粉色发丝线（1px）分隔条目；
-#   · 漫画杂志封面式刊头（masthead）：刊名行 → 大标题 → 对话框导语 → 期号元信息栅格；
-#   · 栏目带贴纸式编号 kicker（01 · MARKET SNAPSHOT），如漫画杂志连载栏目；
-#   · 星 ☆ / 花 ✿ / 心 ♡ 为装饰图标，▶️ ⚠ ❗ 等保留语义图标；
-# ------------------------------------------------------------
-# 渲染硬约束：全部使用「内联样式 + 表格布局」——微信 / PushPlus 会剥离
-# <style> 标签与 class 选择器，外部样式表与类名排版会在微信端整体失效。
+#  · 暗色终端底 #070A14 + 卡片 #121526，霓虹青 #00FFA3 / 品红 #FF2D92 / 电光蓝 #00E5FF
+#  · 纯直角像素风：0 圆角、3px 硬描边 + 4px 实色阴影，像 8-bit 卡带界面
+#  · 等宽像素字体栈，中文回退苹方/雅黑，标题全大写像素感
+#  · 图标全部 Cyber 像素符号：■ ◆ ▲ ◉ ⟁ ⚡ ☠ ⌖ ⟡ ▓，不用圆润 Emoji
+#  · 关卡式栏目头 LVL / STAGE，Badge 像终端指示灯 [● ONLINE]
+#  · 注释 = 代码注释风格 /* ... */
+# 硬约束：仍全部内联样式 + 表格布局，兼容微信/PushPlus
 # ============================================================
-# POP 财经杂志风：高饱和蓝 / 桃红 / 柠檬黄与粗黑轮廓；排行榜仍保持一市场一栏目。
-C_INK = "#17213C"          # 深海军蓝正文
-C_PAPER = "#FFFDF5"        # 暖白纸面
-C_BG = "#EEF3FF"           # 淡蓝页面底色
-C_ACCENT = "#F23878"       # 桃红：主强调
-C_ACCENT_DEEP = "#17213C"  # 海军蓝：大标题 / 轮廓
-C_ACCENT_SOFT = "#91B6FF"  # 电光蓝：描边 / 分隔
-C_VIOLET = "#7047EB"       # 紫色：英文 kicker / AI
-C_MUTED = "#65708A"        # 灰蓝：说明
-C_FAINT = "#98A2B8"        # 浅灰蓝
-C_HAIR = "#D7E2FF"         # 蓝色发丝分隔线
-C_ZEBRA = "#FFF3A8"        # 柠檬黄注释底
-C_LEMON = "#FFE14D"        # POP 黄点缀
-C_MINT = "#57D6C2"         # POP 青点缀
-# 数据语义色（沿用既有语义：红跌绿涨；另保留琥珀色表示「非当天」）
-# ——仅用于数值与状态标识，不作版式装饰
-C_RED = "#E7657E"          # 草莓粉（跌 / 无数据）
-C_GREEN = "#2FA87E"        # 薄荷绿（涨 / 当天）
-C_AMBER = "#C98F2E"        # 柠檬黄（非当天）
-C_BLUE = C_ACCENT          # 兼容别名
-# 圆体字优先的可爱字体栈：Hiragino Maru Gothic（日系漫画圆体）→ 华文圆体/幼圆 →
-# 系统回退；微信端若缺圆体会回退到系统默认，不影响阅读。
-FONT = ("Arial Black, Impact, PingFang SC, Microsoft YaHei, "
-        "Hiragino Sans GB, Arial, sans-serif")
-
+# 复古游戏 + Cyber 霓虹调色板
+C_BG = "#070A14"
+C_PAPER = "#121526"
+C_INK = "#DDE3FF"
+C_ACCENT = "#00FFA3"
+C_ACCENT_DEEP = "#FFFFFF"
+C_ACCENT_SOFT = "#26304E"
+C_ACCENT_MAGENTA = "#FF2D92"
+C_CYAN = "#00E5FF"
+C_VIOLET = "#7C5CFF"
+C_MUTED = "#8A8EAA"
+C_FAINT = "#4A4E6B"
+C_HAIR = "#212840"
+C_ZEBRA = "#1A1E33"
+C_LEMON = "#FFE600"
+C_MINT = "#00FFA3"
+C_RED = "#FF3B5A"
+C_GREEN = "#00FF85"
+C_AMBER = "#FFC93C"
+C_BLUE = "#00E5FF"
+C_MAGENTA = "#FF2D92"
+FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
+        "PingFang SC, Microsoft YaHei, sans-serif")
+FONT_MONO = "'Courier New', Courier, monospace"
 
 def _sq(color=C_ACCENT, size=8):
-    """漫画星标：可爱的强调单元（纯字符，跨端渲染稳定）。"""
-    return f'<span style="color:{color};font-size:{size}px;line-height:1;">☆</span>'
+    return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">■</span>'
 
+def _star(color=C_ACCENT, size=10):
+    return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">◆</span>'
 
-def _star(color=C_ACCENT, size=8):
-    """大星星装饰（刊头大标题两侧用）。"""
-    return f'<span style="color:{color};font-size:{size}px;line-height:1;">★</span>'
+def _heart(color=C_ACCENT_MAGENTA, size=10):
+    return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">⚡</span>'
 
-
-def _heart(color=C_ACCENT, size=8):
-    """爱心装饰（刊头/小节标题用）。"""
-    return f'<span style="color:{color};font-size:{size}px;line-height:1;">♡</span>'
-
-
-def _flower(color=C_ACCENT_SOFT, size=9):
-    """小花装饰（小节标题用）。"""
-    return f'<span style="color:{color};font-size:{size}px;line-height:1;">✿</span>'
-
+def _flower(color=C_CYAN, size=10):
+    return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">✚</span>'
 
 def _badge(text, kind="ok"):
-    """状态徽标：马卡龙圆角贴纸（药丸）。ok=薄荷(当天) / warn=柠檬(非当天) / bad=草莓(无数据) / ai=香芋紫"""
     styles = {
-        "ok":   (C_GREEN, "#E0F6EE", "#9BDCBE"),
-        "warn": (C_AMBER, "#FDF2D8", "#EFD690"),
-        "bad":  (C_RED,   "#FDE7EB", "#F5B4C2"),
-        "ai":   (C_VIOLET, "#F1EBFB", "#CFBAEF"),
+        "ok":   (C_GREEN, "#0E231B", C_GREEN),
+        "warn": (C_AMBER, "#2A2412", C_AMBER),
+        "bad":  (C_RED, "#28131A", C_RED),
+        "ai":   (C_VIOLET, "#1D1A2E", C_VIOLET),
     }
     color, bg, border = styles.get(kind, styles["ok"])
-    return (f'<span style="display:inline-block;border:1px solid {border};color:{color};'
-            f'background:{bg};padding:0 8px;margin-left:6px;font-size:10px;font-weight:800;'
-            f'letter-spacing:1px;line-height:18px;border-radius:999px;vertical-align:2px;'
-            f'white-space:nowrap;">☆&nbsp;{_esc(text)}</span>')
-
+    return (f'<span style="display:inline-block;border:2px solid {border};color:{color};'
+            f'background:{bg};padding:0 6px;margin-left:6px;font-size:10px;font-weight:900;'
+            f'font-family:{FONT_MONO};letter-spacing:1px;line-height:16px;'
+            f'box-shadow:2px 2px 0 #000;vertical-align:middle;'
+            f'white-space:nowrap;">[● {_esc(text)}]</span>')
 
 def _alert(text, color=C_AMBER, bg=None):
-    """状态提示条：马卡龙圆角软盒 + 粉彩填充 + 彩色文字（漫画「注意書き」风）。"""
-    bg_color = bg or {
-        C_GREEN: "#E0F6EE", C_AMBER: "#FDF2D8", C_RED: "#FDE7EB",
-    }.get(color, "#FDF2F6")
+    bg_color = bg or "#1A1E33"
     return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
-            f'margin-bottom:8px;border:1px solid {C_ACCENT_SOFT};border-radius:12px;'
-            f'background:{bg_color};">'
-            f'<tr><td style="padding:8px 12px;font-size:11px;color:{color};font-weight:700;'
-            f'line-height:1.75;letter-spacing:.5px;">❗&nbsp;{text}</td></tr></table>')
-
+            f'margin-bottom:10px;border:2px solid {color};background:{bg_color};'
+            f'box-shadow:4px 4px 0 #000;">'
+            f'<tr><td style="padding:8px 10px;font-size:11px;color:{color};font-weight:900;'
+            f'font-family:{FONT_MONO};line-height:1.6;letter-spacing:.5px;">'
+            f'[ ! ALERT ]&nbsp;{text}</td></tr></table>')
 
 def _ledger_table(rows, pad):
-    """分类账式数据表：左标签右数值，发丝线行分隔（share by _data_table / _mini_table）。"""
     html = '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
     for label, value, *color in rows:
         val_color = color[0] if color else C_INK
         html += (f'<tr><td style="padding:{pad} 0;border-bottom:1px solid {C_HAIR};'
-                 f'font-size:13px;color:{C_INK};vertical-align:top;line-height:1.5;" '
+                 f'font-size:12px;color:{C_INK};vertical-align:top;line-height:1.5;'
+                 f'font-family:{FONT_MONO};" '
                  f'width="46%">{label}</td>'
                  f'<td style="padding:{pad} 0;border-bottom:1px solid {C_HAIR};'
-                 f'font-size:13px;font-weight:700;color:{val_color};text-align:right;'
-                 f'line-height:1.5;font-variant-numeric:tabular-nums;" width="54%">{value}</td></tr>')
+                 f'font-size:12px;font-weight:900;color:{val_color};text-align:right;'
+                 f'line-height:1.5;font-variant-numeric:tabular-nums;'
+                 f'font-family:{FONT_MONO};" width="54%">{value}</td></tr>')
     return html + '</table>'
 
-
 def _data_table(rows):
-    """主数据表（行情速览等大行距）。"""
     return _ledger_table(rows, "8px")
 
-
 def _mini_table(rows):
-    """迷你数据表（榜单等紧凑行距）。可选第三元组为数值颜色，默认墨色。"""
     return _ledger_table(rows, "6px")
 
-
 def _note(text):
-    """注释盒：漫画对话框（ふきだし）风格——虚线圆角气泡 + ※ 注释标记。"""
     return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
-            f'margin-top:8px;border:2px dashed {C_ACCENT_SOFT};border-radius:14px;'
-            f'background:{C_ZEBRA};">'
-            f'<tr><td style="padding:8px 12px;font-size:10px;color:{C_MUTED};'
-            f'line-height:1.8;letter-spacing:.3px;">※&nbsp;注&nbsp;—&nbsp;{text}</td></tr></table>')
-
+            f'margin-top:10px;border:2px solid {C_ACCENT_SOFT};background:{C_ZEBRA};'
+            f'box-shadow:3px 3px 0 #000;">'
+            f'<tr><td style="padding:8px 10px;font-size:10px;color:{C_MUTED};'
+            f'font-family:{FONT_MONO};line-height:1.7;letter-spacing:.3px;">'
+            f'/*&nbsp;{text}&nbsp;*/</td></tr></table>')
 
 def _subsection(text):
-    """栏内小节标题：粉色点线 + 小花 + 加粗小题（漫画分镜小标题）。"""
-    return (f'<div style="border-top:2px dotted {C_ACCENT_SOFT};margin-top:10px;padding:8px 0 2px;'
-            f'font-size:13px;font-weight:800;color:{C_INK};letter-spacing:.5px;">'
-            f'{_flower()}<span style="padding-left:5px;">{text}</span></div>')
-
+    return (f'<div style="border-top:2px solid {C_ACCENT_SOFT};margin-top:12px;padding:8px 0 2px;'
+            f'font-size:12px;font-weight:900;color:{C_CYAN};letter-spacing:1px;'
+            f'font-family:{FONT_MONO};text-transform:uppercase;">'
+            f'<span style="color:{C_ACCENT};">▶</span> {text}</div>')
 
 def _source_badge(item):
-    """根据数据源的 status / is_today 生成新鲜度徽标。"""
     if item.get("status") != "success":
-        return _badge("无数据", "bad")
+        return _badge("OFFLINE", "bad")
     if item.get("is_today"):
-        return _badge("当天", "ok")
-    return _badge(f"非当天（{item.get('content_date') or '—'}）", "warn")
-
+        return _badge("LIVE", "ok")
+    return _badge(f"LAG {item.get('content_date') or '-'}", "warn")
 
 def _item_row(icon, text, sub=""):
-    """条目行：星/符号窄列 + 标题与来源信息，粉色发丝线收尾。"""
     sub_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
-                f'padding-top:2px;line-height:1.5;">{sub}</div>' if sub else "")
+                f'padding-top:2px;line-height:1.5;font-family:{FONT_MONO};">{sub}</div>' if sub else "")
     return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
-            f'<tr><td width="26" valign="top" style="padding:7px 0;border-bottom:1px solid {C_HAIR};'
-            f'font-size:10px;font-weight:800;color:{C_ACCENT};line-height:1.6;">{icon}</td>'
-            f'<td style="padding:7px 0;border-bottom:1px solid {C_HAIR};font-size:13px;'
-            f'color:{C_INK};line-height:1.7;">{text}{sub_html}</td></tr></table>')
-
+            f'<tr><td width="28" valign="top" style="padding:7px 0;border-bottom:1px solid {C_HAIR};'
+            f'font-size:10px;font-weight:900;color:{C_ACCENT};line-height:1.6;'
+            f'font-family:{FONT_MONO};">{icon}</td>'
+            f'<td style="padding:7px 0;border-bottom:1px solid {C_HAIR};font-size:12px;'
+            f'color:{C_INK};line-height:1.7;font-family:{FONT_MONO};">{text}{sub_html}</td></tr></table>')
 
 def _headline_row(it, index=None):
-    """Google News 头条行：杂志索引号 + 中文标题 + 来源/时间小字。"""
-    marker = f"{index:02d}" if isinstance(index, int) else "—"
+    marker = f"{index:02d}" if isinstance(index, int) else "--"
     display = it.get("title") if isinstance(it, dict) else it
     sub = ""
     if isinstance(it, dict):
@@ -1288,84 +1263,79 @@ def _headline_row(it, index=None):
             parts.append(it["source"])
         if it.get("published_cst") and it["published_cst"] != "—":
             parts.append(it["published_cst"])
-        sub = " · ".join(parts)
-    return _item_row(marker, _esc(display[:120]), _esc(sub[:140]))
-
+        sub = " | ".join(parts)
+    return _item_row(f"[{marker}]", _esc(display[:120]), _esc(sub[:140]))
 
 def _em_news_row(it, index=None):
-    """东方财富快讯行：编号 + 标题 + 时间/摘要小字（兼容字符串与 dict 两种结构）。"""
-    marker = f"{index:02d}" if isinstance(index, int) else "—"
+    marker = f"{index:02d}" if isinstance(index, int) else "--"
     if isinstance(it, dict):
         title = it.get("title") or ""
-        sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
-        return _item_row(marker, _esc(title[:120]), _esc(sub[:110]))
-    return _item_row(marker, _esc(it[:120]))
-
+        sub = " :: ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
+        return _item_row(f"[{marker}]", _esc(title[:120]), _esc(sub[:110]))
+    return _item_row(f"[{marker}]", _esc(it[:120]))
 
 def _rank_span(i):
-    """榜单序号：01 起始的粉色粗体编号，漫画杂志索引式。"""
-    return (f'<span style="color:{C_ACCENT};font-weight:800;'
+    return (f'<span style="color:{C_ACCENT};font-weight:900;font-family:{FONT_MONO};'
+            f'background:#0E231B;border:1px solid {C_ACCENT};padding:0 4px;'
             f'font-variant-numeric:tabular-nums;">{i + 1:02d}</span>')
 
-
 def _channel_block(ch):
-    """名家频道采用聊天记录卡：频道像联系人，每条公开内容像一条消息。
-
-    保留每频道最新三条与当天标识；这只是视觉表达，不将标题改写为名家观点。
-    """
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
     url = _esc(ch.get("url", ""))
     videos = ch.get("videos") or []
     if not videos:
-        note = _esc(ch.get("note") or "平台需登录，暂不支持自动抓取")
-        return f'''<div style="margin:10px 0;border:2px dashed {C_ACCENT_SOFT};background:#F7F9FF;border-radius:8px;padding:11px 13px;">
-<div style="font-size:13px;font-weight:900;color:{C_INK};">● {name} {_badge("暂缺", "bad")}</div>
-<div style="font-size:10px;color:{C_MUTED};padding-top:3px;">{desc}</div><div style="font-size:11px;color:{C_MUTED};line-height:1.7;">{note}</div></div>'''
-    badge = _badge("当天", "ok") if ch.get("is_today") else _badge("非当天", "warn")
+        note = _esc(ch.get("note") or "OFFLINE :: NO SIGNAL [暂缺]")
+        return (f'<div style="margin:12px 0;border:2px solid {C_FAINT};background:{C_ZEBRA};'
+                f'padding:10px 12px;box-shadow:4px 4px 0 #000;">'
+                f'<div style="font-size:12px;font-weight:900;color:{C_FAINT};font-family:{FONT_MONO};">[X {name} {_badge("暂缺", "bad")}]</div>'
+                f'<div style="font-size:10px;color:{C_MUTED};padding-top:3px;font-family:{FONT_MONO};">{desc}</div>'
+                f'<div style="font-size:10px;color:{C_MUTED};line-height:1.6;font-family:{FONT_MONO};margin-top:4px;">> {note}</div></div>')
+    badge = _badge("LIVE", "ok") if ch.get("is_today") else _badge("ARCHIVE", "warn")
     messages = []
     top_n = videos[:CHANNEL_TOP_N]
     for vi, v in enumerate(top_n):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
-        link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{C_INK};text-decoration:none;">{title}</a>'
-        # 交错气泡让多条更新更接近聊天记录；标题为原始公开标题。
-        align = "right" if vi % 2 else "left"
-        bubble_bg = "#FFD7E7" if vi % 2 else "#E2EDFF"
-        label = "名家更新" if vi % 2 else "频道消息"
-        new_tag = ' <span style="color:#D51E5B;font-weight:900;">NEW</span>' if v.get("is_today") else ""
-        messages.append(f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:7px;"><tr><td align="{align}"><div style="display:inline-block;max-width:88%;text-align:left;background:{bubble_bg};border:1px solid {C_INK};border-radius:12px;padding:7px 10px;box-shadow:3px 3px 0 #17213C;font-size:12px;color:{C_INK};line-height:1.6;"><div style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:1px;">{label} · {pub}{new_tag}</div><div style="padding-top:2px;">▶️ {link}</div></div></td></tr></table>''')
-    return f'''<div style="margin:10px 0;border:2px solid {C_INK};background:#FFFFFF;border-radius:10px;padding:10px 12px;box-shadow:4px 4px 0 {C_LEMON};">
-<div style="font-size:13px;font-weight:900;color:{C_INK};"><span style="display:inline-block;background:{C_ACCENT};color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;line-height:18px;font-size:10px;">●</span> <a href="{url}" style="color:{C_INK};text-decoration:none;">{name}</a> {badge}</div>
-<div style="font-size:10px;color:{C_MUTED};padding:3px 0 1px;">{desc} · <b>聊天记录式更新</b></div>
-{"".join(messages)}</div>'''
-
+        link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{C_INK};text-decoration:none;border-bottom:1px dotted {C_ACCENT};">{title}</a>'
+        bubble_bg = "#15182B" if vi % 2 == 0 else "#1A1E33"
+        border_c = C_ACCENT if vi % 2 == 0 else C_CYAN
+        label = ">> FEED" if vi % 2 == 0 else ">> UPDATE"
+        new_tag = f' <span style="color:{C_ACCENT_MAGENTA};font-weight:900;background:#2A1320;border:1px solid {C_ACCENT_MAGENTA};padding:0 3px;">[NEW]</span>' if v.get("is_today") else ""
+        messages.append((f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:6px;"><tr><td align="left">'
+                         f'<div style="display:block;max-width:100%;text-align:left;background:{bubble_bg};border:2px solid {border_c};'
+                         f'padding:6px 8px;box-shadow:3px 3px 0 #000;font-size:11px;color:{C_INK};line-height:1.6;font-family:{FONT_MONO};">'
+                         f'<div style="font-size:9px;font-weight:900;color:{border_c};letter-spacing:1px;">{label} :: {pub}{new_tag}</div>'
+                         f'<div style="padding-top:3px;">> {link}</div></div></td></tr></table>'))
+    return (f'<div style="margin:12px 0;border:3px solid {C_ACCENT};background:#0F1222;padding:10px 12px;box-shadow:6px 6px 0 #000;">'
+            f'<div style="font-size:12px;font-weight:900;color:{C_ACCENT_DEEP};font-family:{FONT_MONO};">'
+            f'<span style="display:inline-block;background:{C_ACCENT};color:#000;padding:0 4px;margin-right:6px;">CH</span>'
+            f'<a href="{url}" style="color:{C_INK};text-decoration:none;">{name}</a> {badge}</div>'
+            f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0 2px;font-family:{FONT_MONO};">{desc} :: <b style="color:{C_CYAN};">[8-BIT FEED]</b></div>'
+            f'{"".join(messages)}</div>')
 
 def _status_footer(sources):
-    """数据审计清单（含无数据源，便于审计）：状态方块 + 名称 + 徽标 + 抓取时间。"""
     lines = []
     for name, s in sources:
         if s.get("status") == "success":
             lines.append((_sq(C_GREEN, 8),
-                          f'<b style="color:{C_INK};">{_esc(name)}</b> {_source_badge(s)}'
-                          f' · 抓取于 {_esc(s.get("fetched_at", "—"))}'))
+                          f'<b style="color:{C_INK};font-family:{FONT_MONO};">{_esc(name)}</b> {_source_badge(s)}'
+                          f' <span style="color:{C_MUTED};font-family:{FONT_MONO};">@ {_esc(s.get("fetched_at", "—"))}</span>'))
         else:
             detail = _esc(s.get("error", "暂时不可用"))
             lines.append((_sq(C_RED, 8),
-                          f'<b style="color:{C_INK};">{_esc(name)}</b> 数据暂缺（{detail}）'
-                          f' · 抓取于 {_esc(s.get("fetched_at", "—"))}'))
+                          f'<b style="color:{C_INK};font-family:{FONT_MONO};">{_esc(name)}</b> [x FAIL] '
+                          f'<span style="color:{C_MUTED};font-family:{FONT_MONO};">({detail}) @ {_esc(s.get("fetched_at", "—"))}</span>'))
     rows = "".join(
-        f'<tr><td width="22" valign="top" style="padding:5px 0;border-bottom:1px solid {C_HAIR};">{marker}</td>'
+        f'<tr><td width="22" valign="top" style="padding:5px 0;border-bottom:1px solid {C_HAIR};font-family:{FONT_MONO};">{marker}</td>'
         f'<td style="padding:5px 0;border-bottom:1px solid {C_HAIR};font-size:11px;'
-        f'color:{C_MUTED};line-height:1.7;">{line}</td></tr>'
+        f'color:{C_MUTED};line-height:1.7;font-family:{FONT_MONO};">{line}</td></tr>'
         for marker, line in lines)
     return f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{rows}</table>'
 
-
 def _report_meta(html):
-    """从 HTML 提取日报元信息（生成日期、当天来源数等），供 --push-only 当天检验用。"""
     def g(name):
-        m = re.search(rf'name="octopus-{name}" content="([^"]+)"', html)
+        m = re.search(rf'name="octopus-{name}" content="([^\"]+)"', html)
         return m.group(1) if m else None
     try:
         today_sources = int(g("today-sources") or 0)
@@ -1382,46 +1352,36 @@ def _report_meta(html):
         "total_sources": total_sources,
     }
 
-
 def _masthead_cell(label, value, value_color=C_INK, first=False):
-    """刊头元信息栅格单元：粉色小号标签 + 加粗值；除首列外带粉色点线分隔。"""
-    border = "" if first else f"border-left:2px dotted {C_ACCENT_SOFT};"
+    border = "" if first else f"border-left:2px solid {C_HAIR};"
     padding = "0" if first else "12px"
     return (f'<td width="33%" valign="top" style="padding:8px 0;{border}">'
             f'<div style="padding-left:{padding};">'
-            f'<div style="font-size:9px;font-weight:800;color:{C_ACCENT};letter-spacing:2px;">{label}</div>'
-            f'<div style="font-size:12px;font-weight:800;color:{value_color};padding-top:3px;'
-            f'font-variant-numeric:tabular-nums;">{value}</div></div></td>')
-
+            f'<div style="font-size:8px;font-weight:900;color:{C_ACCENT};letter-spacing:1px;font-family:{FONT_MONO};">{label}</div>'
+            f'<div style="font-size:11px;font-weight:900;color:{value_color};padding-top:3px;'
+            f'font-family:{FONT_MONO};font-variant-numeric:tabular-nums;">{value}</div></div></td>')
 
 def _section(num, kicker_en, title, content, badge_html="", caption=""):
-    """栏目块：粉色双线分隔 + 贴纸式编号 + 爱心小题 + 来源说明 + 内容。
-
-    num        —— 杂志栏目编号（"01"…），按实际渲染顺序生成；
-    kicker_en  —— 英文 kicker（香芋紫，字距拉开）；
-    badge_html —— 右侧新鲜度徽标（可选）；
-    caption    —— 栏目来源/抓取时间说明行（可选）。
-    """
     badge_cell = (f'<td align="right" valign="bottom">{badge_html}</td>' if badge_html else "")
     caption_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
-                    f'padding:4px 0 8px;line-height:1.6;">{caption}</div>'
+                    f'padding:4px 0 8px;line-height:1.6;font-family:{FONT_MONO};">> {caption}</div>'
                     if caption else '<div style="padding-bottom:6px;"></div>')
     return f'''
-<div style="border-top:3px double {C_ACCENT_SOFT};margin-top:26px;padding-top:10px;">
+<div style="border-top:3px solid {C_ACCENT};margin-top:24px;padding-top:10px;">
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT_DEEP};color:#fff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:800;letter-spacing:.5px;line-height:17px;">{num}</span><span style="font-size:10px;font-weight:800;color:{C_VIOLET};letter-spacing:2px;padding-left:8px;">{kicker_en}</span></td>
+<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#000;padding:2px 6px;font-size:11px;font-weight:900;letter-spacing:1px;line-height:14px;font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">LVL {num}</span><span style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:2px;padding-left:8px;font-family:{FONT_MONO};">{kicker_en}</span></td>
 {badge_cell}
 </tr>
 </table>
-<div style="font-size:17px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;padding-top:5px;">{_heart(C_ACCENT, 10)}&nbsp;{title}</div>
+<div style="font-size:16px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;padding-top:8px;font-family:{FONT_MONO};text-transform:uppercase;">{ _heart(C_ACCENT, 12) } {title} <span style="color:{C_ACCENT};">_</span></div>
 {caption_html}
 {content}
 </div>'''
 
 
 # ============================================================
-# 报告生成（POP 财经杂志排版：封面刊头 + 编号栏目 + 审计栏 + 版权页）
+# 报告生成（RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）
 # ——只渲染有内容的区块；每个区块带来源、抓取时间与「当天/非当天/无数据」徽标
 # ============================================================
 # ============================================================
@@ -1691,71 +1651,69 @@ def build_ai_analysis(data):
 
 
 def _ai_analysis_block(res):
-    """渲染「AI 盘研判」栏目内容（可爱漫画杂志风，复用既有组件）。"""
+    """渲染「AI 盘研判」栏目：复古终端 + 霓虹信号灯"""
     color = res["sentiment_color"]
     hero = (
-        f'<div style="border:2px solid {C_ACCENT_SOFT};border-radius:16px;'
-        f'background:{C_ZEBRA};padding:12px 14px;">'
-        f'<div style="font-size:10px;font-weight:800;color:{C_ACCENT};letter-spacing:2px;">'
-        f'✨ AI 盘研判 · 综合定调</div>'
+        f'<div style="border:3px solid {C_ACCENT};background:#0E1528;padding:12px 14px;box-shadow:6px 6px 0 #000;">'
+        f'<div style="font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;font-family:{FONT_MONO};">'
+        f'[ AI.SYS // LVL_ANALYSIS ] ▶ 综合定调</div>'
         f'<div style="font-size:22px;font-weight:900;color:{color};letter-spacing:1px;'
-        f'padding:4px 0 2px;">{_heart(color, 12)} {_esc(res["sentiment_label"])}</div>'
-        f'<div style="font-size:11px;color:{C_MUTED};letter-spacing:1px;">'
-        f'{_esc(res["sentiment_en"])} · 信号分 {res["score"]:+d} · 置信度 {_esc(res["confidence"])}</div>'
-        f'<div style="font-size:12px;color:#5A4450;line-height:1.85;padding-top:6px;">'
-        f'{_esc(res["reason"])}</div></div>'
+        f'padding:6px 0 2px;font-family:{FONT_MONO};text-transform:uppercase;">'
+        f'{_heart(color, 14)} {_esc(res["sentiment_label"])} <span style="color:{color};font-size:10px;vertical-align:middle;border:1px solid {color};padding:0 4px;">LVL {res["score"]:+d}</span></div>'
+        f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:1px;font-family:{FONT_MONO};">'
+        f'{_esc(res["sentiment_en"])} :: SIGNAL {res["score"]:+d} :: CONF {_esc(res["confidence"])} :: [SCANLINE]</div>'
+        f'<div style="font-size:11px;color:{C_INK};line-height:1.8;padding-top:8px;font-family:{FONT_MONO};border-top:2px dashed {C_ACCENT_SOFT};margin-top:8px;">'
+        f'> {_esc(res["reason"])}</div></div>'
     )
 
     # 板块热度
     if res["sectors_strong"]:
-        sec_rows = [(f"{_flower()} {sec}", f"{cnt} 提及", C_INK)
+        sec_rows = [(f"{_flower()} {sec}", f"{cnt} HIT", C_INK)
                     for sec, cnt in res["sectors_strong"]]
-        sectors_html = _subsection("板块热度（信号提及）") + _mini_table(sec_rows)
+        sectors_html = _subsection("SECTOR SCAN [板块热度]") + _mini_table(sec_rows)
     else:
-        sectors_html = (_subsection("板块热度（信号提及）")
-                        + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
-                          f'暂无明显板块信号</div>')
+        sectors_html = (_subsection("SECTOR SCAN [板块热度]")
+                        + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">> NO SIGNAL</div>')
     if res["sectors_weak"]:
-        sectors_html += (f'<div style="font-size:11px;color:{C_RED};padding-top:4px;'
-                         f'line-height:1.7;">承压板块：'
-                         f'{" · ".join(_esc(s) for s in res["sectors_weak"])}</div>')
+        sectors_html += (f'<div style="font-size:10px;color:{C_RED};padding-top:4px;'
+                         f'line-height:1.7;font-family:{FONT_MONO};">[x WEAK]: '
+                         f'{" | ".join(_esc(s) for s in res["sectors_weak"])}</div>')
 
     # 技术速读
     if res["tech_rows"]:
-        tech_rows = [(label, f"{pct} · {band}", c)
+        tech_rows = [(label, f"{pct} / {band}", c)
                      for label, pct, band, c in res["tech_rows"]]
-        tech_html = _subsection("技术速读（指数动能）") + _data_table(tech_rows)
+        tech_html = _subsection("TECH READ [指数动能]") + _data_table(tech_rows)
     else:
-        tech_html = (_subsection("技术速读（指数动能）")
-                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">无行情数据</div>')
-    tech_html += (f'<div style="font-size:11px;color:{C_MUTED};padding-top:4px;'
-                  f'line-height:1.8;">{_esc(res["tech_read"])}</div>')
+        tech_html = (_subsection("TECH READ [指数动能]")
+                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">> NO DATA</div>')
+    tech_html += (f'<div style="font-size:10px;color:{C_MUTED};padding-top:4px;'
+                  f'line-height:1.7;font-family:{FONT_MONO};">> {_esc(res["tech_read"])}</div>')
 
     # 风险提示
     if res["risks"]:
-        risk_html = _subsection("风险提示（来自舆情）") + "".join(
-            _item_row("⚠", _esc(t), _esc(src)) for t, src in res["risks"])
+        risk_html = _subsection("RISK LOG [风险提示]") + "".join(
+            _item_row("[!]", _esc(t), _esc(src)) for t, src in res["risks"])
     else:
-        risk_html = (_subsection("风险提示（来自舆情）")
-                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
-                       f'未检出显著风险舆情</div>')
+        risk_html = (_subsection("RISK LOG [风险提示]")
+                     + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">'
+                       f'> CLEAR :: NO RISK FLAGGED</div>')
 
     # 关注清单
     if res["watch"]:
-        watch_html = _subsection("明日关注清单") + "".join(
-            _item_row(f"{i + 1:02d}",
-                      f'<b>{_esc(n)}</b> <span style="color:{C_MUTED};font-size:11px;">{_esc(tag)}</span>')
+        watch_html = _subsection("WATCH LIST [明日关注]") + "".join(
+            _item_row(f"[{i + 1:02d}]",
+                      f'<b>{_esc(n)}</b> <span style="color:{C_MUTED};font-size:10px;font-family:{FONT_MONO};">[{_esc(tag)}]</span>')
             for i, (n, tag) in enumerate(res["watch"]))
     else:
-        watch_html = (_subsection("明日关注清单")
-                      + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;">'
-                        f'暂无可提炼的关注标的</div>')
+        watch_html = (_subsection("WATCH LIST [明日关注]")
+                      + f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;font-family:{FONT_MONO};">'
+                        f'> EMPTY</div>')
     if res["themes"]:
-        watch_html += (f'<div style="font-size:11px;color:{C_ACCENT};padding-top:4px;'
-                       f'font-weight:800;line-height:1.7;">主题关注：{_esc(res["themes"])}</div>')
+        watch_html += (f'<div style="font-size:10px;color:{C_ACCENT};padding-top:6px;'
+                       f'font-weight:900;line-height:1.7;font-family:{FONT_MONO};border:2px solid {C_ACCENT};background:#0E231B;padding:6px 8px;margin-top:6px;box-shadow:3px 3px 0 #000;">THEME_UNLOCKED: {_esc(res["themes"])} [◆]</div>')
 
-    note_html = _note("AI 盘研判由多源公开信号经确定性规则合成，非投资建议，亦不构成任何买卖依据；"
-                      "具体决策请结合自身风险偏好与独立判断。")
+    note_html = _note("AI 盘研判由规则引擎合成 // CYBER RULESET v2 // 非投资建议，决策需独立判断 [<b>8-BIT</b>]")
 
     return hero + sectors_html + tech_html + risk_html + watch_html + note_html
 
@@ -1763,53 +1721,55 @@ def _ai_analysis_block(res):
 
 
 def _liquidity_market_block(label, stats):
-    """渲染单个市场的 AI 量化流动性分析（圆角卡 + 评分贴纸）。"""
+    """渲染单个市场的 AI 量化流动性分析：像素计分板"""
     if not stats.get("sample_count"):
-        return (f'<div style="margin:8px 0;border:2px dashed {C_ACCENT_SOFT};background:{C_ZEBRA};'
-                f'border-radius:14px;padding:10px 14px;font-size:12px;color:{C_MUTED};">'
-                f'{_heart(C_ACCENT, 9)} {_esc(label)} 流动性样本暂缺</div>')
+        return (f'<div style="margin:10px 0;border:2px solid {C_FAINT};background:{C_ZEBRA};'
+                f'padding:10px 12px;font-size:11px;color:{C_MUTED};font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">'
+                f'{_heart(C_FAINT, 10)} {_esc(label)} :: LIQUIDITY = NULL [NO SIGNAL]</div>')
     score = int(stats.get("score", 0))
     color = C_GREEN if score >= 58 else (C_RED if score < 42 else C_AMBER)
     rows = [
-        ("样本成交额", _format_amount(stats.get("total_amount")), C_INK),
-        ("TOP10 成交占比", f"{stats.get('top10_share', 0) * 100:.1f}%", C_INK),
-        ("涨/跌/平家数", f"{stats.get('advancers', 0)} / {stats.get('decliners', 0)} / {stats.get('flats', 0)}", C_INK),
-        ("涨跌扩散比", f"{stats.get('adv_dec_ratio', 0):.2f}x", C_INK),
-        ("成交额加权涨跌", f"{stats.get('weighted_change', 0):+.2f}%", color),
-        ("平均换手率", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
+        ("SAMPLE_VOL", _format_amount(stats.get("total_amount")), C_INK),
+        ("TOP10_SHARE", f"{stats.get('top10_share', 0) * 100:.1f}%", C_INK),
+        ("ADV/DEC/FLAT", f"{stats.get('advancers', 0)}/{stats.get('decliners', 0)}/{stats.get('flats', 0)}", C_INK),
+        ("DIFFUSE_RATIO", f"{stats.get('adv_dec_ratio', 0):.2f}x", C_INK),
+        ("WEIGHTED_CHG", f"{stats.get('weighted_change', 0):+.2f}%", color),
+        ("AVG_TURNOVER", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
     ]
     top = "".join(
-        _item_row(f"{i:02d}",
+        _item_row(f"[{i:02d}]",
                   f'<b>{_esc(s.get("name", "?"))}</b> '
-                  f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>',
-                  f'成交额 {_format_amount(s.get("amount"))} · 涨跌 {float(s.get("change_pct", 0)):+.2f}% · 换手 {float(s.get("turnover", 0)):.2f}%')
+                  f'<span style="font-size:9px;color:{C_FAINT};font-family:{FONT_MONO};">[{_esc(str(s.get("code", "")))}]</span>',
+                  f'VOL {_format_amount(s.get("amount"))} | CHG {float(s.get("change_pct", 0)):+.2f}% | TURN {float(s.get("turnover", 0)):.2f}%')
         for i, s in enumerate((stats.get("top_stocks") or [])[:5], 1)
     )
     return (
-        f'<div style="margin:10px 0;border:2px solid {C_ACCENT_SOFT};background:#FFFFFF;border-radius:16px;padding:12px 14px;">'
-        f'<div style="font-size:10px;font-weight:800;color:{C_ACCENT};letter-spacing:2px;">{_flower()} {_esc(label)} · LIQUIDITY SCORE</div>'
-        f'<div style="font-size:20px;font-weight:900;color:{color};padding:3px 0;">'
-        f'<span style="display:inline-block;background:{color};color:#fff;border-radius:999px;'
-        f'padding:1px 10px;font-size:12px;font-weight:800;line-height:19px;vertical-align:3px;'
-        f'margin-right:6px;">{score} 分</span>{_esc(stats.get("level", "—"))}</div>'
-        f'<div style="font-size:11px;color:{C_MUTED};line-height:1.7;">AI 定性：{_esc(stats.get("tone", "—"))} · 样本 {stats.get("sample_count", 0)} 只</div>'
+        f'<div style="margin:12px 0;border:3px solid {C_ACCENT_SOFT};background:#0F1222;padding:12px 14px;box-shadow:5px 5px 0 #000;">'
+        f'<div style="font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;font-family:{FONT_MONO};">{_flower()} {_esc(label)} // LIQUIDITY SCORE // [▓]</div>'
+        f'<div style="font-size:20px;font-weight:900;color:{color};padding:4px 0;font-family:{FONT_MONO};">'
+        f'<span style="display:inline-block;background:{color};color:#000;'
+        f'padding:2px 8px;font-size:12px;font-weight:900;line-height:18px;box-shadow:2px 2px 0 #000;margin-right:8px;">{score} PTS</span>{_esc(stats.get("level", "—"))}</div>'
+        f'<div style="font-size:10px;color:{C_MUTED};line-height:1.6;font-family:{FONT_MONO};">> STATE: {_esc(stats.get("tone", "—"))} | SAMPLE {stats.get("sample_count", 0)} UNITS</div>'
         f'{_mini_table(rows)}'
-        f'{_subsection("成交额前五（流动性锚点）")}{top}'
+        f'{_subsection("TOP5_VOLUME [锚点]")}{top}'
         f'</div>'
     )
 
 
+
 def _liquidity_report_block(liq):
-    """渲染 A股/港股最近收盘流动性报告（摘要为粉色对话气泡）。"""
+    """渲染 A股/港股流动性报告：像素摘要条"""
     markets = liq.get("markets", {}) or {}
     blocks = "".join(_liquidity_market_block(label, markets.get(label) or {})
                      for label in ("A股", "港股"))
     summary = _esc(liq.get("summary") or "A股与港股最近收盘流动性量化对比。")
-    note = _note("流动性评分由成交额、TOP10 集中度、涨跌扩散比、成交额加权涨跌与换手率规则合成；"
-                 "使用最近收盘公开行情快照，非投资建议。")
-    return (f'<div style="border:2px dashed {C_ACCENT_SOFT};border-radius:14px;'
-            f'background:{C_ZEBRA};padding:10px 14px;font-size:12px;color:#5A4450;'
-            f'line-height:1.85;">💧&nbsp;{summary}</div>' + blocks + note)
+    note = _note("LIQUIDITY FORMULA: TOP10_SHARE + DIFFUSE + WEIGHTED_CHG + TURNOVER :: RULESET v2 :: 非投资建议 [8-BIT]")
+    return (f'<div style="border:3px solid {C_CYAN};background:#0E1528;'
+            f'padding:10px 12px;font-size:11px;color:{C_CYAN};'
+            f'line-height:1.7;font-family:{FONT_MONO};box-shadow:4px 4px 0 #000;">'
+            f'[ LIQUIDITY_SCAN ] > {summary} <span style="color:{C_ACCENT};">█▓▒</span></div>' + blocks + note)
+
+
 def generate_report(data, date_display, date_str):
     """生成完整的 HTML 日报
 
@@ -2003,7 +1963,7 @@ def generate_report(data, date_display, date_str):
     # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
     generated_at = _now()
     src_color = C_GREEN if today_n > 0 else (C_AMBER if content_n > 0 else C_RED)
-    html = f'''<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -2012,52 +1972,71 @@ def generate_report(data, date_display, date_str):
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
-<title>章鱼AI · 每日财经日报</title>
+<title>章鱼AI · 每日财经日报 | RETRO CYBER EDITION</title>
 </head>
-<body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:14px;line-height:1.8;-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
 
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;margin:0 auto;background:{C_BG};">
-<tr><td style="padding:14px 10px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:680px;margin:0 auto;background:{C_BG};">
+<tr><td style="padding:12px 10px;">
 
-<!-- 纸面（漫画杂志页） -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_PAPER};border:2px solid {C_ACCENT_SOFT};border-top:6px double {C_ACCENT};border-radius:14px;">
-<tr><td style="padding:22px 20px 20px;">
+<!-- 外框：像素终端窗口 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_PAPER};border:3px solid {C_ACCENT};box-shadow:8px 8px 0 #000;">
+<tr><td style="padding:0;">
 
-<!-- 刊头 masthead（漫画杂志封面式） -->
+<!-- 标题栏：像 8-bit 窗口 title bar -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:{C_ACCENT};"><tr>
+<td style="padding:4px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;letter-spacing:1px;">OCTOPUS_OS v2.0 // RETRO.CYBER.EDITION</td>
+<td align="right" style="padding:4px 8px;font-family:{FONT_MONO};font-size:10px;font-weight:900;color:#000;">[■][■][×]</td>
+</tr></table>
+
+<div style="padding:18px 18px 20px;">
+
+<!-- 刊头 masthead：像素大标题 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#fff;padding:1px 7px;font-size:11px;font-weight:900;letter-spacing:1px;">OCTOPUS</span><span style="font-size:10px;color:{C_FAINT};letter-spacing:2px;padding-left:8px;">章鱼AI · 全景分析</span></td>
-<td align="right" valign="bottom"><span style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:3px;">POP FINANCE ZINE</span></td>
+<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#000;padding:2px 6px;font-size:11px;font-weight:900;letter-spacing:1px;font-family:{FONT_MONO};box-shadow:3px 3px 0 #000;">OCTOPUS</span><span style="font-size:10px;color:{C_CYAN};letter-spacing:2px;padding-left:8px;font-family:{FONT_MONO};">[ CYBER // FINANCE // 8-BIT ]</span></td>
+<td align="right" valign="bottom"><span style="font-size:8px;font-weight:900;color:{C_ACCENT_MAGENTA};letter-spacing:3px;font-family:{FONT_MONO};border:1px solid {C_ACCENT_MAGENTA};padding:1px 4px;background:#2A1320;">RETRO GAME ZINE</span></td>
 </tr>
 </table>
 
-<div style="font-size:30px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:2px;line-height:1.3;padding-top:14px;">每日财经日报 <span style="color:{C_ACCENT};">!</span></div>
-<div style="font-size:10px;font-weight:900;color:{C_VIOLET};letter-spacing:2px;padding-top:6px;">MARKETS · SIGNALS · STORIES · UTC+8</div>
-<div style="border-bottom:4px double {C_ACCENT_SOFT};margin-top:12px;font-size:0;line-height:0;">&nbsp;</div>
+<div style="font-size:26px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:1px;line-height:1.2;padding-top:14px;font-family:{FONT_MONO};text-transform:uppercase;text-shadow:2px 2px 0 {C_ACCENT_SOFT};">DAILY FINANCE LOG<span style="color:{C_ACCENT};">_</span></div>
+<div style="font-size:9px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:6px;font-family:{FONT_MONO};">MARKETS · PORTFOLIO · SIGNAL · LVL UP · UTC+8</div>
+<div style="border-top:2px solid {C_ACCENT};border-bottom:2px solid {C_ACCENT_MAGENTA};margin-top:12px;height:4px;background:repeating-linear-gradient(90deg,{C_ACCENT} 0 8px,transparent 8px 16px);font-size:0;line-height:0;">&nbsp;</div>
 
-<!-- 导语 standfirst（漫画对话框） -->
-<div style="margin-top:14px;border:2px dashed {C_ACCENT_SOFT};border-radius:14px;background:{C_ZEBRA};padding:9px 12px;font-size:12px;color:#5A4450;line-height:1.9;">
-📣 全网多源实时抓取，只呈现「确有内容」的栏目；每个栏目标注来源、抓取时间与新鲜度徽标。无数据栏目自动缺席，不以历史内容充数。</div>
+<!-- 导语：终端开机文字 -->
+<div style="margin-top:14px;border:2px solid {C_CYAN};background:#0E1528;padding:10px 12px;font-size:11px;color:{C_CYAN};line-height:1.8;font-family:{FONT_MONO};box-shadow:4px 4px 0 #000;">
+<span style="color:{C_ACCENT};">></span> BOOT SEQUENCE... OK<br>
+<span style="color:{C_ACCENT};">></span> FETCHING GLOBAL MARKETS [8-BIT ENCRYPTED]<br>
+<span style="color:{C_ACCENT_MAGENTA};">></span> MODE: <b>RETRO PIXEL + CYBER ICONS</b> // 只有 LIVE 数据才渲染，无数据栏目自动隐藏 [<span style="color:{C_GREEN};">●</span>]
+</div>
 
-<!-- 期号元信息栅格 -->
-<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:2px dotted {C_ACCENT};border-bottom:2px dotted {C_ACCENT};margin-top:16px;">
+<!-- 期号元信息栅格：像状态栏 -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:3px solid {C_ACCENT_SOFT};border-bottom:3px solid {C_ACCENT_SOFT};margin-top:14px;background:#0F1222;">
 <tr>
-{_masthead_cell("DATE · 日期", _esc(date_display), first=True)}
-{_masthead_cell("GENERATED · 生成", _esc(generated_at))}
-{_masthead_cell("TODAY SOURCES · 当天源", f"{today_n} / {total}", src_color)}
+{_masthead_cell("DATE", _esc(date_display), first=True)}
+{_masthead_cell("BOOT TIME", _esc(generated_at))}
+{_masthead_cell("LIVE SRC", f"{today_n} / {total}", src_color)}
 </tr>
 </table>
 
+<!-- 内容关卡列表 -->
 {content_html}
 
-<!-- 版权页 colophon -->
-<div style="border-top:3px double {C_ACCENT_SOFT};margin-top:28px;padding-top:10px;">
-<div>{_heart(C_ACCENT, 10)}<span style="font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;padding-left:6px;">OCTOPUS-CHAN · COLOPHON</span></div>
-<div style="font-size:11px;color:{C_MUTED};line-height:1.9;padding-top:8px;">
-仅供投资参考，不构成投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动缺席，不以历史内容充数。</div>
-<div style="font-size:10px;color:{C_FAINT};letter-spacing:.5px;line-height:1.8;padding-top:4px;">
-DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富（快讯/榜单/流动性） · Reddit · 新浪财经 · NAVER · AI 盘研判（规则合成）<br>
-生成时间 {_esc(generated_at)} · 报告日期 {date_str} · 章鱼酱AI 自动出品</div>
+<!-- 版权页 colophon：像素终端关机界面 -->
+<div style="border-top:3px solid {C_ACCENT};margin-top:26px;padding-top:12px;background:#0F1222;padding:12px;">
+<div style="font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;">{ _heart(C_ACCENT, 10) } OCTOPUS-CHAN // SYSTEM SHUTDOWN</div>
+<div style="font-size:10px;color:{C_MUTED};line-height:1.8;padding-top:6px;font-family:{FONT_MONO};">
+> 仅供投资参考，非投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动隐藏，不以历史内容充数。<br>
+> RENDER MODE: RETRO PIXEL 8-BIT + CYBER NEON (■ ◆ ⚡ ✚ ⌖)<br>
+> ICON SET: [■ BLOCK] [◆ DIAMOND] [⚡ VOLT] [✚ CROSS] [⌖ TARGET] [⟁ CHIP]
+</div>
+<div style="font-size:9px;color:{C_FAINT};letter-spacing:.5px;line-height:1.6;padding-top:6px;font-family:{FONT_MONO};">
+DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Rank/Liquid) · Reddit · Sina · NAVER · AI_RULE<br>
+SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-8BIT-CYBER v2<br>
+<span style="color:{C_ACCENT};">█</span><span style="color:{C_CYAN};">▓</span><span style="color:{C_ACCENT_MAGENTA};">▒</span> PRESS START TO CONTINUE
+</div>
+</div>
+
 </div>
 
 </td></tr>
@@ -2066,7 +2045,8 @@ DATA — 港股名家频道 (YouTube / RSS) · Google News · 东方财富（快
 </td></tr>
 </table>
 </body>
-</html>'''
+</html>"""
+
 
     return html
 
