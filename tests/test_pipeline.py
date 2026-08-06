@@ -332,7 +332,7 @@ class GoogleNewsSourceTests(unittest.TestCase):
 
 
 class EastmoneySourceTests(unittest.TestCase):
-    """2026-08-02 新增：东方财富快讯（5 条最新新闻）与热门榜单（A股/港股/美股涨幅前十）。"""
+    """2026-08-02 新增：东方财富快讯（5 条最新新闻）与热门榜单（A股/港股/美股成交量前五）。"""
 
     def test_fetch_eastmoney_news_parses_five_items(self):
         payload = {"data": {"list": [
@@ -354,7 +354,10 @@ class EastmoneySourceTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
 
     def test_fetch_hot_stocks_parses_three_markets(self):
+        requested_page_sizes = []
+
         def fake_request(url, params=None, **kw):
+            requested_page_sizes.append(params["pz"])
             return {"data": {"diff": [
                 {"f12": f"60000{i}", "f14": f"股票{i}", "f2": "10.5", "f3": "9.87"}
                 for i in range(10)
@@ -363,10 +366,11 @@ class EastmoneySourceTests(unittest.TestCase):
         with patch.object(pipeline, "safe_request", side_effect=fake_request):
             result = pipeline.fetch_hot_stocks()
         self.assertEqual(result["status"], "success")
+        self.assertEqual(requested_page_sizes, [str(pipeline.HOT_STOCK_TOP_N)] * 3)
         self.assertEqual(set(result["markets"].keys()), {"A股", "港股", "美股"})
-        self.assertEqual(len(result["markets"]["A股"]["stocks"]), 10)
+        self.assertEqual(len(result["markets"]["A股"]["stocks"]), pipeline.HOT_STOCK_TOP_N)
         self.assertEqual(result["markets"]["港股"]["stocks"][0]["code"], "600000")
-        self.assertEqual(result["markets"]["美股"]["stocks"][9]["change_pct"], "9.87")
+        self.assertEqual(result["markets"]["美股"]["stocks"][4]["change_pct"], "9.87")
 
     def test_fetch_hot_stocks_unavailable(self):
         with patch.object(pipeline, "safe_request", return_value=None):
@@ -447,8 +451,8 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
         self.assertIn("热门榜单", html)
-        self.assertIn("A股成交量前十", html)
-        self.assertIn("美股成交量前十", html)
+        self.assertIn("A股成交量前五", html)
+        self.assertIn("美股成交量前五", html)
         self.assertIn("美联储释放降息信号", html)
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)

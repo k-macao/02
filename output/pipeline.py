@@ -18,7 +18,7 @@
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
      Google News 中文版，标题本身即中文，无需翻译。
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
-  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前十
+  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前五
      （东方财富 push2 免费接口），按市场一对一独立成栏展示。
   6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
       TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
@@ -559,8 +559,10 @@ def fetch_eastmoney_news():
 
 
 # ============================================================
-# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前十）
+# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
 # ============================================================
+HOT_STOCK_TOP_N = 5
+
 HOT_STOCK_MARKETS = {
     "A股": {"fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23", "desc": "沪深京 A 股"},
     "港股": {"fs": "m:128+t:3,m:128+t:4,m:128+t:1,m:128+t:2", "desc": "港股主板"},
@@ -569,16 +571,16 @@ HOT_STOCK_MARKETS = {
 
 
 def fetch_hot_stocks():
-    """抓取最近一个交易日收盘后的 A股/港股/美股成交量前十（东方财富 push2 免费接口）。
+    """抓取最近一个交易日收盘后的 A股/港股/美股成交量前五（东方财富 push2 免费接口）。
 
     返回 _source_result：markets={市场名: {"desc", "stocks":[{code,name,price,amount}]}}
     """
-    print("📡 正在抓取 A股/港股/美股成交量前十...")
+    print(f"📡 正在抓取 A股/港股/美股成交量前{HOT_STOCK_TOP_N}...")
     markets = {}
     any_stock = False
     for label, cfg in HOT_STOCK_MARKETS.items():
         params = {
-            "pn": "1", "pz": "10", "po": "1", "np": "1", "fltt": "2", "invt": "2",
+            "pn": "1", "pz": str(HOT_STOCK_TOP_N), "po": "1", "np": "1", "fltt": "2", "invt": "2",
             "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f4,f6,f12,f14",
         }
         data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
@@ -586,7 +588,7 @@ def fetch_hot_stocks():
         stocks = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
-            for it in diff[:10]:
+            for it in diff[:HOT_STOCK_TOP_N]:
                 name = str(it.get("f14") or "").strip()
                 if not name:
                     continue
@@ -602,7 +604,7 @@ def fetch_hot_stocks():
         markets[label] = {"desc": cfg["desc"], "stocks": stocks}
         if stocks:
             any_stock = True
-        print(f"  {'✅' if stocks else '⚠️'} {label}成交量前十: {len(stocks)} 只")
+        print(f"  {'✅' if stocks else '⚠️'} {label}成交量前{HOT_STOCK_TOP_N}: {len(stocks)} 只")
 
     if not any_stock:
         print("  ⚠️ 热门榜单暂不可用，不显示历史兜底榜单")
@@ -2108,7 +2110,7 @@ def generate_report(data, date_display, date_str):
             f"{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get('content_date') or '—')}",
         ))
 
-    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 成交量前十）
+    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
     # 一对一模式：每个市场独立成一个栏目（三个排行榜）
     if hot.get("status") == "success":
         for mlabel, m_en in [("A股", "A-SHARES"), ("港股", "HK-STOCKS"), ("美股", "US-STOCKS")]:
@@ -2118,7 +2120,7 @@ def generate_report(data, date_display, date_str):
                 continue
 
             rows = []
-            for i, s in enumerate(stocks[:10]):
+            for i, s in enumerate(stocks[:HOT_STOCK_TOP_N]):
                 amount_display = _format_amount(s.get("amount"))
                 pct = _percent_number(s.get("change_pct"))
                 trend = _trend_badge(pct, compact=True)
@@ -2132,10 +2134,10 @@ def generate_report(data, date_display, date_str):
 
             content = _mini_table(rows) + _note(f"榜单为最近交易日收盘后的{mlabel}成交量排名。")
             sections.append((
-                f"{m_en} RANK", f"{mlabel}成交量前十",
+                f"{m_en} RANK", f"{mlabel}成交量前五",
                 content,
                 _source_badge(hot),
-                f"{_source_note(hot)} · {mlabel}成交量前十"
+                f"{_source_note(hot)} · {mlabel}成交量前五"
             ))
 
     # 4.9 A股 / 港股最近收盘流动性报告（AI 量化）
