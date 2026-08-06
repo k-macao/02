@@ -35,8 +35,8 @@
      让微信侧也能感知原因，而不是只看到 Actions 变红。
   7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
      触发反垃圾/去重拦截，也便于区分每一次推送。
-  7.1 页面风格（2026-08-05 起）：可爱日系漫画杂志风（Kawaii Manga Funzine）——
-     马卡龙粉色系（胭脂粉底 + 奶油纸面 + 树莓粉/贝壳粉/深玫瑰粉主调，香芋紫/柠檬/
+  7.1 页面风格：POP 财经杂志风（POP Finance Zine）——
+     高饱和蓝 / 桃红 / 柠檬黄（胭脂粉底 + 奶油纸面 + 树莓粉/贝壳粉/深玫瑰粉主调，香芋紫/柠檬/
      薄荷作小点缀）、圆体字优先的字体栈（Hiragino Maru Gothic / 华文圆体 / 幼圆）、
      星☆/花✿/心♡ 漫画图标、粉色双线/点线分隔 + 圆角贴纸徽标 + 对话框式注释，
      刊头为漫画杂志封面式（刊名行 / 大标题 / 导语 / 期号元信息栅格）+ 编号栏目
@@ -1130,11 +1130,11 @@ def collect_all_data():
 
 
 # ============================================================
-# HTML 组件（设计系统：可爱日系漫画杂志风）
+# HTML 组件（设计系统：POP 财经杂志风）
 # ------------------------------------------------------------
 # 版式语言：
 #   · 全程左对齐（flush-left）+ 圆角卡片分组；
-#   · 马卡龙粉色系：树莓粉 #D97796（品牌色）为主强调，贝壳粉描边、深玫瑰粉标题、
+#   · 高饱和蓝 / 桃红 / 柠檬黄：树莓粉 #D97796（品牌色）为主强调，贝壳粉描边、深玫瑰粉标题、
 #     香芋紫 / 柠檬黄 / 薄荷绿作点缀；红 / 绿 / 琥珀仅作「涨跌与数据状态」语义色；
 #   · 粉色双线 / 点线分隔「栏目」，粉色发丝线（1px）分隔条目；
 #   · 漫画杂志封面式刊头（masthead）：刊名行 → 大标题 → 对话框导语 → 期号元信息栅格；
@@ -1144,21 +1144,20 @@ def collect_all_data():
 # 渲染硬约束：全部使用「内联样式 + 表格布局」——微信 / PushPlus 会剥离
 # <style> 标签与 class 选择器，外部样式表与类名排版会在微信端整体失效。
 # ============================================================
-# 可爱日系漫画杂志风（2026-08-05 改版）：马卡龙粉色系 + 圆体字 + 星/花/爱心图标，
-# 版面结构（栏目、一对一排行榜、数据审计栏）保持原样，仅换肤。
-C_INK = "#59434E"          # 可可玫瑰深棕（正文，柔和不刺眼）
-C_PAPER = "#FFFCFA"        # 奶油马卡龙（纸面）
-C_BG = "#FDF0F4"           # 胭脂粉（页面底色）
-C_ACCENT = "#D97796"       # 树莓粉：主强调色（品牌色，链接/数字/图标）
-C_ACCENT_DEEP = "#C46185"  # 深玫瑰粉（大标题 / 贴纸底）
-C_ACCENT_SOFT = "#F8C6D6"  # 贝壳粉（虚线 / 描边 / 双线分隔）
-C_VIOLET = "#B79CD6"       # 香芋紫（英文 kicker / AI 徽标）
-C_MUTED = "#B2909F"        # 灰粉（来源说明 / caption）
-C_FAINT = "#D4B7C3"        # 浅灰粉（刊头小字）
-C_HAIR = "#FADCE6"         # 粉色发丝分隔线
-C_ZEBRA = "#FDF2F6"        # 花瓣粉底（注释盒 / 暂缺盒）
-C_LEMON = "#FFE6A7"        # 柠檬黄马卡龙（点缀）
-C_MINT = "#A9DCC7"         # 薄荷绿马卡龙（点缀）
+# POP 财经杂志风：高饱和蓝 / 桃红 / 柠檬黄与粗黑轮廓；排行榜仍保持一市场一栏目。
+C_INK = "#17213C"          # 深海军蓝正文
+C_PAPER = "#FFFDF5"        # 暖白纸面
+C_BG = "#EEF3FF"           # 淡蓝页面底色
+C_ACCENT = "#F23878"       # 桃红：主强调
+C_ACCENT_DEEP = "#17213C"  # 海军蓝：大标题 / 轮廓
+C_ACCENT_SOFT = "#91B6FF"  # 电光蓝：描边 / 分隔
+C_VIOLET = "#7047EB"       # 紫色：英文 kicker / AI
+C_MUTED = "#65708A"        # 灰蓝：说明
+C_FAINT = "#98A2B8"        # 浅灰蓝
+C_HAIR = "#D7E2FF"         # 蓝色发丝分隔线
+C_ZEBRA = "#FFF3A8"        # 柠檬黄注释底
+C_LEMON = "#FFE14D"        # POP 黄点缀
+C_MINT = "#57D6C2"         # POP 青点缀
 # 数据语义色（沿用既有语义：红跌绿涨；另保留琥珀色表示「非当天」）
 # ——仅用于数值与状态标识，不作版式装饰
 C_RED = "#E7657E"          # 草莓粉（跌 / 无数据）
@@ -1167,9 +1166,8 @@ C_AMBER = "#C98F2E"        # 柠檬黄（非当天）
 C_BLUE = C_ACCENT          # 兼容别名
 # 圆体字优先的可爱字体栈：Hiragino Maru Gothic（日系漫画圆体）→ 华文圆体/幼圆 →
 # 系统回退；微信端若缺圆体会回退到系统默认，不影响阅读。
-FONT = ("Hiragino Maru Gothic ProN, Yuanti SC, YouYuan, 幼圆, "
-        "Comic Sans MS, Chalkboard SE, PingFang SC, "
-        "Hiragino Sans GB, Microsoft YaHei, sans-serif")
+FONT = ("Arial Black, Impact, PingFang SC, Microsoft YaHei, "
+        "Hiragino Sans GB, Arial, sans-serif")
 
 
 def _sq(color=C_ACCENT, size=8):
@@ -1311,50 +1309,36 @@ def _rank_span(i):
 
 
 def _channel_block(ch):
-    """生成单个频道的内容块：有内容时列出最新 CHANNEL_TOP_N 条；无内容（需登录/未配置）标注暂缺原因。
+    """名家频道采用聊天记录卡：频道像联系人，每条公开内容像一条消息。
 
-    有内容：粉色左边条圆角卡 + 频道名（链接）+ 新鲜度徽标 + ▶️ 条目清单；
-    暂缺：粉色虚线气泡盒 + 「暂缺」徽标 + 原因，不伪造内容。
+    保留每频道最新三条与当天标识；这只是视觉表达，不将标题改写为名家观点。
     """
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
-    url = ch.get("url", "")
+    url = _esc(ch.get("url", ""))
     videos = ch.get("videos") or []
     if not videos:
         note = _esc(ch.get("note") or "平台需登录，暂不支持自动抓取")
-        return f'''<div style="margin:8px 0;border:2px dashed {C_ACCENT_SOFT};background:{C_ZEBRA};border-radius:14px;padding:10px 14px;">
-<div style="font-size:13px;font-weight:800;color:{C_INK};">{_heart(C_ACCENT, 9)} {name} {_badge("暂缺", "bad")}</div>
-<div style="font-size:10px;color:{C_MUTED};padding:3px 0 1px;">{desc}</div>
-<div style="font-size:11px;color:{C_MUTED};line-height:1.7;">{note}</div>
-</div>'''
+        return f'''<div style="margin:10px 0;border:2px dashed {C_ACCENT_SOFT};background:#F7F9FF;border-radius:8px;padding:11px 13px;">
+<div style="font-size:13px;font-weight:900;color:{C_INK};">● {name} {_badge("暂缺", "bad")}</div>
+<div style="font-size:10px;color:{C_MUTED};padding-top:3px;">{desc}</div><div style="font-size:11px;color:{C_MUTED};line-height:1.7;">{note}</div></div>'''
     badge = _badge("当天", "ok") if ch.get("is_today") else _badge("非当天", "warn")
-    rows = []
+    messages = []
     top_n = videos[:CHANNEL_TOP_N]
     for vi, v in enumerate(top_n):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
-        today_tag = (f' <span style="display:inline-block;border:1px solid {C_ACCENT};'
-                     f'color:{C_ACCENT};background:#FFF0F6;border-radius:999px;'
-                     f'padding:0 7px;font-size:9px;font-weight:800;letter-spacing:1px;">'
-                     f'NEW · 当天</span>' if v.get("is_today") else "")
-        link = f'<a href="{v.get("url","#")}" style="color:{C_ACCENT};text-decoration:none;">{title}</a>'
-        # 最后一行免发丝线，避免与频道盒下边框叠线
-        hair = "" if vi == len(top_n) - 1 else f"border-bottom:1px solid {C_HAIR};"
-        rows.append(
-            f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
-            f'<tr><td width="24" valign="top" style="padding:5px 0;{hair}'
-            f'font-size:11px;line-height:1.6;">▶️</td>'
-            f'<td style="padding:5px 0;{hair}font-size:13px;'
-            f'color:{C_INK};line-height:1.65;">{link}'
-            f'<div style="font-size:10px;color:{C_MUTED};padding-top:2px;">发布于 {pub}{today_tag}</div>'
-            f'</td></tr></table>')
-    return f'''<div style="margin:8px 0;border:1px solid {C_HAIR};border-left:4px solid {C_ACCENT};background:#FFFFFF;border-radius:14px;padding:10px 14px;">
-<div style="font-size:13px;font-weight:800;color:{C_INK};">
-<a href="{_esc(url)}" style="color:{C_INK};text-decoration:none;">{_heart(C_ACCENT, 9)} {name}</a> {badge}
-</div>
-<div style="font-size:10px;color:{C_MUTED};padding:2px 0 4px;letter-spacing:.3px;">{desc}</div>
-{"".join(rows)}
-</div>'''
+        link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{C_INK};text-decoration:none;">{title}</a>'
+        # 交错气泡让多条更新更接近聊天记录；标题为原始公开标题。
+        align = "right" if vi % 2 else "left"
+        bubble_bg = "#FFD7E7" if vi % 2 else "#E2EDFF"
+        label = "名家更新" if vi % 2 else "频道消息"
+        new_tag = ' <span style="color:#D51E5B;font-weight:900;">NEW</span>' if v.get("is_today") else ""
+        messages.append(f'''<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:7px;"><tr><td align="{align}"><div style="display:inline-block;max-width:88%;text-align:left;background:{bubble_bg};border:1px solid {C_INK};border-radius:12px;padding:7px 10px;box-shadow:3px 3px 0 #17213C;font-size:12px;color:{C_INK};line-height:1.6;"><div style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:1px;">{label} · {pub}{new_tag}</div><div style="padding-top:2px;">▶️ {link}</div></div></td></tr></table>''')
+    return f'''<div style="margin:10px 0;border:2px solid {C_INK};background:#FFFFFF;border-radius:10px;padding:10px 12px;box-shadow:4px 4px 0 {C_LEMON};">
+<div style="font-size:13px;font-weight:900;color:{C_INK};"><span style="display:inline-block;background:{C_ACCENT};color:#fff;border-radius:50%;width:18px;height:18px;text-align:center;line-height:18px;font-size:10px;">●</span> <a href="{url}" style="color:{C_INK};text-decoration:none;">{name}</a> {badge}</div>
+<div style="font-size:10px;color:{C_MUTED};padding:3px 0 1px;">{desc} · <b>聊天记录式更新</b></div>
+{"".join(messages)}</div>'''
 
 
 def _status_footer(sources):
@@ -1437,7 +1421,7 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 
 
 # ============================================================
-# 报告生成（可爱漫画杂志排版：封面刊头 + 编号栏目 + 审计栏 + 版权页）
+# 报告生成（POP 财经杂志排版：封面刊头 + 编号栏目 + 审计栏 + 版权页）
 # ——只渲染有内容的区块；每个区块带来源、抓取时间与「当天/非当天/无数据」徽标
 # ============================================================
 # ============================================================
@@ -2042,13 +2026,13 @@ def generate_report(data, date_display, date_str):
 <!-- 刊头 masthead（漫画杂志封面式） -->
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td valign="bottom">{_sq(C_ACCENT, 12)}<span style="font-size:12px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;padding-left:6px;">OCTOPUS-CHAN</span><span style="font-size:10px;color:{C_FAINT};letter-spacing:2px;padding-left:8px;">章鱼酱 · 全景分析</span></td>
-<td align="right" valign="bottom"><span style="font-size:9px;font-weight:800;color:{C_ACCENT};letter-spacing:3px;">{_heart(C_ACCENT, 9)} FINANCE FUNZINE</span></td>
+<td valign="bottom"><span style="display:inline-block;background:{C_ACCENT};color:#fff;padding:1px 7px;font-size:11px;font-weight:900;letter-spacing:1px;">OCTOPUS</span><span style="font-size:10px;color:{C_FAINT};letter-spacing:2px;padding-left:8px;">章鱼AI · 全景分析</span></td>
+<td align="right" valign="bottom"><span style="font-size:9px;font-weight:900;color:{C_VIOLET};letter-spacing:3px;">POP FINANCE ZINE</span></td>
 </tr>
 </table>
 
-<div style="font-size:30px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:2px;line-height:1.3;padding-top:14px;">{_star(C_ACCENT, 16)} 每日财经日报 {_star(C_ACCENT, 16)}</div>
-<div style="font-size:10px;font-weight:800;color:{C_VIOLET};letter-spacing:2px;padding-top:6px;">わくわく♡きょうのマーケット · DAILY FINANCE FUNZINE · UTC+8</div>
+<div style="font-size:30px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:2px;line-height:1.3;padding-top:14px;">每日财经日报 <span style="color:{C_ACCENT};">!</span></div>
+<div style="font-size:10px;font-weight:900;color:{C_VIOLET};letter-spacing:2px;padding-top:6px;">MARKETS · SIGNALS · STORIES · UTC+8</div>
 <div style="border-bottom:4px double {C_ACCENT_SOFT};margin-top:12px;font-size:0;line-height:0;">&nbsp;</div>
 
 <!-- 导语 standfirst（漫画对话框） -->
