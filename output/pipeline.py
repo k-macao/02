@@ -24,7 +24,8 @@
      页面只保留 AI 对三个榜单成交量的研判结果。
   6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
       TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
-      资金定性和成交额锚点；规则合成，可复现，非投资建议。
+      资金定性和 AI 资金结论；规则合成，可复现，非投资建议。页面不展示任何成交量
+      个股排名表，只保留 AI 研判结论。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -41,7 +42,7 @@
      暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
      等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
      章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
-     编码，并覆盖行情、成交榜和流动性锚点。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
+     编码，并覆盖行情等板块。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
@@ -1916,7 +1917,11 @@ def _ai_analysis_block(res):
 
 
 def _liquidity_market_block(label, stats):
-    """渲染单个市场的 AI 量化流动性分析：像素计分板 + 明确涨跌符号。"""
+    """渲染单个市场的 AI 量化流动性研判：像素计分板 + 聚合指标 + AI 定性。
+
+    2026-08-06 起不再展示「TOP5 VOLUME 流动性锚点」个股排名表——
+    页面不出现任何成交量榜单/排名，只保留 AI 对榜单数据的研判结论。
+    """
     if not stats.get("sample_count"):
         return (f'<div style="margin:10px 0;border:1px solid {C_FAINT};background:{C_ZEBRA};'
                 f'padding:10px 12px;font-size:11px;color:{C_MUTED};font-family:{FONT_MONO};'
@@ -1934,21 +1939,6 @@ def _liquidity_market_block(label, stats):
         ("WEIGHTED_CHG", _trend_badge(stats.get("weighted_change", 0)), color),
         ("AVG_TURNOVER", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
     ]
-
-    top_rows = []
-    for i, stock in enumerate((stats.get("top_stocks") or [])[:5], 1):
-        pct = float(stock.get("change_pct", 0) or 0)
-        pct_color = C_GREEN if pct > 0 else (C_RED if pct < 0 else C_AMBER)
-        top_rows.append(_item_row(
-            f"{i:02d}",
-            f'<b>{_esc(stock.get("name", "?"))}</b> '
-            f'<span style="font-size:9px;color:{C_FAINT};font-family:{FONT_MONO};">'
-            f'[{_esc(str(stock.get("code", "")))}]</span>',
-            f'成交额 {_format_amount(stock.get("amount"))}&nbsp;&nbsp;'
-            f'{_trend_badge(pct, compact=True)}&nbsp;&nbsp;换手 {float(stock.get("turnover", 0) or 0):.2f}%',
-            icon_color=pct_color,
-        ))
-    top = "".join(top_rows)
 
     score_bar = _signal_meter(score, 100, color, 10)
     return (
@@ -1971,7 +1961,6 @@ def _liquidity_market_block(label, stats):
         f'◆ AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b> '
         f'// 样本 {stats.get("sample_count", 0)} 只</div>'
         f'{_mini_table(rows)}'
-        f'{_pixel_panel("TOP5 VOLUME // 流动性锚点", top, color, "⌖")}'
         f'</div>'
     )
 

@@ -422,6 +422,12 @@ class LiquidityReportTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertIn("AI 量化 · A股与港股最近收盘流动性报告", html)
         self.assertIn("LIQUIDITY SCORE", html)
+        self.assertIn("AI 定性", html)
+        # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
+        self.assertNotIn("TOP5 VOLUME", html)
+        self.assertNotIn("流动性锚点", html)
+        # 榜单个股只作为 AI 研判的输入：出现在 AI 盘研判「明日关注」清单，
+        # 而不是以排名表形式出现。
         self.assertIn("A股股票0", html)
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["total_sources"], 9)
