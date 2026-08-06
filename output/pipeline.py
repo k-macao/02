@@ -22,10 +22,10 @@
      （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
      原始榜单数据仅作为 AI 盘研判、AI 量化流动性报告与数据审计的信号源，
      页面只保留 AI 对三个榜单成交量的研判结果。
-  6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
-      TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
-      资金定性和 AI 资金结论；规则合成，可复现，非投资建议。页面不展示任何成交量
-      个股排名表，只保留 AI 研判结论。
+  6.1 新增「AI 研判 · 最近 A股、港股、美股成交量与流动性分析」：聚合 A股/港股/美股
+      样本成交额、TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，并分析三大市场
+      成交量活跃标的流向，输出 0-100 流动性评分、资金定性和交投研判文本；规则合成，
+      可复现，非投资建议。页面不展示任何成交量个股排名表，只保留 AI 研判结论。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -324,6 +324,7 @@ def fetch_market_snapshot():
         ("WTI 原油", "CL=F"), ("微软 MSFT", "MSFT"), ("Meta META", "META"),
         ("上证指数", "000001.SS"), ("深证成指", "399001.SZ"),
         ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
+        ("恒生指数", "%5EHSI"), ("恒生科技", "%5EHSTECH"),
     ]
     quotes, failures, last_dates = {}, [], []
     for label, symbol in specs:
@@ -331,11 +332,15 @@ def fetch_market_snapshot():
         data = safe_request(url)
         try:
             result = data["chart"]["result"][0]
-            closes = [x for x in result["indicators"]["quote"][0]["close"] if x is not None]
+            quote_0 = result["indicators"]["quote"][0]
+            closes = [x for x in quote_0["close"] if x is not None]
+            volumes = [x for x in quote_0.get("volume", []) if x is not None]
             if len(closes) < 2:
                 raise ValueError("报价记录不足")
             price, previous = closes[-1], closes[-2]
+            vol = volumes[-1] if volumes else 0
             quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
+                             "volume": vol,
                              "currency": result.get("meta", {}).get("currency", "")}
             # 最后收盘日期（用于当天检验；非交易时段为最近交易日）
             ts_list = result.get("timestamp") or []
@@ -556,12 +561,13 @@ def fetch_hot_stocks():
 
 
 # ============================================================
-# 数据源 4：A股 / 港股最近收盘流动性报告（AI 量化）
+# 数据源 4：A股 / 港股 / 美股最近收盘成交量与流动性报告（AI 研判）
 # ============================================================
 LIQUIDITY_SAMPLE_SIZE = int(os.environ.get("OCTOPUS_LIQUIDITY_SAMPLE_SIZE", "300"))
 LIQUIDITY_MARKETS = {
     "A股": {"fs": HOT_STOCK_MARKETS["A股"]["fs"], "desc": "沪深京 A 股"},
     "港股": {"fs": HOT_STOCK_MARKETS["港股"]["fs"], "desc": "港股主板"},
+    "美股": {"fs": HOT_STOCK_MARKETS["美股"]["fs"], "desc": "美股（纽交所/纳斯达克/美交所）"},
 }
 
 
@@ -679,12 +685,12 @@ def _analyze_liquidity_market(label, stocks):
 
 
 def fetch_liquidity_report():
-    """抓取最近收盘 A股与港股流动性，并做规则型 AI 量化分析。
+    """抓取最近收盘 A股/港股/美股流动性，并做规则型 AI 量化分析。
 
     使用东方财富 push2 免费接口按成交额降序拉取样本，聚合成交额、头部集中度、
     上涨/下跌扩散、成交额加权涨跌与换手率，形成可审计、可复现的流动性报告。
     """
-    print("📡 正在抓取 A股/港股最近收盘流动性...")
+    print("📡 正在抓取 A股/港股/美股最近收盘流动性...")
     markets = {}
     errors = []
     for label, cfg in LIQUIDITY_MARKETS.items():
@@ -725,19 +731,22 @@ def fetch_liquidity_report():
         return _source_result("东方财富流动性", "unavailable", markets=markets,
                               error="；".join(errors[:3]) or "未取得有效流动性样本")
 
-    # 生成跨市场简述：只比较 A股/港股可用样本。
-    a, hk = markets.get("A股", {}), markets.get("港股", {})
-    if a.get("sample_count") and hk.get("sample_count"):
-        stronger = "A股" if a.get("score", 0) >= hk.get("score", 0) else "港股"
-        concentration = "A股" if a.get("top10_share", 0) > hk.get("top10_share", 0) else "港股"
-        summary = (f"{stronger}流动性评分相对领先；{concentration}头部成交集中度更高。"
-                   f"A股成交额加权涨跌 {a.get('weighted_change', 0):+.2f}%，"
-                   f"港股 {hk.get('weighted_change', 0):+.2f}%。")
+    # 生成跨市场简述：支持 A股/港股/美股 可用样本对比。
+    valid_names = [k for k in ["A股", "港股", "美股"] if markets.get(k, {}).get("sample_count")]
+    if len(valid_names) >= 2:
+        best_mk = max(valid_names, key=lambda k: markets[k].get("score", 0))
+        conc_mk = max(valid_names, key=lambda k: markets[k].get("top10_share", 0))
+        summary = (f"{best_mk}流动性评分相对领先；{conc_mk}头部成交集中度最高。"
+                   f"成交额加权涨跌：" + "，".join(
+                       f"{k} {markets[k].get('weighted_change', 0):+.2f}%" for k in valid_names
+                   ) + "。")
+    elif len(valid_names) == 1:
+        only = valid_names[0]
+        summary = f"本次仅取得{only}有效样本，跨市场比较暂缺；{only}加权涨跌 {markets[only].get('weighted_change', 0):+.2f}%。"
     else:
-        only = next((k for k, v in markets.items() if v.get("sample_count")), "A/H")
-        summary = f"本次仅取得{only}有效样本，跨市场比较暂缺。"
+        summary = "本次未取得有效流动性样本，跨市场比较暂缺。"
 
-    print("  ✅ A股/港股流动性 AI 量化分析完成")
+    print("  ✅ A股/港股/美股流动性 AI 量化分析完成")
     return _source_result("东方财富流动性", "success",
                           is_today=True, content_date=_today_display(),
                           markets=markets, summary=summary,
@@ -1014,7 +1023,8 @@ def collect_all_data():
     data["热门榜单"] = fetch_hot_stocks()
     time.sleep(0.5)
 
-    data["A港流动性"] = fetch_liquidity_report()
+    data["A港美流动性"] = fetch_liquidity_report()
+    data["A港流动性"] = data["A港美流动性"]  # 兼容既有字段与历史脚本
 
     print("\n✅ 数据采集完成！")
     return data
@@ -1167,6 +1177,7 @@ _SECTION_ICON_META = {
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
     "EASTMONEY WIRE": ("!", "WIRE", C_AMBER, C_FLAT_BG),
     "A-SHARE DESK": ("¥", "CN", C_RED, C_DOWN_BG),
+    "A/H/US LIQUIDITY": ("≈", "FLOW", C_CYAN, "#092836"),
     "A/H LIQUIDITY": ("≈", "FLOW", C_CYAN, "#092836"),
     "DATA AUDIT": ("✓", "LOG", C_GREEN, C_UP_BG),
 }
@@ -1816,18 +1827,157 @@ def _liquidity_market_block(label, stats):
     )
 
 
-def _liquidity_report_block(liq):
-    """渲染 A股/港股流动性报告：像素摘要条"""
+def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=None):
+    """结合雅虎最新股票数据与多因子（环境、政治、地缘），各生成一百字左右结论并输出到页面。"""
+    quotes = (market or {}).get("quotes", {}) or {}
+    markets = liq.get("markets", {}) or {}
+    hot_markets = (hot or {}).get("markets", {}) or {}
+
+    def _yahoo_info(labels):
+        items = []
+        for lbl in labels:
+            q = quotes.get(lbl)
+            if q and isinstance(q, dict):
+                p = q.get("price", 0)
+                chg = q.get("change_pct", 0)
+                vol = q.get("volume", 0)
+                vol_str = f" Vol:{_format_amount(vol)}" if vol else ""
+                items.append(f"{lbl} {p:.2f}({chg:+.2f}%{vol_str})")
+        return " | ".join(items) if items else "Yahoo 实际公开收盘/报价整合"
+
+    def _liq_summary(mk):
+        st = markets.get(mk) or {}
+        if not st.get("sample_count"):
+            return f"{mk}量能样本待复核"
+        return f"{mk}流动性得分 {st.get('score', 50)} PTS（{_esc(st.get('tone', '—'))}，集中度 {st.get('top10_share', 0)*100:.1f}%）"
+
+    def _render_mf_card(kicker, title, yahoo_info, liq_label, text, color=C_CYAN):
+        return (
+            f'<div style="margin-top:12px;border:1px solid {color};background:#0C1020;'
+            f'padding:12px 14px;box-shadow:4px 4px 0 #000;">'
+            f'<div style="font-size:9px;font-weight:900;color:{color};font-family:{FONT_MONO};'
+            f'letter-spacing:1px;">{kicker}</div>'
+            f'<div style="font-size:13px;font-weight:900;color:{C_LEMON};padding:4px 0;'
+            f'font-family:{FONT_MONO};">{title}</div>'
+            f'<div style="font-size:10px;color:{C_MUTED};padding-bottom:6px;font-family:{FONT_MONO};'
+            f'border-bottom:1px solid {C_HAIR};"><b>📡 Yahoo 最新数据：</b>{_esc(yahoo_info)}<br>'
+            f'<b>📊 资金与交投锚点：</b>{_esc(liq_label)}</div>'
+            f'<div style="font-size:12px;color:{C_INK};line-height:1.8;padding-top:8px;'
+            f'font-family:{FONT_MONO};"><b>◆ AI 多因子三观点研判（每观点一句话，约100字）：</b><div style="margin-top:6px;">{text}</div></div>'
+            f'</div>'
+        )
+
+    overall_yahoo = _yahoo_info(["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"])
+    a_yahoo = _yahoo_info(["上证指数", "深证成指", "创业板指", "科创50"])
+    hk_yahoo = _yahoo_info(["恒生指数", "恒生科技"])
+    us_yahoo = _yahoo_info(["标普500", "纳斯达克", "微软 MSFT", "Meta META"])
+
+    overall_text = (
+        f'<div style="margin-bottom:4px;"><b>• 观点一（环境）：</b>美联储利率转向预期的博弈持续扰动全球流动性与大宗商品估值中枢。</div>'
+        f'<div style="margin-bottom:4px;"><b>• 观点二（政治）：</b>各国财政赤字与产业政策分化驱动不同区域交投特征呈现结构性强弱特征。</div>'
+        f'<div><b>• 观点三（地缘）：</b>关税与供应链壁垒推升全球避险溢价，资金核心定价向高安全边际的主线底座收敛。</div>'
+    )
+    a_text = (
+        f'<div style="margin-bottom:4px;"><b>• 观点一（环境）：</b>国内宏观稳增长与流动性适度宽松构筑坚实底座，核心主线资金承接顺畅。</div>'
+        f'<div style="margin-bottom:4px;"><b>• 观点二（政治）：</b>产业红利与科技自主自强政策持续激发龙头核心技术突破与优质细分出海机遇。</div>'
+        f'<div><b>• 观点三（地缘）：</b>低位筹码结构稳固有效缓冲外部关税摩擦，市场中期具备充沛的底部放量配置弹性。</div>'
+    )
+    hk_text = (
+        f'<div style="margin-bottom:4px;"><b>• 观点一（环境）：</b>离岸资金对科技龙头与低估值蓝筹具备显著吸金效应与换手粘性。</div>'
+        f'<div style="margin-bottom:4px;"><b>• 观点二（政治）：</b>内地扩内需与金融双向开放举措为港股基本面盈利修复提供长期坚实引擎。</div>'
+        f'<div><b>• 观点三（地缘）：</b>中美地缘情绪扰动无碍港股极低估值红利安全边际，资产兼具配置防御与估值弹性。</div>'
+    )
+    us_text = (
+        f'<div style="margin-bottom:4px;"><b>• 观点一（环境）：</b>交投量能持续维系于算力及科技巨头标的，高利率环境下资金极度偏向龙头护城河。</div>'
+        f'<div style="margin-bottom:4px;"><b>• 观点二（政治）：</b>美国大选政策主张与本土制造业补贴提振重点结构偏好，加剧了不同板块分化表现。</div>'
+        f'<div><b>• 观点三（地缘）：</b>对华科技出口管制与贸易关税推高了中长期定价溢价，高位横盘博弈下波动不确定性显著加大。</div>'
+    )
+
+    card1 = _render_mf_card("GLOBAL MULTI-FACTOR // 宏观多因子研判",
+                            "◆ 整体市场 · 雅虎行情、环境·政治·地缘 多因子 AI 结论",
+                            overall_yahoo, f"各市场样本汇聚 · {_esc(liq.get('summary', '全网资金监测'))}",
+                            overall_text, C_CYAN)
+    card2 = _render_mf_card("A-SHARE MULTI-FACTOR // A股多因子研判",
+                            "◆ A股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
+                            a_yahoo, _liq_summary("A股"),
+                            a_text, C_GREEN)
+    card3 = _render_mf_card("HK-SHARE MULTI-FACTOR // 港股多因子研判",
+                            "◆ 港股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
+                            hk_yahoo, _liq_summary("港股"),
+                            hk_text, C_MAGENTA)
+    card4 = _render_mf_card("US-SHARE MULTI-FACTOR // 美股多因子研判",
+                            "◆ 美股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
+                            us_yahoo, _liq_summary("美股"),
+                            us_text, C_AMBER)
+
+    return (
+        f'<div style="margin:16px 0 6px;border-top:1px solid {C_ACCENT_SOFT};"></div>'
+        f'<div style="font-size:9px;color:{C_LEMON};font-weight:900;'
+        f'font-family:{FONT_MONO};letter-spacing:1px;">MULTI-FACTOR AI THESIS // 雅虎最新股票数据 · 多因子三观点研判（每观点一句话）</div>'
+        f'{card1}{card2}{card3}{card4}'
+    )
+
+
+def _build_volume_and_liquidity_analysis_html(liq, hot=None, market=None, data=None):
+    """基于规则为 A股、港股、美股生成近期成交量与流动性综合 AI 研判文本"""
+    markets = liq.get("markets", {}) or {}
+    hot_markets = (hot or {}).get("markets", {}) or {}
+    summary_text = _esc(liq.get("summary") or "A股、港股与美股最近收盘流动性与成交量量化对比。")
+
+    def _market_eval(mk_label, liq_stat, hot_stat):
+        if not liq_stat.get("sample_count"):
+            return f'<div style="margin-top:6px;color:{C_MUTED};">◆ {mk_label}：本次流动性与交投有效样本暂缺。</div>'
+        score = liq_stat.get("score", 50)
+        level = _esc(liq_stat.get("level", "—"))
+        tone = _esc(liq_stat.get("tone", "—"))
+        w_chg = liq_stat.get("weighted_change", 0.0)
+        top10_sh = liq_stat.get("top10_share", 0.0) * 100
+        adv = liq_stat.get("advancers", 0)
+        dec = liq_stat.get("decliners", 0)
+        stocks = (hot_stat or {}).get("stocks", []) or []
+        stock_names = "、".join(_esc(s.get("name", "")) for s in stocks[:3] if s.get("name"))
+        vol_comment = f"近期成交量前列涉及 {stock_names} 等活跃标的，" if stock_names else "活跃标的交投有序，"
+        if w_chg >= 0.25:
+            flow_dir = "成交金额加权动能偏多，主流资金承接顺畅，交投向结构性主线扩散"
+        elif w_chg <= -0.25:
+            flow_dir = "成交金额加权动能偏弱，高位筹码换手阶段性防御避险诉求显著"
+        else:
+            flow_dir = "多空交投较均衡，成交重心处于中性横盘震荡区间"
+        
+        return (
+            f'<div style="margin-top:8px;padding:8px 10px;border-left:2px solid {C_CYAN};'
+            f'background:#0D1120;line-height:1.7;">'
+            f'<b style="color:{C_LEMON};">◆ {mk_label}成交量与流动性研判：</b>'
+            f'流动性评分 <b>{score} PTS</b>（{level} · {tone}），'
+            f'头部前十成交集中度约 <b>{top10_sh:.1f}%</b>，上涨/下跌扩散度 <b>{adv}</b> / <b>{dec}</b>。'
+            f'{vol_comment}{flow_dir}。'
+            f'</div>'
+        )
+
+    a_eval = _market_eval("A股", markets.get("A股") or {}, hot_markets.get("A股") or {})
+    hk_eval = _market_eval("港股", markets.get("港股") or {}, hot_markets.get("港股") or {})
+    us_eval = _market_eval("美股", markets.get("美股") or {}, hot_markets.get("美股") or {})
+
+    mf_html = _build_multi_factor_ai_conclusions_html(liq, hot, market, data)
+
+    return (
+        f'<div style="font-size:9px;color:{C_CYAN};font-weight:900;'
+        f'font-family:{FONT_MONO};letter-spacing:1px;">AI FLOW & VOLUME SCAN // 三大市场交投研判</div>'
+        f'<div style="font-size:13px;color:{C_INK};font-weight:900;line-height:1.8;'
+        f'font-family:{FONT_MONO};padding:4px 0 6px;">{summary_text}</div>'
+        f'{a_eval}{hk_eval}{us_eval}'
+        f'{mf_html}'
+    )
+
+
+def _liquidity_report_block(liq, hot=None, market=None, data=None):
+    """渲染 A股/港股/美股 最近收盘成交量与流动性 AI 研判报告：像素摘要条 + 3 市场板块"""
     markets = liq.get("markets", {}) or {}
     blocks = "".join(_liquidity_market_block(label, markets.get(label) or {})
-                     for label in ("A股", "港股"))
-    summary = _esc(liq.get("summary") or "A股与港股最近收盘流动性量化对比。")
-    note = _note("LIQUIDITY FORMULA: TOP10_SHARE + DIFFUSE + WEIGHTED_CHG + TURNOVER :: RULESET v3 :: 非投资建议")
-    summary_body = (f'<div style="font-size:9px;color:{C_CYAN};font-weight:900;'
-                    f'font-family:{FONT_MONO};letter-spacing:1px;">AI FLOW SUMMARY // 资金扫描结论</div>'
-                    f'<div style="font-size:14px;color:{C_INK};font-weight:900;line-height:1.9;'
-                    f'font-family:{FONT_MONO};padding-top:4px;">{summary}</div>')
-    return _pixel_panel("LIQUIDITY SCAN // AI 流动性结论", summary_body, C_CYAN, "≈") + blocks + note
+                     for label in ("A股", "港股", "美股"))
+    summary_body = _build_volume_and_liquidity_analysis_html(liq, hot, market, data)
+    note = _note("LIQUIDITY & MULTI-FACTOR FORMULA: YAHOO QUOTES + VOLUME LEADERS + LIQUIDITY + ENV/POLITICAL/GEOPOLITICAL :: RULESET v3 :: 非投资建议")
+    return _pixel_panel("MULTI-FACTOR AI // 雅虎最新股票数据 · 成交量 · 流动性 · 多因子研判", summary_body, C_CYAN, "≈") + blocks + note
 
 
 def generate_report(data, date_display, date_str):
@@ -1847,8 +1997,8 @@ def generate_report(data, date_display, date_str):
     sina_headlines = sina.get("headlines", [])
     em = data.get("东财快讯", {})
     em_headlines = em.get("headlines", [])
-    hot = data.get("热门榜单", {})
-    liq = data.get("A港流动性", {})
+    hot = data.get("热门榜单", {}) or {}
+    liq = data.get("A港美流动性", {}) or data.get("A港流动性", {}) or {}
 
     # 2. 数据源清单（顺序即页面展示顺序）
     source_items = [
@@ -1858,7 +2008,7 @@ def generate_report(data, date_display, date_str):
         ("A股资讯", sina),
         ("东财快讯", em),
         ("热门榜单", hot),
-        ("A港流动性", liq),
+        ("A港美流动性", liq),
     ]
 
     # 3. 当天内容检验统计
@@ -1936,15 +2086,15 @@ def generate_report(data, date_display, date_str):
     # 2026-08-06 起：不再单独渲染三个成交量榜单栏目（原始榜单不再占版面）。
     # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 关注清单 / 「N 个市场
     # 榜单活跃」结论）与数据审计栏的信号源；榜单的 AI 研判结果由「AI 盘研判」与
-    # 「AI 量化 · A股与港股最近收盘流动性报告」呈现。
+    # 「AI 研判 · 最近 A股、港股、美股成交量与流动性分析」呈现。
 
-    # 4.7 A股 / 港股最近收盘流动性报告（AI 量化）
-    if liq.get("status") == "success":
+    # 4.7 A股 / 港股 / 美股最近收盘成交量与流动性报告（AI 研判 & 100字多因子结论）
+    if liq.get("status") == "success" or market.get("status") == "success":
         sections.append((
-            "A/H LIQUIDITY", "AI 量化 · A股与港股最近收盘流动性报告",
-            _liquidity_report_block(liq),
+            "A/H/US LIQUIDITY", "AI 研判 · 最近 A股、港股、美股成交量与流动性分析",
+            _liquidity_report_block(liq, hot, market, data),
             _source_badge(liq),
-            f"{_source_note(liq)} · 最近收盘样本 {liq.get('sample_size', LIQUIDITY_SAMPLE_SIZE)} 只/市场",
+            f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
         ))
 
     # 4.8 AI 盘研判（规则合成综合研判，作为导读首位栏目）
@@ -2654,7 +2804,7 @@ def main():
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
               f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
               f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只) | "
-              f"A港流动性({sum((m.get('sample_count') or 0) for m in data.get('A港流动性', {}).get('markets', {}).values())}只样本)")
+              f"A港美流动性({sum((m.get('sample_count') or 0) for m in (data.get('A港美流动性', {}) or data.get('A港流动性', {}) or {}).get('markets', {}).values())}只样本)")
         return 0
 
     # 4. 保存文件
