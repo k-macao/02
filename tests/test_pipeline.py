@@ -26,8 +26,6 @@ class ReportFreshnessTests(unittest.TestCase):
             ),
             "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
-            "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
-            "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
         }
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
         self.assertIn("6,123", html)
@@ -111,8 +109,6 @@ class ReportFreshnessTests(unittest.TestCase):
             ),
             "全球头条": pipeline._source_result("test news", "unavailable", headlines=[], error="offline"),
             "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[], error="offline"),
-            "韩股半导体": pipeline._source_result("test korea", "unavailable", headlines=[], error="offline"),
-            "Reddit WSB热议": pipeline._source_result("test wsb", "unavailable", stocks=[], error="offline"),
         }
         return data
 
@@ -145,7 +141,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 9)
+        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -158,7 +154,7 @@ class ReportFreshnessTests(unittest.TestCase):
         self.assertTrue(can_push)
         # 全部无内容 → 不推送
         empty = {k: pipeline._source_result(k, "unavailable", error="offline")
-                 for k in ["实时行情", "港股名家频道", "全球头条", "A股资讯", "韩股半导体", "Reddit WSB热议"]}
+                 for k in ["实时行情", "港股名家频道", "全球头条", "A股资讯"]}
         can_push, reason = pipeline.check_push_eligibility(empty)
         self.assertFalse(can_push)
         self.assertIn("0/", reason)
@@ -422,9 +418,15 @@ class LiquidityReportTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertIn("AI 量化 · A股与港股最近收盘流动性报告", html)
         self.assertIn("LIQUIDITY SCORE", html)
+        self.assertIn("AI 定性", html)
+        # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
+        self.assertNotIn("TOP5 VOLUME", html)
+        self.assertNotIn("流动性锚点", html)
+        # 榜单个股只作为 AI 研判的输入：出现在 AI 盘研判「明日关注」清单，
+        # 而不是以排名表形式出现。
         self.assertIn("A股股票0", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 9)
+        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
 
 class NewLayoutRenderingTests(unittest.TestCase):
     """2026-08-02 新增：东财快讯 / 热门榜单渲染（不含 AI 总览表）。"""
@@ -450,9 +452,11 @@ class NewLayoutRenderingTests(unittest.TestCase):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("热门榜单", html)
-        self.assertIn("A股成交量前五", html)
-        self.assertIn("美股成交量前五", html)
+        self.assertIn("热门榜单", html)  # 仍作为数据源出现在数据审计栏
+        # 2026-08-06 起不再单独渲染三个成交量榜单栏目，只保留 AI 研判结果
+        self.assertNotIn("A股成交量前五", html)
+        self.assertNotIn("港股成交量前五", html)
+        self.assertNotIn("美股成交量前五", html)
         self.assertIn("美联储释放降息信号", html)
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)
@@ -460,7 +464,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 9)  # 数据源扩展到 9 个（含 A港流动性）
+        self.assertEqual(meta["total_sources"], 7)  # 数据源共 7 个（Reddit / 韩股已移除）
 
 
 class RetroPixelVisualTests(unittest.TestCase):
@@ -482,8 +486,6 @@ class RetroPixelVisualTests(unittest.TestCase):
         data["实时行情"]["quotes"]["深证成指"] = {
             "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
         }
-        # 榜单同样必须出现明确的跌幅色块，而不是只显示成交额。
-        data["热门榜单"]["markets"]["A股"]["stocks"][0]["change_pct"] = "-2.50"
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
 
         self.assertIn("OCTOPUS_OS v3.0", html)
@@ -494,7 +496,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情
-        self.assertIn("▼ -2.50%", html)     # A股成交榜 compact badge
+        self.assertIn("▼ -2.50%", html)     # AI 盘研判 TECH READ 的 compact 徽标
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式

@@ -18,11 +18,14 @@
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
      Google News 中文版，标题本身即中文，无需翻译。
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
-  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前五
-     （东方财富 push2 免费接口），按市场一对一独立成栏展示。
+  6. 新增「热门榜单」数据源：最近交易日收盘后 A股/港股/美股 成交量前五
+     （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
+     原始榜单数据仅作为 AI 盘研判、AI 量化流动性报告与数据审计的信号源，
+     页面只保留 AI 对三个榜单成交量的研判结果。
   6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
       TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
-      资金定性和成交额锚点；规则合成，可复现，非投资建议。
+      资金定性和 AI 资金结论；规则合成，可复现，非投资建议。页面不展示任何成交量
+      个股排名表，只保留 AI 研判结论。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -39,16 +42,16 @@
      暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
      等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
      章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
-     编码，并覆盖行情、成交榜和流动性锚点。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
+     编码，并覆盖行情等板块。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
-     升级为 OCTOPUS_OS v3。栏目结构与一对一排行榜保持不变。
+     升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
      截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
      始终保留完整版。
-  9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股/韩股头条、
-     Reddit WSB、港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
+  9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股头条、
+     港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
      信号分 + 置信度、板块热度、技术速读、风险提示、明日关注清单）。无需大模型 API、
      可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
 
@@ -369,74 +372,7 @@ def _quote_value(market, label, precision=2):
     return value, color
 
 
-# ============================================================
-# 数据源 1：Reddit WSB 热议
-# ============================================================
-def fetch_wsb():
-    """抓取 r/wallstreetbets 热门帖子，提取股票提及"""
-    print("📡 正在抓取 Reddit WSB...")
-
-    url = "https://www.reddit.com/r/wallstreetbets/hot.json"
-    params = {"limit": 100}
-    headers = {**DEFAULT_HEADERS, "Accept": "application/json"}
-
-    data = safe_request(url, headers=headers, params=params)
-
-    stocks = []
-    stock_mentions = {}
-    post_utcs = []
-
-    if data and "data" in data and "children" in data["data"]:
-        for child in data["data"]["children"]:
-            post = child.get("data", {})
-            title = post.get("title", "")
-            selftext = post.get("selftext", "")
-            text = title + " " + selftext
-            created = post.get("created_utc")
-            if created:
-                post_utcs.append(created)
-
-            # 排除常见非股票代码
-            exclude_words = {"THE", "AND", "FOR", "ARE", "BUT", "NOT", "YOU", "ALL", "CAN", "HER",
-                           "WAS", "ONE", "OUR", "OUT", "DAY", "GET", "HAS", "HIM", "HIS", "HOW",
-                           "ITS", "MAY", "NEW", "NOW", "OLD", "SEE", "WAY", "WHO", "BOY", "DID",
-                           "LET", "PUT", "SAY", "SHE", "TOO", "USE", "DD", "YOLO", "WSB",
-                           "FDA", "SEC", "FED", "GDP", "PCE", "CPI", "ETF", "IPO", "AI", "USA",
-                           "US", "UK", "EU", "CEO", "CFO", "COO", "CTO", "EV", "TSLA", "SPY",
-                           "QQQ", "SPX", "DOW", "NYSE", "NASDAQ", "OTC", "ATH", "ITM",
-                           "USD", "EUR", "GBP", "BTC", "ETH", "NFT", "DeFi", "S&P",
-                           "EST", "EOD", "PT", "RSI", "MACD", "EPS", "P/E", "EBITDA", "TTM",
-                           "Q1", "Q2", "Q3", "Q4", "FY", "YTD", "MoM", "YoY", "APR", "IRR",
-                           "IMO", "IMHO", "TBH", "BTBC", "FWIW", "ELI5", "TL;DR", "EDIT",
-                           "SOURCE", "PERMALINK", "CROSSPOST", "REPOST"}
-
-            # 匹配 $SYMBOL 或纯大写代码
-            symbols = re.findall(r'\$([A-Z]{1,5})\b', text)
-            symbols += re.findall(r'\b([A-Z]{2,5})\b', text)
-
-            for sym in symbols:
-                if sym not in exclude_words and len(sym) >= 2:
-                    stock_mentions[sym] = stock_mentions.get(sym, 0) + 1
-
-        # 排序取 Top 10
-        sorted_stocks = sorted(stock_mentions.items(), key=lambda x: x[1], reverse=True)[:10]
-        for symbol, mentions in sorted_stocks:
-            stocks.append({"symbol": symbol, "name": "", "mentions": mentions})
-
-    if not stocks:
-        print("  ⚠️ Reddit 暂不可用，不显示历史兜底榜单")
-        return _source_result("Reddit WSB", "unavailable", stocks=[], error="未取得有效帖子")
-
-    newest_dt = datetime.fromtimestamp(max(post_utcs), CST) if post_utcs else None
-    content_date = newest_dt.strftime("%Y-%m-%d") if newest_dt else None
-    print(f"  ✅ 成功抓取到 {len(stocks)} 只热门股票（最新帖 {content_date}）")
-    return _source_result("Reddit WSB", "success",
-                          is_today=_date_is_today(newest_dt), content_date=content_date,
-                          stocks=stocks)
-
-
-# ============================================================
-# 数据源 2：全球头条（Google News 中文版）
+# 数据源 1：全球头条（Google News 中文版）
 # ============================================================
 GOOGLE_NEWS_RSS = {
     "zh": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
@@ -505,7 +441,7 @@ def fetch_google_news():
 
 
 # ============================================================
-# 数据源 6：东方财富快讯（免费 API，5 条最新新闻）
+# 数据源 2：东方财富快讯（免费 API，5 条最新新闻）
 # ============================================================
 EASTMONEY_NEWS_URLS = [
     "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns",
@@ -559,7 +495,7 @@ def fetch_eastmoney_news():
 
 
 # ============================================================
-# 数据源 7：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
+# 数据源 3：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
 # ============================================================
 HOT_STOCK_TOP_N = 5
 
@@ -620,7 +556,7 @@ def fetch_hot_stocks():
 
 
 # ============================================================
-# 数据源 8：A股 / 港股最近收盘流动性报告（AI 量化）
+# 数据源 4：A股 / 港股最近收盘流动性报告（AI 量化）
 # ============================================================
 LIQUIDITY_SAMPLE_SIZE = int(os.environ.get("OCTOPUS_LIQUIDITY_SAMPLE_SIZE", "300"))
 LIQUIDITY_MARKETS = {
@@ -811,7 +747,7 @@ def fetch_liquidity_report():
 
 
 # ============================================================
-# 数据源 3：A股资讯（新浪财经）
+# 数据源 5：A股资讯（新浪财经）
 # ============================================================
 def fetch_sina_headlines():
     """抓取新浪财经 A 股资讯"""
@@ -856,53 +792,7 @@ def fetch_sina_headlines():
                           headlines=headlines[:5])
 
 
-# ============================================================
-# 数据源 4：韩股 & 半导体资讯
-# ============================================================
-def fetch_kospi_headlines():
-    """抓取韩股和半导体相关资讯"""
-    print("📡 正在抓取韩股 & 半导体资讯...")
-
-    headlines = []
-
-    # Naver 财经 API
-    url = "https://api.stock.naver.com/news/world/stock/KOSPI"
-    params = {
-        "pageSize": "20",
-        "page": "1",
-    }
-
-    data = safe_request(url, params=params)
-
-    if data and isinstance(data, list):
-        for item in data[:10]:
-            title = item.get("title", "") or item.get("content", "")
-            if title:
-                clean = re.sub(r'<[^>]+>', '', title).strip()
-                if clean:
-                    headlines.append(clean)
-
-    # Yahoo 韩股新闻兜底
-    if not headlines:
-        kr_url = "https://finance.yahoo.com/quote/%5EKS11/news/"
-        html = safe_request(kr_url, is_json=False)
-        if html:
-            titles = re.findall(r'"headline":"([^"]+)"', html)
-            for t in titles[:10]:
-                clean = t.encode().decode('unicode_escape') if '\\u' in t else t
-                headlines.append(clean.strip())
-
-    if not headlines:
-        print("  ⚠️ Naver/Yahoo 韩股资讯暂不可用，不显示历史兜底资讯")
-        return _source_result("Naver / Yahoo Korea", "unavailable", headlines=[], error="未取得有效资讯")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条韩股资讯（本次抓取 = 当天内容）")
-    return _source_result("Naver / Yahoo Korea", "success",
-                          is_today=True, content_date=_today_display(),
-                          headlines=headlines[:5])
-
-
-# ============================================================
-# 数据源 5：港股名家频道（YouTube / 通用 RSS / 需登录平台）
+# 数据源 6：港股名家频道（YouTube / 通用 RSS / 需登录平台）
 # ============================================================
 def resolve_channel_id(channel):
     """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
@@ -1111,16 +1001,11 @@ def collect_all_data():
     time.sleep(0.5)
     data["港股名家频道"] = fetch_hk_channels()
     time.sleep(0.5)
-    data["Reddit WSB热议"] = fetch_wsb()
-    time.sleep(0.5)
 
     data["全球头条"] = fetch_google_news()
     time.sleep(0.5)
 
     data["A股资讯"] = fetch_sina_headlines()
-    time.sleep(0.5)
-
-    data["韩股半导体"] = fetch_kospi_headlines()
     time.sleep(0.5)
 
     data["东财快讯"] = fetch_eastmoney_news()
@@ -1281,12 +1166,7 @@ _SECTION_ICON_META = {
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
     "EASTMONEY WIRE": ("!", "WIRE", C_AMBER, C_FLAT_BG),
-    "SEMIS & KOSPI": ("◆", "CHIP", C_VIOLET, C_AI_BG),
     "A-SHARE DESK": ("¥", "CN", C_RED, C_DOWN_BG),
-    "WSB HEAT": ("#", "WSB", C_MAGENTA, "#301226"),
-    "A-SHARES RANK": ("1P", "TOP", C_RED, C_DOWN_BG),
-    "HK-STOCKS RANK": ("2P", "TOP", C_CYAN, "#092836"),
-    "US-STOCKS RANK": ("3P", "TOP", C_VIOLET, C_AI_BG),
     "A/H LIQUIDITY": ("≈", "FLOW", C_CYAN, "#092836"),
     "DATA AUDIT": ("✓", "LOG", C_GREEN, C_UP_BG),
 }
@@ -1401,15 +1281,6 @@ def _em_news_row(it, index=None):
         sub = " :: ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
         return _item_row(f"[{marker}]", _esc(title[:120]), _esc(sub[:110]))
     return _item_row(f"[{marker}]", _esc(it[:120]))
-
-def _rank_span(i):
-    colors = (C_LEMON, C_CYAN, C_MAGENTA)
-    color = colors[i] if i < len(colors) else C_ACCENT
-    bg = C_FLAT_BG if i == 0 else ("#092836" if i == 1 else ("#301226" if i == 2 else C_UP_BG))
-    mark = "★" if i == 0 else "■"
-    return (f'<span style="display:inline-block;color:{color};font-weight:900;font-family:{FONT_MONO};'
-            f'background:{bg};border:1px solid {color};padding:0 4px;box-shadow:2px 2px 0 #000;'
-            f'font-variant-numeric:tabular-nums;">{mark}{i + 1:02d}</span>')
 
 def _channel_block(ch):
     name = _esc(ch.get("name", "?"))
@@ -1526,8 +1397,8 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 # ============================================================
 # AI 盘研判（规则 / 启发式合成，无需大模型 API）
 # ------------------------------------------------------------
-# 基于当日已抓取的多源信号（实时行情、热门榜单、全球/东财/A股/韩股头条、
-# Reddit WSB、港股名家频道观点）做确定性合成，输出一个跨市场综合研判：
+# 基于当日已抓取的多源信号（实时行情、热门榜单、全球/东财/A股头条、
+# 港股名家频道观点）做确定性合成，输出一个跨市场综合研判：
 #   情绪定调（多/空/中性 + 信号分 + 置信度）、板块热度、技术速读、
 #   风险提示、明日关注清单。全部由规则计算，可复现、不调外部大模型、
 #   不伪造内容；明确标注「非投资建议」。
@@ -1615,15 +1486,11 @@ def build_ai_analysis(data):
     google = data.get("全球头条", {}) or {}
     em = data.get("东财快讯", {}) or {}
     sina = data.get("A股资讯", {}) or {}
-    kospi = data.get("韩股半导体", {}) or {}
-    wsb = data.get("Reddit WSB热议", {}) or {}
     yt = data.get("港股名家频道", {}) or {}
 
     google_headlines = google.get("headlines", []) or []
     em_headlines = em.get("headlines", []) or []
     sina_headlines = sina.get("headlines", []) or []
-    kospi_headlines = kospi.get("headlines", []) or []
-    wsb_stocks = wsb.get("stocks", []) or []
     yt_channels = yt.get("channels", []) or []
 
     # —— 1. 文本与结构化信号汇总 ——
@@ -1636,7 +1503,6 @@ def build_ai_analysis(data):
             texts.append(it.get("title", ""))
             texts.append(it.get("summary", ""))
     texts += [h for h in sina_headlines if isinstance(h, str)]
-    texts += [h for h in kospi_headlines if isinstance(h, str)]
     for ch in yt_channels:
         for v in ch.get("videos", []) or []:
             texts.append(v.get("title", ""))
@@ -1653,9 +1519,6 @@ def build_ai_analysis(data):
     for h in sina_headlines:
         if isinstance(h, str):
             headlines_struct.append((h, "新浪财经"))
-    for h in kospi_headlines:
-        if isinstance(h, str):
-            headlines_struct.append((h, "韩股/半导体"))
     for ch in yt_channels:
         for v in ch.get("videos", []) or []:
             headlines_struct.append((v.get("title", ""), ch.get("name", "")))
@@ -1692,12 +1555,9 @@ def build_ai_analysis(data):
     if all_text:
         points += max(-20, min(20, net * 2))
         signals += 1
-    if wsb_stocks:
-        points += 3
-        signals += 1
     points = max(-100, min(100, round(points)))
 
-    has_data = bool(changes) or bool(present) or bool(all_text) or bool(wsb_stocks)
+    has_data = bool(changes) or bool(present) or bool(all_text)
     if not has_data or not AI_ANALYSIS_ENABLED:
         return {"available": False}
 
@@ -1713,8 +1573,6 @@ def build_ai_analysis(data):
     if all_text:
         tone = "多" if net > 0 else ("空" if net < 0 else "平")
         reason_parts.append(f"舆情净{tone}（利好 {int(bull)} / 利空 {int(bear)}）")
-    if wsb_stocks:
-        reason_parts.append("Reddit 散户热议")
     reason = "；".join(reason_parts) + "。" if reason_parts else "信号不足。"
 
     # —— 3. 板块热度 ——
@@ -1759,10 +1617,6 @@ def build_ai_analysis(data):
             nm = s.get("name", "")
             if nm:
                 watch.append((nm, m))
-    for s in wsb_stocks[:5]:
-        sym = s.get("symbol", "")
-        if sym:
-            watch.append((sym, "WSB"))
     seen, uniq = set(), []
     for nm, tag in watch:
         if nm and nm not in seen:
@@ -1914,7 +1768,11 @@ def _ai_analysis_block(res):
 
 
 def _liquidity_market_block(label, stats):
-    """渲染单个市场的 AI 量化流动性分析：像素计分板 + 明确涨跌符号。"""
+    """渲染单个市场的 AI 量化流动性研判：像素计分板 + 聚合指标 + AI 定性。
+
+    2026-08-06 起不再展示「TOP5 VOLUME 流动性锚点」个股排名表——
+    页面不出现任何成交量榜单/排名，只保留 AI 对榜单数据的研判结论。
+    """
     if not stats.get("sample_count"):
         return (f'<div style="margin:10px 0;border:1px solid {C_FAINT};background:{C_ZEBRA};'
                 f'padding:10px 12px;font-size:11px;color:{C_MUTED};font-family:{FONT_MONO};'
@@ -1932,21 +1790,6 @@ def _liquidity_market_block(label, stats):
         ("WEIGHTED_CHG", _trend_badge(stats.get("weighted_change", 0)), color),
         ("AVG_TURNOVER", f"{stats.get('avg_turnover', 0):.2f}%", C_INK),
     ]
-
-    top_rows = []
-    for i, stock in enumerate((stats.get("top_stocks") or [])[:5], 1):
-        pct = float(stock.get("change_pct", 0) or 0)
-        pct_color = C_GREEN if pct > 0 else (C_RED if pct < 0 else C_AMBER)
-        top_rows.append(_item_row(
-            f"{i:02d}",
-            f'<b>{_esc(stock.get("name", "?"))}</b> '
-            f'<span style="font-size:9px;color:{C_FAINT};font-family:{FONT_MONO};">'
-            f'[{_esc(str(stock.get("code", "")))}]</span>',
-            f'成交额 {_format_amount(stock.get("amount"))}&nbsp;&nbsp;'
-            f'{_trend_badge(pct, compact=True)}&nbsp;&nbsp;换手 {float(stock.get("turnover", 0) or 0):.2f}%',
-            icon_color=pct_color,
-        ))
-    top = "".join(top_rows)
 
     score_bar = _signal_meter(score, 100, color, 10)
     return (
@@ -1969,7 +1812,6 @@ def _liquidity_market_block(label, stats):
         f'◆ AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b> '
         f'// 样本 {stats.get("sample_count", 0)} 只</div>'
         f'{_mini_table(rows)}'
-        f'{_pixel_panel("TOP5 VOLUME // 流动性锚点", top, color, "⌖")}'
         f'</div>'
     )
 
@@ -1999,18 +1841,13 @@ def generate_report(data, date_display, date_str):
     market = data.get("实时行情", {})
     yt = data.get("港股名家频道", {})
     yt_live = yt.get("channels", [])        # 已抓取到内容的频道
-    wsb = data.get("Reddit WSB热议", {})
-    wsb_stocks = wsb.get("stocks", [])
     google = data.get("全球头条", {})
     gh_headlines = google.get("headlines", [])
     sina = data.get("A股资讯", {})
     sina_headlines = sina.get("headlines", [])
-    kospi = data.get("韩股半导体", {})
-    kospi_headlines = kospi.get("headlines", [])
     em = data.get("东财快讯", {})
     em_headlines = em.get("headlines", [])
     hot = data.get("热门榜单", {})
-    hot_markets = hot.get("markets", {})
     liq = data.get("A港流动性", {})
 
     # 2. 数据源清单（顺序即页面展示顺序）
@@ -2019,8 +1856,6 @@ def generate_report(data, date_display, date_str):
         ("港股名家频道", yt),
         ("全球头条", google),
         ("A股资讯", sina),
-        ("韩股半导体", kospi),
-        ("Reddit WSB热议", wsb),
         ("东财快讯", em),
         ("热门榜单", hot),
         ("A港流动性", liq),
@@ -2082,65 +1917,28 @@ def generate_report(data, date_display, date_str):
                          _source_badge(em),
                          f"{_source_note(em)} · 免费公开数据源"))
 
-    # 4.5 半导体 & 韩股
-    if kospi_headlines:
-        kospi_items = "".join(_item_row(f"{i:02d}", _esc(h[:120]))
-                              for i, h in enumerate(kospi_headlines[:5], 1))
-        sections.append(("SEMIS & KOSPI", "半导体 & 韩股", kospi_items,
-                         _source_badge(kospi), _source_note(kospi)))
+    # 4.4 东方财富快讯
+    if em_headlines:
+        em_items = "".join(_em_news_row(it, i)
+                           for i, it in enumerate(em_headlines[:5], 1))
+        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
+                         _source_badge(em),
+                         f"{_source_note(em)} · 免费公开数据源"))
 
-    # 4.6 A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
+    # 4.5 A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
     if sina_headlines:
         sina_items = "".join(_item_row(f"{i:02d}", _esc(h[:120]))
                              for i, h in enumerate(sina_headlines[:5], 1))
         sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
                          _source_badge(sina), _source_note(sina)))
 
-    # 4.7 Reddit WSB 热议
-    if wsb_stocks:
-        wsb_rows = []
-        for i, s in enumerate(wsb_stocks[:10]):
-            label = (f'{_rank_span(i)}&nbsp; <b>{_esc(s.get("symbol", "?"))}</b>'
-                     f' <span style="color:{C_MUTED};font-size:11px;">{_esc(s.get("name", ""))}</span>')
-            wsb_rows.append((label, f'{s.get("mentions", "?")} 次提及', C_INK))
-        sections.append((
-            "WSB HEAT", "Reddit WSB热议",
-            _subsection("TOP 10 · 提及榜") + _mini_table(wsb_rows),
-            _source_badge(wsb),
-            f"{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get('content_date') or '—')}",
-        ))
+    # 4.6 热门榜单（A股/港股/美股 成交量前五）
+    # 2026-08-06 起：不再单独渲染三个成交量榜单栏目（原始榜单不再占版面）。
+    # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 关注清单 / 「N 个市场
+    # 榜单活跃」结论）与数据审计栏的信号源；榜单的 AI 研判结果由「AI 盘研判」与
+    # 「AI 量化 · A股与港股最近收盘流动性报告」呈现。
 
-    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
-    # 一对一模式：每个市场独立成一个栏目（三个排行榜）
-    if hot.get("status") == "success":
-        for mlabel, m_en in [("A股", "A-SHARES"), ("港股", "HK-STOCKS"), ("美股", "US-STOCKS")]:
-            mdata = hot_markets.get(mlabel) or {}
-            stocks = mdata.get("stocks", [])
-            if not stocks:
-                continue
-
-            rows = []
-            for i, s in enumerate(stocks[:HOT_STOCK_TOP_N]):
-                amount_display = _format_amount(s.get("amount"))
-                pct = _percent_number(s.get("change_pct"))
-                trend = _trend_badge(pct, compact=True)
-                trend_color = (C_GREEN if (pct or 0) > 0 else
-                               (C_RED if (pct or 0) < 0 else C_AMBER))
-                label = (f'{_rank_span(i)}&nbsp; <b>{_esc(s.get("name", "?"))}</b> '
-                         f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
-                value = (f'<span style="display:block;color:{C_INK};font-weight:900;">'
-                         f'{amount_display}</span><span style="display:block;padding-top:4px;">{trend}</span>')
-                rows.append((label, value, trend_color))
-
-            content = _mini_table(rows) + _note(f"榜单为最近交易日收盘后的{mlabel}成交量排名。")
-            sections.append((
-                f"{m_en} RANK", f"{mlabel}成交量前五",
-                content,
-                _source_badge(hot),
-                f"{_source_note(hot)} · {mlabel}成交量前五"
-            ))
-
-    # 4.9 A股 / 港股最近收盘流动性报告（AI 量化）
+    # 4.7 A股 / 港股最近收盘流动性报告（AI 量化）
     if liq.get("status") == "success":
         sections.append((
             "A/H LIQUIDITY", "AI 量化 · A股与港股最近收盘流动性报告",
@@ -2149,7 +1947,7 @@ def generate_report(data, date_display, date_str):
             f"{_source_note(liq)} · 最近收盘样本 {liq.get('sample_size', LIQUIDITY_SAMPLE_SIZE)} 只/市场",
         ))
 
-    # 4.10 AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    # 4.8 AI 盘研判（规则合成综合研判，作为导读首位栏目）
     if AI_ANALYSIS_ENABLED:
         ai_result = build_ai_analysis(data)
         if ai_result.get("available"):
@@ -2267,7 +2065,7 @@ def generate_report(data, date_display, date_str):
 > TREND KEY: [▲ 涨 / UP] [▼ 跌 / DOWN] [■ 平 / FLAT] [◆ AI CORE]
 </div>
 <div style="font-size:9px;color:{C_FAINT};letter-spacing:.5px;line-height:1.6;padding-top:6px;font-family:{FONT_MONO};">
-DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Rank/Liquid) · Reddit · Sina · NAVER · AI_RULE<br>
+DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Liquid) · Sina · AI_RULE<br>
 SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-PIXEL-QUEST v3<br>
 <span style="color:{C_ACCENT};">█</span><span style="color:{C_CYAN};">▓</span><span style="color:{C_ACCENT_MAGENTA};">▒</span> PRESS START TO CONTINUE
 </div>
@@ -2852,10 +2650,8 @@ def main():
     if args.dry_run:
         print("\n🔍 预览模式（不推送、不保存）")
         print(f"   数据源: 港股名家频道({len(data.get('港股名家频道', {}).get('channels', []))}频道可抓取) | "
-              f"WSB({len(data.get('Reddit WSB热议', {}).get('stocks', []))}只) | "
               f"全球头条({len(data.get('全球头条', {}).get('headlines', []))}条) | "
               f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
-              f"韩股({len(data.get('韩股半导体', {}).get('headlines', []))}条) | "
               f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
               f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只) | "
               f"A港流动性({sum((m.get('sample_count') or 0) for m in data.get('A港流动性', {}).get('markets', {}).values())}只样本)")
