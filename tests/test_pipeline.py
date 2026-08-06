@@ -459,6 +459,43 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertEqual(meta["total_sources"], 9)  # 数据源扩展到 9 个（含 A港流动性）
 
 
+class RetroPixelVisualTests(unittest.TestCase):
+    """Retro Pixel v3：大图标、明确涨跌与 AI 主结论必须稳定渲染。"""
+
+    def test_trend_badge_uses_color_arrow_and_text_triple_encoding(self):
+        up = pipeline._trend_badge(1.25)
+        down = pipeline._trend_badge("-2.50%")
+        flat = pipeline._trend_badge(0)
+        self.assertIn("▲ 涨 +1.25%", up)
+        self.assertIn(pipeline.C_GREEN, up)
+        self.assertIn("▼ 跌 -2.50%", down)
+        self.assertIn(pipeline.C_RED, down)
+        self.assertIn("■ 平 0.00%", flat)
+        self.assertIn(pipeline.C_AMBER, flat)
+
+    def test_report_prioritizes_pixel_icons_and_ai_core_content(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["实时行情"]["quotes"]["深证成指"] = {
+            "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
+        }
+        # 榜单同样必须出现明确的跌幅色块，而不是只显示成交额。
+        data["热门榜单"]["markets"]["A股"]["stocks"][0]["change_pct"] = "-2.50"
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+
+        self.assertIn("OCTOPUS_OS v3.0", html)
+        self.assertIn("aria-label=\"章鱼像素图标\"", html)
+        self.assertIn("LVL 01 // AI READ", html)
+        self.assertIn("AI CORE OUTPUT", html)
+        self.assertIn("AI 主结论 // CORE THESIS", html)
+        self.assertIn("READ THIS FIRST // 先看结论", html)
+        self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
+        self.assertIn("▼ 跌 -2.50%", html)  # 深证行情
+        self.assertIn("▼ -2.50%", html)     # A股成交榜 compact badge
+        self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
+        self.assertIn("▼ 跌 / DOWN", html)
+        self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
+
+
 class PushResultTests(unittest.TestCase):
     """推送结果必须明确返回 True/False，且支持 txt/html 模板参数。"""
 
