@@ -450,9 +450,11 @@ class NewLayoutRenderingTests(unittest.TestCase):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("热门榜单", html)
-        self.assertIn("A股成交量前五", html)
-        self.assertIn("美股成交量前五", html)
+        self.assertIn("热门榜单", html)  # 仍作为数据源出现在数据审计栏
+        # 2026-08-06 起不再单独渲染三个成交量榜单栏目，只保留 AI 研判结果
+        self.assertNotIn("A股成交量前五", html)
+        self.assertNotIn("港股成交量前五", html)
+        self.assertNotIn("美股成交量前五", html)
         self.assertIn("美联储释放降息信号", html)
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)
@@ -482,8 +484,6 @@ class RetroPixelVisualTests(unittest.TestCase):
         data["实时行情"]["quotes"]["深证成指"] = {
             "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
         }
-        # 榜单同样必须出现明确的跌幅色块，而不是只显示成交额。
-        data["热门榜单"]["markets"]["A股"]["stocks"][0]["change_pct"] = "-2.50"
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
 
         self.assertIn("OCTOPUS_OS v3.0", html)
@@ -494,7 +494,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情
-        self.assertIn("▼ -2.50%", html)     # A股成交榜 compact badge
+        self.assertIn("▼ -2.50%", html)     # AI 盘研判 TECH READ 的 compact 徽标
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式

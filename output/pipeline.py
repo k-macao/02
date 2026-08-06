@@ -18,8 +18,10 @@
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
      Google News 中文版，标题本身即中文，无需翻译。
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
-  6. 新增「热门榜单」区块：最近交易日收盘后 A股/港股/美股 成交量前五
-     （东方财富 push2 免费接口），按市场一对一独立成栏展示。
+  6. 新增「热门榜单」数据源：最近交易日收盘后 A股/港股/美股 成交量前五
+     （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
+     原始榜单数据仅作为 AI 盘研判、AI 量化流动性报告与数据审计的信号源，
+     页面只保留 AI 对三个榜单成交量的研判结果。
   6.1 新增「AI 量化 · A股与港股最近收盘流动性报告」：聚合 A股/港股样本成交额、
       TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，输出 0-100 流动性评分、
       资金定性和成交额锚点；规则合成，可复现，非投资建议。
@@ -41,7 +43,7 @@
      章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
      编码，并覆盖行情、成交榜和流动性锚点。AI 盘研判首屏使用 AI CORE 主控卡、方向 / 信号分 /
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
-     升级为 OCTOPUS_OS v3。栏目结构与一对一排行榜保持不变。
+     升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
      PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
@@ -2010,7 +2012,6 @@ def generate_report(data, date_display, date_str):
     em = data.get("东财快讯", {})
     em_headlines = em.get("headlines", [])
     hot = data.get("热门榜单", {})
-    hot_markets = hot.get("markets", {})
     liq = data.get("A港流动性", {})
 
     # 2. 数据源清单（顺序即页面展示顺序）
@@ -2110,35 +2111,11 @@ def generate_report(data, date_display, date_str):
             f"{_source_note(wsb)} · 最新帖日期 {_esc(wsb.get('content_date') or '—')}",
         ))
 
-    # 4.8 热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
-    # 一对一模式：每个市场独立成一个栏目（三个排行榜）
-    if hot.get("status") == "success":
-        for mlabel, m_en in [("A股", "A-SHARES"), ("港股", "HK-STOCKS"), ("美股", "US-STOCKS")]:
-            mdata = hot_markets.get(mlabel) or {}
-            stocks = mdata.get("stocks", [])
-            if not stocks:
-                continue
-
-            rows = []
-            for i, s in enumerate(stocks[:HOT_STOCK_TOP_N]):
-                amount_display = _format_amount(s.get("amount"))
-                pct = _percent_number(s.get("change_pct"))
-                trend = _trend_badge(pct, compact=True)
-                trend_color = (C_GREEN if (pct or 0) > 0 else
-                               (C_RED if (pct or 0) < 0 else C_AMBER))
-                label = (f'{_rank_span(i)}&nbsp; <b>{_esc(s.get("name", "?"))}</b> '
-                         f'<span style="font-size:10px;color:{C_FAINT};">{_esc(str(s.get("code", "")))}</span>')
-                value = (f'<span style="display:block;color:{C_INK};font-weight:900;">'
-                         f'{amount_display}</span><span style="display:block;padding-top:4px;">{trend}</span>')
-                rows.append((label, value, trend_color))
-
-            content = _mini_table(rows) + _note(f"榜单为最近交易日收盘后的{mlabel}成交量排名。")
-            sections.append((
-                f"{m_en} RANK", f"{mlabel}成交量前五",
-                content,
-                _source_badge(hot),
-                f"{_source_note(hot)} · {mlabel}成交量前五"
-            ))
+    # 4.8 热门榜单（A股/港股/美股 成交量前五）
+    # 2026-08-06 起：不再单独渲染三个成交量榜单栏目（原始榜单不再占版面）。
+    # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 关注清单 / 「N 个市场
+    # 榜单活跃」结论）与数据审计栏的信号源；榜单的 AI 研判结果由「AI 盘研判」与
+    # 「AI 量化 · A股与港股最近收盘流动性报告」呈现。
 
     # 4.9 A股 / 港股最近收盘流动性报告（AI 量化）
     if liq.get("status") == "success":
