@@ -107,6 +107,30 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
 
+# ============================================================
+# 推送主题（2026-08-21 起，一对一 / 一对多推送共用）
+# ============================================================
+# guizang —— 默认主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
+#   （github.com/op7418/guizang-ppt-skill），改造成适合微信阅读的竖版长页面：
+#   暖米白电子纸 + 墨黑 Hero / 章节幕封、衬线标题（荧光绿）、非衬线正文（墨黑）、
+#   等宽元信息、发丝线与大留白；全部字体偏小；宽表格自动转纵向 rowline 避免
+#   横向溢出；因子分析以杂志式信号矩阵呈现（保留涨跌颜色、概率与证据）。
+#   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
+# pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
+PUSH_THEMES = ("guizang", "pixel")
+DEFAULT_PUSH_THEME = "guizang"
+
+
+def _resolve_push_theme(name=None):
+    """归一化推送主题：空 / 非法值一律回落到默认主题 guizang。"""
+    theme = name if name is not None else os.environ.get("OCTOPUS_PUSH_THEME", "")
+    theme = str(theme or "").strip().lower()
+    return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
+
+
+# 当前默认主题（环境变量 OCTOPUS_PUSH_THEME 可覆盖；命令行 --theme 优先）
+PUSH_THEME = _resolve_push_theme()
+
 # 请求头
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1072,6 +1096,36 @@ FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
         "PingFang SC, Microsoft YaHei, sans-serif")
 FONT_MONO = "'Courier New', Courier, monospace"
 
+# ============================================================
+# GUIZANG 主题调色板：「电子杂志 × 电子墨水」(Style A · 墨水经典基底)
+# —— 暖米白电子纸 + 墨黑 Hero；衬线标题 + 非衬线正文 + 等宽元信息
+# —— 荧光绿只用于墨黑底上的标题 / 强调（暖米白底上小字会过曝，正文保持墨黑）
+# ============================================================
+GZ_PAPER = "#F1EFEA"        # 暖米白电子纸（页面底）
+GZ_PAPER_TINT = "#E8E5DE"   # 注记 / 引言底色（纸同系加深一档）
+GZ_INK = "#0A0A0B"          # 墨黑（正文）
+GZ_INK_TINT = "#18181A"     # 墨黑（Hero / 章节幕封底）
+GZ_HAIR = "#C9C4B8"         # 发丝线（纸底）
+GZ_HAIR_INK = "#3A3A3E"     # 发丝线（墨黑底）
+GZ_CREAM = "#F1EFEA"        # 墨黑底上的正文
+GZ_META = "#7E7A6E"         # 等宽元信息（纸底）
+GZ_META_INK = "#9B978C"     # 等宽元信息（墨黑底）
+GZ_NEON = "#B6F542"         # 荧光绿（标题 / 强调）
+GZ_UP = "#257A36"           # 涨（纸底）
+GZ_DOWN = "#BE4B32"         # 跌（纸底）
+GZ_FLAT = "#7E7A6E"         # 平（纸底）
+GZ_UP_INK = "#8FE06E"       # 涨（墨黑底）
+GZ_DOWN_INK = "#FF8A6E"     # 跌（墨黑底）
+GZ_FLAT_INK = "#9B978C"     # 平（墨黑底）
+GZ_WARN = "#A66A1F"         # 警示（纸底）
+GZ_WARN_INK = "#E5B567"     # 警示（墨黑底）
+# 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
+GZ_SERIF = ("'Noto Serif SC', 'Songti SC', STSong, 'SimSun', Georgia, "
+            "'Times New Roman', serif")
+GZ_SANS = ("'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', "
+           "'Helvetica Neue', Arial, sans-serif")
+GZ_MONO = "'IBM Plex Mono', 'Courier New', Courier, monospace"
+
 
 def _sq(color=C_ACCENT, size=8):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">■</span>'
@@ -1399,6 +1453,806 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 {caption_html}
 {content}
 </div>'''
+
+
+# ============================================================
+# GUIZANG 主题排版（电子杂志 × 电子墨水 · 微信竖版长页面）
+# —— 衬线标题（荧光绿）+ 非衬线正文（墨黑）+ 等宽元信息 + 发丝线 + 大留白
+# —— 全部字体偏小；宽表格 → 纵向 rowline；因子分析 → 杂志式信号矩阵
+# —— 纯内联样式 + 表格布局，无 JS / 无外部 CSS / 无 WebGL，PushPlus/微信兼容
+# ============================================================
+
+def _quote_parts(market, label, precision=2):
+    """主题无关的行情取值：(价格字符串, 涨跌幅 float|None)；缺失返回 (None, None)。"""
+    quote = (market.get("quotes", {}) or {}).get(label)
+    if not quote:
+        return None, None
+    try:
+        price_str = f"{float(quote['price']):,.{precision}f}"
+    except (TypeError, ValueError, KeyError):
+        return None, None
+    return price_str, _percent_number(quote.get("change_pct", 0))
+
+
+def gz_trend_badge(value, compact=False):
+    """涨跌徽标：颜色 + 箭头 + 涨/跌/平 三重编码（杂志式描边，无硬投影）。"""
+    pct = _percent_number(value)
+    if pct is None:
+        return (f'<span style="display:inline-block;border:1px solid {GZ_HAIR};color:{GZ_FLAT};'
+                f'padding:1px 7px;font-size:9px;line-height:16px;font-family:{GZ_MONO};'
+                f'white-space:nowrap;">■ --</span>')
+    if pct > 0:
+        color, arrow, word = GZ_UP, "▲", "涨"
+    elif pct < 0:
+        color, arrow, word = GZ_DOWN, "▼", "跌"
+    else:
+        color, arrow, word = GZ_FLAT, "■", "平"
+    label = f"{arrow} {pct:+.2f}%" if compact else f"{arrow} {word} {pct:+.2f}%"
+    if pct == 0:
+        label = f"{arrow} 0.00%" if compact else f"{arrow} {word} 0.00%"
+    return (f'<span style="display:inline-block;border:1px solid {color};color:{color};'
+            f'padding:1px 7px;font-size:9px;font-weight:700;line-height:16px;'
+            f'font-family:{GZ_MONO};white-space:nowrap;">{label}</span>')
+
+
+def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_HAIR, size=9):
+    """信号强度发丝格：实心 ■ + 空心 □，不依赖 CSS 渐变。"""
+    maximum = max(1, int(maximum or 1))
+    n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
+    return (f'<span style="color:{lit};font-size:{size}px;letter-spacing:2px;line-height:1;">'
+            f'{"■" * n}</span>'
+            f'<span style="color:{off};font-size:{size}px;letter-spacing:2px;line-height:1;">'
+            f'{"□" * (cells - n)}</span>')
+
+
+def gz_badge(text, kind="ok", on_ink=False):
+    """标签胶囊（Style A .tag）：单色发丝边框 + 等宽小字，无硬投影。"""
+    if on_ink:
+        styles = {"ok": GZ_UP_INK, "warn": GZ_WARN_INK, "bad": GZ_DOWN_INK, "ai": GZ_NEON}
+    else:
+        styles = {"ok": GZ_UP, "warn": GZ_WARN, "bad": GZ_DOWN, "ai": GZ_INK}
+    color = styles.get(kind, GZ_INK)
+    dot = "◆" if kind == "ai" else "●"
+    return (f'<span style="display:inline-block;border:1px solid {color};color:{color};'
+            f'padding:0 6px;margin-left:6px;font-size:8px;font-weight:700;line-height:15px;'
+            f'font-family:{GZ_MONO};letter-spacing:1px;vertical-align:middle;white-space:nowrap;">'
+            f'{dot} {_esc(text)}</span>')
+
+
+def gz_source_badge(item, on_ink=False):
+    if item.get("status") != "success":
+        return gz_badge("OFFLINE", "bad", on_ink)
+    if item.get("is_today"):
+        return gz_badge("LIVE · 当天", "ok", on_ink)
+    return gz_badge(f"LAG {item.get('content_date') or '-'}", "warn", on_ink)
+
+
+def gz_note(text):
+    return (f'<div style="margin-top:14px;padding-top:8px;border-top:1px solid {GZ_HAIR};'
+            f'font-size:9px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.8;'
+            f'letter-spacing:.3px;">/* {text} */</div>')
+
+
+def gz_subsection(text):
+    return (f'<div style="margin-top:16px;padding-top:10px;border-top:1px solid {GZ_INK};'
+            f'font-size:11px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};'
+            f'letter-spacing:1px;">{text}</div>')
+
+
+def gz_rowline(label_html, right_html, pad="9px"):
+    """rowline：一行一条信息（左等宽元信息 / 右取值 + 涨跌徽标），手机竖排不横向溢出。"""
+    return (
+        f'<tr>'
+        f'<td style="padding:{pad} 0;border-bottom:1px solid {GZ_HAIR};font-size:10px;'
+        f'color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;vertical-align:top;'
+        f'line-height:1.7;">{label_html}</td>'
+        f'<td align="right" style="padding:{pad} 0;border-bottom:1px solid {GZ_HAIR};'
+        f'font-size:11px;color:{GZ_INK};vertical-align:top;line-height:1.7;'
+        f'white-space:nowrap;">{right_html}</td>'
+        f'</tr>'
+    )
+
+
+def gz_table(rows_html):
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;">{rows_html}</table>')
+
+
+def gz_market_row(label, price_str, pct):
+    """行情 rowline：左指数名 / 右价格 + 涨跌徽标（宽表格的纵向转换）。"""
+    if price_str is None:
+        right = (f'<span style="font-size:9px;color:{GZ_FLAT};font-family:{GZ_MONO};">'
+                 f'■ 数据暂缺</span>')
+    else:
+        value = (f'<span style="font-size:13px;font-weight:700;color:{GZ_INK};'
+                 f'font-family:{GZ_MONO};letter-spacing:.5px;">{price_str}</span> ')
+        right = value + (
+            gz_trend_badge(pct) if pct is not None
+            else f'<span style="font-size:9px;color:{GZ_FLAT};font-family:{GZ_MONO};">■ 数据暂缺</span>')
+    return gz_rowline(_esc(label), right)
+
+
+def gz_market_section(market):
+    """行情速览：两个 group 的 rowline（自动避免横向溢出）。"""
+    rows = []
+    for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
+        price_str, pct = _quote_parts(market, label, precision)
+        rows.append(gz_market_row(label, price_str, pct))
+    a_rows = []
+    for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
+        price_str, pct = _quote_parts(market, label, precision)
+        a_rows.append(gz_market_row(label, price_str, pct))
+    return (gz_subsection("全球与美股") + gz_table("".join(rows))
+            + gz_subsection("A股四指数") + gz_table("".join(a_rows))
+            + gz_note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
+
+
+def gz_headline_row(it, index=None):
+    """杂志式头条行：等宽序号 + 非衬线标题 + 等宽溯源。"""
+    marker = f"{index:02d}" if isinstance(index, int) else "——"
+    display = it.get("title") if isinstance(it, dict) else it
+    sub = ""
+    if isinstance(it, dict):
+        parts = []
+        if it.get("source"):
+            parts.append(it["source"])
+        if it.get("published_cst") and it.get("published_cst") != "—":
+            parts.append(it["published_cst"])
+        sub = " · ".join(parts)
+    sub_html = (f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};'
+                f'padding-top:3px;letter-spacing:.5px;">{_esc(sub[:140])}</div>' if sub else "")
+    return (
+        f'<tr>'
+        f'<td width="26" valign="top" style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};'
+        f'font-size:9px;color:{GZ_META};font-family:{GZ_MONO};">{marker}</td>'
+        f'<td style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};vertical-align:top;">'
+        f'<div style="font-size:12.5px;color:{GZ_INK};line-height:1.65;">{_esc(display[:120])}</div>'
+        f'{sub_html}</td></tr>'
+    )
+
+
+def gz_em_news_row(it, index=None):
+    """东财快讯行：等宽序号 + 标题 + 时间/摘要等宽溯源。"""
+    marker = f"{index:02d}" if isinstance(index, int) else "——"
+    if isinstance(it, dict):
+        title = it.get("title") or ""
+        sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
+    else:
+        title, sub = it, ""
+    sub_html = (f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};'
+                f'padding-top:3px;letter-spacing:.5px;">{_esc(sub[:110])}</div>' if sub else "")
+    return (
+        f'<tr>'
+        f'<td width="26" valign="top" style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};'
+        f'font-size:9px;color:{GZ_META};font-family:{GZ_MONO};">{marker}</td>'
+        f'<td style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};vertical-align:top;">'
+        f'<div style="font-size:12.5px;color:{GZ_INK};line-height:1.65;">{_esc(title[:120])}</div>'
+        f'{sub_html}</td></tr>'
+    )
+
+
+def gz_item_row(icon, text, sub="", icon_color=None, row_bg=None):
+    """通用条目行（icon_color / row_bg 为 pixel 主题参数，guizang 忽略底色）。"""
+    sub_html = (f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};'
+                f'padding-top:3px;letter-spacing:.5px;line-height:1.6;">{sub}</div>' if sub else "")
+    return (
+        f'<tr>'
+        f'<td width="26" valign="top" style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};'
+        f'font-size:10px;font-weight:700;color:{icon_color or GZ_INK};font-family:{GZ_MONO};">{icon}</td>'
+        f'<td style="padding:10px 0;border-bottom:1px solid {GZ_HAIR};font-size:12.5px;'
+        f'color:{GZ_INK};line-height:1.65;">{text}{sub_html}</td></tr>'
+    )
+
+
+def gz_channel_block(ch):
+    """频道块：发丝线分隔 + 衬线频道名 + 杂志式条目列表（取代像素聊天泡泡）。"""
+    name = _esc(ch.get("name", "?"))
+    desc = _esc(ch.get("desc", ""))
+    url = _esc(ch.get("url", ""))
+    videos = ch.get("videos") or []
+    if not videos:
+        note = _esc(ch.get("note") or "OFFLINE :: NO SIGNAL [暂缺]")
+        return (
+            f'<div style="margin-top:16px;padding-top:12px;border-top:1px solid {GZ_HAIR};">'
+            f'<div style="font-size:12.5px;font-weight:700;color:{GZ_FLAT};">'
+            f'{name} {gz_badge("暂缺", "bad")}</div>'
+            f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};padding-top:4px;'
+            f'letter-spacing:.5px;line-height:1.7;">{desc} · {note}</div></div>'
+        )
+    badge = gz_badge("LIVE · 当天", "ok") if ch.get("is_today") else gz_badge("ARCHIVE", "warn")
+    name_link = f'<a href="{url}" style="color:{GZ_INK};text-decoration:none;">{name}</a>' if url else name
+    items = []
+    for vi, v in enumerate(videos[:CHANNEL_TOP_N], 1):
+        title = _esc(v.get("title", "")[:110])
+        pub = _esc(v.get("published_cst", ""))
+        link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{GZ_INK};text-decoration:none;">{title}</a>'
+        new_tag = (f' <span style="color:{GZ_UP};font-size:8px;font-weight:700;'
+                   f'font-family:{GZ_MONO};letter-spacing:1px;">[NEW · 当天]</span>'
+                   if v.get("is_today") else "")
+        items.append(
+            f'<tr>'
+            f'<td width="24" valign="top" style="padding:8px 0;border-bottom:1px solid {GZ_HAIR};'
+            f'font-size:9px;color:{GZ_META};font-family:{GZ_MONO};">{vi:02d}</td>'
+            f'<td style="padding:8px 0;border-bottom:1px solid {GZ_HAIR};vertical-align:top;">'
+            f'<div style="font-size:12px;color:{GZ_INK};line-height:1.6;">{link}{new_tag}</div>'
+            f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};padding-top:2px;'
+            f'letter-spacing:.5px;">{pub}</div></td></tr>'
+        )
+    return (
+        f'<div style="margin-top:18px;padding-top:14px;border-top:1px solid {GZ_HAIR};">'
+        f'<div style="font-size:13.5px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};'
+        f'letter-spacing:.5px;">{name_link} {badge}</div>'
+        f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};padding-top:4px;'
+        f'letter-spacing:.5px;line-height:1.7;">{desc}</div>'
+        f'{gz_table("".join(items))}</div>'
+    )
+
+
+def gz_status_footer(sources):
+    """数据审计行：绿/红点 + 来源名 + 状态徽标 + 等宽抓取时间。"""
+    rows = []
+    for name, s in sources:
+        if s.get("status") == "success":
+            rows.append((GZ_UP, _esc(name), gz_source_badge(s),
+                         f'@ {_esc(s.get("fetched_at", "—"))}'))
+        else:
+            detail = _esc(s.get("error", "暂时不可用"))
+            rows.append((GZ_DOWN, _esc(name),
+                         f'<span style="font-size:8px;font-weight:700;color:{GZ_DOWN};'
+                         f'font-family:{GZ_MONO};letter-spacing:1px;">[x FAIL]</span>',
+                         f'（{detail}）@ {_esc(s.get("fetched_at", "—"))}'))
+    trs = []
+    for color, name, badge, tail in rows:
+        trs.append(
+            f'<tr>'
+            f'<td width="8" valign="top" style="padding:6px 6px 6px 0;font-size:8px;color:{color};line-height:1.4;">●</td>'
+            f'<td style="padding:6px 0;border-bottom:1px solid {GZ_HAIR};font-size:10.5px;'
+            f'color:{GZ_INK};line-height:1.8;">{name} {badge} '
+            f'<span style="color:{GZ_META};font-family:{GZ_MONO};font-size:9px;">{tail}</span></td></tr>'
+        )
+    return gz_table("".join(trs))
+
+
+def gz_alert(text, color=None):
+    """引言式警示条：纸同系加深底 + 左侧色条（无硬投影）。"""
+    c = color or GZ_INK
+    return (
+        f'<div style="margin-bottom:14px;padding:10px 12px;background:{GZ_PAPER_TINT};'
+        f'border-left:2px solid {c};font-size:11px;color:{GZ_INK};line-height:1.8;">'
+        f'<span style="font-family:{GZ_MONO};font-size:8px;font-weight:700;letter-spacing:1px;'
+        f'color:{c};">ALERT · </span>{text}</div>'
+    )
+
+
+def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
+    border = "" if first else f"border-left:1px solid {GZ_HAIR_INK};"
+    padding = "0" if first else "12px"
+    return (
+        f'<td width="33%" valign="top" style="padding:8px 0;{border}">'
+        f'<div style="padding-left:{padding};">'
+        f'<div style="font-size:8px;color:{GZ_META_INK};letter-spacing:1px;font-family:{GZ_MONO};">{label}</div>'
+        f'<div style="font-size:11px;font-weight:700;color:{value_color};padding-top:3px;'
+        f'font-family:{GZ_MONO};">{value}</div></div></td>'
+    )
+
+
+def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
+    """章节幕封：墨黑底 + 荧光绿衬线标题 + 等宽 kicker（Style A 章节页）；正文落回暖米白纸。"""
+    caption_html = (f'<div style="font-size:9px;color:{GZ_META_INK};font-family:{GZ_MONO};'
+                    f'padding-top:6px;letter-spacing:.5px;line-height:1.7;">{caption}</div>'
+                    if caption else "")
+    return (
+        f'<div style="margin-top:30px;background:{GZ_INK_TINT};padding:16px 18px 14px;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>'
+        f'<td style="font-size:9px;color:{GZ_NEON};font-family:{GZ_MONO};font-weight:700;'
+        f'letter-spacing:2px;line-height:1;">{num} / {kicker_en}</td>'
+        f'<td align="right" valign="middle">{badge_html}</td>'
+        f'</tr></table>'
+        f'<div style="font-size:17px;font-weight:700;color:{GZ_NEON};font-family:{GZ_SERIF};'
+        f'letter-spacing:1px;padding-top:9px;line-height:1.4;">{title}</div>'
+        f'{caption_html}</div>'
+        f'<div style="padding:14px 2px 4px;">{content}</div>'
+    )
+
+
+def gz_ai_analysis_block(res):
+    """AI 盘研判（guizang）：杂志式信号矩阵 —— 方向 / 信号分 / 置信度 / 研判概率
+    + 板块热度 / 技术速读 / 风险提示 / 明日主题（保留涨跌颜色、概率与证据）。"""
+    score = int(res["score"])
+    if score > 8:
+        arrow, bias_color = "▲", GZ_UP_INK
+    elif score < -8:
+        arrow, bias_color = "▼", GZ_DOWN_INK
+    else:
+        arrow, bias_color = "■", GZ_FLAT_INK
+    # 研判概率：由信号分规则估算（|score| 越高概率上界越高）；非统计预测，页脚已注明
+    prob = 50 + min(30, abs(score) * 30 // 100)
+    prob_chip = (f'<span style="display:inline-block;border:1px solid {bias_color};'
+                 f'color:{bias_color};padding:1px 7px;font-size:9px;font-weight:700;'
+                 f'line-height:16px;font-family:{GZ_MONO};white-space:nowrap;">P {prob}%</span>')
+
+    # ① 主控条（墨黑）：方向 + 信号分 + 置信度 + 研判概率 + 信号格
+    verdict = (
+        f'<div style="background:{GZ_INK_TINT};padding:14px 16px;">'
+        f'<div style="font-size:8px;color:{GZ_META_INK};font-family:{GZ_MONO};letter-spacing:2px;">'
+        f'MARKET BIAS · 市场倾向 // RULESET v3</div>'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px;"><tr>'
+        f'<td valign="middle">'
+        f'<div style="font-size:24px;font-weight:700;color:{bias_color};font-family:{GZ_SERIF};'
+        f'line-height:1.2;">{_esc(res["sentiment_label"])} {arrow}</div>'
+        f'<div style="font-size:8px;color:{GZ_META_INK};font-family:{GZ_MONO};padding-top:4px;'
+        f'letter-spacing:1px;">{_esc(res["sentiment_en"])}</div>'
+        f'</td>'
+        f'<td align="right" valign="middle">'
+        f'<div style="font-size:9px;color:{GZ_META_INK};font-family:{GZ_MONO};letter-spacing:1px;">'
+        f'SIGNAL {score:+d} · CONF {_esc(res["confidence"])}</div>'
+        f'<div style="padding-top:6px;text-align:right;">{prob_chip} '
+        f'<span style="font-size:8px;color:{GZ_META_INK};font-family:{GZ_MONO};">研判概率</span></div>'
+        f'<div style="padding-top:5px;text-align:right;">'
+        f'{gz_meter(abs(score), 100, 10, bias_color, GZ_HAIR_INK, 9)}</div>'
+        f'</td>'
+        f'</tr></table></div>'
+    )
+
+    # ② 主结论（纸）：衬线导语
+    thesis = (
+        f'<div style="margin-top:12px;padding:10px 12px;background:{GZ_PAPER_TINT};">'
+        f'<div style="font-size:8px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;">'
+        f'READ THIS FIRST · 先看结论</div>'
+        f'<div style="font-size:12.5px;color:{GZ_INK};line-height:1.9;padding-top:4px;'
+        f'font-weight:700;">{_esc(res["reason"])}</div></div>'
+    )
+
+    # ③ 板块热度 rowline（保留命中数能量格）
+    if res["sectors_strong"]:
+        max_hits = max(cnt for _, cnt in res["sectors_strong"])
+        sec_rows = "".join(
+            gz_rowline(_esc(sec),
+                       f'{gz_meter(cnt, max_hits, 5, GZ_INK, GZ_HAIR)} '
+                       f'<span style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};">{cnt} HIT</span>')
+            for sec, cnt in res["sectors_strong"])
+        sectors_html = gz_subsection("SECTOR SCAN · 板块热度") + gz_table(sec_rows)
+        if res["sectors_weak"]:
+            sectors_html += (
+                f'<div style="margin-top:10px;padding:8px 10px;border-left:2px solid {GZ_DOWN};'
+                f'font-size:11px;color:{GZ_DOWN};font-weight:700;line-height:1.7;">'
+                f'▼ 承压板块 · {" / ".join(_esc(s) for s in res["sectors_weak"])}</div>')
+    else:
+        sectors_html = (gz_subsection("SECTOR SCAN · 板块热度")
+                        + f'<div style="font-size:10px;color:{GZ_FLAT};font-family:{GZ_MONO};'
+                          f'padding:8px 0;">■ NO SECTOR SIGNAL</div>')
+
+    # ④ 技术速读 rowline（保留 ▲/▼/■ 涨跌颜色与档位）
+    if res["tech_rows"]:
+        tech_rows = "".join(
+            gz_rowline(_esc(label),
+                       f'{gz_trend_badge(pct, compact=True)} '
+                       f'<span style="font-size:10px;font-weight:700;color:{c};">{_esc(band)}</span>')
+            for label, pct, band, c in res["tech_rows"])
+        tech_html = (gz_subsection("TECH READ · 指数动能") + gz_table(tech_rows)
+                     + f'<div style="font-size:11.5px;color:{GZ_INK};line-height:1.8;padding-top:10px;">'
+                       f'<span style="font-family:{GZ_MONO};font-size:8px;color:{GZ_META};'
+                       f'letter-spacing:1px;">◆ AI 解读 · </span>'
+                       f'{_esc(res["tech_read"])}</div>')
+    else:
+        tech_html = (gz_subsection("TECH READ · 指数动能")
+                     + f'<div style="font-size:10px;color:{GZ_FLAT};font-family:{GZ_MONO};'
+                       f'padding:8px 0;">■ NO MARKET DATA</div>')
+
+    # ⑤ 风险提示（保留风险项与来源证据）
+    if res["risks"]:
+        risk_rows = "".join(
+            gz_item_row("!", _esc(t), _esc(src), icon_color=GZ_DOWN)
+            for t, src in res["risks"])
+        risk_html = gz_subsection("RISK LOG · 风险提示") + gz_table(risk_rows)
+    else:
+        risk_html = (gz_subsection("RISK LOG · 风险提示")
+                     + f'<div style="font-size:10.5px;color:{GZ_UP};font-weight:700;padding:8px 0;">'
+                       f'✓ CLEAR · 未检出显著风险舆情</div>')
+
+    # ⑥ 明日关注（2026-08-06 起只保留主题行）
+    if res["themes"]:
+        watch_html = (
+            f'<div style="margin-top:16px;padding:9px 12px;background:{GZ_INK_TINT};'
+            f'font-size:11.5px;font-weight:700;color:{GZ_NEON};font-family:{GZ_SERIF};'
+            f'letter-spacing:.5px;">★ 主题解锁 · {_esc(res["themes"])}</div>')
+    else:
+        watch_html = (f'<div style="margin-top:16px;font-size:10px;color:{GZ_FLAT};'
+                      f'font-family:{GZ_MONO};padding:8px 0;">■ NO WATCH THEME</div>')
+
+    note_html = gz_note("AI 盘研判由公开数据经确定性规则合成 // 研判概率为规则估算（信号分映射）· 非统计预测 // 非投资建议，决策需独立判断")
+    return verdict + thesis + sectors_html + tech_html + risk_html + watch_html + note_html
+
+
+def gz_liquidity_market_block(label, stats):
+    """单市场流动性研判（guizang）：衬线评分大字 + 发丝格 + 聚合指标 rowline。"""
+    if not stats.get("sample_count"):
+        return (f'<div style="margin-top:14px;padding-top:10px;border-top:1px solid {GZ_HAIR};'
+                f'font-size:10px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:.5px;">'
+                f'■ {_esc(label)} :: LIQUIDITY = NULL [NO SIGNAL]</div>')
+    score = int(stats.get("score", 0))
+    color = GZ_UP if score >= 58 else (GZ_DOWN if score < 42 else GZ_INK)
+    breadth = (
+        f'<span style="color:{GZ_UP};font-weight:700;font-family:{GZ_MONO};font-size:10px;">▲ {stats.get("advancers", 0)}</span> / '
+        f'<span style="color:{GZ_DOWN};font-weight:700;font-family:{GZ_MONO};font-size:10px;">▼ {stats.get("decliners", 0)}</span> / '
+        f'<span style="color:{GZ_FLAT};font-weight:700;font-family:{GZ_MONO};font-size:10px;">■ {stats.get("flats", 0)}</span>')
+    rows = "".join([
+        gz_rowline("SAMPLE_VOL",
+                   f'<span style="font-family:{GZ_MONO};font-size:11px;">{_format_amount(stats.get("total_amount"))}</span>'),
+        gz_rowline("TOP10_SHARE", f'<span style="font-family:{GZ_MONO};font-size:11px;">{stats.get("top10_share", 0) * 100:.1f}%</span>'),
+        gz_rowline("ADV / DEC / FLAT", breadth),
+        gz_rowline("DIFFUSE_RATIO", f'<span style="font-family:{GZ_MONO};font-size:11px;">{stats.get("adv_dec_ratio", 0):.2f}x</span>'),
+        gz_rowline("WEIGHTED_CHG", gz_trend_badge(stats.get("weighted_change", 0))),
+        gz_rowline("AVG_TURNOVER", f'<span style="font-family:{GZ_MONO};font-size:11px;">{stats.get("avg_turnover", 0):.2f}%</span>'),
+    ])
+    return (
+        f'<div style="margin-top:16px;padding-top:14px;border-top:1px solid {GZ_HAIR};">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>'
+        f'<td valign="middle">'
+        f'<div style="font-size:8px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;">'
+        f'{_esc(label)} // LIQUIDITY SCORE</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{color};font-family:{GZ_SERIF};'
+        f'padding-top:2px;">{score} PTS <span style="font-size:11px;">· {_esc(stats.get("level", "—"))}</span></div>'
+        f'<div style="padding-top:5px;">{gz_meter(score, 100, 10, color, GZ_HAIR, 9)}</div>'
+        f'</td>'
+        f'<td align="right" valign="middle" style="font-size:10px;color:{GZ_INK};line-height:1.8;">'
+        f'◆ AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b><br>'
+        f'<span style="color:{GZ_META};font-family:{GZ_MONO};font-size:9px;">样本 {stats.get("sample_count", 0)} 只</span>'
+        f'</td></tr></table>'
+        f'<div style="padding-top:10px;">{gz_table(rows)}</div></div>'
+    )
+
+
+def _gz_direction_prob(chg):
+    """方向研判概率：按指数涨跌幅幅度的规则估算（50% 基准 + 最多 ±30 个百分点）。"""
+    if chg is None:
+        return None
+    return 50 + min(30, int(round(abs(chg) * 20)))
+
+
+def _gz_factor_sentiment(text):
+    """因子方向：复用 AI 盘研判的多/空词表做确定性计数。"""
+    bull = sum(text.count(w) for w in _AI_BULL_WORDS)
+    bear = sum(text.count(w) for w in _AI_BEAR_WORDS)
+    if bull > bear:
+        return "▲", GZ_UP
+    if bear > bull:
+        return "▼", GZ_DOWN
+    return "■", GZ_FLAT
+
+
+def _gz_market_change(quotes, labels):
+    chgs = []
+    for lbl in labels:
+        q = (quotes or {}).get(lbl)
+        if isinstance(q, dict):
+            p = _percent_number(q.get("change_pct", 0))
+            if p is not None:
+                chgs.append(p)
+    return (sum(chgs) / len(chgs)) if chgs else None
+
+
+def gz_build_multi_factor_matrix_html(liq, hot=None, market=None, data=None):
+    """因子分析 → 杂志式信号矩阵：每市场 = 指数涨跌徽标 + 概率（规则估算）
+    + 环境/政治/地缘 三个因子行（方向色 + 概率 + 一句话证据）。"""
+    quotes = (market or {}).get("quotes", {}) or {}
+    markets = liq.get("markets", {}) or {}
+
+    def _yahoo_info(labels):
+        items = []
+        for lbl in labels:
+            q = quotes.get(lbl)
+            if q and isinstance(q, dict):
+                p = q.get("price", 0)
+                chg = q.get("change_pct", 0)
+                vol = q.get("volume", 0)
+                vol_str = f" Vol:{_format_amount(vol)}" if vol else ""
+                items.append(f"{lbl} {p:.2f}({chg:+.2f}%{vol_str})")
+        return " | ".join(items) if items else "Yahoo 实际公开收盘/报价整合"
+
+    def _liq_summary(mk):
+        st = markets.get(mk) or {}
+        if not st.get("sample_count"):
+            return f"{mk}量能样本待复核"
+        return (f"{mk}流动性得分 {st.get('score', 50)} PTS"
+                f"（{_esc(st.get('tone', '—'))}，集中度 {st.get('top10_share', 0) * 100:.1f}%）")
+
+    factor_labels = [("环境", "ENV"), ("政治", "POL"), ("地缘", "GEO")]
+
+    def _matrix(title, change, yahoo, liq_label, views):
+        prob = _gz_direction_prob(change)
+        if change is None:
+            head_badge = (f'<span style="font-size:9px;color:{GZ_FLAT};font-family:{GZ_MONO};">'
+                          f'■ 数据暂缺</span>')
+        else:
+            head_badge = gz_trend_badge(change)
+            if prob is not None:
+                pcolor = GZ_UP if change > 0 else (GZ_DOWN if change < 0 else GZ_FLAT)
+                head_badge += (f' <span style="display:inline-block;border:1px solid {pcolor};'
+                               f'color:{pcolor};padding:1px 7px;font-size:9px;font-weight:700;'
+                               f'line-height:16px;font-family:{GZ_MONO};white-space:nowrap;">'
+                               f'P {prob}%</span>')
+        factor_rows = []
+        for i, (fzh, fen) in enumerate(factor_labels, 1):
+            view = views[i - 1]
+            arrow, fcolor = _gz_factor_sentiment(view)
+            prob_html = ""
+            if prob is not None:
+                prob_html = (f' <span style="font-size:9px;font-weight:700;color:{fcolor};'
+                             f'font-family:{GZ_MONO};">P {prob}%</span>')
+            factor_rows.append(
+                f'<div style="padding:9px 0;border-top:1px solid {GZ_HAIR};">'
+                f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>'
+                f'<td style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;">'
+                f'{i:02d} · {fen} {fzh}</td>'
+                f'<td align="right" style="font-size:10px;font-weight:700;color:{fcolor};'
+                f'font-family:{GZ_MONO};white-space:nowrap;">{arrow}{prob_html}</td>'
+                f'</tr></table>'
+                f'<div style="font-size:11.5px;color:{GZ_INK};line-height:1.75;padding-top:5px;">'
+                f'{view}</div></div>')
+        meta = (f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.8;'
+                f'letter-spacing:.3px;padding-top:8px;">'
+                f'<div>雅虎最新数据 · {_esc(yahoo)}</div>'
+                f'<div>资金与交投锚点 · {_esc(liq_label)}</div></div>')
+        return (
+            f'<div style="margin-top:18px;padding-top:14px;border-top:1px solid {GZ_INK};">'
+            f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>'
+            f'<td style="font-size:14px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};'
+            f'letter-spacing:.5px;">{title}</td>'
+            f'<td align="right" valign="middle" style="white-space:nowrap;">{head_badge}</td>'
+            f'</tr></table>'
+            f'{meta}'
+            f'<div style="margin-top:6px;border-top:1px solid {GZ_INK};">{"".join(factor_rows)}</div>'
+            f'</div>'
+        )
+
+    views_overall = [
+        "美联储利率转向预期的博弈持续扰动全球流动性与大宗商品估值中枢。",
+        "各国财政赤字与产业政策分化驱动不同区域交投特征呈现结构性强弱特征。",
+        "关税与供应链壁垒推升全球避险溢价，资金核心定价向高安全边际的主线底座收敛。",
+    ]
+    views_a = [
+        "国内宏观稳增长与流动性适度宽松构筑坚实底座，核心主线资金承接顺畅。",
+        "产业红利与科技自主自强政策持续激发龙头核心技术突破与优质细分出海机遇。",
+        "低位筹码结构稳固有效缓冲外部关税摩擦，市场中期具备充沛的底部放量配置弹性。",
+    ]
+    views_hk = [
+        "离岸资金对科技龙头与低估值蓝筹具备显著吸金效应与换手粘性。",
+        "内地扩内需与金融双向开放举措为港股基本面盈利修复提供长期坚实引擎。",
+        "中美地缘情绪扰动无碍港股极低估值红利安全边际，资产兼具配置防御与估值弹性。",
+    ]
+    views_us = [
+        "交投量能持续维系于算力及科技巨头标的，高利率环境下资金极度偏向龙头护城河。",
+        "美国大选政策主张与本土制造业补贴提振重点结构偏好，加剧了不同板块分化表现。",
+        "对华科技出口管制与贸易关税推高了中长期定价溢价，高位横盘博弈下波动不确定性显著加大。",
+    ]
+
+    return (
+        f'<div style="margin-top:20px;padding-top:12px;border-top:1px solid {GZ_INK};">'
+        f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;">'
+        f'MULTI-FACTOR AI THESIS · 信号矩阵 // 雅虎最新股票数据 · 环境/政治/地缘（每因子一句话证据）</div>'
+        + _matrix("整体市场 · 宏观多因子",
+                  _gz_market_change(quotes, ["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"]),
+                  _yahoo_info(["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"]),
+                  f"各市场样本汇聚 · {_esc(liq.get('summary', '全网资金监测'))}", views_overall)
+        + _matrix("A股 · 多因子",
+                  _gz_market_change(quotes, ["上证指数", "深证成指"]),
+                  _yahoo_info(["上证指数", "深证成指", "创业板指", "科创50"]), _liq_summary("A股"), views_a)
+        + _matrix("港股 · 多因子",
+                  _gz_market_change(quotes, ["恒生指数", "恒生科技"]),
+                  _yahoo_info(["恒生指数", "恒生科技"]), _liq_summary("港股"), views_hk)
+        + _matrix("美股 · 多因子",
+                  _gz_market_change(quotes, ["标普500", "纳斯达克"]),
+                  _yahoo_info(["标普500", "纳斯达克", "微软 MSFT", "Meta META"]), _liq_summary("美股"), views_us)
+        + '</div>'
+    )
+
+
+def gz_build_volume_and_liquidity_analysis_html(liq, hot=None, market=None, data=None):
+    """三大市场交投研判 + 因子信号矩阵（guizang 杂志式排版）。"""
+    markets = liq.get("markets", {}) or {}
+    hot_markets = (hot or {}).get("markets", {}) or {}
+    summary_text = _esc(liq.get("summary") or "A股、港股与美股最近收盘流动性与成交量量化对比。")
+
+    def _market_eval(mk_label, liq_stat, hot_stat):
+        if not liq_stat.get("sample_count"):
+            return (f'<div style="margin-top:10px;font-size:11px;color:{GZ_META};line-height:1.8;">'
+                    f'◆ {mk_label}：本次流动性与交投有效样本暂缺。</div>')
+        score = liq_stat.get("score", 50)
+        level = _esc(liq_stat.get("level", "—"))
+        tone = _esc(liq_stat.get("tone", "—"))
+        w_chg = liq_stat.get("weighted_change", 0.0)
+        top10_sh = liq_stat.get("top10_share", 0.0) * 100
+        adv = liq_stat.get("advancers", 0)
+        dec = liq_stat.get("decliners", 0)
+        stocks = (hot_stat or {}).get("stocks", []) or []
+        stock_names = "、".join(_esc(s.get("name", "")) for s in stocks[:3] if s.get("name"))
+        vol_comment = f"近期成交量前列涉及 {stock_names} 等活跃标的，" if stock_names else "活跃标的交投有序，"
+        if w_chg >= 0.25:
+            flow_dir = "成交金额加权动能偏多，主流资金承接顺畅，交投向结构性主线扩散"
+        elif w_chg <= -0.25:
+            flow_dir = "成交金额加权动能偏弱，高位筹码换手阶段性防御避险诉求显著"
+        else:
+            flow_dir = "多空交投较均衡，成交重心处于中性横盘震荡区间"
+        return (
+            f'<div style="margin-top:10px;padding:10px 12px;background:{GZ_PAPER_TINT};'
+            f'line-height:1.8;font-size:11.5px;color:{GZ_INK};">'
+            f'<b>◆ {mk_label}成交量与流动性研判：</b>'
+            f'流动性评分 <b>{score} PTS</b>（{level} · {tone}），'
+            f'头部前十成交集中度约 <b>{top10_sh:.1f}%</b>，上涨/下跌扩散度 <b>{adv}</b> / <b>{dec}</b>。'
+            f'{vol_comment}{flow_dir}。'
+            f'</div>'
+        )
+
+    a_eval = _market_eval("A股", markets.get("A股") or {}, hot_markets.get("A股") or {})
+    hk_eval = _market_eval("港股", markets.get("港股") or {}, hot_markets.get("港股") or {})
+    us_eval = _market_eval("美股", markets.get("美股") or {}, hot_markets.get("美股") or {})
+
+    mf_html = gz_build_multi_factor_matrix_html(liq, hot, market, data)
+
+    return (
+        f'<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1px;">'
+        f'AI FLOW & VOLUME SCAN // 三大市场交投研判</div>'
+        f'<div style="font-size:12.5px;color:{GZ_INK};line-height:1.9;padding-top:8px;">{summary_text}</div>'
+        f'{a_eval}{hk_eval}{us_eval}'
+        f'{mf_html}'
+    )
+
+
+def gz_liquidity_report_block(liq, hot=None, market=None, data=None):
+    """A股/港股/美股 成交量与流动性报告（guizang）：交投研判 + 信号矩阵 + 三市场评分。"""
+    markets = liq.get("markets", {}) or {}
+    blocks = "".join(gz_liquidity_market_block(label, markets.get(label) or {})
+                     for label in ("A股", "港股", "美股"))
+    summary_body = gz_build_volume_and_liquidity_analysis_html(liq, hot, market, data)
+    note = gz_note("LIQUIDITY & MULTI-FACTOR FORMULA: YAHOO QUOTES + VOLUME LEADERS + LIQUIDITY + ENV/POLITICAL/GEOPOLITICAL :: RULESET v3 :: 非投资建议")
+    return summary_body + blocks + note
+
+
+# ============================================================
+# 主题渲染套件：把 pixel / guizang 两套布局助手统一成栏目拼版接口
+# ============================================================
+class _RenderKit:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _pixel_market_section(market):
+    market_rows = []
+    for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
+        value, color = _quote_value(market, label, precision)
+        market_rows.append((label, value, color))
+    astock_rows = []
+    for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
+        value, color = _quote_value(market, label, precision)
+        astock_rows.append((label, value, color))
+    return (_subsection("全球与美股") + _data_table(market_rows)
+            + _subsection("A股四指数") + _data_table(astock_rows)
+            + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
+
+
+def _collect_report_parts(data, kit):
+    """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。"""
+    market = data.get("实时行情", {})
+    yt = data.get("港股名家频道", {})
+    yt_live = yt.get("channels", [])        # 已抓取到内容的频道
+    google = data.get("全球头条", {})
+    gh_headlines = google.get("headlines", [])
+    sina = data.get("A股资讯", {})
+    sina_headlines = sina.get("headlines", [])
+    em = data.get("东财快讯", {})
+    em_headlines = em.get("headlines", [])
+    hot = data.get("热门榜单", {}) or {}
+    liq = data.get("A港美流动性", {}) or data.get("A港流动性", {}) or {}
+
+    source_items = [
+        ("实时行情", market),
+        ("港股名家频道", yt),
+        ("全球头条", google),
+        ("A股资讯", sina),
+        ("东财快讯", em),
+        ("热门榜单", hot),
+        ("A港美流动性", liq),
+    ]
+
+    total = len(source_items)
+    today_n = sum(1 for _, s in source_items if s.get("is_today"))
+    content_n = sum(1 for _, s in source_items if s.get("status") == "success")
+
+    sections = []  # (kicker_en, title, content, badge_html, caption)
+
+    # 行情速览
+    if market.get("status") == "success":
+        data_date = market.get("content_date") or "—"
+        sections.append((
+            "MARKET SNAPSHOT", "行情速览（实时）",
+            kit.market_section(market),
+            kit.source_badge(market),
+            f"{_source_note(market)} · 数据日期 {data_date}",
+        ))
+
+    # 港股名家频道：只显示实际抓取到内容的频道
+    if yt_live:
+        blocks = "".join(kit.channel_block(ch) for ch in yt_live)
+        note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
+        sections.append((
+            "HK GURU CHANNELS", "港股名家频道",
+            blocks + kit.note(f"数据来自各频道公开 RSS；{note}。带 NEW · 当天 标记的内容发布于今天（北京时间）；"
+                              f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
+            kit.source_badge(yt),
+            f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
+        ))
+
+    # 全球头条（Google News 中文）
+    if gh_headlines:
+        gh_items = "".join(kit.headline_row(it, i)
+                           for i, it in enumerate(gh_headlines[:8], 1))
+        sections.append(("GLOBAL HEADLINES", "全球头条", gh_items,
+                         kit.source_badge(google), _source_note(google)))
+
+    # 东方财富快讯
+    if em_headlines:
+        em_items = "".join(kit.em_news_row(it, i)
+                           for i, it in enumerate(em_headlines[:5], 1))
+        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
+                         kit.source_badge(em),
+                         f"{_source_note(em)} · 免费公开数据源"))
+
+    # A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
+    if sina_headlines:
+        sina_items = "".join(kit.item_row(f"{i:02d}", _esc(h[:120]))
+                             for i, h in enumerate(sina_headlines[:5], 1))
+        sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
+                         kit.source_badge(sina), _source_note(sina)))
+
+    # A股 / 港股 / 美股最近收盘成交量与流动性报告（AI 研判 & 100字多因子结论）
+    if liq.get("status") == "success" or market.get("status") == "success":
+        sections.append((
+            "A/H/US LIQUIDITY", "AI 研判 · 最近 A股、港股、美股成交量与流动性分析",
+            kit.liquidity_block(liq, hot, market, data),
+            kit.source_badge(liq),
+            f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
+        ))
+
+    # AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    if AI_ANALYSIS_ENABLED:
+        ai_result = build_ai_analysis(data)
+        if ai_result.get("available"):
+            sections.insert(0, (
+                "AI READ", "AI 盘研判",
+                kit.ai_block(ai_result), kit.ai_badge(),
+                "章鱼AI · 多源信号规则合成（非投资建议）",
+            ))
+
+    # 数据审计栏
+    if today_n > 0:
+        push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
+        hint_color = kit.ok_color
+    else:
+        push_hint = ("无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
+                     if content_n > 0 else
+                     "无任何抓取内容 → 本次不会推送。")
+        hint_color = kit.warn_color if content_n > 0 else kit.bad_color
+
+    audit_content = (
+        kit.alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
+                  f"所有暂缺项均已明确标注，不会复用旧日报内容。",
+                  kit.ok_color if today_n > 0 else hint_color)
+        + kit.status_footer(source_items)
+        + kit.note(f"{push_hint}生成、抓取和推送是独立步骤：请以各来源的抓取时间、数据日期和当天标记判断数据新鲜度。")
+    )
+    sections.append(("DATA AUDIT", "本次数据可用性 · 当天检验", audit_content, "", ""))
+
+    return {
+        "sections": sections,
+        "total": total,
+        "today_n": today_n,
+        "content_n": content_n,
+        "market": market,
+        "liq": liq,
+    }
 
 
 # ============================================================
@@ -1961,156 +2815,167 @@ def _liquidity_report_block(liq, hot=None, market=None, data=None):
     return _pixel_panel("MULTI-FACTOR AI // 雅虎最新股票数据 · 成交量 · 流动性 · 多因子研判", summary_body, C_CYAN, "≈") + blocks + note
 
 
-def generate_report(data, date_display, date_str):
-    """生成完整的 HTML 日报
+PIXEL_KIT = _RenderKit(
+    market_section=_pixel_market_section,
+    channel_block=_channel_block,
+    headline_row=_headline_row,
+    em_news_row=_em_news_row,
+    item_row=_item_row,
+    note=_note,
+    alert=_alert,
+    status_footer=_status_footer,
+    source_badge=_source_badge,
+    ai_badge=lambda: _badge("AI 合成", "ai"),
+    ai_block=_ai_analysis_block,
+    liquidity_block=_liquidity_report_block,
+    section=_section,
+    ok_color=C_GREEN, warn_color=C_AMBER, bad_color=C_RED,
+)
+
+GUIZANG_KIT = _RenderKit(
+    market_section=gz_market_section,
+    channel_block=gz_channel_block,
+    headline_row=gz_headline_row,
+    em_news_row=gz_em_news_row,
+    item_row=gz_item_row,
+    note=gz_note,
+    alert=gz_alert,
+    status_footer=gz_status_footer,
+    # 章节幕封上的徽标落在墨黑底 → 用墨黑底配色；审计栏（纸底）仍用纸底配色
+    source_badge=lambda item: gz_source_badge(item, on_ink=True),
+    ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
+    ai_block=gz_ai_analysis_block,
+    liquidity_block=gz_liquidity_report_block,
+    section=gz_section,
+    ok_color=GZ_UP, warn_color=GZ_WARN, bad_color=GZ_DOWN,
+)
+
+
+def generate_report(data, date_display, date_str, theme=None):
+    """生成完整的 HTML 日报（按推送主题分发排版）。
+
+    theme: "guizang"（默认 · 电子杂志 × 电子墨水竖版长页面）/ "pixel"（旧版复古像素）。
+    """
+    theme = _resolve_push_theme(theme)
+    if theme == "guizang":
+        return generate_report_guizang(data, date_display, date_str)
+    return generate_report_pixel(data, date_display, date_str)
+
+
+def generate_report_guizang(data, date_display, date_str):
+    """生成完整 HTML 日报（guizang · 电子杂志 × 电子墨水，微信竖版长页面）。
+
+    - 暖米白电子纸 + 墨黑 Hero / 章节幕封；衬线标题（荧光绿）、非衬线正文（墨黑）；
+    - 等宽元信息、发丝线、大留白，全部字体偏小；
+    - 宽表格 → 纵向 rowline；因子分析 → 杂志式信号矩阵（涨跌颜色 + 概率 + 证据）；
+    - 每个区块带来源、抓取时间与「当天/非当天/无数据」徽标；
+    - 纯内联样式、无 JS / 无外部 CSS，兼容 PushPlus / 微信详情页。
+    """
+    parts = _collect_report_parts(data, GUIZANG_KIT)
+    sections = parts["sections"]
+    total = parts["total"]
+    today_n = parts["today_n"]
+    content_n = parts["content_n"]
+
+    # 栏目编号按渲染顺序生成（只在场的栏目占用编号）
+    content_html = "".join(
+        GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+        for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
+
+    # 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
+    generated_at = _now()
+    src_color = GZ_UP_INK if today_n > 0 else (GZ_WARN_INK if content_n > 0 else GZ_DOWN_INK)
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="octopus-report-date" content="{date_str}">
+<meta name="octopus-generated-at" content="{generated_at}">
+<meta name="octopus-today-sources" content="{today_n}">
+<meta name="octopus-total-sources" content="{total}">
+<title>章鱼AI · 财经作战日志 | GUIZANG EDITION</title>
+</head>
+<body style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:12px;line-height:1.8;-webkit-text-size-adjust:100%;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;margin:0 auto;background:{GZ_PAPER};">
+<tr><td style="padding:0;">
+
+<!-- Hero：墨黑章节幕封（Style A hero） -->
+<div style="background:{GZ_INK_TINT};padding:26px 20px 20px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>
+<td style="font-size:9px;color:{GZ_NEON};font-family:{GZ_MONO};font-weight:700;letter-spacing:2px;line-height:1;">OCTOPUS AI · DAILY LOG</td>
+<td align="right" style="font-size:9px;color:{GZ_META_INK};font-family:{GZ_MONO};letter-spacing:1px;line-height:1;">VOL. {_esc(date_str)}</td>
+</tr></table>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:16px;"><tr>
+<td width="46" valign="top">
+<table width="44" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid {GZ_NEON};"><tr><td align="center" valign="middle" style="padding:6px 0;"><div style="font-size:19px;font-weight:700;color:{GZ_NEON};font-family:{GZ_SERIF};line-height:1;">章</div></td></tr></table>
+</td>
+<td valign="middle" style="padding-left:12px;">
+<div style="font-size:23px;font-weight:700;color:{GZ_NEON};font-family:{GZ_SERIF};letter-spacing:2px;line-height:1.3;">财经作战日志</div>
+<div style="font-size:8px;color:{GZ_META_INK};font-family:{GZ_MONO};letter-spacing:2px;padding-top:6px;">DAILY MARKET QUEST // SIGNAL · AI · FLOW · UTC+8</div>
+</td>
+</tr></table>
+<div style="font-size:12px;color:{GZ_CREAM};font-family:{GZ_SERIF};letter-spacing:1px;padding-top:14px;">{_esc(date_display)}</div>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:14px;border-top:1px solid {GZ_HAIR_INK};"><tr>
+<td style="padding-top:12px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>
+{gz_masthead_cell("DATE", _esc(date_display), GZ_CREAM, True)}
+{gz_masthead_cell("BOOT TIME", _esc(generated_at))}
+{gz_masthead_cell("LIVE SRC", f"{today_n} / {total}", src_color)}
+</tr></table>
+</td>
+</tr></table>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:12px;border-top:1px solid {GZ_HAIR_INK};"><tr>
+<td style="padding-top:9px;font-family:{GZ_MONO};font-size:8px;letter-spacing:1px;">
+<span style="color:{GZ_UP_INK};font-weight:700;">▲ 涨</span><span style="color:{GZ_DOWN_INK};font-weight:700;padding-left:10px;">▼ 跌</span><span style="color:{GZ_FLAT_INK};padding-left:10px;">■ 平</span><span style="color:{GZ_NEON};font-weight:700;padding-left:10px;">◆ AI</span>
+</td>
+<td align="right" style="padding-top:9px;font-family:{GZ_MONO};font-size:8px;letter-spacing:1px;color:{GZ_META_INK};">TREND KEY</td>
+</tr></table>
+</div>
+
+<!-- 正文：暖米白电子纸 + 大留白（竖版长页面） -->
+<div style="padding:4px 20px 24px;">
+{content_html}
+</div>
+
+<!-- 版权页 colophon：杂志版权页 -->
+<div style="margin:0 20px;padding-top:14px;border-top:1px solid {GZ_INK};">
+<div style="font-size:9px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.9;letter-spacing:.3px;">
+&gt; 仅供投资参考，非投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动隐藏，不以历史内容充数。<br>
+&gt; RENDER MODE: GUIZANG E-INK MAGAZINE // 电子杂志 × 电子墨水 // 全内联样式 · 无 JS<br>
+&gt; TREND KEY: [▲ 涨] [▼ 跌] [■ 平] [◆ AI]
+</div>
+<div style="font-size:8px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.8;letter-spacing:.3px;padding-top:6px;opacity:.8;">
+DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Liquid) · Sina · AI_RULE<br>
+SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-GUIZANG v1
+</div>
+</div>
+
+</td></tr>
+</table>
+</body>
+</html>"""
+
+    return html
+
+
+def generate_report_pixel(data, date_display, date_str):
+    """生成完整 HTML 日报（旧版 RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）。
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
     - 没有抓到内容的区块不出现在页面主体，仅在数据审计栏留痕；
     - 当天内容检验仍作为推送门禁，但不在页面顶部单独显示横幅。
     """
-    # 1. 提取所有数据源（缺失的键按空处理，兼容旧测试数据）
-    market = data.get("实时行情", {})
-    yt = data.get("港股名家频道", {})
-    yt_live = yt.get("channels", [])        # 已抓取到内容的频道
-    google = data.get("全球头条", {})
-    gh_headlines = google.get("headlines", [])
-    sina = data.get("A股资讯", {})
-    sina_headlines = sina.get("headlines", [])
-    em = data.get("东财快讯", {})
-    em_headlines = em.get("headlines", [])
-    hot = data.get("热门榜单", {}) or {}
-    liq = data.get("A港美流动性", {}) or data.get("A港流动性", {}) or {}
-
-    # 2. 数据源清单（顺序即页面展示顺序）
-    source_items = [
-        ("实时行情", market),
-        ("港股名家频道", yt),
-        ("全球头条", google),
-        ("A股资讯", sina),
-        ("东财快讯", em),
-        ("热门榜单", hot),
-        ("A港美流动性", liq),
-    ]
-
-    # 3. 当天内容检验统计
-    total = len(source_items)
-    today_n = sum(1 for _, s in source_items if s.get("is_today"))
-    content_n = sum(1 for _, s in source_items if s.get("status") == "success")
-
-    # 4. 逐栏目构建内容（只登记有内容的栏目；编号在拼版时统一生成）
-    sections = []  # (kicker_en, title, content, badge_html, caption)
-
-    # 4.1 行情速览
-    if market.get("status") == "success":
-        market_rows = []
-        for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-                                 ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
-            value, color = _quote_value(market, label, precision)
-            market_rows.append((label, value, color))
-        astock_rows = []
-        for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
-            value, color = _quote_value(market, label, precision)
-            astock_rows.append((label, value, color))
-        data_date = market.get("content_date") or "—"
-        sections.append((
-            "MARKET SNAPSHOT", "行情速览（实时）",
-            _subsection("全球与美股") + _data_table(market_rows)
-            + _subsection("A股四指数") + _data_table(astock_rows)
-            + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"),
-            _source_badge(market),
-            f"{_source_note(market)} · 数据日期 {data_date}",
-        ))
-
-    # 4.2 港股名家频道：只显示实际抓取到内容的频道；暂缺/未配置项不渲染到日报
-    if yt_live:
-        blocks = "".join(_channel_block(ch) for ch in yt_live)
-        note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
-        sections.append((
-            "HK GURU CHANNELS", "港股名家频道",
-            blocks + _note(f"数据来自各频道公开 RSS；{note}。带 NEW · 当天 标记的内容发布于今天（北京时间）；"
-                           f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
-            _source_badge(yt),
-            f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
-        ))
-
-    # 4.3 全球头条（Google News 中文）
-    if gh_headlines:
-        gh_items = "".join(_headline_row(it, i)
-                           for i, it in enumerate(gh_headlines[:8], 1))
-        sections.append(("GLOBAL HEADLINES", "全球头条", gh_items,
-                         _source_badge(google), _source_note(google)))
-
-    # 4.4 东方财富快讯
-    if em_headlines:
-        em_items = "".join(_em_news_row(it, i)
-                           for i, it in enumerate(em_headlines[:5], 1))
-        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
-                         _source_badge(em),
-                         f"{_source_note(em)} · 免费公开数据源"))
-
-    # 4.4 东方财富快讯
-    if em_headlines:
-        em_items = "".join(_em_news_row(it, i)
-                           for i, it in enumerate(em_headlines[:5], 1))
-        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
-                         _source_badge(em),
-                         f"{_source_note(em)} · 免费公开数据源"))
-
-    # 4.5 A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
-    if sina_headlines:
-        sina_items = "".join(_item_row(f"{i:02d}", _esc(h[:120]))
-                             for i, h in enumerate(sina_headlines[:5], 1))
-        sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
-                         _source_badge(sina), _source_note(sina)))
-
-    # 4.6 热门榜单（A股/港股/美股 成交量前五）
-    # 2026-08-06 起：不再单独渲染三个成交量榜单栏目（原始榜单不再占版面）。
-    # 热门榜单数据仍会抓取，仅作为 AI 盘研判（板块热度 / 明日关注主题 / 「N 个市场
-    # 榜单活跃」结论）与数据审计栏的信号源；榜单的 AI 研判结果由「AI 盘研判」与
-    # 「AI 研判 · 最近 A股、港股、美股成交量与流动性分析」呈现。
-
-    # 4.7 A股 / 港股 / 美股最近收盘成交量与流动性报告（AI 研判 & 100字多因子结论）
-    if liq.get("status") == "success" or market.get("status") == "success":
-        sections.append((
-            "A/H/US LIQUIDITY", "AI 研判 · 最近 A股、港股、美股成交量与流动性分析",
-            _liquidity_report_block(liq, hot, market, data),
-            _source_badge(liq),
-            f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
-        ))
-
-    # 4.8 AI 盘研判（规则合成综合研判，作为导读首位栏目）
-    if AI_ANALYSIS_ENABLED:
-        ai_result = build_ai_analysis(data)
-        if ai_result.get("available"):
-            ai_block = _ai_analysis_block(ai_result)
-            sections.insert(0, (
-                "AI READ", "AI 盘研判",
-                ai_block, _badge("AI 合成", "ai"),
-                "章鱼AI · 多源信号规则合成（非投资建议）",
-            ))
-
-    # 5. 数据审计栏（当天检验仍用于推送门禁，但不在页面顶部单独显示横幅）
-    if today_n > 0:
-        push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
-        hint_color = C_GREEN
-    else:
-        push_hint = ("无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
-                     if content_n > 0 else
-                     "无任何抓取内容 → 本次不会推送。")
-        hint_color = C_AMBER if content_n > 0 else C_RED
-
-    audit_content = (
-        _alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
-               f"所有暂缺项均已明确标注，不会复用旧日报内容。",
-               C_GREEN if today_n > 0 else hint_color)
-        + _status_footer(source_items)
-        + _note(f"{push_hint}生成、抓取和推送是独立步骤：请以各来源的抓取时间、数据日期和当天标记判断数据新鲜度。")
-    )
-    sections.append(("DATA AUDIT", "本次数据可用性 · 当天检验", audit_content, "", ""))
+    parts = _collect_report_parts(data, PIXEL_KIT)
+    sections = parts["sections"]
+    total = parts["total"]
+    today_n = parts["today_n"]
+    content_n = parts["content_n"]
 
     # 6. 拼版：栏目编号按渲染顺序生成（只在场的栏目占用编号）
     content_html = "".join(
-        _section(f"{i:02d}", kicker, title, content, badge, caption)
+        PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
 
     # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
@@ -2690,6 +3555,7 @@ def main():
   python3 output/pipeline.py --push-only            # 推送实际最后更新的一份日报（再次当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list                 # 列出日报
+  python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
         """
     )
 
@@ -2709,6 +3575,8 @@ def main():
                        help="允许 --push-only 推送未带新鲜度标记的旧版日报（不推荐）")
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
+    parser.add_argument("--theme", default=None, choices=list(PUSH_THEMES),
+                       help="推送主题：guizang（默认 · 电子杂志×电子墨水）/ pixel（旧版复古像素）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
 
@@ -2756,10 +3624,12 @@ def main():
 
     # 正常流程
     mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
+    theme = _resolve_push_theme(args.theme)
     print("🐙 " + "=" * 48)
     print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
+    print(f"   推送主题: {theme}（OCTOPUS_PUSH_THEME / --theme 可切换）")
 
     # 0. 清理历史 HTML 报告（手动/自动推送前必做）：
     #    避免历史残留文件（含旧版本特征的报告）被推送或被 latest.html 引用。
@@ -2774,7 +3644,7 @@ def main():
     print("\n📝 正在生成日报...")
     date_display = _date_display()
     date_str = _today_str()
-    html = generate_report(data, date_display, date_str)
+    html = generate_report(data, date_display, date_str, theme=theme)
     print("  ✅ 日报生成完成")
 
     # 3. dry-run 模式

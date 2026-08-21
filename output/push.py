@@ -9,6 +9,13 @@
   python3 output/push.py --manual --force-push  # 手动强制推送（内容非当天也推）
   python3 output/push.py --push-only            # 推送实际最后更新的日报（不清理）
   python3 output/push.py --list                 # 列出已生成的日报（不清理）
+
+页面风格（一对一 / 一对多推送共用同一份日报 HTML）:
+  默认主题 guizang（电子杂志 × 电子墨水，参考 guizang-ppt-skill Style A：
+  暖米白电子纸 + 墨黑 Hero、荧光绿衬线标题、等宽元信息、发丝线、大留白、
+  rowline 纵向表格、杂志式信号矩阵因子分析；纯内联样式，无 JS/外部CSS/WebGL）。
+  切回旧版像素主题: python3 output/push.py --theme pixel
+  或环境变量: OCTOPUS_PUSH_THEME=pixel
 """
 import os
 import sys
