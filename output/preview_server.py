@@ -50,6 +50,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.path = "/日报排版示例.html"
         return super().do_GET()
 
+    def do_HEAD(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            if os.path.isfile(LATEST):
+                self.path = "/latest.html"
+        elif path == "/sample":
+            self.path = "/日报排版示例.html"
+        return super().do_HEAD()
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
