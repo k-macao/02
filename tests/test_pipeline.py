@@ -419,11 +419,11 @@ class LiquidityReportTests(unittest.TestCase):
         data["A港美流动性"] = self._liquidity_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertIn("AI 研判 · 最近 A股、港股、美股成交量与流动性分析", html)
-        self.assertIn("AI FLOW & VOLUME SCAN", html)
+        self.assertIn("三大市场交投研判", html)
         self.assertIn("◆ A股成交量与流动性研判：", html)
         self.assertIn("◆ 港股成交量与流动性研判：", html)
         self.assertIn("◆ 美股成交量与流动性研判：", html)
-        self.assertIn("LIQUIDITY SCORE", html)
+        self.assertIn("流动性评分", html)
         self.assertIn("AI 定性", html)
         # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
         self.assertNotIn("TOP5 VOLUME", html)
@@ -596,12 +596,19 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("IBM Plex Mono", html)
         # 发丝线与留白
         self.assertIn(pipeline.GZ_HAIR, html)
-        # 章节幕封 + 元信息
-        self.assertIn("01 / AI READ", html)
-        self.assertIn("TREND KEY", html)
+        # 章节幕封：单列中文优先，不再用三列刊头 / TREND KEY
+        self.assertIn("01 · AI READ", html)
+        self.assertIn("▲ 涨", html)
         # 涨跌三重编码保留（颜色 + 箭头 + 文字）
         self.assertIn("▲ 涨 +1.25%", html)
         self.assertNotIn("OCTOPUS_OS", html)          # 不再是像素主题
+        # 微信稳排：刊头单列、无 inline-block 胶囊、无 nowrap 挤爆、无 8px 英文 kicker
+        self.assertNotIn("white-space:nowrap", html)
+        self.assertNotIn("display:inline-block", html)
+        self.assertNotIn('width="33%"', html)
+        self.assertNotIn("font-size:8px", html)
+        self.assertIn("bgcolor=", html.lower())
+        self.assertIn("font-size:16px", html)
 
     def test_guizang_inline_only_no_js_or_external_assets(self):
         data = NewLayoutRenderingTests()._rich_data()
@@ -621,6 +628,7 @@ class GuizangThemeTests(unittest.TestCase):
         # rowline：每条行情一行（左等宽指数名 / 右价格 + 涨跌徽标），无横向列
         self.assertIn("6,123", html)                  # 标普500 价格
         self.assertIn("数据暂缺", html)                # 缺失指数明确标注
+        self.assertIn("border-top:1px solid " + pipeline.GZ_HAIR, html)
         self.assertIn("border-bottom:1px solid " + pipeline.GZ_HAIR, html)
         self.assertIn("全球与美股", html)
         self.assertIn("A股四指数", html)
@@ -637,6 +645,28 @@ class GuizangThemeTests(unittest.TestCase):
             html,
             r'<table width="100%"[^>]*style="width:100%!important;',
         )
+
+    def test_guizang_news_lists_wrap_rows_in_table_not_bare_tr(self):
+        """全球头条 / 东财快讯 / A股资讯 的 <tr> 必须包在 <table> 里。
+
+        旧版把 gz_headline_row / gz_em_news_row / gz_item_row 产出的裸 <tr>
+        直接塞进章节 <div>，微信 / PushPlus 会丢掉行或把序号与标题挤成一团。
+        """
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A股资讯"] = pipeline._source_result(
+            "新浪财经", "success", is_today=True, content_date="2026-08-02",
+            headlines=["国务院部署进一步释放消费潜力"])
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        self.assertNotRegex(html, r"<div[^>]*>\s*<tr\b")
+        self.assertIn("美联储释放降息信号", html)
+        self.assertIn("A股三大指数集体收涨", html)
+        self.assertIn("国务院部署进一步释放消费潜力", html)
+        # 刊头三列禁止 break-all，避免日期被微信逐字拆开
+        self.assertNotIn("word-break:break-all", html)
+        # pixel 主题每行本就是独立 table，同样不能裸 tr
+        html_px = pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertNotRegex(html_px, r"<div[^>]*>\s*<tr\b")
 
     def test_guizang_signal_matrix_keeps_direction_probability_and_evidence(self):
         data = NewLayoutRenderingTests()._rich_data()
