@@ -1825,11 +1825,16 @@ def gz_ai_analysis_block(res):
 
     # ④ 技术速读 rowline（保留 ▲/▼/■ 涨跌颜色与档位）
     if res["tech_rows"]:
+        # 档位词配色必须用 guizang 纸底色板：tech_rows 携带的 bcolor 来自 _ai_band()，
+        # 是像素主题墨黑底的高对比色（#FF5576/#35F29A/#FFD166），直接印到电子纸上会刺眼。
+        band_palette = {"强势": GZ_UP, "偏强": GZ_UP, "震荡": GZ_WARN,
+                        "偏弱": GZ_DOWN, "弱势": GZ_DOWN}
         tech_rows = "".join(
             gz_rowline(_esc(label),
                        f'{gz_trend_badge(pct, compact=True)} '
-                       f'<span style="font-size:10px;font-weight:700;color:{c};">{_esc(band)}</span>')
-            for label, pct, band, c in res["tech_rows"])
+                       f'<span style="font-size:10px;font-weight:700;color:'
+                       f'{band_palette.get(band, GZ_INK)};">{_esc(band)}</span>')
+            for label, pct, band, _ in res["tech_rows"])
         tech_html = (gz_subsection("TECH READ · 指数动能") + gz_table(tech_rows)
                      + f'<div style="font-size:11.5px;color:{GZ_INK};line-height:1.8;padding-top:10px;">'
                        f'<span style="font-family:{GZ_MONO};font-size:8px;color:{GZ_META};'
