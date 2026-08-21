@@ -1120,11 +1120,12 @@ GZ_FLAT_INK = "#6B665A"     # 平
 GZ_WARN = "#A05A18"         # 警示（琥珀暖棕）
 GZ_WARN_INK = "#A05A18"     # 警示
 # 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
-GZ_SERIF = ("-apple-system, BlinkMacSystemFont, 'Noto Serif SC', 'Songti SC', STSong, 'SimSun', Georgia, "
-            "'Times New Roman', serif")
-GZ_SANS = ("-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', "
-           "'WenQuanYi Micro Hei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif")
-GZ_MONO = ("ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'IBM Plex Mono', 'Courier New', Courier, monospace")
+# 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
+# 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。这里只保留微信/iOS/Android
+# 都有可靠回退的短字体栈，视觉不变，但一份完整日报可减少约 2.6 万字符。
+GZ_SERIF = "'Songti SC',STSong,serif"
+GZ_SANS = "-apple-system,'PingFang SC',sans-serif"
+GZ_MONO = "monospace"
 
 
 def _sq(color=C_ACCENT, size=8):
@@ -2856,6 +2857,34 @@ GUIZANG_KIT = _RenderKit(
 )
 
 
+def _harden_wechat_table_widths(html):
+    """把 ``width=100%`` 同步写进内联 style，防止微信把日报压成半屏。
+
+    PushPlus/微信详情页的 HTML 清洗器会在部分客户端移除 ``table`` 的 ``width``
+    属性，却保留内联 ``style``。旧版最外层表格只有 ``width=\"100%\"``，属性被
+    清洗后便按内容固有宽度收缩，实际截图中整份日报只占约半个屏幕，标题和日期也
+    被逐字折行。双写 HTML 属性和 CSS（并使用 ``!important``）可兼容两条渲染链路。
+    """
+    def patch(match):
+        tag = match.group(0)
+        if re.search(r'\bstyle\s*=\s*(["\'])', tag, re.I):
+            return re.sub(
+                r'(\bstyle\s*=\s*["\'])',
+                r'\1width:100%!important;',
+                tag,
+                count=1,
+                flags=re.I,
+            )
+        return tag[:-1] + ' style="width:100%!important;">'
+
+    return re.sub(
+        r'<table\b[^>]*\bwidth\s*=\s*(["\'])100%\1[^>]*>',
+        patch,
+        html,
+        flags=re.I,
+    )
+
+
 def generate_report(data, date_display, date_str, theme=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
@@ -2863,8 +2892,10 @@ def generate_report(data, date_display, date_str, theme=None):
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
-        return generate_report_guizang(data, date_display, date_str)
-    return generate_report_pixel(data, date_display, date_str)
+        html = generate_report_guizang(data, date_display, date_str)
+    else:
+        html = generate_report_pixel(data, date_display, date_str)
+    return _harden_wechat_table_widths(html)
 
 
 def generate_report_guizang(data, date_display, date_str):
