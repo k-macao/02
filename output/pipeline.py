@@ -112,7 +112,7 @@ PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "1
 # ============================================================
 # guizang —— 默认主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
 #   （github.com/op7418/guizang-ppt-skill），改造成适合微信阅读的竖版长页面：
-#   暖米白电子纸 + 墨黑 Hero / 章节幕封、衬线标题（荧光绿）、非衬线正文（墨黑）、
+#   浅灰正文 + 深灰 Hero / 章节幕封、衬线标题（荧光绿）、非衬线正文（近黑深灰）、
 #   等宽元信息、发丝线与大留白；全部字体偏小；宽表格自动转纵向 rowline 避免
 #   横向溢出；因子分析以杂志式信号矩阵呈现（保留涨跌颜色、概率与证据）。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
@@ -1097,34 +1097,35 @@ FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
 FONT_MONO = "'Courier New', Courier, monospace"
 
 # ============================================================
-# GUIZANG 主题调色板：「电子杂志 × 电子墨水」(Style A · 灰黄电子纸全页底色)
-# —— 灰黄/暖米灰电子纸全页底色 + 灰黄同系卡片幕封；衬线标题 + 非衬线正文 + 等宽元信息
-# —— 全部灰底/灰黄底色，彻底去除割裂的纯黑大色块，高对比度墨色正文与清晰涨跌编码
+# GUIZANG 主题调色板：「电子杂志 × 电子墨水」(Style A · 中性灰阶版)
+# —— 全部背景只使用浅灰 / 中灰 / 深灰；Hero 与章节幕封用深灰，正文和卡片用浅灰。
+# —— 荧光绿只作标题、AI 与 LIVE 点缀；正文仍保持高对比，涨跌继续保留语义色与符号编码。
 # ============================================================
-GZ_PAPER = "#F4F1EA"        # 灰黄电子纸（页面整体底色）
-GZ_PAPER_TINT = "#E9E4D8"   # 卡片 / 注记 / 引言底色（纸同系加深一档）
-GZ_INK = "#1A1A1D"          # 墨黑（正文主字色）
-GZ_INK_TINT = "#DFD8CB"     # 章节幕封 / Hero 顶部卡片底色（灰黄同系深一阶，彻底告别黑底）
-GZ_HAIR = "#CBC5B8"         # 发丝分隔线（纸底）
-GZ_HAIR_INK = "#B8B1A2"     # 发丝线（幕封/卡片底）
-GZ_CREAM = "#1A1A1D"        # 幕封/卡片底上的正文字色（保持墨黑高对比）
-GZ_META = "#6B665A"         # 等宽元信息（纸底）
-GZ_META_INK = "#5C574D"     # 等宽元信息（幕封/卡片底）
-GZ_NEON = "#1A1A1D"         # 标题 / 强调字色（墨黑高对比标题）
-GZ_UP = "#1F7A38"           # 涨（纸底与卡片底统一正绿）
-GZ_DOWN = "#C82333"         # 跌（纸底与卡片底统一正红）
-GZ_FLAT = "#6B665A"         # 平（中灰）
-GZ_UP_INK = "#1F7A38"       # 涨
-GZ_DOWN_INK = "#C82333"     # 跌
-GZ_FLAT_INK = "#6B665A"     # 平
-GZ_WARN = "#A05A18"         # 警示（琥珀暖棕）
-GZ_WARN_INK = "#A05A18"     # 警示
+GZ_PAPER = "#E7E8E5"        # 页面整体：冷调浅灰
+GZ_PAPER_TINT = "#D5D7D3"   # 卡片 / 注记 / 引言：中浅灰
+GZ_INK = "#191C1A"          # 正文：近黑深灰
+GZ_INK_TINT = "#30342F"     # Hero / 章节幕封：深灰（不使用纯黑）
+GZ_HAIR = "#B8BCB6"         # 浅灰背景上的发丝线
+GZ_HAIR_INK = "#555B54"     # 深灰幕封上的发丝线
+GZ_CREAM = "#F0F2EE"        # 深灰幕封上的主文字
+GZ_META = "#626861"         # 浅灰背景上的元信息
+GZ_META_INK = "#BEC5BB"     # 深灰幕封上的元信息
+GZ_NEON = "#B7FF3C"         # 荧光绿：标题 / AI / LIVE 点缀
+GZ_UP = "#237A3B"           # 浅灰背景上的涨（深绿，保证可读性）
+GZ_DOWN = "#B92D3B"         # 浅灰背景上的跌（语义红）
+GZ_FLAT = "#626861"         # 平（中灰）
+GZ_UP_INK = "#B7FF3C"       # 深灰背景上的涨 / LIVE（荧光绿）
+GZ_DOWN_INK = "#FF7180"     # 深灰背景上的跌
+GZ_FLAT_INK = "#BEC5BB"     # 深灰背景上的平
+GZ_WARN = "#8A5A12"         # 浅灰背景上的警示
+GZ_WARN_INK = "#FFD36A"     # 深灰背景上的警示
 # 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
-GZ_SERIF = ("-apple-system, BlinkMacSystemFont, 'Noto Serif SC', 'Songti SC', STSong, 'SimSun', Georgia, "
-            "'Times New Roman', serif")
-GZ_SANS = ("-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', "
-           "'WenQuanYi Micro Hei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif")
-GZ_MONO = ("ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'IBM Plex Mono', 'Courier New', Courier, monospace")
+# 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
+# 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。这里只保留微信/iOS/Android
+# 都有可靠回退的短字体栈，视觉不变，但一份完整日报可减少约 2.6 万字符。
+GZ_SERIF = "'Songti SC',STSong,serif"
+GZ_SANS = "-apple-system,'PingFang SC',sans-serif"
+GZ_MONO = "monospace"
 
 
 def _sq(color=C_ACCENT, size=8):
@@ -1512,8 +1513,9 @@ def gz_badge(text, kind="ok", on_ink=False):
     else:
         styles = {"ok": GZ_UP, "warn": GZ_WARN, "bad": GZ_DOWN, "ai": GZ_INK}
     color = styles.get(kind, GZ_INK)
+    badge_bg = GZ_INK_TINT if on_ink else GZ_PAPER
     dot = "◆" if kind == "ai" else "●"
-    return (f'<span style="display:inline-block;border:1px solid {color};color:{color};background:{GZ_PAPER};'
+    return (f'<span style="display:inline-block;border:1px solid {color};color:{color};background:{badge_bg};'
             f'padding:0 6px;margin-left:6px;font-size:8.5px;font-weight:700;line-height:15px;'
             f'font-family:{GZ_MONO};letter-spacing:.5px;vertical-align:middle;white-space:nowrap;">'
             f'{dot} {_esc(text)}</span>')
@@ -1646,7 +1648,7 @@ def gz_item_row(icon, text, sub="", icon_color=None, row_bg=None):
 
 
 def gz_channel_block(ch):
-    """频道块：灰黄卡片 + 衬线频道名 + 杂志式条目列表。"""
+    """频道块：浅灰卡片 + 衬线频道名 + 杂志式条目列表。"""
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
     url = _esc(ch.get("url", ""))
@@ -1715,7 +1717,7 @@ def gz_status_footer(sources):
 
 
 def gz_alert(text, color=None):
-    """引言式警示条：灰黄同系加深底 + 左侧色条（无硬投影）。"""
+    """引言式警示条：中浅灰底 + 左侧色条（无硬投影）。"""
     c = color or GZ_INK
     return (
         f'<div style="margin-bottom:12px;padding:10px 12px;background:{GZ_PAPER_TINT};border-radius:2px;'
@@ -1738,7 +1740,7 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """章节幕封：灰黄底卡片 + 墨黑标题 + 等宽 kicker；正文落于灰黄纸底。"""
+    """章节幕封：深灰卡片 + 荧光绿标题 + 等宽 kicker；正文落于浅灰纸底。"""
     caption_html = (f'<div style="font-size:9.5px;color:{GZ_META_INK};font-family:{GZ_MONO};'
                     f'padding-top:5px;letter-spacing:.3px;line-height:1.6;">{caption}</div>'
                     if caption else "")
@@ -1773,7 +1775,7 @@ def gz_ai_analysis_block(res):
                  f'color:{bias_color};padding:1px 7px;font-size:9px;font-weight:700;'
                  f'line-height:16px;font-family:{GZ_MONO};white-space:nowrap;background:{GZ_PAPER};">P {prob}%</span>')
 
-    # ① 主控条（灰黄底卡片）：方向 + 信号分 + 置信度 + 研判概率 + 信号格
+    # ① 主控条（中浅灰卡片）：方向 + 信号分 + 置信度 + 研判概率 + 信号格
     verdict = (
         f'<div style="background:{GZ_PAPER_TINT};border:1px solid {GZ_HAIR};padding:12px 14px;border-radius:4px;">'
         f'<div style="font-size:8.5px;color:{GZ_META};font-family:{GZ_MONO};letter-spacing:1.5px;">'
@@ -1859,7 +1861,7 @@ def gz_ai_analysis_block(res):
     if res["themes"]:
         watch_html = (
             f'<div style="margin-top:12px;padding:9px 12px;background:{GZ_PAPER_TINT};border:1px solid {GZ_HAIR};border-radius:3px;'
-            f'font-size:11.5px;font-weight:700;color:{GZ_NEON};font-family:{GZ_SERIF};'
+            f'font-size:11.5px;font-weight:700;color:{GZ_UP};font-family:{GZ_SERIF};'
             f'letter-spacing:.5px;">★ 主题解锁 · {_esc(res["themes"])}</div>')
     else:
         watch_html = (f'<div style="margin-top:12px;font-size:10px;color:{GZ_FLAT};'
@@ -2856,6 +2858,34 @@ GUIZANG_KIT = _RenderKit(
 )
 
 
+def _harden_wechat_table_widths(html):
+    """把 ``width=100%`` 同步写进内联 style，防止微信把日报压成半屏。
+
+    PushPlus/微信详情页的 HTML 清洗器会在部分客户端移除 ``table`` 的 ``width``
+    属性，却保留内联 ``style``。旧版最外层表格只有 ``width=\"100%\"``，属性被
+    清洗后便按内容固有宽度收缩，实际截图中整份日报只占约半个屏幕，标题和日期也
+    被逐字折行。双写 HTML 属性和 CSS（并使用 ``!important``）可兼容两条渲染链路。
+    """
+    def patch(match):
+        tag = match.group(0)
+        if re.search(r'\bstyle\s*=\s*(["\'])', tag, re.I):
+            return re.sub(
+                r'(\bstyle\s*=\s*["\'])',
+                r'\1width:100%!important;',
+                tag,
+                count=1,
+                flags=re.I,
+            )
+        return tag[:-1] + ' style="width:100%!important;">'
+
+    return re.sub(
+        r'<table\b[^>]*\bwidth\s*=\s*(["\'])100%\1[^>]*>',
+        patch,
+        html,
+        flags=re.I,
+    )
+
+
 def generate_report(data, date_display, date_str, theme=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
@@ -2863,14 +2893,16 @@ def generate_report(data, date_display, date_str, theme=None):
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
-        return generate_report_guizang(data, date_display, date_str)
-    return generate_report_pixel(data, date_display, date_str)
+        html = generate_report_guizang(data, date_display, date_str)
+    else:
+        html = generate_report_pixel(data, date_display, date_str)
+    return _harden_wechat_table_widths(html)
 
 
 def generate_report_guizang(data, date_display, date_str):
-    """生成完整 HTML 日报（guizang · 灰黄电子纸 × 电子墨水，微信竖版长页面）。
+    """生成完整 HTML 日报（guizang · 灰阶电子纸 × 荧光绿，微信竖版长页面）。
 
-    - 灰黄/暖灰电子纸全页底色（#F4F1EA）+ 灰黄同系卡片（#E9E4D8 / #DFD8CB）；
+    - 全页灰阶底色：浅灰 #E7E8E5 / 中灰 #D5D7D3 / 深灰 #30342F，荧光绿 #B7FF3C 点缀；
     - 衬线标题、非衬线正文、等宽元信息，全内联样式；
     - 宽表格 → 纵向 rowline；因子分析 → 杂志式信号矩阵（涨跌颜色 + 概率 + 证据）；
     - 每个区块带来源、抓取时间与「当天/非当天/无数据」徽标；
@@ -2909,7 +2941,7 @@ def generate_report_guizang(data, date_display, date_str):
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;margin:0 auto;background:{GZ_PAPER};table-layout:fixed;word-break:break-word;">
 <tr><td style="padding:0;word-break:break-word;">
 
-<!-- Hero：灰黄章节幕封（Style A editorial hero） -->
+<!-- Hero：深灰章节幕封 + 荧光绿点缀（Style A editorial hero） -->
 <div style="background:{GZ_INK_TINT};border-bottom:1px solid {GZ_HAIR};padding:22px 18px 18px;">
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>
 <td style="font-size:9px;color:{GZ_META_INK};font-family:{GZ_MONO};font-weight:700;letter-spacing:1.5px;line-height:1.2;">OCTOPUS AI · DAILY LOG</td>
@@ -2942,7 +2974,7 @@ def generate_report_guizang(data, date_display, date_str):
 </tr></table>
 </div>
 
-<!-- 正文：灰黄电子纸 + 杂志排版（竖版长页面） -->
+<!-- 正文：浅灰电子纸 + 杂志排版（竖版长页面） -->
 <div style="padding:4px 18px 24px;">
 {content_html}
 </div>
@@ -2951,7 +2983,7 @@ def generate_report_guizang(data, date_display, date_str):
 <div style="margin:0 18px;padding:14px 0 24px;border-top:1px solid {GZ_HAIR};">
 <div style="font-size:9.5px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.8;letter-spacing:.3px;">
 &gt; 仅供投资参考，非投资建议。行情与榜单来自公开数据，未抓取到内容的栏目自动隐藏，不以历史内容充数。<br>
-&gt; RENDER MODE: GUIZANG E-INK MAGAZINE // 灰黄电子纸 × 电子墨水 // 全内联样式 · 无 JS<br>
+&gt; RENDER MODE: GUIZANG E-INK MAGAZINE // 深浅灰阶 × 荧光绿 // 全内联样式 · 无 JS<br>
 &gt; TREND KEY: [▲ 涨] [▼ 跌] [■ 平] [◆ AI]
 </div>
 <div style="font-size:8.5px;color:{GZ_META};font-family:{GZ_MONO};line-height:1.7;letter-spacing:.3px;padding-top:6px;opacity:.85;">

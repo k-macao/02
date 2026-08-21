@@ -1,6 +1,7 @@
 """无需网络的日报新鲜度回归测试。"""
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 import types
@@ -587,10 +588,12 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertIn(pipeline.GZ_INK_TINT, html)     # 墨黑 Hero / 章节幕封
         self.assertIn(pipeline.GZ_NEON, html)         # 荧光绿
         self.assertIn(pipeline.GZ_INK, html)          # 正文墨黑
-        # 字体分工：衬线标题 + 非衬线正文 + 等宽元信息
-        self.assertIn("Noto Serif SC", html)
-        self.assertIn("Noto Sans SC", html)
-        self.assertIn("IBM Plex Mono", html)
+        # 字体分工：衬线标题 + 非衬线正文 + 等宽元信息；短字体栈避免
+        # 数百次重复后撑破 PushPlus 10 万字符上限。
+        self.assertIn("Songti SC", html)
+        self.assertIn("PingFang SC", html)
+        self.assertIn("font-family:monospace", html)
+        self.assertNotIn("IBM Plex Mono", html)
         # 发丝线与留白
         self.assertIn(pipeline.GZ_HAIR, html)
         # 章节幕封 + 元信息
@@ -621,6 +624,19 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertIn("border-bottom:1px solid " + pipeline.GZ_HAIR, html)
         self.assertIn("全球与美股", html)
         self.assertIn("A股四指数", html)
+
+    def test_wechat_width_is_in_inline_css_not_only_html_attribute(self):
+        data = ReportFreshnessTests()._sample_data()
+        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
+        tables = re.findall(r'<table\b[^>]*\bwidth="100%"[^>]*>', html, re.I)
+        self.assertGreater(len(tables), 5)
+        for tag in tables:
+            self.assertIn("width:100%!important", tag)
+        # 最外层尤其必须固定为满宽，否则微信清洗 width 属性后会收缩成半屏。
+        self.assertRegex(
+            html,
+            r'<table width="100%"[^>]*style="width:100%!important;',
+        )
 
     def test_guizang_signal_matrix_keeps_direction_probability_and_evidence(self):
         data = NewLayoutRenderingTests()._rich_data()
