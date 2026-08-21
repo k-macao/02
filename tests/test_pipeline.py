@@ -527,7 +527,8 @@ class RetroPixelVisualTests(unittest.TestCase):
         data["实时行情"]["quotes"]["深证成指"] = {
             "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
         }
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        # 像素视觉回归固定走 pixel 主题（默认主题自 2026-08-21 起为 guizang）
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
 
         self.assertIn("OCTOPUS_OS v3.0", html)
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
@@ -559,6 +560,107 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("★ THEME UNLOCKED // AI/算力、半导体/芯片", html)
         # 个股不再以「关注清单」形式渲染（榜单股名为 A股股票0 等）
         self.assertNotIn("<b>A股股票", html)
+
+
+class GuizangThemeTests(unittest.TestCase):
+    """2026-08-21 起：默认推送主题为 guizang（电子杂志 × 电子墨水竖版长页面）。
+
+    参考 guizang-ppt-skill Style A：暖米白电子纸 + 墨黑 Hero、衬线标题（荧光绿）、
+    等宽元信息、发丝线、大留白；宽表格 → 纵向 rowline；因子分析 → 杂志式信号矩阵；
+    全部内联样式，无 WebGL / 外部 CSS / JavaScript（PushPlus/微信详情页兼容）。
+    """
+
+    def test_default_theme_is_guizang_and_resolves_invalid_to_default(self):
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "guizang")
+        self.assertEqual(pipeline._resolve_push_theme(None), "guizang")
+        self.assertEqual(pipeline._resolve_push_theme(""), "guizang")
+        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "guizang")
+        self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
+        self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
+
+    def test_guizang_page_style_tokens_and_vertical_layout(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")  # 默认 = guizang
+        # 主题标识与配色：暖米白电子纸 / 墨黑 Hero / 荧光绿标题
+        self.assertIn("GUIZANG EDITION", html)
+        self.assertIn(pipeline.GZ_PAPER, html)        # 暖米白
+        self.assertIn(pipeline.GZ_INK_TINT, html)     # 墨黑 Hero / 章节幕封
+        self.assertIn(pipeline.GZ_NEON, html)         # 荧光绿
+        self.assertIn(pipeline.GZ_INK, html)          # 正文墨黑
+        # 字体分工：衬线标题 + 非衬线正文 + 等宽元信息
+        self.assertIn("Noto Serif SC", html)
+        self.assertIn("Noto Sans SC", html)
+        self.assertIn("IBM Plex Mono", html)
+        # 发丝线与留白
+        self.assertIn(pipeline.GZ_HAIR, html)
+        # 章节幕封 + 元信息
+        self.assertIn("01 / AI READ", html)
+        self.assertIn("TREND KEY", html)
+        # 涨跌三重编码保留（颜色 + 箭头 + 文字）
+        self.assertIn("▲ 涨 +1.25%", html)
+        self.assertNotIn("OCTOPUS_OS", html)          # 不再是像素主题
+
+    def test_guizang_inline_only_no_js_or_external_assets(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        low = html.lower()
+        self.assertNotIn("<style", low)
+        self.assertNotIn("<script", low)
+        self.assertNotIn("src=", low)                 # 无外部 JS / 图片
+        self.assertNotIn("link rel", low)             # 无外部 CSS
+        self.assertNotIn("onload", low)
+        self.assertNotIn("onclick", low)
+        self.assertNotIn("webgl", low)
+
+    def test_guizang_market_table_becomes_vertical_rowline(self):
+        data = ReportFreshnessTests()._sample_data()
+        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
+        # rowline：每条行情一行（左等宽指数名 / 右价格 + 涨跌徽标），无横向列
+        self.assertIn("6,123", html)                  # 标普500 价格
+        self.assertIn("数据暂缺", html)                # 缺失指数明确标注
+        self.assertIn("border-bottom:1px solid " + pipeline.GZ_HAIR, html)
+        self.assertIn("全球与美股", html)
+        self.assertIn("A股四指数", html)
+
+    def test_guizang_signal_matrix_keeps_direction_probability_and_evidence(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        liq = LiquidityReportTests()._liquidity_data()
+        data["A港美流动性"] = liq
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        # 因子分析 → 杂志式信号矩阵
+        self.assertIn("信号矩阵", html)
+        self.assertIn("MULTI-FACTOR AI THESIS", html)
+        # 三因子（环境/政治/地缘）+ 证据句保留
+        self.assertIn("01 · ENV 环境", html)
+        self.assertIn("02 · POL 政治", html)
+        self.assertIn("03 · GEO 地缘", html)
+        self.assertIn("美联储利率转向预期的博弈", html)
+        # 概率（规则估算，涨跌颜色区分）：整体市场 P 75%（+1.25%）、A股 P 58%（+0.40%）
+        self.assertIn("P 75%", html)
+        self.assertIn("P 58%", html)
+        self.assertIn("概率为规则估算", html)
+        self.assertIn("研判概率", html)                # 研判概率标签
+        # 涨跌颜色保留
+        self.assertIn(pipeline.GZ_UP, html)
+        self.assertIn(pipeline.GZ_DOWN, html)
+
+    def test_theme_parameter_switches_to_pixel(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertIn("OCTOPUS_OS v3.0", html)
+        self.assertIn("RETRO PIXEL EDITION", html)
+        self.assertNotIn("GUIZANG EDITION", html)
+        # guizang 默认页不含像素标识
+        html_gz = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        self.assertNotIn("OCTOPUS_OS v3.0", html_gz)
+
+    def test_guizang_meta_supports_push_only_freshness_check(self):
+        data = ReportFreshnessTests()._sample_data()
+        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["date"], "20260801")
+        self.assertGreaterEqual(meta["today_sources"], 1)
+        self.assertEqual(meta["total_sources"], 7)
 
 
 class PushResultTests(unittest.TestCase):

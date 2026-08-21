@@ -10,7 +10,10 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
 
 **每次运行都会重新抓取数据、原子更新日报；新版规则：**
 - **没有数据的区块不会出现在页面里，也不推送空内容**；
-- **页面风格：复古游戏像素风（Retro Pixel Market Quest）**——暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红高对比配色、纯直角硬描边和实体投影；栏目以 `LVL` 关卡呈现，并配有独立的 44px 大图标砖与纯 HTML 8-bit 章鱼图标。**涨跌使用颜色 + `▲ 涨` / `▼ 跌` / `■ 平` 三重编码**，行情速览等板块显示高对比涨跌徽标；**AI 盘研判置于首屏，以 AI CORE 主控卡、方向 / 信号分 / 置信度计分板和 14px「AI 主结论」高亮框凸显**，板块、技术、风险与关注主题各自使用独立像素面板。**页面不出现任何成交量榜单/排名表，只保留 AI 对榜单数据的研判报告**；港股名家频道保留聊天记录式消息结构。全部为内联样式 + 表格布局，适配微信 / PushPlus 渲染；
+- **页面风格（默认 `guizang` 主题，2026-08-21 起）**：参考 [Guizang PPT Skill](https://github.com/op7418/guizang-ppt-skill) 的 **Style A「电子杂志 × 电子墨水」**，改造成适合微信阅读的**竖版长页面**——暖米白电子纸（`#F1EFEA`）+ 墨黑 Hero / 章节幕封、衬线标题（**荧光绿** `#B6F542`）、非衬线正文（墨黑 `#0A0A0B`）、等宽元信息、发丝线与大留白，**全部字体偏小**。**涨跌使用颜色 + `▲ 涨` / `▼ 跌` / `■ 平` 三重编码**；**宽表格自动转为手机友好的纵向 `rowline`**（一行一条，避免横向溢出）；**因子分析以杂志式信号矩阵呈现**（保留涨跌颜色、概率与一句话证据）；**AI 盘研判置于首屏**（方向 / 信号分 / 置信度 / 研判概率 + 板块、技术、风险、关注主题）。**页面不出现任何成交量榜单/排名表，只保留 AI 对榜单数据的研判报告**。全部为内联样式 + 表格布局，**不依赖 WebGL / 外部 CSS / JavaScript**，适配 PushPlus / 微信详情页渲染。
+  - **旧版 `pixel` 主题保留**（复古游戏像素风 Retro Pixel Market Quest）：用环境变量 `OCTOPUS_PUSH_THEME=pixel` 或命令行 `--theme pixel` 切回；
+  - 一对一 / 一对多推送共用同一份日报 HTML，两种模式都跟随当前主题；
+  - 本地大屏预览 `python3 output/preview_server.py`：**首页 `/` = 实际 PushPlus 完整页面（`latest.html`）**，`/sample` 为 guizang 排版示例（示例数据）；
 - 每个区块标注 **当天 / 非当天 / 无数据** 状态徽标；当天内容检验仍作为推送门禁，但不在页面顶部单独显示横幅；
 - **只有至少一个数据源抓到「当天」内容才自动推送日报**；否则不推日报，但会向你推一条
   **「检验未通过」纯文本告警**（含各来源状态与处理建议），避免彻底沉默；
@@ -63,6 +66,8 @@ python3 output/pipeline.py --push-only output/daily_report_20260730.html  # 推�
 python3 output/pipeline.py --force-push-old     # 允许 --push-only 推送不带新鲜度标记的旧版文件（不推荐）
 python3 output/pipeline.py --allow-incomplete-push # 全部数据源故障时仍推送“数据暂缺”状态报告
 python3 output/pipeline.py --list               # 列出已生成的日报
+python3 output/pipeline.py --theme pixel        # 本次改用旧版像素主题（默认 guizang）
+OCTOPUS_PUSH_THEME=pixel python3 output/push.py # 用环境变量固定主题（CI / crontab）
 ```
 
 ## 🖐 手动推送
