@@ -644,6 +644,23 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertIn(pipeline.GZ_UP, html)
         self.assertIn(pipeline.GZ_DOWN, html)
 
+    def test_guizang_never_uses_pixel_palette_colors(self):
+        # 回归：AI 盘研判「技术速读」档位词（强势/偏强/震荡/偏弱/弱势）曾误用
+        # _ai_band() 携带的像素墨黑底高对比色（#FF5576/#35F29A/#FFD166），
+        # 印到暖米白电子纸上会刺眼；guizang 页面必须只出现 GZ_* 色板。
+        data = NewLayoutRenderingTests()._rich_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        self.assertIn("TECH READ · 指数动能", html)   # 确认技术速读在场（标普 +1.25% → 偏强，上证 +0.40% → 震荡）
+        for leaked in (pipeline.C_RED, pipeline.C_GREEN, pipeline.C_AMBER):
+            self.assertNotIn(leaked, html, f"像素主题配色 {leaked} 泄漏进 guizang 页面")
+        # 档位词改用 guizang 纸底涨跌/警示色
+        self.assertIn(f'color:{pipeline.GZ_UP};">偏强<', html)
+        self.assertIn(f'color:{pipeline.GZ_WARN};">震荡<', html)
+        # pixel 主题保持原高对比配色不受影响
+        html_px = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertIn(pipeline.C_GREEN, html_px)
+        self.assertIn(pipeline.C_AMBER, html_px)
+
     def test_theme_parameter_switches_to_pixel(self):
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
