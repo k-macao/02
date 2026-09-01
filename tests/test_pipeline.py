@@ -1193,5 +1193,89 @@ class CleanOldReportsTests(unittest.TestCase):
             self.assertTrue((Path(directory) / "latest.html").exists())
 
 
+def _relative_luminance(hex_color):
+    raw = hex_color.lstrip("#")
+    channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+              for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast_ratio(fg, bg):
+    high, low = sorted((_relative_luminance(fg), _relative_luminance(bg)),
+                       reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+class GuizangContrastTests(unittest.TestCase):
+    """GUIZANG 主题的正文级颜色必须满足 WCAG AA（4.5:1）。
+
+    历史问题：涨用的绿色 #237A3B 在浅灰纸底上只有 4.36:1、在卡片底
+    #D5D7D3 上只有 3.70:1，用户反馈「绿色字体颜色看不清」。
+    """
+
+    MIN_RATIO = 4.5
+
+    def test_ink_colors_are_readable_on_light_backgrounds(self):
+        for name in ("GZ_UP", "GZ_DOWN", "GZ_FLAT", "GZ_WARN", "GZ_INK", "GZ_META"):
+            color = getattr(pipeline, name)
+            for bg_name in ("GZ_PAPER", "GZ_PAPER_TINT"):
+                bg = getattr(pipeline, bg_name)
+                ratio = _contrast_ratio(color, bg)
+                self.assertGreaterEqual(
+                    ratio, self.MIN_RATIO,
+                    f"{name} {color} 在 {bg_name} {bg} 上仅 {ratio:.2f}:1，低于 AA 4.5:1")
+
+    def test_ink_tint_colors_are_readable_on_dark_backgrounds(self):
+        bg = pipeline.GZ_INK_TINT
+        for name in ("GZ_UP_INK", "GZ_DOWN_INK", "GZ_FLAT_INK", "GZ_WARN_INK",
+                     "GZ_NEON", "GZ_CREAM", "GZ_META_INK"):
+            color = getattr(pipeline, name)
+            ratio = _contrast_ratio(color, bg)
+            self.assertGreaterEqual(
+                ratio, self.MIN_RATIO,
+                f"{name} {color} 在幕封 {bg} 上仅 {ratio:.2f}:1，低于 AA 4.5:1")
+
+    def test_meter_empty_cells_meet_non_text_contrast(self):
+        """信号格空槽是图形，按 WCAG 非文本对比 3:1 校验。"""
+        for bg_name in ("GZ_PAPER", "GZ_PAPER_TINT"):
+            bg = getattr(pipeline, bg_name)
+            ratio = _contrast_ratio(pipeline.GZ_METER_OFF, bg)
+            self.assertGreaterEqual(
+                ratio, 3.0,
+                f"GZ_METER_OFF 在 {bg_name} 上仅 {ratio:.2f}:1，低于非文本 3:1")
+
+    def test_neon_green_never_lands_on_a_light_background(self):
+        """荧光绿只能出现在深灰幕封上；放到浅灰纸底几乎不可见（约 1.02:1）。"""
+        self.assertLess(_contrast_ratio(pipeline.GZ_NEON, pipeline.GZ_PAPER), 2.0)
+        html = pipeline.generate_report(self_sample_for_neon(), "2026年8月1日 · 周六",
+                                        "20260801")
+        neon = pipeline.GZ_NEON.lower()
+        for match in re.finditer(r'<div[^>]*>', html.lower()):
+            tag = match.group(0)
+            if f"color:{neon}" in tag.replace(" ", ""):
+                # 荧光绿文字所在容器必须显式落在深灰幕封链路上。
+                head = html[:match.start()].lower()
+                last_dark = head.rfind(pipeline.GZ_INK_TINT.lower())
+                last_light = max(head.rfind(pipeline.GZ_PAPER.lower()),
+                                 head.rfind(pipeline.GZ_PAPER_TINT.lower()))
+                self.assertGreater(
+                    last_dark, last_light,
+                    "检测到荧光绿文字被渲染在浅灰背景区域内")
+
+
+def self_sample_for_neon():
+    return {
+        "实时行情": pipeline._source_result(
+            "test quote", "success", is_today=True, content_date="2026-08-01",
+            quotes={"标普500": {"price": 6123.45, "change_pct": 1.25, "currency": "USD"}},
+        ),
+        "全球头条": pipeline._source_result("test news", "unavailable", headlines=[],
+                                        error="offline"),
+        "A股资讯": pipeline._source_result("test sina", "unavailable", headlines=[],
+                                        error="offline"),
+    }
+
+
 if __name__ == "__main__":
     unittest.main()

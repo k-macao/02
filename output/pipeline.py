@@ -1106,19 +1106,20 @@ GZ_PAPER = "#E7E8E5"        # 页面整体：冷调浅灰
 GZ_PAPER_TINT = "#D5D7D3"   # 卡片 / 注记 / 引言：中浅灰
 GZ_INK = "#191C1A"          # 正文：近黑深灰
 GZ_INK_TINT = "#30342F"     # Hero / 章节幕封：深灰（不使用纯黑）
-GZ_HAIR = "#B8BCB6"         # 浅灰背景上的发丝线
+GZ_HAIR = "#B8BCB6"         # 浅灰背景上的发丝线（纯装饰分隔，不承载信息）
+GZ_METER_OFF = "#727870"    # 信号格空槽：非文本图形，对纸底 3.68:1、对卡片底 3.13:1
 GZ_HAIR_INK = "#555B54"     # 深灰幕封上的发丝线
 GZ_CREAM = "#F0F2EE"        # 深灰幕封上的主文字
-GZ_META = "#626861"         # 浅灰背景上的元信息
+GZ_META = "#54594F"         # 浅灰背景上的元信息（AA：对纸底 5.85:1）
 GZ_META_INK = "#BEC5BB"     # 深灰幕封上的元信息
-GZ_NEON = "#B7FF3C"         # 荧光绿：标题 / AI / LIVE 点缀
-GZ_UP = "#237A3B"           # 浅灰背景上的涨（深绿，保证可读性）
-GZ_DOWN = "#B92D3B"         # 浅灰背景上的跌（语义红）
-GZ_FLAT = "#626861"         # 平（中灰）
-GZ_UP_INK = "#B7FF3C"       # 深灰背景上的涨 / LIVE（荧光绿）
-GZ_DOWN_INK = "#FF7180"     # 深灰背景上的跌
+GZ_NEON = "#B7FF3C"         # 荧光绿：只在深灰幕封上做标题 / AI / LIVE 点缀
+GZ_UP = "#0F5C2A"           # 浅灰背景上的涨（深绿；对纸底 6.61:1、对卡片底 5.61:1）
+GZ_DOWN = "#9E1F2E"         # 浅灰背景上的跌（深红；对纸底 6.35:1、对卡片底 5.39:1）
+GZ_FLAT = "#54594F"         # 平（中灰；对纸底 5.85:1、对卡片底 4.96:1）
+GZ_UP_INK = "#B7FF3C"       # 深灰背景上的涨 / LIVE（荧光绿，对幕封 10.48:1）
+GZ_DOWN_INK = "#FF8A96"     # 深灰背景上的跌（对幕封 5.63:1）
 GZ_FLAT_INK = "#BEC5BB"     # 深灰背景上的平
-GZ_WARN = "#8A5A12"         # 浅灰背景上的警示
+GZ_WARN = "#75470A"         # 浅灰背景上的警示（对纸底 6.41:1、对卡片底 5.44:1）
 GZ_WARN_INK = "#FFD36A"     # 深灰背景上的警示
 # 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
 # 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
@@ -1496,7 +1497,7 @@ def gz_trend_badge(value, compact=False):
     return f'<span style="color:{color};font-weight:700;">{label}</span>'
 
 
-def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_HAIR, size=14):
+def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_METER_OFF, size=14):
     """信号格放大到可读字号；微信忽略 letter-spacing 也仍能看出实心/空心。"""
     maximum = max(1, int(maximum or 1))
     n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
@@ -1723,7 +1724,7 @@ def gz_ai_analysis_block(res):
         f'<div style="font-size:15px;color:{GZ_INK};padding-top:8px;line-height:1.6;">'
         f'信号 {score:+d} · 置信度 {_esc(res["confidence"])} · '
         f'<span style="color:{bias_color};font-weight:700;">研判概率 P {prob}%</span></div>'
-        f'<div style="padding-top:6px;">{gz_meter(abs(score), 100, 8, bias_color, GZ_HAIR, 14)}</div>',
+        f'<div style="padding-top:6px;">{gz_meter(abs(score), 100, 8, bias_color, GZ_METER_OFF, 14)}</div>',
         bg=GZ_PAPER_TINT, pad="14px")
     thesis = gz_shell(
         f'<div style="font-size:13px;color:{GZ_META};">先看结论</div>'
@@ -1734,7 +1735,7 @@ def gz_ai_analysis_block(res):
         max_hits = max(cnt for _, cnt in res["sectors_strong"])
         sec_cards = "".join(
             gz_rowline(_esc(sec),
-                       f'{gz_meter(cnt, max_hits, 5, GZ_INK, GZ_HAIR, 14)} '
+                       f'{gz_meter(cnt, max_hits, 5, GZ_INK, GZ_METER_OFF, 14)} '
                        f'<span style="color:{GZ_META};">{cnt} 次</span>')
             for sec, cnt in res["sectors_strong"])
         sectors_html = gz_subsection("板块热度") + sec_cards
@@ -1798,7 +1799,7 @@ def gz_liquidity_market_block(label, stats):
         f'<div style="font-size:13px;color:{GZ_META};">{_esc(label)} · 流动性评分</div>'
         f'<div style="font-size:22px;font-weight:700;color:{color};font-family:{GZ_SERIF};padding-top:4px;">'
         f'{score} 分 · {_esc(stats.get("level", "—"))}</div>'
-        f'<div style="padding-top:6px;">{gz_meter(score, 100, 10, color, GZ_HAIR, 14)}</div>'
+        f'<div style="padding-top:6px;">{gz_meter(score, 100, 10, color, GZ_METER_OFF, 14)}</div>'
         f'<div style="font-size:15px;color:{GZ_INK};padding-top:8px;line-height:1.6;">'
         f'AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b>'
         f' · 样本 {stats.get("sample_count", 0)} 只</div>',
