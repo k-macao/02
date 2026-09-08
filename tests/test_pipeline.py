@@ -640,13 +640,14 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("<style", low)
         self.assertNotIn("<script", low)
         images = re.findall(r'<img\b[^>]*>', html)
-        self.assertEqual(len(images), html.count("<h2 ") + 1)
+        # 图片 = 每个栏目标题 1 枚大图标 + 刊头 64px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
+        self.assertEqual(len(images), html.count("<h2 ") + 1 + len(pipeline.KOBOYO_MASTHEAD_ICONS))
         for image in images:
             self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z]+\.svg"')
             self.assertIn('alt=""', image)
             self.assertIn('aria-hidden="true"', image)
-            self.assertRegex(image, r'width="(?:28|48)"')
-            self.assertRegex(image, r'height="(?:28|48)"')
+            self.assertRegex(image, r'width="(?:32|40|64)"')
+            self.assertRegex(image, r'height="(?:32|40|64)"')
         self.assertNotIn("<svg", low)                 # 只用链接，不内嵌或保存图标
         self.assertNotIn("data:image", low)
         self.assertNotIn("link rel", low)             # 无外部 CSS
@@ -663,6 +664,14 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertIn("Hiragino Mincho ProN", heading)
             self.assertIn("Songti SC", heading)
             self.assertIn("letter-spacing:", heading)
+            self.assertIn("font-weight:700", heading)   # 标题统一加粗宋体
+        for h1 in re.findall(r'<h1\b[^>]*>', html):
+            self.assertIn("font-size:34px", h1)          # 主标题加大
+        for h2 in re.findall(r'<h2\b[^>]*>', html):
+            self.assertIn("font-size:26px", h2)          # 栏目标题加大
+        # 刊头多图标显示：全部栏目手绘图标在刊头再排一行
+        for slug in pipeline.KOBOYO_MASTHEAD_ICONS:
+            self.assertIn(f'icons/svg/{slug}.svg', html)
         # 不依赖颜色，涨跌仍然可以分辨。
         self.assertIn("▲ 涨 +1.25%", html)
         self.assertIn("▼ 跌 -1.25%", pipeline.gz_trend_badge(-1.25))
