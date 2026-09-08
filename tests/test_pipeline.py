@@ -142,7 +142,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
+        self.assertEqual(meta["total_sources"], 8)  # 8 个数据源（2026-09-08 新增「A股大盘全景」；Reddit / 韩股已移除）
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -434,7 +434,7 @@ class LiquidityReportTests(unittest.TestCase):
         self.assertIn("港股股票0", html)
         self.assertIn("美股股票0", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 7)  # Reddit / 韩股已移除
+        self.assertEqual(meta["total_sources"], 8)  # 8 个数据源（2026-09-08 新增「A股大盘全景」；Reddit / 韩股已移除）
 
     def test_volume_and_liquidity_analysis_html_synthesizes_hot_and_liq(self):
         liq = self._liquidity_data()
@@ -506,7 +506,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 7)  # 数据源共 7 个（Reddit / 韩股已移除）
+        self.assertEqual(meta["total_sources"], 8)  # 数据源共 8 个（2026-09-08 新增「A股大盘全景」；Reddit / 韩股已移除）
 
 
 class RetroPixelVisualTests(unittest.TestCase):
@@ -794,7 +794,7 @@ class GuizangThemeTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 7)
+        self.assertEqual(meta["total_sources"], 8)  # 8 个数据源（含 A股大盘全景）
 
 
 class PushResultTests(unittest.TestCase):
@@ -1262,6 +1262,262 @@ class CleanOldReportsTests(unittest.TestCase):
             # 旧文件应原封不动
             self.assertTrue((Path(directory) / "daily_report_20260801.html").exists())
             self.assertTrue((Path(directory) / "latest.html").exists())
+
+
+class MarketPanoramaTests(unittest.TestCase):
+    """2026-09-08 新增：A股大盘全景复盘（指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力）。
+
+    全部用 fake safe_request 按 URL 分发，不发真实网络请求。
+    """
+
+    QUOTE_TS = int(pipeline.datetime(2026, 9, 8, 15, 0, tzinfo=pipeline.CST).timestamp())
+
+    @staticmethod
+    def _indices_diff():
+        # f12 代码与 PANORAMA_INDEX_SPECS 一一对应；三大载体指数附带市场宽度统计
+        return [
+            {"f12": "000001", "f14": "上证指数", "f2": 3123.45, "f3": 1.25, "f4": 38.50,
+             "f6": 5.1e11, "f17": 3090.0, "f15": 3130.0, "f16": 3081.0, "f18": 3084.95,
+             "f104": 1800, "f105": 500, "f106": 60, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "399001", "f14": "深证成指", "f2": 10456.78, "f3": -0.62, "f4": -65.30,
+             "f6": 6.2e11, "f17": 10500.0, "f15": 10580.0, "f16": 10400.0, "f18": 10522.08,
+             "f104": 2100, "f105": 700, "f106": 80, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "399006", "f14": "创业板指", "f2": 2101.23, "f3": 2.10, "f4": 43.19,
+             "f6": 3.0e11, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "000688", "f14": "科创50", "f2": 901.10, "f3": 0.0, "f4": 0.0,
+             "f6": 8.0e10, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "899050", "f14": "北证50", "f2": 801.50, "f3": 0.85, "f4": 6.76,
+             "f6": 8.0e9, "f104": 150, "f105": 100, "f106": 10,
+             "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "000300", "f14": "沪深300", "f2": 3980.20, "f3": 0.90, "f4": 35.54,
+             "f6": 2.9e11, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "000016", "f14": "上证50", "f2": 2601.30, "f3": 0.55, "f4": 14.22,
+             "f6": 1.1e11, "f124": MarketPanoramaTests.QUOTE_TS},
+            {"f12": "000905", "f14": "中证500", "f2": 5902.40, "f3": 1.10, "f4": 64.20,
+             "f6": 2.2e11, "f124": MarketPanoramaTests.QUOTE_TS},
+        ]
+
+    @staticmethod
+    def _sector_rows(po):
+        sign = 1 if po == "1" else -1
+        return [
+            {"f12": f"BK10{i}", "f14": f"板块{i}", "f3": sign * (3.5 - i * 0.3),
+             "f62": 1.5e9 - i * 1e8, "f104": 30 - i, "f105": 5 + i,
+             "f128": f"领涨股{i}", "f136": 9.9 - i}
+            for i in range(pipeline.PANORAMA_SECTOR_TOP_N)
+        ]
+
+    def _install_fake_requests(self, with_kline=True, with_kamt=True, with_sectors=True):
+        def fake(url, params=None, **kw):
+            if "ulist.np" in url:
+                return {"data": {"diff": self._indices_diff()}}
+            if "stock/kline" in url:
+                if not with_kline:
+                    return None
+                base = {"1.000001": 4.8e11, "0.399001": 6.0e11, "0.899050": 7.0e9}[
+                    (params or {}).get("secid")]
+                return {"data": {"klines": [f"2026-09-07,{base}", f"2026-09-08,{base * 1.05:.0f}"]}}
+            if "kamt.kline" in url:
+                if not with_kamt:
+                    return None
+                return {"data": {"s2n": ["2026-09-08,-,1350.25"], "n2s": []}}
+            if "clist/get" in url:
+                if not with_sectors:
+                    return None
+                return {"data": {"diff": self._sector_rows((params or {}).get("po"))}}
+            return None
+        return patch.object(pipeline, "safe_request", side_effect=fake)
+
+    # ------------------------------------------------------------------
+    # 采集层
+    # ------------------------------------------------------------------
+    def test_fetch_market_panorama_parses_all_blocks(self):
+        with self._install_fake_requests():
+            result = pipeline.fetch_market_panorama()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["source"], "东方财富·A股全景")
+        self.assertEqual(result["content_date"], "2026-09-08")
+        self.assertEqual(result["quote_time"], "2026-09-08 15:00:00")
+        self.assertEqual(result["is_today"], pipeline._today_display() == "2026-09-08")
+
+        # ① 指数表现：按 spec 顺序保留八大宽基，名称统一为正式中文名
+        self.assertEqual(len(result["indices"]), 8)
+        self.assertEqual([i["name"] for i in result["indices"]],
+                         [label for _, label in pipeline.PANORAMA_INDEX_SPECS])
+        self.assertEqual(result["indices"][0]["price"], 3123.45)
+        self.assertEqual(result["indices"][0]["chg_pct"], 1.25)
+
+        # ② 涨跌家数：沪深京三市合计 + 涨跌比 + 情绪定调
+        b = result["breadth"]
+        self.assertEqual((b["up"], b["down"], b["flat"]), (4050, 1300, 150))
+        self.assertEqual(b["ratio"], 3.12)
+        self.assertEqual(b["mood"], "普涨强势")
+        self.assertFalse(b["partial"])
+
+        # ③ 成交额：沪深京合计 + 上一交易日环比（K 线末根日期==报价日时取前一根）
+        t = result["turnover"]
+        self.assertAlmostEqual(t["total"], 5.1e11 + 6.2e11 + 8.0e9)
+        self.assertAlmostEqual(t["sh_sz"], 5.1e11 + 6.2e11)
+        self.assertAlmostEqual(t["prev_total"], 4.8e11 + 6.0e11 + 7.0e9)
+        self.assertAlmostEqual(t["chg_pct"], (t["total"] / t["prev_total"] - 1) * 100, places=6)
+
+        # ④ 北向资金：净买列为 "-"，取行内最后一个数值作为成交总额（亿元）
+        north = result["north"]
+        self.assertTrue(north["available"])
+        self.assertEqual(north["amount_yi"], 1350.25)
+        self.assertEqual(north["date"], "2026-09-08")
+        self.assertIn("2024-08-19", north["policy_note"])
+
+        # ⑤ 板块热力：领涨 TOP 涨幅降序、领跌 TOP 跌幅最深在前
+        leading = result["sectors"]["leading"]
+        lagging = result["sectors"]["lagging"]
+        self.assertEqual(len(leading), pipeline.PANORAMA_SECTOR_TOP_N)
+        self.assertEqual([r["chg_pct"] for r in leading],
+                         sorted((r["chg_pct"] for r in leading), reverse=True))
+        self.assertEqual([r["chg_pct"] for r in lagging],
+                         sorted((r["chg_pct"] for r in lagging)))
+        self.assertEqual(leading[0]["lead_stock"], "领涨股0")
+        self.assertEqual(leading[0]["main_inflow"], 1.5e9)
+
+    def test_fetch_market_panorama_unavailable_when_quote_request_fails(self):
+        with patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_market_panorama()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["indices"], [])
+        self.assertIsNone(result["breadth"])
+        self.assertIsNone(result["turnover"])
+
+    def test_fetch_market_panorama_degrades_per_subblock(self):
+        # 指数 / 宽度在线，K 线、北向、板块全挂：整体仍 success，对应子块缺席并标 partial
+        with self._install_fake_requests(with_kline=False, with_kamt=False, with_sectors=False):
+            result = pipeline.fetch_market_panorama()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["indices"]), 8)
+        self.assertIsNotNone(result["turnover"])
+        self.assertIsNone(result["turnover"]["prev_total"])
+        self.assertIsNone(result["turnover"]["chg_pct"])
+        self.assertFalse(result["north"]["available"])
+        self.assertEqual(result["sectors"], {"leading": [], "lagging": []})
+        self.assertTrue(result["partial"])
+        self.assertIn("北向", result["error"])
+        self.assertIn("板块热力", result["error"])
+
+    def test_breadth_mood_thresholds(self):
+        self.assertEqual(pipeline._panorama_breadth_mood(2.0), "普涨强势")
+        self.assertEqual(pipeline._panorama_breadth_mood(1.2), "偏多震荡")
+        self.assertEqual(pipeline._panorama_breadth_mood(0.8), "多空均衡")
+        self.assertEqual(pipeline._panorama_breadth_mood(0.5), "偏空承压")
+        self.assertEqual(pipeline._panorama_breadth_mood(0.49), "普跌弱势")
+        self.assertEqual(pipeline._panorama_breadth_mood(None), "数据不足")
+
+    def test_format_amount_keeps_minus_sign_for_main_outflow(self):
+        # 板块主力净流入（f62）常为负：负号必须保留，不能只显示绝对值或原始大数
+        self.assertEqual(pipeline._format_amount(-1.2e9), "-12.00亿")
+        self.assertEqual(pipeline._format_amount(-8.0e4), "-8.00万")
+        self.assertEqual(pipeline._format_amount(-500), "-500.00")
+        # 非负值行为保持不变
+        self.assertEqual(pipeline._format_amount(1.5e9), "15.00亿")
+        self.assertEqual(pipeline._format_amount("—"), "—")
+
+    # ------------------------------------------------------------------
+    # 渲染层
+    # ------------------------------------------------------------------
+    def _panorama_payload(self):
+        return pipeline._source_result(
+            "东方财富·A股全景", "success", is_today=True, content_date="2026-09-08",
+            indices=[
+                {"code": "000001", "name": "上证指数", "price": 3123.45, "chg_pct": 1.25,
+                 "amount": 5.1e11, "chg": 38.50},
+                {"code": "399001", "name": "深证成指", "price": 10456.78, "chg_pct": -0.62,
+                 "amount": 6.2e11, "chg": -65.30},
+            ],
+            breadth={"up": 4050, "down": 1300, "flat": 150, "ratio": 3.12,
+                     "mood": "普涨强势", "partial": False,
+                     "markets": {"沪": {"up": 1800, "down": 500, "flat": 60},
+                                 "深": {"up": 2100, "down": 700, "flat": 80},
+                                 "京": {"up": 150, "down": 100, "flat": 10}}},
+            turnover={"total": 1.138e12, "sh_sz": 1.13e12, "prev_total": 1.087e12,
+                      "chg_pct": 4.69,
+                      "by_market": {"沪": 5.1e11, "深": 6.2e11, "京": 8.0e9},
+                      "partial": False},
+            north={"available": True, "amount_yi": 1350.25, "date": "2026-09-08",
+                   "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": None},
+            sectors={
+                "leading": [{"code": "BK100", "name": "领涨板块甲", "chg_pct": 3.50,
+                             "main_inflow": 1.5e9, "lead_stock": "领涨牛股", "lead_stock_pct": 9.9}],
+                "lagging": [{"code": "BK200", "name": "领跌板块乙", "chg_pct": -2.10,
+                             "main_inflow": -8.0e8, "lead_stock": "领跌熊股", "lead_stock_pct": -6.5}],
+            },
+            quote_time="2026-09-08 15:00:00")
+
+    def test_panorama_section_renders_in_guizang_theme(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A股大盘全景"] = self._panorama_payload()
+        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
+        self.assertIn("A股大盘全景复盘", html)
+        self.assertIn("指数表现", html)
+        self.assertIn("上证指数", html)
+        self.assertIn("3,123.45", html)
+        self.assertIn("涨跌家数", html)
+        self.assertIn("4,050 家", html)
+        self.assertIn("普涨强势", html)
+        self.assertIn("3.12", html)
+        self.assertIn("成交额", html)
+        self.assertIn("北向资金", html)
+        self.assertIn("1,350.25 亿元", html)
+        self.assertIn("2024-08-19", html)          # 披露口径说明
+        self.assertIn("板块热力", html)
+        self.assertIn("领涨板块甲", html)
+        self.assertIn("领跌板块乙", html)
+        self.assertIn("领涨牛股", html)
+        # guizang 页面只允许 GZ_* 色板，像素主题高对比色不得泄漏
+        for leaked in (pipeline.C_RED, pipeline.C_GREEN, pipeline.C_AMBER,
+                       pipeline.C_LEMON, pipeline.C_CYAN):
+            self.assertNotIn(leaked, html, f"像素主题配色 {leaked} 泄漏进 guizang 页面")
+
+    def test_panorama_section_renders_in_pixel_theme(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A股大盘全景"] = self._panorama_payload()
+        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908", theme="pixel")
+        self.assertIn("A股大盘全景复盘", html)
+        self.assertIn("指数表现", html)
+        self.assertIn("涨跌家数", html)
+        self.assertIn("▲ 上涨 4,050 家", html)
+        self.assertIn("普涨强势", html)
+        self.assertIn("北向资金", html)
+        self.assertIn("板块热力", html)
+        self.assertIn("领涨板块甲", html)
+
+    def test_panorama_section_absent_and_audited_when_unavailable(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A股大盘全景"] = pipeline._source_result(
+            "东方财富·A股全景", "unavailable", indices=[], breadth=None, turnover=None,
+            north={"available": False, "amount_yi": None, "date": None,
+                   "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": "offline"},
+            sectors={"leading": [], "lagging": []}, quote_time=None, error="offline")
+        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
+        self.assertNotIn("A股大盘全景复盘", html)   # 栏目标题不渲染
+        self.assertIn("A股大盘全景", html)           # 数据审计栏仍留痕
+        self.assertIn("暂缺", html)
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["total_sources"], 8)  # 源数与是否有数据无关
+
+    def test_panorama_counts_in_audit_and_eligibility(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["A股大盘全景"] = self._panorama_payload()
+        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["total_sources"], 8)  # 审计源数固定，与实收数据无关
+        ok, reason = pipeline.check_push_eligibility(data)
+        self.assertTrue(ok)
+        # check_push_eligibility 按实收数据源动态计数（rich fixture 未含流动性源 → 8 项缺 1）
+        n_dict_sources = len([v for v in data.values() if isinstance(v, dict)])
+        self.assertIn(f"/{n_dict_sources}", reason)
+        # 全景单独作为唯一「当天」源时也能通过当天检验，证明它真正计入推送门禁
+        ok_solo, reason_solo = pipeline.check_push_eligibility(
+            {"A股大盘全景": self._panorama_payload()})
+        self.assertTrue(ok_solo)
+        self.assertIn("1/1", reason_solo)
 
 
 if __name__ == "__main__":
