@@ -538,8 +538,11 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("AI 主结论 // CORE THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
-        self.assertIn("▼ 跌 -2.50%", html)  # 深证行情
-        self.assertIn("▼ -2.50%", html)     # AI 盘研判 TECH READ 的 compact 徽标
+        self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（行情速览：明细数字唯一出处）
+        # 2026-09-09 页内去重：TECH READ 不再逐条复述 compact 徽标，只保留聚合
+        self.assertIn("指数动能聚合", html)
+        self.assertIn("明细数值见「行情速览」", html)
+        self.assertNotIn("▼ -2.50%", html)  # 逐指数 compact 徽标已从动能区移除
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
@@ -1518,6 +1521,102 @@ class MarketPanoramaTests(unittest.TestCase):
             {"A股大盘全景": self._panorama_payload()})
         self.assertTrue(ok_solo)
         self.assertIn("1/1", reason_solo)
+
+
+class ReportInnerDedupeTests(unittest.TestCase):
+    """2026-09-09 页内去重：同一标题 / 数字在单份日报只出现一次。"""
+
+    RISK_TITLE = "美股暴跌引发全球市场恐慌情绪蔓延"
+
+    def _dedupe_data(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["实时行情"]["quotes"]["深证成指"] = {
+            "price": 12345.67, "change_pct": -2.5, "currency": "CNY"}
+        data["实时行情"]["quotes"]["恒生指数"] = {
+            "price": 25000.0, "change_pct": 0.8, "currency": "HKD"}
+        data["全球头条"]["headlines"].append({
+            "title": self.RISK_TITLE, "source": "测试源",
+            "url": "", "published_cst": "2026-08-02 11:00", "is_today": True})
+        return data
+
+    def test_pixel_risk_shown_title_renders_reference_only(self):
+        """正文已展示的风险标题：风险区仅引用定位，全文只出现一次。"""
+        html = pipeline.generate_report(
+            self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertEqual(html.count(self.RISK_TITLE), 1)  # 全文只在正文全球头条出现
+        self.assertIn("「全球头条」第02条", html)          # 风险区仅引用定位
+        self.assertIn('href="#h-gh-02"', html)             # 引用可跳回正文
+        self.assertIn('id="h-gh-02"', html)                # 正文锚点存在
+        self.assertIn("命中：", html)                      # 引用携带命中关键词（新增信息）
+        res = pipeline.build_ai_analysis(self._dedupe_data())
+        risk = [r for r in res["risks"] if r["title"] == self.RISK_TITLE][0]
+        self.assertTrue(risk["shown"])
+        self.assertIn("暴跌", risk["keywords"])
+
+    def test_guizang_risk_reference_and_tech_aggregate(self):
+        """guizang 主题同样去重：风险引用 + 动能聚合。"""
+        html = pipeline.generate_report(
+            self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
+        self.assertEqual(html.count(self.RISK_TITLE), 1)
+        self.assertIn("「全球头条」第02条", html)
+        self.assertIn('href="#h-gh-02"', html)
+        self.assertIn("指数动能聚合", html)
+        self.assertIn("明细数值见「行情速览」", html)
+
+    def test_tech_aggregate_counts_match_quotes(self):
+        """动能聚合的涨跌家数与输入行情一致（3 涨 / 1 跌 / 0 平）。"""
+        html = pipeline.generate_report(
+            self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertIn("指数动能聚合（4 个指数）", html)
+        self.assertIn("▲ 3", html)
+        self.assertIn("▼ 1", html)
+        res = pipeline.build_ai_analysis(self._dedupe_data())
+        self.assertEqual(res["tech_stats"]["count"], 4)
+        self.assertEqual(
+            (res["tech_stats"]["ups"], res["tech_stats"]["downs"], res["tech_stats"]["flats"]),
+            (3, 1, 0))
+
+    def test_market_section_shows_hk_indices_in_both_themes(self):
+        """恒生指数补缺：双主题行情速览都有港股双指数小节。"""
+        for theme in ("pixel", "guizang"):
+            html = pipeline.generate_report(
+                self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertIn("港股双指数", html)
+            self.assertIn("恒生指数", html)
+
+    def test_multi_factor_matrix_does_not_repeat_quotes(self):
+        """多因子矩阵不再复述报价数字：价格只在行情速览出现一次。"""
+        for theme in ("pixel", "guizang"):
+            html = pipeline.generate_report(
+                self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertIn("数值详见「行情速览」", html)
+            self.assertEqual(html.count("12,345.67"), 1, f"theme={theme}")  # 千分位价格仅出现一次
+            self.assertEqual(html.count("-2.50%"), 1, f"theme={theme}")     # 涨跌幅仅出现一次
+
+    def test_unshown_channel_risk_keeps_full_title(self):
+        """正文截断未展示的风险标题（港股频道第 4 条）：风险区保留全文。"""
+        data = self._dedupe_data()
+        videos = data["港股名家频道"]["channels"][0]["videos"]
+        videos.extend([
+            {"title": "午盘点评：恒指窄幅震荡", "video_id": f"v{i}",
+             "url": f"https://www.youtube.com/watch?v=v{i}",
+             "published": "2026-08-02T02:00:00+00:00",
+             "published_cst": "2026-08-02 10:00", "is_today": True}
+            for i in (2, 3)
+        ])
+        videos.append({
+            "title": "恒指爆雷股预警名单更新", "video_id": "v4",
+            "url": "https://www.youtube.com/watch?v=v4",
+            "published": "2026-08-02T08:00:00+00:00",
+            "published_cst": "2026-08-02 16:00", "is_today": True})
+        html = pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        # 第 4 条正文不展示（只展示前 3 条），风险区必须保留全文以免信息丢失
+        self.assertIn("恒指爆雷股预警名单更新", html)
+        self.assertNotIn("h-hk-01-04", html)  # 正文无此锚点，不做引用跳转
+        res = pipeline.build_ai_analysis(data)
+        risk = [r for r in res["risks"] if r["title"] == "恒指爆雷股预警名单更新"][0]
+        self.assertFalse(risk["shown"])
 
 
 if __name__ == "__main__":
