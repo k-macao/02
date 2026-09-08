@@ -1124,7 +1124,7 @@ REPORT_TITLE = "章鱼 AI·全景分析 —AI 港股研报"
 # 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
 # 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。这里只保留微信/iOS/Android
 # 都有可靠回退的短字体栈，视觉不变，但一份完整日报可减少约 2.6 万字符。
-GZ_SERIF = "'Hiragino Mincho ProN','Songti SC',STSong,serif"
+GZ_SERIF = "'Hiragino Mincho ProN','Songti SC',STSong,SimSun,serif"
 GZ_SANS = "-apple-system,'PingFang SC',sans-serif"
 GZ_MONO = "monospace"
 
@@ -1144,7 +1144,11 @@ KOBOYO_SECTION_ICONS = {
 }
 
 
-def gz_icon(name, size=28, *, masthead=False):
+# 刊头多图标横排：全部栏目手绘图标（按栏目顺序去重）在刊头一次排开，直观预览各栏目。
+KOBOYO_MASTHEAD_ICONS = tuple(dict.fromkeys(KOBOYO_SECTION_ICONS.values()))
+
+
+def gz_icon(name, size=40, *, masthead=False):
     """装饰性远程 SVG；即使外链被微信屏蔽，独立文字标题仍完整可读。"""
     if name not in {"octopus", *KOBOYO_SECTION_ICONS.values()}:
         name = "document"
@@ -1154,6 +1158,12 @@ def gz_icon(name, size=28, *, masthead=False):
     return (f'<img src="{KOBOYO_ICON_BASE}{name}.svg" width="{size}" height="{size}" '
             f'alt="" aria-hidden="true" loading="{loading}" decoding="async" '
             f'style="width:{size}px;height:{size}px;object-fit:contain;border:0;{spacing}">')
+
+
+def gz_masthead_icon_row(size=32):
+    """刊头栏目图标列：多图标显示；外链失效时仅少一行装饰，刊头文字仍完整。"""
+    icons = "".join(gz_icon(name, size) for name in KOBOYO_MASTHEAD_ICONS)
+    return f'<div style="padding-top:24px;line-height:1;">{icons}</div>'
 
 
 def _sq(color=C_ACCENT, size=8):
@@ -1716,7 +1726,7 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """日式编辑栏目：小幅 Koboyo 手绘图标、宋体标题、留白与细线。"""
+    """日式编辑栏目：大号 Koboyo 手绘图标、加粗宋体大标题、留白与细线。"""
     content = content or ""
     if content.lstrip().startswith("<tr"):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
@@ -1726,7 +1736,7 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
     badge = (f'<div style="font-size:13px;padding-top:8px;">{badge_html}</div>' if badge_html else "")
     head = gz_shell(
         f'<h2 style="margin:0;border-top:1px solid {GZ_HAIR};padding-top:28px;'
-        f'font-size:22px;font-weight:500;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1px;line-height:1.7;">'
+        f'font-size:26px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1px;line-height:1.7;">'
         f'{gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"))}{title}</h2>{cap}{badge}', bg=GZ_PAPER, pad="40px 0 16px")
     body = gz_shell(content, bg=GZ_PAPER, pad="0 0 12px")
     return head + body
@@ -2800,7 +2810,7 @@ def generate_report(data, date_display, date_str, theme=None):
 
 
 def generate_report_guizang(data, date_display, date_str):
-    """日式黑白研报：宋体标题、Koboyo 直链图标与单列留白；不依赖脚本。"""
+    """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
     parts = _collect_report_parts(data, GUIZANG_KIT)
     sections = parts["sections"]
     total = parts["total"]
@@ -2830,10 +2840,11 @@ def generate_report_guizang(data, date_display, date_str):
 
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;">
 <tr><td align="left" valign="top" style="padding:64px 0 24px;">
-{gz_icon("octopus", 48, masthead=True)}
+{gz_icon("octopus", 64, masthead=True)}
 <div style="font-size:13px;color:{GZ_META};line-height:1.8;">{_esc(date_display)}</div>
-<h1 style="margin:18px 0 0;font-size:28px;font-weight:500;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1.5px;line-height:1.8;">{REPORT_TITLE}</h1>
+<h1 style="margin:18px 0 0;font-size:34px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1.5px;line-height:1.8;">{REPORT_TITLE}</h1>
 <div style="font-size:13px;color:{GZ_META};padding-top:16px;line-height:1.8;">更新于 {_esc(generated_at)} · 当天源 {today_n}/{total}</div>
+{gz_masthead_icon_row()}
 </td></tr>
 </table>
 
