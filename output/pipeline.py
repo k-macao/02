@@ -26,6 +26,14 @@
       样本成交额、TOP10 成交集中度、涨跌扩散比、成交额加权涨跌与换手率，并分析三大市场
       成交量活跃标的流向，输出 0-100 流动性评分、资金定性和交投研判文本；规则合成，
       可复现，非投资建议。页面不展示任何成交量个股排名表，只保留 AI 研判结论。
+  6.2 新增「A股大盘全景复盘」栏目（数据源：东方财富 push2/push2his 免费接口）：
+      ① 指数表现——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
+      最新价、涨跌幅与成交额；② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、
+      涨跌比与情绪定调）；③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
+      ④ 北向资金——港交所 2024-08-19 起停披净买入，仅展示盘后成交总额（可得时）与
+      披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
+      净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
+      时整个栏目才缺席；规则合成，非投资建议。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -308,13 +316,15 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
 # 数据新鲜度与实时行情
 # ============================================================
 def _format_amount(val):
-    """格式化成交额：显示亿/万，保留两位小数"""
+    """格式化成交额：显示亿/万，保留两位小数；负数保留负号（如主力净流出）。"""
     try:
         v = float(val)
-        if v >= 1e8:
-            return f"{v/1e8:.2f}亿"
-        if v >= 1e4:
-            return f"{v/1e4:.2f}万"
+        sign = "-" if v < 0 else ""
+        a = abs(v)
+        if a >= 1e8:
+            return f"{sign}{a/1e8:.2f}亿"
+        if a >= 1e4:
+            return f"{sign}{a/1e4:.2f}万"
         return f"{v:.2f}"
     except (TypeError, ValueError):
         return str(val or "—")
@@ -781,6 +791,296 @@ def fetch_liquidity_report():
 
 
 # ============================================================
+# 数据源 4.5：A股大盘全景复盘
+# （指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
+# ------------------------------------------------------------
+# 使用东方财富 push2 / push2his 免费公开接口（与「热门榜单」「流动性」同源）：
+#   · 指数表现：ulist.np/get 一次返回八大宽基指数最新价、涨跌幅与成交额；
+#   · 涨跌家数：指数行情附带的交易所统计字段 f104/f105/f106（沪市 = 上证指数、
+#     深市 = 深证成指、京市 = 北证50）合计为沪深京市场宽度；
+#   · 成交额：沪深京指数成分成交额（f6，元）合计；上一交易日成交额用
+#     push2his 日 K（fields2=f51,f57）补齐，用于计算环比增减；
+#   · 北向资金：港交所自 2024-08-19 起停止披露北向实时 / 每日净买入额，仅盘后
+#     公布当日成交总额。本模块按东财沪深港通历史接口（kamt.kline）取最近一条
+#     披露记录、以行内最后一个可解析数值作为当日成交总额（亿元）的启发式读取，
+#     读取不到就明确标注暂缺——绝不编造净买入数字；
+#   · 板块热力：clist/get 行业板块（fs=m:90+t:2）按涨跌幅排序，取领涨 / 领跌
+#     各 PANORAMA_SECTOR_TOP_N 名，附主力净流入与领涨股。
+# 任何一个子请求失败只影响对应子块；八大指数与市场宽度全失败才整体标记
+# unavailable。规则合成（情绪定调等）确定性可复现，均为非投资建议。
+# ============================================================
+PANORAMA_INDEX_SPECS = [
+    ("1.000001", "上证指数"), ("0.399001", "深证成指"),
+    ("0.399006", "创业板指"), ("1.000688", "科创50"),
+    ("0.899050", "北证50"), ("1.000300", "沪深300"),
+    ("1.000016", "上证50"), ("1.000905", "中证500"),
+]
+# 各交易所「全市场涨跌家数」的载体指数（f104/f105/f106 为该交易所股票统计）
+PANORAMA_BREADTH_SOURCES = [("1.000001", "沪"), ("0.399001", "深"), ("0.899050", "京")]
+PANORAMA_SECTOR_TOP_N = int(os.environ.get("OCTOPUS_PANORAMA_SECTOR_TOP_N", "5"))
+PANORAMA_NORTH_POLICY_NOTE = (
+    "港交所自 2024-08-19 起停止披露北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
+    "本页不再估算净买入，避免把推算当披露。")
+
+
+def _panorama_float(val):
+    """把东财字段（可能为 "-" / None / ""）转成 float；不可解析返回 None。"""
+    try:
+        if val is None or val == "-" or val == "":
+            return None
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _panorama_int(val):
+    """同 _panorama_float，但转成 int（涨跌家数等统计字段）。"""
+    num = _panorama_float(val)
+    return int(num) if num is not None else None
+
+
+def _fetch_panorama_indices():
+    """一次请求拉取全部宽基指数行情；返回 (按 PANORAMA_INDEX_SPECS 排序的指数列表,
+    {代码: 行情}, 报价时间字符串|None)。"""
+    params = {
+        "fltt": "2", "invt": "2",
+        "secids": ",".join(secid for secid, _ in PANORAMA_INDEX_SPECS),
+        "fields": "f2,f3,f4,f6,f12,f14,f15,f16,f17,f18,f104,f105,f106,f124",
+    }
+    data = safe_request("https://push2.eastmoney.com/api/qt/ulist.np/get",
+                        params=params, timeout=12)
+    rows = ((data or {}).get("data") or {}).get("diff") or []
+    by_code, quote_ts = {}, []
+    for it in rows:
+        code = str(it.get("f12") or "")
+        price = _panorama_float(it.get("f2"))
+        chg_pct = _panorama_float(it.get("f3"))
+        if not code or price is None or chg_pct is None:
+            continue
+        by_code[code] = {
+            "code": code,
+            "name": str(it.get("f14") or "").strip() or code,
+            "price": price, "chg_pct": chg_pct,
+            "chg": _panorama_float(it.get("f4")),
+            "amount": _panorama_float(it.get("f6")),
+            "open": _panorama_float(it.get("f17")), "high": _panorama_float(it.get("f15")),
+            "low": _panorama_float(it.get("f16")), "prev_close": _panorama_float(it.get("f18")),
+            "up": _panorama_int(it.get("f104")), "down": _panorama_int(it.get("f105")),
+            "flat": _panorama_int(it.get("f106")),
+        }
+        ts = _panorama_int(it.get("f124"))
+        if ts:
+            quote_ts.append(ts)
+    indices = []
+    for secid, label in PANORAMA_INDEX_SPECS:
+        row = by_code.get(secid.split(".", 1)[1])
+        if row:
+            row["name"] = label  # 统一正式中文名，规避行情源简称差异
+            indices.append(row)
+    quote_time = (datetime.fromtimestamp(max(quote_ts), CST).strftime("%Y-%m-%d %H:%M:%S")
+                  if quote_ts else None)
+    return indices, by_code, quote_time
+
+
+def _fetch_panorama_prev_amounts():
+    """取沪 / 深 / 京载体指数最近两根日 K 的成交额（fields2=f51,f57，单位元）。
+
+    返回 {secid: [(日期, 成交额), ...]}；单交易所失败只影响该交易所。
+    """
+    out = {}
+    for secid, _ in PANORAMA_BREADTH_SOURCES:
+        params = {"secid": secid, "klt": "101", "fqt": "0", "lmt": "2", "end": "20500101",
+                  "fields1": "f1,f2,f3", "fields2": "f51,f57"}
+        data = safe_request("https://push2his.eastmoney.com/api/qt/stock/kline/get",
+                            params=params, timeout=12)
+        pairs = []
+        try:
+            klines = (((data or {}).get("data") or {}).get("klines")) or []
+            for line in klines[-2:]:
+                parts = str(line).split(",")
+                if len(parts) >= 2:
+                    amt = _panorama_float(parts[1])
+                    if amt is not None:
+                        pairs.append((parts[0].strip(), amt))
+        except Exception:
+            pairs = []
+        out[secid] = pairs
+    return out
+
+
+def _fetch_panorama_northbound():
+    """北向资金：2024-08-19 起不再披露净买入，尽力读最近披露的当日成交总额。
+
+    kamt.kline 的 data.s2n 每行为 "日期,数值,..."；披露口径调整后净买列为 "-"，
+    成交额列仍更新，故取行内最后一个可解析数值作为成交总额（亿元）的启发式近似；
+    读不到任何数值 → available=False 并给出原因（页面明确标注，不造数）。
+    """
+    params = {"fields1": "f1,f2,f3,f4", "fields2": "f51,f52,f53,f54,f55,f56",
+              "klt": "101", "lmt": "1"}
+    data = safe_request("https://push2.eastmoney.com/api/qt/kamt.kline/get",
+                        params=params, timeout=12)
+    note = PANORAMA_NORTH_POLICY_NOTE
+    try:
+        rows = (((data or {}).get("data") or {}).get("s2n")) or []
+        if not rows:
+            raise ValueError("接口未返回北向记录")
+        parts = str(rows[-1]).split(",")
+        date = parts[0].strip()
+        nums = [x for x in (_panorama_float(v) for v in parts[1:]) if x is not None]
+        if not date:
+            raise ValueError("北向记录缺少日期")
+        if not nums:
+            return {"available": False, "amount_yi": None, "date": date,
+                    "policy_note": note, "error": "披露口径内暂无成交总额数值"}
+        return {"available": True, "amount_yi": nums[-1], "date": date,
+                "policy_note": note, "error": None}
+    except Exception as exc:
+        return {"available": False, "amount_yi": None, "date": None,
+                "policy_note": note, "error": str(exc)}
+
+
+def _fetch_panorama_sectors():
+    """行业板块领涨 / 领跌各 PANORAMA_SECTOR_TOP_N 名（fs=m:90+t:2，按涨跌幅排序）。"""
+    result = {"leading": [], "lagging": []}
+    for key, po in (("leading", "1"), ("lagging", "0")):
+        params = {"pn": "1", "pz": str(PANORAMA_SECTOR_TOP_N), "po": po, "np": "1",
+                  "fltt": "2", "invt": "2", "fid": "f3", "fs": "m:90+t:2",
+                  "fields": "f2,f3,f12,f14,f62,f104,f105,f128,f136"}
+        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
+                            params=params, timeout=12)
+        rows = []
+        try:
+            diff = ((data or {}).get("data") or {}).get("diff") or []
+            for it in diff[:PANORAMA_SECTOR_TOP_N]:
+                name = str(it.get("f14") or "").strip()
+                chg = _panorama_float(it.get("f3"))
+                if not name or chg is None:
+                    continue
+                rows.append({
+                    "code": str(it.get("f12") or ""), "name": name, "chg_pct": chg,
+                    "main_inflow": _panorama_float(it.get("f62")),
+                    "up": _panorama_int(it.get("f104")), "down": _panorama_int(it.get("f105")),
+                    "lead_stock": str(it.get("f128") or "").strip(),
+                    "lead_stock_pct": _panorama_float(it.get("f136")),
+                })
+        except Exception:
+            rows = []
+        result[key] = rows
+    return result
+
+
+def _panorama_breadth_mood(ratio):
+    """由涨跌比给出确定性情绪定调（阈值规则，可复现，非投资建议）。"""
+    if ratio is None:
+        return "数据不足"
+    if ratio >= 2.0:
+        return "普涨强势"
+    if ratio >= 1.2:
+        return "偏多震荡"
+    if ratio >= 0.8:
+        return "多空均衡"
+    if ratio >= 0.5:
+        return "偏空承压"
+    return "普跌弱势"
+
+
+def fetch_market_panorama():
+    """抓取 A股大盘全景复盘：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
+    print("📡 正在抓取 A股大盘全景复盘（指数/涨跌家数/成交额/北向/板块）...")
+    errors = []
+
+    indices, by_code, quote_time = _fetch_panorama_indices()
+
+    # ---- 涨跌家数（沪深京合计）----
+    breadth = None
+    b_parts, b_missing = {}, []
+    for secid, exch in PANORAMA_BREADTH_SOURCES:
+        row = by_code.get(secid.split(".", 1)[1])
+        if row and row.get("up") is not None and row.get("down") is not None:
+            b_parts[exch] = {"up": row["up"], "down": row["down"], "flat": row.get("flat")}
+        else:
+            b_missing.append(exch)
+    if b_parts:
+        up = sum(p["up"] for p in b_parts.values())
+        down = sum(p["down"] for p in b_parts.values())
+        flat = sum((p.get("flat") or 0) for p in b_parts.values())
+        ratio = round(up / down, 2) if down else None
+        breadth = {"up": up, "down": down, "flat": flat, "ratio": ratio,
+                   "mood": _panorama_breadth_mood(ratio),
+                   "markets": b_parts, "partial": bool(b_missing)}
+
+    # ---- 成交额（沪深京合计 + 较上一交易日环比）----
+    turnover = None
+    amount_by_exch = {}
+    for secid, exch in PANORAMA_BREADTH_SOURCES:
+        row = by_code.get(secid.split(".", 1)[1])
+        if row and row.get("amount"):
+            amount_by_exch[exch] = row["amount"]
+    if amount_by_exch:
+        prev_total = None
+        try:
+            klines = _fetch_panorama_prev_amounts()
+            quote_date = (quote_time or "")[:10] or None
+            prev_sum, prev_ok = 0.0, 0
+            for secid, _ in PANORAMA_BREADTH_SOURCES:
+                pairs = klines.get(secid) or []
+                if not pairs:
+                    continue
+                # 最新一根 K 线日期 == 指数报价日 → 其前一根才是「上一交易日」；
+                # 否则最新一根即最近完整交易日（盘前 / 盘中 / 非交易日场景）。
+                if quote_date and len(pairs) >= 2 and pairs[-1][0] == quote_date:
+                    prev_pair = pairs[-2]
+                else:
+                    prev_pair = pairs[-1]
+                if prev_pair and prev_pair[1]:
+                    prev_sum += prev_pair[1]
+                    prev_ok += 1
+            if prev_ok >= 2 and prev_sum > 0:  # 至少沪深两市齐备才给环比，避免口径误导
+                prev_total = prev_sum
+        except Exception as exc:
+            errors.append(f"上日成交额: {exc}")
+        cur_total = sum(amount_by_exch.values())
+        turnover = {
+            "total": cur_total,
+            "sh_sz": amount_by_exch.get("沪", 0.0) + amount_by_exch.get("深", 0.0),
+            "by_market": amount_by_exch,
+            "prev_total": prev_total,
+            "chg_pct": (cur_total / prev_total - 1) * 100 if prev_total else None,
+            "partial": len(amount_by_exch) < 3,
+        }
+
+    # ---- 北向资金（成交总额启发式读取 + 披露政策说明）----
+    north = _fetch_panorama_northbound()
+    if not north.get("available"):
+        errors.append(f"北向成交总额: {north.get('error') or '暂缺'}")
+
+    # ---- 板块热力（领涨 / 领跌行业板块）----
+    sectors = _fetch_panorama_sectors()
+    if not sectors["leading"] and not sectors["lagging"]:
+        errors.append("板块热力: 行业板块接口未返回有效数据")
+
+    if not indices and not breadth:
+        print("  ⚠️ A股大盘全景暂不可用；日报将明确显示数据暂缺")
+        return _source_result("东方财富·A股全景", "unavailable",
+                              indices=[], breadth=None, turnover=None,
+                              north=north, sectors=sectors, quote_time=quote_time,
+                              error="；".join(errors[:3]) or "push2 接口未返回有效数据")
+
+    content_date = (quote_time or "")[:10] or _today_display()
+    is_today = content_date == _today_display()
+    print(f"  ✅ 全景复盘：指数 {len(indices)} 只 / "
+          f"涨跌家数 {'齐' if breadth else '缺'} / "
+          f"板块 {len(sectors['leading'])}+{len(sectors['lagging'])} / "
+          f"北向 {'✓' if north.get('available') else '暂缺'}")
+    return _source_result("东方财富·A股全景", "success",
+                          is_today=is_today, content_date=content_date,
+                          indices=indices, breadth=breadth, turnover=turnover,
+                          north=north, sectors=sectors, quote_time=quote_time,
+                          error="；".join(errors[:3]) or None,
+                          partial=bool(errors or (breadth or {}).get("partial")))
+
+
+# ============================================================
 # 数据源 5：A股资讯（新浪财经）
 # ============================================================
 def fetch_sina_headlines():
@@ -1033,6 +1333,8 @@ def collect_all_data():
     data = {}
     data["实时行情"] = fetch_market_snapshot()
     time.sleep(0.5)
+    data["A股大盘全景"] = fetch_market_panorama()
+    time.sleep(0.5)
     data["港股名家频道"] = fetch_hk_channels()
     time.sleep(0.5)
 
@@ -1135,6 +1437,7 @@ KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
 KOBOYO_SECTION_ICONS = {
     "AI READ": "brain",
     "MARKET SNAPSHOT": "chart",
+    "A-SHARE PANORAMA": "chart",
     "HK GURU CHANNELS": "camera",
     "GLOBAL HEADLINES": "globe",
     "EASTMONEY WIRE": "newspaper",
@@ -1630,6 +1933,104 @@ def gz_market_section(market):
             + gz_note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
 
 
+def _gz_pan_sector_card(it):
+    """guizang 板块热力行：板块名 + 涨跌徽标，下一行主力净流入 / 领涨股。"""
+    badge = gz_trend_badge(it.get("chg_pct"))
+    sub_bits = []
+    if it.get("main_inflow") is not None:
+        sub_bits.append(f"主力净流入 {_format_amount(it['main_inflow'])}")
+    if it.get("lead_stock"):
+        lead = _esc(it["lead_stock"])
+        lead_pct = it.get("lead_stock_pct")
+        sub_bits.append(f"领涨 {lead}" + (f" {lead_pct:+.2f}%" if lead_pct is not None else ""))
+    sub = (f'<div style="font-size:13px;color:{GZ_META};line-height:1.7;padding-top:4px;">'
+           f'{" · ".join(sub_bits)}</div>') if sub_bits else ""
+    return gz_shell(
+        f'<div style="font-size:16px;font-weight:700;color:{GZ_INK};line-height:1.6;">'
+        f'{_esc(it["name"])} <span style="font-size:14px;padding-left:6px;">{badge}</span></div>{sub}',
+        pad="14px 0", hair=True)
+
+
+def gz_panorama_block(pan):
+    """guizang 版「A股大盘全景复盘」：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
+    parts = []
+
+    # 1) 指数表现
+    indices = pan.get("indices") or []
+    if indices:
+        rows = []
+        for idx in indices:
+            pct = idx.get("chg_pct")
+            badge = gz_trend_badge(pct) if pct is not None else \
+                f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+            amt = f' · 成交额 {_format_amount(idx["amount"])}' if idx.get("amount") else ""
+            rows.append(gz_shell(
+                f'<div style="font-size:14px;color:{GZ_META};">{_esc(idx["name"])}'
+                f'<span style="font-size:13px;">{amt}</span></div>'
+                f'<div style="padding-top:4px;line-height:1.45;">'
+                f'<span style="font-size:20px;font-weight:700;color:{GZ_INK};font-family:{GZ_MONO};">'
+                f'{idx["price"]:,.2f}</span>'
+                f'<span style="font-size:16px;padding-left:10px;">{badge}</span></div>',
+                bg=GZ_PAPER, pad="20px 0", hair=True))
+        parts.append(gz_subsection("指数表现") + "".join(rows))
+
+    # 2) 涨跌家数（市场宽度）
+    b = pan.get("breadth")
+    if b:
+        parts.append(
+            gz_subsection("涨跌家数")
+            + gz_rowline(_esc("上涨 / 下跌 / 平盘（沪深京合计）"),
+                         f'<span style="font-weight:700;">▲ {b["up"]:,} 家 · ▼ {b["down"]:,} 家 '
+                         f'· ■ {b["flat"]:,} 家</span>')
+            + gz_rowline(_esc("涨跌比 / 情绪定调"),
+                         (f'{b["ratio"]:.2f}' if b.get("ratio") is not None else "—")
+                         + f' · {_esc(b.get("mood") or "—")}'))
+        if b.get("partial"):
+            parts.append(gz_note("部分交易所涨跌家数暂缺，本栏为已取得市场的合计。"))
+
+    # 3) 成交额
+    t = pan.get("turnover")
+    if t:
+        chg = t.get("chg_pct")
+        chg_html = (f' 较上一交易日 {gz_trend_badge(chg)}' if chg is not None
+                    else f' <span style="font-size:13px;color:{GZ_META};">（环比暂缺）</span>')
+        parts.append(
+            gz_subsection("成交额")
+            + gz_rowline(_esc("沪深京成交额合计"),
+                         f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                         f'{_format_amount(t["total"])}</span>{chg_html}')
+            + (gz_rowline(_esc("上一交易日合计（沪深京）"), _format_amount(t["prev_total"]))
+               if t.get("prev_total") else ""))
+
+    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    north = pan.get("north") or {}
+    if north:
+        if north.get("available") and north.get("amount_yi") is not None:
+            val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                   f'{north["amount_yi"]:,.2f} 亿元</span>')
+        else:
+            val = f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+        parts.append(
+            gz_subsection("北向资金")
+            + gz_rowline(_esc(f"北向当日成交总额（{north.get('date') or '—'}）"), val)
+            + gz_note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
+
+    # 5) 板块热力
+    sec = pan.get("sectors") or {}
+    for title, key in (("板块热力 · 领涨行业 TOP", "leading"),
+                       ("板块热力 · 领跌行业 TOP", "lagging")):
+        rows = sec.get(key) or []
+        if rows:
+            parts.append(gz_subsection(title) + "".join(_gz_pan_sector_card(it) for it in rows))
+
+    if pan.get("quote_time"):
+        parts.append(gz_note(
+            f"数据截至 {pan['quote_time']}（北京时间）；成交额「亿/万」为本地换算。"
+            "指数表现与涨跌家数源自交易所统计字段；板块按行业涨跌幅排序。"
+            "规则合成，非投资建议。"))
+    return "".join(parts)
+
+
 def _gz_news_card(marker, title, sub=""):
     # Headlines lead; source and timestamp sit quietly underneath. No list-number chrome.
     meta = (f'<div style="font-size:13px;color:{GZ_META};line-height:1.7;padding-top:8px;">'
@@ -2045,9 +2446,99 @@ def _pixel_market_section(market):
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
 
 
+def _panorama_block(pan):
+    """pixel 版「A股大盘全景复盘」：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
+    parts = []
+
+    # 1) 指数表现
+    indices = pan.get("indices") or []
+    if indices:
+        rows = []
+        for idx in indices:
+            pct = idx.get("chg_pct")
+            color = C_GREEN if (pct or 0) > 0 else (C_RED if (pct or 0) < 0 else C_AMBER)
+            amt = (f' <span style="color:{C_FAINT};font-size:10px;">'
+                   f'成交额 {_format_amount(idx["amount"])}</span>') if idx.get("amount") else ""
+            left = f'<b style="color:{C_INK};">{_esc(idx["name"])}</b>{amt}'
+            right = f'{idx["price"]:,.2f} {_trend_badge(pct)}'
+            rows.append((left, right, color))
+        parts.append(_subsection("指数表现") + _mini_table(rows))
+
+    # 2) 涨跌家数（市场宽度）
+    b = pan.get("breadth")
+    if b:
+        meter = _signal_meter(b["up"], max(1, b["up"] + b["down"]), color=C_CYAN, cells=5)
+        breadth_line = (f'<span style="color:{C_GREEN};font-weight:900;">▲ 上涨 {b["up"]:,} 家</span>'
+                        f' <span style="color:{C_MUTED};">/</span> '
+                        f'<span style="color:{C_RED};font-weight:900;">▼ 下跌 {b["down"]:,} 家</span>'
+                        f' <span style="color:{C_MUTED};">/</span> '
+                        f'<span style="color:{C_AMBER};font-weight:900;">■ 平盘 {b["flat"]:,} 家</span>')
+        ratio_txt = f'{b["ratio"]:.2f}' if b.get("ratio") is not None else "—"
+        rows = [("沪深京市场宽度", breadth_line),
+                ("涨跌比 / 情绪", f'{meter} <b style="color:{C_LEMON};">{ratio_txt}</b>'
+                              f' · {_esc(b.get("mood") or "—")}')]
+        blk = _subsection("涨跌家数") + _mini_table(rows)
+        if b.get("partial"):
+            blk += _note("部分交易所涨跌家数暂缺，本栏为已取得市场的合计。")
+        parts.append(blk)
+
+    # 3) 成交额
+    t = pan.get("turnover")
+    if t:
+        chg = t.get("chg_pct")
+        chg_html = (f' 较上一交易日 {_trend_badge(chg, compact=True)}' if chg is not None
+                    else f' <span style="color:{C_FAINT};font-size:10px;">（环比暂缺）</span>')
+        line = (f'<span style="color:{C_LEMON};font-size:15px;font-weight:900;">'
+                f'{_format_amount(t["total"])}</span>{chg_html}')
+        rows = [("沪深京成交额合计", line)]
+        if t.get("prev_total"):
+            rows.append(("上一交易日合计（沪深京）", _format_amount(t["prev_total"])))
+        parts.append(_subsection("成交额") + _mini_table(rows))
+
+    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    north = pan.get("north") or {}
+    if north:
+        if north.get("available") and north.get("amount_yi") is not None:
+            val = (f'<span style="color:{C_CYAN};font-weight:900;">'
+                   f'{north["amount_yi"]:,.2f} 亿元</span>')
+        else:
+            val = f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
+        parts.append(_subsection("北向资金")
+                     + _mini_table([(f'北向当日成交总额（{_esc(north.get("date") or "—")}）', val)])
+                     + _note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
+
+    # 5) 板块热力
+    sec = pan.get("sectors") or {}
+    for title, key in (("板块热力 · 领涨行业 TOP", "leading"),
+                       ("板块热力 · 领跌行业 TOP", "lagging")):
+        items = sec.get(key) or []
+        if not items:
+            continue
+        rows = []
+        for it in items:
+            sub_bits = []
+            if it.get("main_inflow") is not None:
+                sub_bits.append(f'主力{_format_amount(it["main_inflow"])}')
+            if it.get("lead_stock"):
+                lead_pct = it.get("lead_stock_pct")
+                sub_bits.append(f'领涨 {_esc(it["lead_stock"])}'
+                                + (f' {lead_pct:+.2f}%' if lead_pct is not None else ''))
+            sub = (f' <span style="color:{C_FAINT};font-size:10px;">{" · ".join(sub_bits)}</span>'
+                   if sub_bits else "")
+            rows.append((f'{_esc(it["name"])}{sub}', _trend_badge(it.get("chg_pct"), compact=True)))
+        parts.append(_subsection(title) + _mini_table(rows))
+
+    if pan.get("quote_time"):
+        parts.append(_note(
+            f"数据截至 {_esc(pan['quote_time'])}（北京时间）；成交额「亿/万」为本地换算。"
+            "板块按行业涨跌幅排序。规则合成，非投资建议。"))
+    return "".join(parts)
+
+
 def _collect_report_parts(data, kit):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。"""
     market = data.get("实时行情", {})
+    pan = data.get("A股大盘全景", {}) or {}
     yt = data.get("港股名家频道", {})
     yt_live = yt.get("channels", [])        # 已抓取到内容的频道
     google = data.get("全球头条", {})
@@ -2061,6 +2552,7 @@ def _collect_report_parts(data, kit):
 
     source_items = [
         ("实时行情", market),
+        ("A股大盘全景", pan),
         ("港股名家频道", yt),
         ("全球头条", google),
         ("A股资讯", sina),
@@ -2083,6 +2575,15 @@ def _collect_report_parts(data, kit):
             kit.market_section(market),
             kit.source_badge(market),
             f"{_source_note(market)} · 数据日期 {data_date}",
+        ))
+
+    # A股大盘全景复盘（指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
+    if pan.get("status") == "success":
+        sections.append((
+            "A-SHARE PANORAMA", "A股大盘全景复盘",
+            kit.panorama_block(pan),
+            kit.source_badge(pan),
+            f"{_source_note(pan)} · 数据截至 {_esc(pan.get('quote_time') or '—')}",
         ))
 
     # 港股名家频道：只显示实际抓取到内容的频道
@@ -2742,6 +3243,7 @@ PIXEL_KIT = _RenderKit(
     ai_badge=lambda: _badge("AI 合成", "ai"),
     ai_block=_ai_analysis_block,
     liquidity_block=_liquidity_report_block,
+    panorama_block=_panorama_block,
     section=_section,
     ok_color=C_GREEN, warn_color=C_AMBER, bad_color=C_RED,
 )
@@ -2761,6 +3263,7 @@ GUIZANG_KIT = _RenderKit(
     ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
     ai_block=gz_ai_analysis_block,
     liquidity_block=gz_liquidity_report_block,
+    panorama_block=gz_panorama_block,
     section=gz_section,
     ok_color=GZ_UP, warn_color=GZ_WARN, bad_color=GZ_DOWN,
 )
