@@ -1119,7 +1119,7 @@ GZ_DOWN_INK = GZ_DOWN
 GZ_FLAT_INK = GZ_FLAT
 GZ_WARN = GZ_INK
 GZ_WARN_INK = GZ_WARN
-REPORT_TITLE = "章鱼 AI·全景分析 —AI 港股研报"
+REPORT_TITLE = "章鱼 AI·全景分析 —AI 深度研报"
 # 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
 # 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
 # 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。这里只保留微信/iOS/Android
