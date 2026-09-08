@@ -420,9 +420,9 @@ class LiquidityReportTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertIn("AI 研判 · 最近 A股、港股、美股成交量与流动性分析", html)
         self.assertIn("三大市场交投研判", html)
-        self.assertIn("◆ A股成交量与流动性研判：", html)
-        self.assertIn("◆ 港股成交量与流动性研判：", html)
-        self.assertIn("◆ 美股成交量与流动性研判：", html)
+        self.assertIn("A股成交量与流动性研判：", html)
+        self.assertIn("港股成交量与流动性研判：", html)
+        self.assertIn("美股成交量与流动性研判：", html)
         self.assertIn("流动性评分", html)
         self.assertIn("AI 定性", html)
         # 2026-08-06 起不展示个股排名表（TOP5 VOLUME 流动性锚点已移除）
@@ -440,9 +440,9 @@ class LiquidityReportTests(unittest.TestCase):
         liq = self._liquidity_data()
         hot = NewLayoutRenderingTests()._rich_data()["热门榜单"]
         html_block = pipeline._build_volume_and_liquidity_analysis_html(liq, hot)
-        self.assertIn("◆ A股成交量与流动性研判：", html_block)
-        self.assertIn("◆ 港股成交量与流动性研判：", html_block)
-        self.assertIn("◆ 美股成交量与流动性研判：", html_block)
+        self.assertIn("A股成交量与流动性研判：", html_block)
+        self.assertIn("港股成交量与流动性研判：", html_block)
+        self.assertIn("美股成交量与流动性研判：", html_block)
         self.assertIn("A股股票0", html_block)
         self.assertIn("流动性评分", html_block)
         self.assertIn("头部前十成交集中度", html_block)
@@ -564,12 +564,7 @@ class RetroPixelVisualTests(unittest.TestCase):
 
 
 class GuizangThemeTests(unittest.TestCase):
-    """2026-08-21 起：默认推送主题为 guizang（电子杂志 × 电子墨水竖版长页面）。
-
-    参考 guizang-ppt-skill Style A：暖米白电子纸 + 墨黑 Hero、衬线标题（荧光绿）、
-    等宽元信息、发丝线、大留白；宽表格 → 纵向 rowline；因子分析 → 杂志式信号矩阵；
-    全部内联样式，无 WebGL / 外部 CSS / JavaScript（PushPlus/微信详情页兼容）。
-    """
+    """默认 guizang 使用简洁白底研报；单列、内联样式与新鲜度元数据继续兼容微信。"""
 
     def test_default_theme_is_guizang_and_resolves_invalid_to_default(self):
         self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "guizang")
@@ -582,12 +577,22 @@ class GuizangThemeTests(unittest.TestCase):
     def test_guizang_page_style_tokens_and_vertical_layout(self):
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")  # 默认 = guizang
-        # 主题标识与配色：暖米白电子纸 / 墨黑 Hero / 荧光绿标题
-        self.assertIn("GUIZANG EDITION", html)
-        self.assertIn(pipeline.GZ_PAPER, html)        # 暖米白
-        self.assertIn(pipeline.GZ_INK_TINT, html)     # 墨黑 Hero / 章节幕封
-        self.assertIn(pipeline.GZ_NEON, html)         # 荧光绿
-        self.assertIn(pipeline.GZ_INK, html)          # 正文墨黑
+        self.assertIn(f"<title>{pipeline.REPORT_TITLE}</title>", html)
+        self.assertIn(pipeline.GZ_PAPER, html)
+        self.assertIn(pipeline.GZ_PAPER_TINT, html)   # 仅结论使用浅色背景
+        self.assertIn(pipeline.GZ_INK, html)
+        for old_color in ("#30342F", "#D5D7D3", "#B7FF3C"):
+            self.assertNotIn(old_color, html)
+        self.assertIn("max-width:760px;margin:0 auto", html)
+        self.assertIn("padding:0 24px", html)
+        self.assertIn("padding:40px 0 16px", html)
+        self.assertIn("line-height:1.85", html)
+        self.assertNotIn("user-scalable=no", html)
+        self.assertNotIn("●", html)
+        self.assertNotIn("○", html)
+        self.assertNotIn("SYS_TIME:", html)
+        self.assertEqual(html.count("<h1 "), 1)
+        self.assertGreater(html.count("<h2 "), 1)
         # 字体分工：衬线标题 + 非衬线正文 + 等宽元信息；短字体栈避免
         # 数百次重复后撑破 PushPlus 10 万字符上限。
         self.assertIn("Songti SC", html)
@@ -596,8 +601,9 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("IBM Plex Mono", html)
         # 发丝线与留白
         self.assertIn(pipeline.GZ_HAIR, html)
-        # 章节幕封：单列中文优先，不再用三列刊头 / TREND KEY
-        self.assertIn("01 · AI READ", html)
+        # 中文标题，不再重复英文栏目编号。
+        self.assertNotIn("01 · AI READ", html)
+        self.assertIn("AI 盘研判</h2>", html)
         self.assertIn("▲ 涨", html)
         # 涨跌三重编码保留（颜色 + 箭头 + 文字）
         self.assertIn("▲ 涨 +1.25%", html)
@@ -610,17 +616,73 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertIn("bgcolor=", html.lower())
         self.assertIn("font-size:16px", html)
 
-    def test_guizang_inline_only_no_js_or_external_assets(self):
+    def test_minimal_news_card_leads_with_title_and_keeps_source(self):
+        html = pipeline.gz_headline_row({
+            "title": "港股市场观察", "source": "测试来源", "published_cst": "2026-09-08 10:00"
+        }, 1)
+        self.assertLess(html.index("港股市场观察"), html.index("测试来源"))
+        self.assertIn("2026-09-08 10:00", html)
+        self.assertNotIn(">01", html)
+        self.assertIn("padding:20px 0", html)
+
+    def test_minimal_section_retains_freshness_without_dark_panels(self):
+        html = pipeline.gz_section("01", "MARKET SNAPSHOT", "行情速览", "原始内容",
+                                   pipeline.gz_badge("非当天 2026-09-07", "warn"), "数据来源")
+        for text in ("行情速览", "原始内容", "非当天 2026-09-07", "数据来源"):
+            self.assertIn(text, html)
+        self.assertNotIn("MARKET SNAPSHOT", html)
+        self.assertNotIn("#30342F", html)
+
+    def test_guizang_inline_only_with_remote_koboyo_icons(self):
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         low = html.lower()
         self.assertNotIn("<style", low)
         self.assertNotIn("<script", low)
-        self.assertNotIn("src=", low)                 # 无外部 JS / 图片
+        images = re.findall(r'<img\b[^>]*>', html)
+        self.assertEqual(len(images), html.count("<h2 ") + 1)
+        for image in images:
+            self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z]+\.svg"')
+            self.assertIn('alt=""', image)
+            self.assertIn('aria-hidden="true"', image)
+            self.assertRegex(image, r'width="(?:28|48)"')
+            self.assertRegex(image, r'height="(?:28|48)"')
+        self.assertNotIn("<svg", low)                 # 只用链接，不内嵌或保存图标
+        self.assertNotIn("data:image", low)
         self.assertNotIn("link rel", low)             # 无外部 CSS
         self.assertNotIn("onload", low)
         self.assertNotIn("onclick", low)
         self.assertNotIn("webgl", low)
+
+    def test_japanese_design_uses_grayscale_and_serif_headings(self):
+        html = pipeline.generate_report(NewLayoutRenderingTests()._rich_data(), "测试日期", "20260908")
+        for color in re.findall(r"#[0-9A-Fa-f]{6}", html):
+            self.assertEqual(color[1:3], color[3:5], color)
+            self.assertEqual(color[3:5], color[5:7], color)
+        for heading in re.findall(r'<h[12]\b[^>]*>', html):
+            self.assertIn("Hiragino Mincho ProN", heading)
+            self.assertIn("Songti SC", heading)
+            self.assertIn("letter-spacing:", heading)
+        # 不依赖颜色，涨跌仍然可以分辨。
+        self.assertIn("▲ 涨 +1.25%", html)
+        self.assertIn("▼ 跌 -1.25%", pipeline.gz_trend_badge(-1.25))
+        self.assertIn("■ 平 0.00%", pipeline.gz_trend_badge(0))
+        self.assertIn("非当天", pipeline.gz_source_badge({"status": "success"}))
+
+    def test_koboyo_icon_mapping_and_safe_fallback(self):
+        for kicker, slug in pipeline.KOBOYO_SECTION_ICONS.items():
+            html = pipeline.gz_section("01", kicker, "栏目标题", "正文")
+            self.assertIn(f'src="https://koboyo.com/icons/svg/{slug}.svg"', html)
+            # 外链不显示时文字标题与内容仍然存在。
+            without_images = re.sub(r'<img\b[^>]*>', '', html)
+            self.assertIn("栏目标题</h2>", without_images)
+            self.assertIn("正文", without_images)
+        icon = pipeline.gz_icon('../invalid" onerror="alert(1)', 200)
+        self.assertIn('/document.svg"', icon)
+        self.assertIn('width="64"', icon)
+        self.assertNotIn('onerror', icon)
+        self.assertIn('loading="eager"', pipeline.gz_icon("octopus", 48, masthead=True))
+        self.assertIn('loading="lazy"', pipeline.gz_icon("brain"))
 
     def test_guizang_market_table_becomes_vertical_rowline(self):
         data = ReportFreshnessTests()._sample_data()
@@ -696,7 +758,7 @@ class GuizangThemeTests(unittest.TestCase):
         # 印到暖米白电子纸上会刺眼；guizang 页面必须只出现 GZ_* 色板。
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        self.assertIn("TECH READ · 指数动能", html)   # 确认技术速读在场（标普 +1.25% → 偏强，上证 +0.40% → 震荡）
+        self.assertIn("指数动能", html)   # 确认技术速读在场（标普 +1.25% → 偏强，上证 +0.40% → 震荡）
         for leaked in (pipeline.C_RED, pipeline.C_GREEN, pipeline.C_AMBER):
             self.assertNotIn(leaked, html, f"像素主题配色 {leaked} 泄漏进 guizang 页面")
         # 档位词改用 guizang 纸底涨跌/警示色
