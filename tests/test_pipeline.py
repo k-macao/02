@@ -1933,6 +1933,41 @@ class NewsSentimentFactorTests(unittest.TestCase):
             history = pipeline._load_sentiment_history(str(path))
             self.assertEqual(history["stocks"], {})
 
+    def test_by_market_top5_with_per_stock_comment_reason(self):
+        res = pipeline.build_news_sentiment(self._senti_data(), "20260802", None)
+        by_market = res["by_market"]
+        self.assertEqual([m["market"] for m in by_market], ["A股", "港股", "美股"])
+        for mb in by_market:
+            self.assertEqual(len(mb["stocks"]), pipeline.HOT_STOCK_TOP_N)
+        a3 = next(s for s in by_market[0]["stocks"] if s["code"] == "000003")
+        self.assertTrue(a3["matched"])
+        self.assertAlmostEqual(a3["score"], 1.0)
+        self.assertIn("AI情绪分", a3["comment"])
+        self.assertIn("近72小时命中 2 条相关新闻", a3["comment"])
+        self.assertIn("命中情绪词", a3["reason"])
+        self.assertIn("正面主要来自", a3["reason"])
+        hk1 = next(s for s in by_market[1]["stocks"] if s["code"] == "000001")
+        self.assertTrue(hk1["matched"])
+        self.assertAlmostEqual(hk1["score"], -1.0)
+        self.assertIn("负面主要来自", hk1["reason"])
+        a0 = next(s for s in by_market[0]["stocks"] if s["code"] == "000000")
+        self.assertFalse(a0["matched"])
+        self.assertIsNone(a0["score"])
+        self.assertIn("近72小时无相关点名新闻", a0["comment"])
+        self.assertIn("窗口内标题未点名该股", a0["reason"])
+        self.assertIn("暂无评分", a0["label"])
+
+    def test_build_news_sentiment_available_without_match(self):
+        # 无归因但榜单存在 → 栏目仍可渲染（逐股「暂无评分」），available 由榜单宇宙决定
+        res = pipeline.build_news_sentiment(
+            NewLayoutRenderingTests()._rich_data(), "20260802", None)
+        self.assertTrue(res["available"])
+        self.assertTrue(res["by_market"])
+        self.assertEqual(res["total_matched"], 0)
+        stocks = [s for mb in res["by_market"] for s in mb["stocks"]]
+        self.assertTrue(all(not s["matched"] for s in stocks))
+        self.assertTrue(all(s["score"] is None for s in stocks))
+
     def test_pixel_render_contains_factors(self):
         html = pipeline.generate_report(
             self._senti_data(), "2026年8月2日 · 周日", "20260802",
@@ -1947,6 +1982,9 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("S−1", html)
         self.assertIn("命中：大涨", html)
         self.assertIn("样本不足", html)  # 无历史的港股股票1
+        self.assertIn("总结评论", html)   # 2026-09-09 逐股 AI 总结评论
+        self.assertIn("原因", html)      # 逐股评论原因
+        self.assertIn("A股 · 成交量前5", html)
 
     def test_guizang_render_contains_factors(self):
         html = pipeline.generate_report(
@@ -1957,25 +1995,37 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("▲ S+1", html)  # 黑白模式用符号区分方向
         self.assertIn("▼ S−1", html)
         self.assertIn("MOM +0.67", html)
+        self.assertIn("总结评论", html)
+        self.assertIn("原因", html)
+        self.assertIn("A股 · 成交量前5", html)
 
-    def test_placeholder_shown_without_attribution(self):
-        # 2026-09-09 起：当天标题存在但均未点名榜单个股 → 显示「样本不足」占位，不再整栏消失
+    def test_per_stock_render_without_attribution(self):
+        # 2026-09-09 起：窗口内标题未点名任何榜单个股时，栏目仍按三大市场成交量前五
+        # 逐股展示「暂无评分 + 总结评论 + 原因」，不伪造 DNS 数值。
         data = NewLayoutRenderingTests()._rich_data()  # 标题未提及任何榜单个股
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
             self.assertIn("AI 新闻情绪因子", html)
-            self.assertIn("样本不足", html)
-            self.assertIn("均未点名榜单个股", html)
+            for market in ("A股", "港股", "美股"):
+                self.assertIn(f"{market} · 成交量前5", html)
+            for name in ("A股股票0", "A股股票4", "港股股票0", "港股股票4",
+                         "美股股票0", "美股股票4"):
+                self.assertIn(name, html)
+            self.assertIn("暂无评分", html)
+            self.assertIn("总结评论", html)
+            self.assertIn("原因", html)
             self.assertNotIn("DNS +", html)   # 无归因 → 不出因子数值
             self.assertNotIn("S+1", html)
 
-    def test_absent_without_any_today_headline(self):
-        # 全天无当天标题 → 栏目缺席（与“无数据不出现在页面”一致，不显示占位）
+    def test_absent_without_hot_rankings(self):
+        # 热门榜单（个股宇宙）缺席且无当天标题 → 栏目缺席
         data = NewLayoutRenderingTests()._rich_data()
         for src in ("全球头条", "东财快讯", "港股名家频道"):
             data[src] = pipeline._source_result(src, "unavailable", headlines=[],
                                                 channels=[], error="offline")
+        data["热门榜单"] = pipeline._source_result(
+            "东方财富热门榜", "unavailable", markets={}, error="offline")
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
@@ -2265,6 +2315,9 @@ class SectionReadingOrderTests(unittest.TestCase):
                 src, "unavailable", headlines=[], channels=[], error="offline")
         data["A股资讯"] = pipeline._source_result(
             "新浪财经", "unavailable", headlines=[], error="offline")
+        # 热门榜单缺席 → 新闻情绪因子无「三大市场前五」可迭代，栏目缺席
+        data["热门榜单"] = pipeline._source_result(
+            "东方财富热门榜", "unavailable", markets={}, error="offline")
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
         order = ["LVL 01 // AI READ", "LVL 02 // MARKET SNAPSHOT",
