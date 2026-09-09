@@ -16,6 +16,9 @@
   rowline 纵向表格、杂志式信号矩阵因子分析；纯内联样式，无 JS/外部CSS/WebGL）。
   切回旧版像素主题: python3 output/push.py --theme pixel
   或环境变量: OCTOPUS_PUSH_THEME=pixel
+
+推送方式:
+  默认 PushPlus「一对多」群组 oai.1（环境变量 PUSHPLUS_TOPIC 可改群组，置空回退一对一）。
 """
 import os
 import sys

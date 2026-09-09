@@ -30,8 +30,8 @@
       ① 指数表现——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
       最新价、涨跌幅与成交额；② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、
       涨跌比与情绪定调）；③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
-      ④ 北向资金——港交所 2024-08-19 起停披净买入，仅展示盘后成交总额（可得时）与
-      披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
+      ④ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
+      展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
       净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
@@ -135,6 +135,11 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
+
+# PushPlus 一对多群组编码（2026-09-09 起默认改为「一对多」推送至群组 oai.1；
+# 可在 PushPlus 后台自定义群组编码，或用环境变量 PUSHPLUS_TOPIC 覆盖；
+# 设为空字符串则回退到一对一直发自己）。
+PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "oai.1")
 
 # ============================================================
 # 推送主题（2026-08-21 起，一对一 / 一对多推送共用）
@@ -827,10 +832,11 @@ def fetch_liquidity_report():
 #     深市 = 深证成指、京市 = 北证50）合计为沪深京市场宽度；
 #   · 成交额：沪深京指数成分成交额（f6，元）合计；上一交易日成交额用
 #     push2his 日 K（fields2=f51,f57）补齐，用于计算环比增减；
-#   · 北向资金：港交所自 2024-08-19 起停止披露北向实时 / 每日净买入额，仅盘后
-#     公布当日成交总额。本模块按东财沪深港通历史接口（kamt.kline）取最近一条
-#     披露记录、以行内最后一个可解析数值作为当日成交总额（亿元）的启发式读取，
-#     读取不到就明确标注暂缺——绝不编造净买入数字；
+#   · 南北向资金：港交所自 2024-08-19 起停止披露南北向实时 / 每日净买入额，仅盘后
+#     公布当日成交总额。本模块按东财数据中心历史报表 RPT_MUTUAL_DEAL_HISTORY 取
+#     最近 N 条披露记录（MUTUAL_TYPE=005 北向合计 / 006 南向合计），按「前一收盘」
+#     规则取最近一个完整交易日（最新行是今天则取前一日；否则取最后一日），
+#     将 DEAL_AMT（百万元）换算为亿元；读取不到就明确标注暂缺——绝不编造净买入数字；
 #   · 板块热力：clist/get 行业板块（fs=m:90+t:2）按涨跌幅排序，取领涨 / 领跌
 #     各 PANORAMA_SECTOR_TOP_N 名，附主力净流入与领涨股。
 # 任何一个子请求失败只影响对应子块；八大指数与市场宽度全失败才整体标记
@@ -846,8 +852,8 @@ PANORAMA_INDEX_SPECS = [
 PANORAMA_BREADTH_SOURCES = [("1.000001", "沪"), ("0.399001", "深"), ("0.899050", "京")]
 PANORAMA_SECTOR_TOP_N = int(os.environ.get("OCTOPUS_PANORAMA_SECTOR_TOP_N", "5"))
 PANORAMA_NORTH_POLICY_NOTE = (
-    "港交所自 2024-08-19 起停止披露北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
-    "本页不再估算净买入，避免把推算当披露。")
+    "港交所自 2024-08-19 起停止披露南北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
+    "本页按最近一个完整交易日（前一收盘）展示北向、南向成交总额，不再估算净买入。")
 
 
 def _panorama_float(val):
@@ -935,35 +941,83 @@ def _fetch_panorama_prev_amounts():
     return out
 
 
-def _fetch_panorama_northbound():
-    """北向资金：2024-08-19 起不再披露净买入，尽力读最近披露的当日成交总额。
+PANORAMA_HSGT_HISTORY_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
-    kamt.kline 的 data.s2n 每行为 "日期,数值,..."；披露口径调整后净买列为 "-"，
-    成交额列仍更新，故取行内最后一个可解析数值作为成交总额（亿元）的启发式近似；
-    读不到任何数值 → available=False 并给出原因（页面明确标注，不造数）。
+
+def _fetch_panorama_northbound():
+    """南北向资金：2024-08-19 起不再披露净买入，读最近完整交易日（前一收盘）成交总额。
+
+    数据源：东财数据中心历史报表 RPT_MUTUAL_DEAL_HISTORY。
+    其中 MUTUAL_TYPE=005 为「北向合计」（沪股通+深股通）、006 为「南向合计」
+    （港股通沪+港股通深）；DEAL_AMT 为该日成交总额（单位：百万元），
+    披露口径调整后北向净买额列缺失，但成交总额仍更新。
+
+    前一天收盘口径：若最新日期记录等于今天，则取它前一日（最近完整交易日）；
+    否则取最后一日（盘前 / 非交易日 / 当日尚未收市场景下，最后一日即最近完整交易日）。
+    读不到任何数值 → available=False / south_available=False 并给出原因。
     """
-    params = {"fields1": "f1,f2,f3,f4", "fields2": "f51,f52,f53,f54,f55,f56",
-              "klt": "101", "lmt": "1"}
-    data = safe_request("https://push2.eastmoney.com/api/qt/kamt.kline/get",
-                        params=params, timeout=12)
+    params = {
+        "reportName": "RPT_MUTUAL_DEAL_HISTORY",
+        "columns": "ALL",
+        "pageNumber": "1",
+        "pageSize": "40",
+        "sortColumns": "TRADE_DATE,MUTUAL_TYPE",
+        "sortTypes": "-1,1",
+        "source": "WEB",
+        "client": "WEB",
+    }
+    data = safe_request(PANORAMA_HSGT_HISTORY_URL, params=params, timeout=12)
     note = PANORAMA_NORTH_POLICY_NOTE
-    try:
-        rows = (((data or {}).get("data") or {}).get("s2n")) or []
-        if not rows:
-            raise ValueError("接口未返回北向记录")
-        parts = str(rows[-1]).split(",")
-        date = parts[0].strip()
-        nums = [x for x in (_panorama_float(v) for v in parts[1:]) if x is not None]
-        if not date:
-            raise ValueError("北向记录缺少日期")
-        if not nums:
+    today_date = _today_display()
+
+    def _pick(rows):
+        """按「前一收盘」规则从 成交总额记录 里取最近一个完整交易日数据。
+
+        rows 为该方向（北向=005 / 南向=006）的逐日记录；
+        DEAL_AMT 单位百万元，转换为亿元（÷100）。
+        """
+        parsed = []
+        for it in rows or []:
+            raw_date = str(it.get("TRADE_DATE") or "")[:10]
+            deal_amt = _panorama_float(it.get("DEAL_AMT"))
+            if not raw_date or deal_amt is None:
+                continue
+            parsed.append((raw_date, deal_amt))
+        parsed.sort(key=lambda item: item[0])
+        if not parsed:
+            return {"available": False, "amount_yi": None, "date": None,
+                    "error": "接口未返回有效记录"}
+        # 最新行是今天 → 取前一行作为「前一收盘」；否则最后一行即最近完整交易日。
+        idx_today = next((i for i, (d, _) in enumerate(parsed) if d == today_date), None)
+        if idx_today is not None and idx_today > 0:
+            date, deal_amt = parsed[idx_today - 1]
+        else:
+            date, deal_amt = parsed[-1]
+        if deal_amt is None:
             return {"available": False, "amount_yi": None, "date": date,
-                    "policy_note": note, "error": "披露口径内暂无成交总额数值"}
-        return {"available": True, "amount_yi": nums[-1], "date": date,
-                "policy_note": note, "error": None}
+                    "error": "披露口径内暂无成交总额数值"}
+        return {"available": True, "amount_yi": deal_amt / 100.0,
+                "date": date, "error": None}
+
+    try:
+        root = ((data or {}).get("result") or {}).get("data") or []
+        north = _pick([it for it in root if str(it.get("MUTUAL_TYPE") or "") == "005"])
+        south = _pick([it for it in root if str(it.get("MUTUAL_TYPE") or "") == "006"])
     except Exception as exc:
-        return {"available": False, "amount_yi": None, "date": None,
-                "policy_note": note, "error": str(exc)}
+        north = {"available": False, "amount_yi": None, "date": None, "error": str(exc)}
+        south = {"available": False, "amount_yi": None, "date": None, "error": str(exc)}
+
+    return {
+        "available": bool(north["available"]),
+        "amount_yi": north["amount_yi"],
+        "date": north["date"],
+        "error": north.get("error"),
+        "south_available": bool(south["available"]),
+        "south_amount_yi": south["amount_yi"],
+        "south_date": south["date"],
+        "south_error": south.get("error"),
+        "policy_note": note,
+    }
 
 
 def _fetch_panorama_sectors():
@@ -1076,10 +1130,12 @@ def fetch_market_panorama():
             "partial": len(amount_by_exch) < 3,
         }
 
-    # ---- 北向资金（成交总额启发式读取 + 披露政策说明）----
+    # ---- 南北向资金（前一收盘成交总额启发式读取 + 披露政策说明）----
     north = _fetch_panorama_northbound()
     if not north.get("available"):
         errors.append(f"北向成交总额: {north.get('error') or '暂缺'}")
+    if not north.get("south_available"):
+        errors.append(f"南向成交总额: {north.get('south_error') or '暂缺'}")
 
     # ---- 板块热力（领涨 / 领跌行业板块）----
     sectors = _fetch_panorama_sectors()
@@ -1095,10 +1151,12 @@ def fetch_market_panorama():
 
     content_date = (quote_time or "")[:10] or _today_display()
     is_today = content_date == _today_display()
+    north_ok = "✓" if (north.get("available") and north.get("south_available")) else \
+               ("部分" if (north.get("available") or north.get("south_available")) else "暂缺")
     print(f"  ✅ 全景复盘：指数 {len(indices)} 只 / "
           f"涨跌家数 {'齐' if breadth else '缺'} / "
           f"板块 {len(sectors['leading'])}+{len(sectors['lagging'])} / "
-          f"北向 {'✓' if north.get('available') else '暂缺'}")
+          f"南北向 {north_ok}")
     return _source_result("东方财富·A股全景", "success",
                           is_today=is_today, content_date=content_date,
                           indices=indices, breadth=breadth, turnover=turnover,
@@ -2044,17 +2102,21 @@ def gz_panorama_block(pan):
             + (gz_rowline(_esc("上一交易日合计（沪深京）"), _format_amount(t["prev_total"]))
                if t.get("prev_total") else ""))
 
-    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    # 4) 南北向资金（前一收盘成交总额 + 披露口径说明）
     north = pan.get("north") or {}
     if north:
-        if north.get("available") and north.get("amount_yi") is not None:
-            val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
-                   f'{north["amount_yi"]:,.2f} 亿元</span>')
-        else:
-            val = f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+        north_val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                     f'{north["amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("available") and north.get("amount_yi") is not None) \
+            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+        south_val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                     f'{north["south_amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("south_available") and north.get("south_amount_yi") is not None) \
+            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
         parts.append(
-            gz_subsection("北向资金")
-            + gz_rowline(_esc(f"北向当日成交总额（{north.get('date') or '—'}）"), val)
+            gz_subsection("南北向资金（前一收盘）")
+            + gz_rowline(_esc(f"北向成交总额（{north.get('date') or '—'}）"), north_val)
+            + gz_rowline(_esc(f"南向成交总额（{north.get('south_date') or north.get('date') or '—'}）"), south_val)
             + gz_note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
 
     # 5) 板块热力
@@ -2568,16 +2630,22 @@ def _panorama_block(pan):
             rows.append(("上一交易日合计（沪深京）", _format_amount(t["prev_total"])))
         parts.append(_subsection("成交额") + _mini_table(rows))
 
-    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    # 4) 南北向资金（前一收盘成交总额 + 披露口径说明）
     north = pan.get("north") or {}
     if north:
-        if north.get("available") and north.get("amount_yi") is not None:
-            val = (f'<span style="color:{C_CYAN};font-weight:900;">'
-                   f'{north["amount_yi"]:,.2f} 亿元</span>')
-        else:
-            val = f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
-        parts.append(_subsection("北向资金")
-                     + _mini_table([(f'北向当日成交总额（{_esc(north.get("date") or "—")}）', val)])
+        north_val = (f'<span style="color:{C_CYAN};font-weight:900;">'
+                     f'{north["amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("available") and north.get("amount_yi") is not None) \
+            else f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
+        south_val = (f'<span style="color:{C_CYAN};font-weight:900;">'
+                     f'{north["south_amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("south_available") and north.get("south_amount_yi") is not None) \
+            else f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
+        parts.append(_subsection("南北向资金（前一收盘）")
+                     + _mini_table([
+                         (f'北向成交总额（{_esc(north.get("date") or "—")}）', north_val),
+                         (f'南向成交总额（{_esc(north.get("south_date") or north.get("date") or "—")}）', south_val),
+                     ])
                      + _note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
 
     # 5) 板块热力
@@ -4902,15 +4970,19 @@ def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=
     return notice, True
 
 
-def push_to_wechat(title, content_html, token=None, template="html", report_name=None):
+def push_to_wechat(title, content_html, token=None, template="html", report_name=None,
+                   topic=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
+    - 默认按「一对多」推送至群组编码 PUSHPLUS_TOPIC（默认 oai.1）；
+      传入 topic 可临时覆盖，传空字符串则回退一对一；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
     token = token or PUSHPLUS_TOKEN
+    topic = topic if topic is not None else PUSHPLUS_TOPIC
 
     if not token:
         print("⚠️ 未设置 PUSHPLUS_TOKEN，跳过推送")
@@ -4918,7 +4990,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
         print("   （在 GitHub Actions 中请确认仓库 Settings → Secrets → PUSHPLUS_TOKEN 已配置）")
         return False
 
-    print(f"📤 正在推送到微信 (PushPlus, template={template})...")
+    mode = f"一对多群组 {topic}" if topic else "一对一"
+    print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
     if template == "html":
         content_html, was_truncated = _truncate_html_for_push(
             content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
@@ -4931,6 +5004,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
         "content": content_html,
         "template": template,
     }
+    if topic:
+        payload["topic"] = topic
     attempts = (0, *PUSH_RETRY_BACKOFF)
     last_error = "未知错误"
 

@@ -818,6 +818,25 @@ class PushResultTests(unittest.TestCase):
         self.assertEqual(calls["json"]["template"], "txt")
         self.assertEqual(calls["json"]["token"], "abc")
         self.assertEqual(calls["json"]["title"], "标题")
+        self.assertEqual(calls["json"]["topic"], "oai.1")   # 默认一对多群组
+
+    def test_push_to_wechat_group_topic_can_be_overridden_or_disabled(self):
+        """PUSHPLUS_TOPIC 可覆盖群组；传空串可回退一对一（不发送 topic 字段）。"""
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(json or {})
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", "custom-group"):
+            self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc"))
+        self.assertEqual(calls[-1]["topic"], "custom-group")
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", ""):
+            self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc"))
+        self.assertNotIn("topic", calls[-1])                 # 一对一不携带 topic
 
     def test_push_to_wechat_returns_false_on_error_code(self):
         with patch.object(pipeline, "requests",
@@ -1311,7 +1330,7 @@ class MarketPanoramaTests(unittest.TestCase):
             for i in range(pipeline.PANORAMA_SECTOR_TOP_N)
         ]
 
-    def _install_fake_requests(self, with_kline=True, with_kamt=True, with_sectors=True):
+    def _install_fake_requests(self, with_kline=True, with_hsgt=True, with_sectors=True):
         def fake(url, params=None, **kw):
             if "ulist.np" in url:
                 return {"data": {"diff": self._indices_diff()}}
@@ -1321,10 +1340,13 @@ class MarketPanoramaTests(unittest.TestCase):
                 base = {"1.000001": 4.8e11, "0.399001": 6.0e11, "0.899050": 7.0e9}[
                     (params or {}).get("secid")]
                 return {"data": {"klines": [f"2026-09-07,{base}", f"2026-09-08,{base * 1.05:.0f}"]}}
-            if "kamt.kline" in url:
-                if not with_kamt:
+            if "datacenter-web.eastmoney.com" in url:
+                if not with_hsgt:
                     return None
-                return {"data": {"s2n": ["2026-09-08,-,1350.25"], "n2s": []}}
+                return {"result": {"data": [
+                    {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 135025.0},
+                    {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 8850.0},
+                ]}}
             if "clist/get" in url:
                 if not with_sectors:
                     return None
@@ -1365,11 +1387,14 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertAlmostEqual(t["prev_total"], 4.8e11 + 6.0e11 + 7.0e9)
         self.assertAlmostEqual(t["chg_pct"], (t["total"] / t["prev_total"] - 1) * 100, places=6)
 
-        # ④ 北向资金：净买列为 "-"，取行内最后一个数值作为成交总额（亿元）
+        # ④ 南北向资金：RPT_MUTUAL_DEAL_HISTORY 的 005/006 成交总额（百万元→亿元）
         north = result["north"]
         self.assertTrue(north["available"])
         self.assertEqual(north["amount_yi"], 1350.25)
         self.assertEqual(north["date"], "2026-09-08")
+        self.assertTrue(north["south_available"])
+        self.assertEqual(north["south_amount_yi"], 88.50)
+        self.assertEqual(north["south_date"], "2026-09-08")
         self.assertIn("2024-08-19", north["policy_note"])
 
         # ⑤ 板块热力：领涨 TOP 涨幅降序、领跌 TOP 跌幅最深在前
@@ -1393,7 +1418,7 @@ class MarketPanoramaTests(unittest.TestCase):
 
     def test_fetch_market_panorama_degrades_per_subblock(self):
         # 指数 / 宽度在线，K 线、北向、板块全挂：整体仍 success，对应子块缺席并标 partial
-        with self._install_fake_requests(with_kline=False, with_kamt=False, with_sectors=False):
+        with self._install_fake_requests(with_kline=False, with_hsgt=False, with_sectors=False):
             result = pipeline.fetch_market_panorama()
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["indices"]), 8)
@@ -1401,9 +1426,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIsNone(result["turnover"]["prev_total"])
         self.assertIsNone(result["turnover"]["chg_pct"])
         self.assertFalse(result["north"]["available"])
+        self.assertFalse(result["north"]["south_available"])
         self.assertEqual(result["sectors"], {"leading": [], "lagging": []})
         self.assertTrue(result["partial"])
         self.assertIn("北向", result["error"])
+        self.assertIn("南向", result["error"])
         self.assertIn("板块热力", result["error"])
 
     def test_breadth_mood_thresholds(self):
@@ -1413,6 +1440,45 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertEqual(pipeline._panorama_breadth_mood(0.5), "偏空承压")
         self.assertEqual(pipeline._panorama_breadth_mood(0.49), "普跌弱势")
         self.assertEqual(pipeline._panorama_breadth_mood(None), "数据不足")
+
+    def test_northbound_previous_close_selection_when_latest_row_is_today(self):
+        """最新行日期==今天时，取它前一行作为「前一收盘」（南向同规则）。"""
+        payload = {"result": {"data": [
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 10000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 20000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 30000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 1000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 2000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 3000.0},
+        ]}}
+        with patch.object(pipeline, "safe_request", return_value=payload), \
+             patch.object(pipeline, "_today_display", return_value="2026-09-08"):
+            north = pipeline._fetch_panorama_northbound()
+        self.assertTrue(north["available"])
+        self.assertEqual(north["date"], "2026-09-07")
+        self.assertEqual(north["amount_yi"], 200.0)   # 20000 百万元 ÷ 100
+        self.assertTrue(north["south_available"])
+        self.assertEqual(north["south_date"], "2026-09-07")
+        self.assertEqual(north["south_amount_yi"], 20.0)
+
+    def test_northbound_uses_last_row_when_latest_is_not_today(self):
+        """最新行不是今天（盘前/非交易日/休市）时，最后一行即最近完整交易日。"""
+        payload = {"result": {"data": [
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 10000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 20000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 30000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 1000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 2000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 3000.0},
+        ]}}
+        with patch.object(pipeline, "safe_request", return_value=payload), \
+             patch.object(pipeline, "_today_display", return_value="2026-09-09"):
+            north = pipeline._fetch_panorama_northbound()
+        self.assertTrue(north["available"])
+        self.assertEqual(north["date"], "2026-09-08")
+        self.assertEqual(north["amount_yi"], 300.0)
+        self.assertEqual(north["south_date"], "2026-09-08")
+        self.assertEqual(north["south_amount_yi"], 30.0)
 
     def test_format_amount_keeps_minus_sign_for_main_outflow(self):
         # 板块主力净流入（f62）常为负：负号必须保留，不能只显示绝对值或原始大数
@@ -1445,6 +1511,8 @@ class MarketPanoramaTests(unittest.TestCase):
                       "by_market": {"沪": 5.1e11, "深": 6.2e11, "京": 8.0e9},
                       "partial": False},
             north={"available": True, "amount_yi": 1350.25, "date": "2026-09-08",
+                   "south_available": True, "south_amount_yi": 88.50,
+                   "south_date": "2026-09-08",
                    "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": None},
             sectors={
                 "leading": [{"code": "BK100", "name": "领涨板块甲", "chg_pct": 3.50,
@@ -1467,8 +1535,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("普涨强势", html)
         self.assertIn("3.12", html)
         self.assertIn("成交额", html)
+        self.assertIn("南北向资金（前一收盘）", html)
         self.assertIn("北向资金", html)
         self.assertIn("1,350.25 亿元", html)
+        self.assertIn("南向成交总额", html)
+        self.assertIn("88.50 亿元", html)
         self.assertIn("2024-08-19", html)          # 披露口径说明
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
@@ -1488,7 +1559,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("涨跌家数", html)
         self.assertIn("▲ 上涨 4,050 家", html)
         self.assertIn("普涨强势", html)
+        self.assertIn("南北向资金（前一收盘）", html)
         self.assertIn("北向资金", html)
+        self.assertIn("南向成交总额", html)
+        self.assertIn("1,350.25 亿元", html)
+        self.assertIn("88.50 亿元", html)
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
 
@@ -1497,6 +1572,8 @@ class MarketPanoramaTests(unittest.TestCase):
         data["A股大盘全景"] = pipeline._source_result(
             "东方财富·A股全景", "unavailable", indices=[], breadth=None, turnover=None,
             north={"available": False, "amount_yi": None, "date": None,
+                   "south_available": False, "south_amount_yi": None,
+                   "south_date": None,
                    "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": "offline"},
             sectors={"leading": [], "lagging": []}, quote_time=None, error="offline")
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
