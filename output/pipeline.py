@@ -149,9 +149,10 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "oai.1")
 # guizang —— 默认主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
 #   （github.com/op7418/guizang-ppt-skill），改造成适合微信阅读的竖版长页面：
 #   浅灰正文 + 深灰 Hero / 章节幕封、衬线标题（荧光绿）、非衬线正文（近黑深灰）、
-#   等宽元信息、发丝线与大留白。微信优先：单列满宽卡片、图标极大、个别突出标题/数字极大、普通正文极小，
-#   不用三列刊头、inline-block 胶囊或 nowrap。因子分析以杂志式信号矩阵呈现
-#   （保留涨跌颜色、概率与证据）。
+#   等宽元信息、发丝线与大留白。微信优先：单列满宽；行情 / 全景 / 流动性指标 / 情绪总览 /
+#   政策冲击 / 数据审计等结构化数据用键值表或多列表格整合；资讯长文与 AI 研判仍用卡片。
+#   图标极大、个别突出标题/数字极大、普通正文极小，不用三列刊头、inline-block 胶囊或 nowrap。
+#   因子分析以杂志式信号矩阵呈现（保留涨跌颜色、概率与证据）。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
 # pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
 PUSH_THEMES = ("guizang", "pixel")
@@ -1986,6 +1987,86 @@ def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None):
     )
 
 
+
+def _gz_missing(text="■ 数据暂缺"):
+    return f'<span style="color:{GZ_FLAT};">{text}</span>'
+
+
+def _gz_num(text):
+    return f'<span style="font-family:{GZ_MONO};font-weight:700;">{text}</span>'
+
+
+def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None):
+    """微信兼容满宽数据表。
+
+    整表一张 ``width=100%`` + ``width:100%!important``，``table-layout:fixed``；
+    不用 ``nowrap`` / ``inline-block`` / ``width="33%"``；行全部包在本函数的
+    ``<table>`` 里，不产出裸 ``<tr>``。``kv=True`` 时第一列为元信息色标签。
+    """
+    rows = [list(r) for r in (rows or [])]
+    if not rows:
+        return ""
+    n = len(headers) if headers else len(rows[0])
+    if n <= 0:
+        return ""
+    if aligns is None:
+        aligns = ["left"] + ["right"] * (n - 1) if n > 1 else ["left"]
+    aligns = (list(aligns) + ["left"] * n)[:n]
+    anchors = list(row_anchors or [])
+    while len(anchors) < len(rows):
+        anchors.append(None)
+
+    def _cell(html, i, *, head=False, kv_label=False, anchor=None):
+        pad_r = "0" if i == n - 1 else "10px"
+        if head:
+            border = f"border-bottom:1px solid {GZ_INK};"
+            size, color, weight = GZ_FS_META, GZ_META, "700"
+        elif kv_label:
+            border = f"border-bottom:1px solid {GZ_HAIR};"
+            size, color, weight = GZ_FS_META, GZ_META, "400"
+        else:
+            border = f"border-bottom:1px solid {GZ_HAIR};"
+            size, color, weight = GZ_FS_BODY, GZ_INK, "400"
+        align = aligns[i]
+        id_attr = f' id="{_esc(anchor)}"' if anchor else ""
+        return (
+            f'<td{id_attr} valign="top" align="{align}" '
+            f'style="padding:10px {pad_r} 10px 0;{border}'
+            f'font-size:{size}px;color:{color};font-weight:{weight};'
+            f'line-height:1.45;text-align:{align};">{html}</td>'
+        )
+
+    trs = []
+    if headers:
+        trs.append("<tr>" + "".join(
+            _cell(_esc(h), i, head=True) for i, h in enumerate(headers)
+        ) + "</tr>")
+    for ri, row in enumerate(rows):
+        tds = []
+        for i in range(n):
+            val = row[i] if i < len(row) else ""
+            tds.append(_cell(
+                val, i,
+                kv_label=(kv and i == 0),
+                anchor=(anchors[ri] if i == 0 else None),
+            ))
+        trs.append("<tr>" + "".join(tds) + "</tr>")
+    table = (
+        f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
+        f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
+        f'{"".join(trs)}</table>'
+    )
+    return gz_shell(table, bg=GZ_PAPER, pad="4px 0 16px")
+
+
+def gz_kv_table(pairs):
+    """多行键值并入一张两列表，避免一条数据一张卡。"""
+    pairs = [(a, b) for a, b in (pairs or [])]
+    if not pairs:
+        return ""
+    return gz_data_table(None, pairs, aligns=("left", "right"), kv=True)
+
+
 def gz_note(text):
     return gz_shell(
         f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.85;">{_esc(text)}</div>',
@@ -2000,11 +2081,8 @@ def gz_subsection(text):
 
 
 def gz_rowline(label_html, right_html, pad="8px"):
-    """竖排键值卡：上一行标签、下一行取值，不再左右互挤。"""
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.5;">{label_html}</div>'
-        f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};padding-top:4px;line-height:1.5;">{right_html}</div>',
-        pad="14px 0")
+    """兼容旧调用：单行键值并入两列表格。"""
+    return gz_kv_table([(label_html, right_html)])
 
 
 def gz_table(rows_html):
@@ -2017,135 +2095,126 @@ def gz_rows(rows_html):
     return rows_html or ""
 
 
-def gz_market_row(label, price_str, pct):
+def _gz_quote_row(label, price_str, pct):
     if price_str is None:
-        val = f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
-    else:
-        badge = gz_trend_badge(pct) if pct is not None else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
-        val = (f'<span style="font-size:{GZ_FS_PRICE}px;font-weight:700;color:{GZ_INK};'
-               f'font-family:{GZ_MONO};">{price_str}</span>'
-               f'<span style="font-size:{GZ_FS_BODY}px;padding-left:10px;">{badge}</span>')
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};">{_esc(label)}</div>'
-        f'<div style="padding-top:4px;line-height:1.45;">{val}</div>',
-        bg=GZ_PAPER, pad="20px 0", hair=True)
+        miss = _gz_missing()
+        return [_esc(label), miss, miss]
+    badge = gz_trend_badge(pct) if pct is not None else _gz_missing()
+    return [_esc(label), _gz_num(price_str), badge]
+
+
+def gz_market_row(label, price_str, pct):
+    """兼容旧调用：单行行情并入三列表。"""
+    return gz_data_table(["名称", "最新价", "涨跌"], [_gz_quote_row(label, price_str, pct)])
 
 
 def gz_market_section(market):
-    rows = []
-    for label, precision in [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]:
-        price_str, pct = _quote_parts(market, label, precision)
-        rows.append(gz_market_row(label, price_str, pct))
-    a_rows = []
-    for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
-        price_str, pct = _quote_parts(market, label, precision)
-        a_rows.append(gz_market_row(label, price_str, pct))
-    # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在行情速览展示；
-    # 动能明细表移除后，这里是它们唯一的展示位置。
-    hk_rows = []
-    for label, precision in [("恒生指数", 2), ("恒生科技", 2)]:
-        price_str, pct = _quote_parts(market, label, precision)
-        hk_rows.append(gz_market_row(label, price_str, pct))
-    return (gz_subsection("全球与美股") + "".join(rows)
-            + gz_subsection("A股四指数") + "".join(a_rows)
-            + gz_subsection("港股双指数") + "".join(hk_rows)
-            + gz_note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
+    def _block(title, specs):
+        rows = []
+        for label, precision in specs:
+            price_str, pct = _quote_parts(market, label, precision)
+            rows.append(_gz_quote_row(label, price_str, pct))
+        return gz_subsection(title) + gz_data_table(["名称", "最新价", "涨跌"], rows)
 
-
-def _gz_pan_sector_card(it):
-    """guizang 板块热力行：板块名 + 涨跌徽标，下一行主力净流入 / 领涨股。"""
-    badge = gz_trend_badge(it.get("chg_pct"))
-    sub_bits = []
-    if it.get("main_inflow") is not None:
-        sub_bits.append(f"主力净流入 {_format_amount(it['main_inflow'])}")
-    if it.get("lead_stock"):
-        lead = _esc(it["lead_stock"])
-        lead_pct = it.get("lead_stock_pct")
-        sub_bits.append(f"领涨 {lead}" + (f" {lead_pct:+.2f}%" if lead_pct is not None else ""))
-    sub = (f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.7;padding-top:4px;">'
-           f'{" · ".join(sub_bits)}</div>') if sub_bits else ""
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};line-height:1.6;">'
-        f'{_esc(it["name"])} <span style="font-size:{GZ_FS_META}px;padding-left:6px;">{badge}</span></div>{sub}',
-        pad="14px 0", hair=True)
+    return (
+        _block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)])
+        + _block("A股四指数", [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)])
+        # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在行情速览展示；
+        # 动能明细表移除后，这里是它们唯一的展示位置。
+        + _block("港股双指数", [("恒生指数", 2), ("恒生科技", 2)])
+        + gz_note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。")
+    )
 
 
 def gz_panorama_block(pan):
-    """guizang 版「A股大盘全景复盘」：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
+    """guizang 版「A股大盘全景复盘」：指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力，均用表格。"""
     parts = []
 
-    # 1) 指数表现
     indices = pan.get("indices") or []
     if indices:
         rows = []
         for idx in indices:
             pct = idx.get("chg_pct")
-            badge = gz_trend_badge(pct) if pct is not None else \
-                f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
-            amt = f' · 成交额 {_format_amount(idx["amount"])}' if idx.get("amount") else ""
-            rows.append(gz_shell(
-                f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};">{_esc(idx["name"])}'
-                f'<span style="font-size:{GZ_FS_META}px;">{amt}</span></div>'
-                f'<div style="padding-top:4px;line-height:1.45;">'
-                f'<span style="font-size:{GZ_FS_PRICE}px;font-weight:700;color:{GZ_INK};font-family:{GZ_MONO};">'
-                f'{idx["price"]:,.2f}</span>'
-                f'<span style="font-size:{GZ_FS_BODY}px;padding-left:10px;">{badge}</span></div>',
-                bg=GZ_PAPER, pad="20px 0", hair=True))
-        parts.append(gz_subsection("指数表现") + "".join(rows))
+            badge = gz_trend_badge(pct) if pct is not None else _gz_missing()
+            amt = _format_amount(idx["amount"]) if idx.get("amount") else "—"
+            rows.append([_esc(idx["name"]), _gz_num(f'{idx["price"]:,.2f}'), badge, amt])
+        parts.append(gz_subsection("指数表现") + gz_data_table(
+            ["指数", "最新价", "涨跌", "成交额"], rows))
 
-    # 2) 涨跌家数（市场宽度）
     b = pan.get("breadth")
     if b:
+        b_rows = []
+        for exch, p in (b.get("markets") or {}).items():
+            b_rows.append([
+                _esc(exch),
+                f'{p["up"]:,} 家',
+                f'{p["down"]:,} 家',
+                f'{(p.get("flat") or 0):,} 家',
+            ])
+        b_rows.append([
+            "沪深京合计",
+            f'{b["up"]:,} 家',
+            f'{b["down"]:,} 家',
+            f'{b["flat"]:,} 家',
+        ])
         parts.append(
             gz_subsection("涨跌家数")
-            + gz_rowline(_esc("上涨 / 下跌 / 平盘（沪深京合计）"),
-                         f'<span style="font-weight:700;">▲ {b["up"]:,} 家 · ▼ {b["down"]:,} 家 '
-                         f'· ■ {b["flat"]:,} 家</span>')
-            + gz_rowline(_esc("涨跌比 / 情绪定调"),
-                         (f'{b["ratio"]:.2f}' if b.get("ratio") is not None else "—")
-                         + f' · {_esc(b.get("mood") or "—")}'))
+            + gz_data_table(["市场", "上涨", "下跌", "平盘"], b_rows)
+            + gz_kv_table([(
+                "涨跌比 / 情绪定调",
+                (f'{b["ratio"]:.2f}' if b.get("ratio") is not None else "—")
+                + f' · {_esc(b.get("mood") or "—")}',
+            )])
+        )
         if b.get("partial"):
             parts.append(gz_note("部分交易所涨跌家数暂缺，本栏为已取得市场的合计。"))
 
-    # 3) 成交额
     t = pan.get("turnover")
     if t:
         chg = t.get("chg_pct")
         chg_html = (f' 较上一交易日 {gz_trend_badge(chg)}' if chg is not None
                     else f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};">（环比暂缺）</span>')
-        parts.append(
-            gz_subsection("成交额")
-            + gz_rowline(_esc("沪深京成交额合计"),
-                         f'<span style="font-size:{GZ_FS_PRICE}px;font-weight:700;font-family:{GZ_MONO};">'
-                         f'{_format_amount(t["total"])}</span>{chg_html}')
-            + (gz_rowline(_esc("上一交易日合计（沪深京）"), _format_amount(t["prev_total"]))
-               if t.get("prev_total") else ""))
+        t_pairs = []
+        for exch, amt in (t.get("by_market") or {}).items():
+            t_pairs.append((f"{exch}市成交额", _format_amount(amt)))
+        t_pairs.append(("沪深京成交额合计", _format_amount(t["total"]) + chg_html))
+        if t.get("prev_total"):
+            t_pairs.append(("上一交易日合计（沪深京）", _format_amount(t["prev_total"])))
+        parts.append(gz_subsection("成交额") + gz_kv_table(t_pairs))
 
-    # 4) 南北向资金（前一收盘成交总额 + 披露口径说明）
     north = pan.get("north") or {}
     if north:
-        north_val = (f'<span style="font-size:{GZ_FS_PRICE}px;font-weight:700;font-family:{GZ_MONO};">'
-                     f'{north["amount_yi"]:,.2f} 亿元</span>') \
+        north_val = _gz_num(f'{north["amount_yi"]:,.2f} 亿元') \
             if (north.get("available") and north.get("amount_yi") is not None) \
-            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
-        south_val = (f'<span style="font-size:{GZ_FS_PRICE}px;font-weight:700;font-family:{GZ_MONO};">'
-                     f'{north["south_amount_yi"]:,.2f} 亿元</span>') \
+            else _gz_missing()
+        south_val = _gz_num(f'{north["south_amount_yi"]:,.2f} 亿元') \
             if (north.get("south_available") and north.get("south_amount_yi") is not None) \
-            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+            else _gz_missing()
         parts.append(
             gz_subsection("南北向资金（前一收盘）")
-            + gz_rowline(_esc(f"北向成交总额（{north.get('date') or '—'}）"), north_val)
-            + gz_rowline(_esc(f"南向成交总额（{north.get('south_date') or north.get('date') or '—'}）"), south_val)
+            + gz_kv_table([
+                (f"北向成交总额（{north.get('date') or '—'}）", north_val),
+                (f"南向成交总额（{north.get('south_date') or north.get('date') or '—'}）", south_val),
+            ])
             + gz_note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
 
-    # 5) 板块热力
     sec = pan.get("sectors") or {}
     for title, key in (("板块热力 · 领涨行业 TOP", "leading"),
                        ("板块热力 · 领跌行业 TOP", "lagging")):
-        rows = sec.get(key) or []
-        if rows:
-            parts.append(gz_subsection(title) + "".join(_gz_pan_sector_card(it) for it in rows))
+        items = sec.get(key) or []
+        if items:
+            s_rows = []
+            for it in items:
+                badge = gz_trend_badge(it.get("chg_pct"))
+                inflow = _format_amount(it["main_inflow"]) if it.get("main_inflow") is not None else "—"
+                lead = _esc(it["lead_stock"]) if it.get("lead_stock") else "—"
+                lead_pct = it.get("lead_stock_pct")
+                if lead != "—" and lead_pct is not None:
+                    lead = f"{lead} {lead_pct:+.2f}%"
+                s_rows.append([_esc(it["name"]), badge, inflow, lead])
+            parts.append(gz_subsection(title) + gz_data_table(
+                ["板块", "涨跌", "主力净流入", "领涨股"], s_rows))
 
     if pan.get("quote_time"):
         parts.append(gz_note(
@@ -2207,37 +2276,40 @@ def gz_channel_block(ch, ch_idx=None):
             bg=GZ_PAPER, pad="20px 0")
     badge = gz_source_badge({"status": "success", "is_today": ch.get("is_today")})
     name_link = f'<a href="{url}" style="color:{GZ_INK};text-decoration:none;">{name}</a>' if url else name
-    items = []
+    rows, anchors = [], []
     for vi, v in enumerate(videos[:CHANNEL_TOP_N], 1):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
         link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{GZ_INK};text-decoration:none;">{title}</a>'
         new_tag = (f' <span style="color:{GZ_UP};font-weight:700;">当天</span>'
                    if v.get("is_today") else "")
-        anchor = f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None
-        items.append(_gz_news_card(f"{vi:02d}", link + new_tag, pub, anchor=anchor))
+        rows.append([link + new_tag, pub])
+        anchors.append(f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None)
     head = gz_shell(
         f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SANS};line-height:1.4;">'
         f'{name_link} · {badge}</div>'
         f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};padding-top:4px;line-height:1.6;">{desc}</div>',
         bg=GZ_PAPER, pad="20px 0")
-    return head + "".join(items)
+    return head + gz_data_table(["标题", "时间"], rows, aligns=("left", "right"), row_anchors=anchors)
 
 
 def gz_status_footer(sources):
-    cards = []
+    rows = []
     for name, s in sources:
         if s.get("status") == "success":
-            line = (f'{_esc(name)} · {gz_source_badge(s)} · '
-                    f'<span style="color:{GZ_META};">{_esc(s.get("fetched_at", "—"))}</span>')
+            rows.append([
+                _esc(name),
+                gz_source_badge(s),
+                f'<span style="color:{GZ_META};">{_esc(s.get("fetched_at", "—"))}</span>',
+            ])
         else:
             detail = _esc(s.get("error", "暂时不可用"))
-            line = (f'{_esc(name)} · {gz_badge("暂缺", "bad")} · '
-                    f'<span style="color:{GZ_META};">{detail} · {_esc(s.get("fetched_at", "—"))}</span>')
-        cards.append(gz_shell(
-            f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.6;">{line}</div>',
-            pad="10px 0"))
-    return "".join(cards)
+            rows.append([
+                _esc(name),
+                gz_badge("暂缺", "bad"),
+                f'<span style="color:{GZ_META};">{detail} · {_esc(s.get("fetched_at", "—"))}</span>',
+            ])
+    return gz_data_table(["来源", "状态", "抓取"], rows, aligns=("left", "left", "right"))
 
 
 def gz_alert(text, color=None):
@@ -2294,11 +2366,9 @@ def gz_ai_analysis_block(res):
         f'{_esc(res["reason"])}</div>',
         bg=GZ_PAPER_TINT, pad="24px")
     if res["sectors_strong"]:
-        sec_cards = "".join(
-            gz_rowline(_esc(sec),
-                       f'<span style="color:{GZ_META};">{cnt} 次</span>')
-            for sec, cnt in res["sectors_strong"])
-        sectors_html = gz_subsection("板块热度") + sec_cards
+        sectors_html = gz_subsection("板块热度") + gz_data_table(
+            ["板块", "提及"],
+            [[_esc(sec), f"{cnt} 次"] for sec, cnt in res["sectors_strong"]])
         if res["sectors_weak"]:
             sectors_html += gz_shell(
                 f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_DOWN};font-weight:700;line-height:1.6;">'
@@ -2326,12 +2396,11 @@ def gz_ai_analysis_block(res):
                     f'{tag} {_esc(info["label"])} '
                     f'<span style="color:{band_palette.get(info.get("band"), GZ_INK)};">'
                     f'{_esc(info.get("band", ""))}</span>')
+        tech_pairs = [(f'指数动能聚合（{tech_stats["count"]} 个指数）', breadth)]
+        if extremes:
+            tech_pairs.append(("动能两极", " · ".join(extremes)))
         tech_html = (gz_subsection("指数动能")
-                     + gz_rowline(f'指数动能聚合（{tech_stats["count"]} 个指数）', breadth)
-                     + (gz_shell(
-                         f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;">'
-                         f'动能两极 · {" · ".join(extremes)}</div>', pad="8px 0")
-                        if extremes else "")
+                     + gz_kv_table(tech_pairs)
                      + gz_shell(
                          f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;">'
                          f'<span style="color:{GZ_META};">解读 · </span>{_esc(res["tech_read"])}</div>',
@@ -2395,14 +2464,14 @@ def gz_liquidity_market_block(label, stats):
         f'AI 定性：<b style="color:{color};">{_esc(stats.get("tone", "—"))}</b>'
         f' · 样本 {stats.get("sample_count", 0)} 只</div>',
         bg=GZ_PAPER, pad="24px 0")
-    rows = (
-        gz_rowline("成交额", _format_amount(stats.get("total_amount")))
-        + gz_rowline("头部集中度", f'{stats.get("top10_share", 0) * 100:.1f}%')
-        + gz_rowline("上涨 / 下跌 / 平", breadth)
-        + gz_rowline("扩散比", f'{stats.get("adv_dec_ratio", 0):.2f}x')
-        + gz_rowline("加权涨跌", gz_trend_badge(stats.get("weighted_change", 0)))
-        + gz_rowline("平均换手", f'{stats.get("avg_turnover", 0):.2f}%')
-    )
+    rows = gz_kv_table([
+        ("成交额", _format_amount(stats.get("total_amount"))),
+        ("头部集中度", f'{stats.get("top10_share", 0) * 100:.1f}%'),
+        ("上涨 / 下跌 / 平", breadth),
+        ("扩散比", f'{stats.get("adv_dec_ratio", 0):.2f}x'),
+        ("加权涨跌", gz_trend_badge(stats.get("weighted_change", 0))),
+        ("平均换手", f'{stats.get("avg_turnover", 0):.2f}%'),
+    ])
     return head + rows
 
 
@@ -4484,37 +4553,37 @@ def gz_sentiment_block(res):
     ms = res.get("market_summary") or {}
     out = []
     # ① 总览信息
-    out.append(gz_rowline("标的范围",
-               f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'))
-    out.append(gz_rowline("窗口内有点名",
-               f"{res['total_matched']} 只（窗口内标题归因：精确名/别名代码/行业概念）"))
-    out.append(gz_rowline("标题窗口",
-               f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'))
-    out.append(gz_rowline("归因未命中",
-               f'{res["unattributed_n"]} 条（已入下方「市场情绪关键词」）'))
+    out.append(gz_kv_table([
+        ("标的范围",
+         f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'),
+        ("窗口内有点名",
+         f"{res['total_matched']} 只（窗口内标题归因：精确名/别名代码/行业概念）"),
+        ("标题窗口",
+         f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
+        ("归因未命中",
+         f'{res["unattributed_n"]} 条（已入下方「市场情绪关键词」）'),
+    ]))
     # ② 市场情绪全景
     if ms.get("available"):
         arrow = "▲" if ms["overall_dns"] > 0.2 else ("▼" if ms["overall_dns"] < -0.2 else "■")
         out.append(gz_subsection(f'市场情绪全景 {arrow} {ms["overall_label"]}'))
-        out.append(gz_rowline(
+        ms_pairs = [(
             "整体 DNS",
             f'{ms["overall_dns"]:+.2f}（{ms["overall_label"]} · '
             f'正{ms["total_pos"]}/中{ms["total_neu"]}/负{ms["total_neg"]} · '
-            f'共{ms["total_n"]}条归因标题）'))
-        # 各市场情绪
+            f'共{ms["total_n"]}条归因标题）')]
         for mkt in SENTI_MARKET_ORDER:
             md = ms.get("market_dns", {}).get(mkt)
             if not md:
                 continue
             if md.get("dns") is None:
-                out.append(gz_rowline(f"{mkt}", f'■ 窗口内无匹配（{md.get("matched", 0)} 只归因）'))
+                ms_pairs.append((f"{mkt}", f'■ 窗口内无匹配（{md.get("matched", 0)} 只归因）'))
             else:
                 mkt_arrow = "▲" if md["dns"] > 0.2 else ("▼" if md["dns"] < -0.2 else "■")
-                out.append(gz_rowline(
+                ms_pairs.append((
                     f"{mkt} {mkt_arrow}",
                     f'DNS {md["dns"]:+.2f}（{md["label"]} · '
                     f'{md["matched"]}只 · 正{md["pos"]}/中{md["neu"]}/负{md["neg"]}）'))
-        # 最热/最冷/最多
         callouts = []
         if ms.get("hottest"):
             h = ms["hottest"]
@@ -4526,7 +4595,8 @@ def gz_sentiment_block(res):
             m = ms["most_covered"]
             callouts.append(f'报道最多：{m["name"]}（{m["total"]}条）')
         if callouts:
-            out.append(gz_rowline("关键信号", _esc(" · ".join(callouts))))
+            ms_pairs.append(("关键信号", _esc(" · ".join(callouts))))
+        out.append(gz_kv_table(ms_pairs))
     # ③ 逐市场逐股
     for mb in by_market:
         out.append(gz_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
@@ -4534,10 +4604,12 @@ def gz_sentiment_block(res):
             if not s.get("matched"):
                 title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
                 out.append(gz_subsection(f'{_esc(title)} · {s["market"]} ■ 暂无评分'))
-                out.append(gz_rowline("总结评论",
-                    _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")))
-                out.append(gz_rowline("原因",
-                    _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")))
+                out.append(gz_kv_table([
+                    ("总结评论",
+                     _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")),
+                    ("原因",
+                     _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")),
+                ]))
                 continue
             arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
             title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
@@ -4546,10 +4618,13 @@ def gz_sentiment_block(res):
             out.append(gz_subsection(
                 f'{_esc(title)} · {s["market"]} {arrow}'
                 f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};font-weight:400;">归因：{tag_label}</span>'))
-            out.append(gz_rowline("AI 情绪分", _esc(s.get("comment") or "")))
-            out.append(gz_rowline("原因", _esc(s.get("reason") or "")))
+            stock_pairs = [
+                ("AI 情绪分", _esc(s.get("comment") or "")),
+                ("原因", _esc(s.get("reason") or "")),
+            ]
             for label, line in _senti_factor_lines(s):
-                out.append(gz_rowline(label, _esc(line)))
+                stock_pairs.append((label, _esc(line)))
+            out.append(gz_kv_table(stock_pairs))
             for h in s["headlines"][:5]:
                 badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
                 tag_mark = ""
@@ -4578,9 +4653,9 @@ def gz_sentiment_block(res):
             pad="4px 0 12px"))
         if unattr_keywords:
             kw_parts = [f'{kw}×{n}' for kw, n in unattr_keywords[:8]]
-            out.append(gz_rowline("高频情绪词", _esc("、".join(kw_parts))))
+            out.append(gz_kv_table([("高频情绪词", _esc("、".join(kw_parts)))]))
         else:
-            out.append(gz_rowline("高频情绪词", _esc("无显著情绪词命中")))
+            out.append(gz_kv_table([("高频情绪词", _esc("无显著情绪词命中"))]))
     # ⑤ 方法论脚注
     out.append(gz_note(
         f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
@@ -4603,10 +4678,12 @@ def gz_sentiment_empty_block(res):
             f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};line-height:1.6;">'
             f'■ 样本不足：{n_today} 条标题（近{SENTI_WINDOW_HOURS}h）均未点名榜单个股</div>',
             pad="8px 0"),
-        gz_rowline("窗口标题", f"{n_today} 条（近 {SENTI_WINDOW_HOURS}h，全部尝试归因）"),
-        gz_rowline("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n
-                   else "0 只（热门榜单暂缺）"),
-        gz_rowline("归因结果", cover),
+        gz_kv_table([
+            ("窗口标题", f"{n_today} 条（近 {SENTI_WINDOW_HOURS}h，全部尝试归因）"),
+            ("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n
+             else "0 只（热门榜单暂缺）"),
+            ("归因结果", cover),
+        ]),
     ]
     out.append(gz_note(
         f"DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：近 {SENTI_WINDOW_HOURS}h 标题未点名榜单个股 → "
@@ -4937,22 +5014,33 @@ def gz_policy_block(res):
         gz_shell(f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};line-height:1.85;">'
                  f'{arrow} {_esc(res["summary"])}</div>', pad="8px 0"),
         gz_subsection("大盘冲击与覆盖"),
-        gz_rowline("政策新闻",
-                   f'{res["policy_n"]} 条（占近 {res.get("window_days") or POLICY_WINDOW_DAYS} 日窗口资讯 '
-                   f'{res["policy_n"]}/{res["total_headlines"]}）'),
-        gz_rowline("大盘冲击",
-                   f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
-        gz_rowline("覆盖维度", _esc(dims_line)),
+        gz_kv_table([
+            ("政策新闻",
+             f'{res["policy_n"]} 条（占近 {res.get("window_days") or POLICY_WINDOW_DAYS} 日窗口资讯 '
+             f'{res["policy_n"]}/{res["total_headlines"]}）'),
+            ("大盘冲击",
+             f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
+            ("覆盖维度", _esc(dims_line)),
+        ]),
         gz_subsection("行业冲击榜"),
     ]
+    board = []
     for s in res["winners"]:
-        out.append(gz_rowline(
+        board.append([
             f'▲ {_esc(s["name"])}',
-            f'PSI +{s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+            f'PSI +{s["score"]}',
+            f'{s["count"]}条',
+            _esc("/".join(s["dims"])),
+        ])
     for s in res["losers"]:
-        out.append(gz_rowline(
+        board.append([
             f'▼ {_esc(s["name"])}',
-            f'PSI {s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+            f'PSI {s["score"]}',
+            f'{s["count"]}条',
+            _esc("/".join(s["dims"])),
+        ])
+    if board:
+        out.append(gz_data_table(["行业", "PSI", "条数", "维度"], board))
     out.append(gz_subsection("政策新闻逐条"))
     for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
         badge = "▲" if h["direction"] > 0 else ("▼" if h["direction"] < 0 else "■")
@@ -5214,7 +5302,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
 
 def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
                                 policy_result=None, news_corpus=None):
-    """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
+    """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标、结构化数据表格与单列留白；不依赖脚本。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
@@ -6091,4 +6179,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

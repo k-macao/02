@@ -702,13 +702,16 @@ class GuizangThemeTests(unittest.TestCase):
     def test_guizang_market_table_becomes_vertical_rowline(self):
         data = ReportFreshnessTests()._sample_data()
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
-        # rowline：每条行情一行（左等宽指数名 / 右价格 + 涨跌徽标），无横向列
+        # 行情速览：三列满宽表（名称 / 最新价 / 涨跌），缺数标注暂缺
         self.assertIn("6,123", html)                  # 标普500 价格
         self.assertIn("数据暂缺", html)                # 缺失指数明确标注
-        self.assertIn("border-top:1px solid " + pipeline.GZ_HAIR, html)
-        self.assertIn("border-bottom:1px solid " + pipeline.GZ_HAIR, html)
+        self.assertIn("名称", html)
+        self.assertIn("最新价", html)
+        self.assertIn("涨跌", html)
         self.assertIn("全球与美股", html)
         self.assertIn("A股四指数", html)
+        self.assertIn("港股双指数", html)
+        self.assertIn("table-layout:fixed", html)
 
     def test_wechat_width_is_in_inline_css_not_only_html_attribute(self):
         data = ReportFreshnessTests()._sample_data()
@@ -1534,6 +1537,7 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("3,123.45", html)
         self.assertIn("涨跌家数", html)
         self.assertIn("4,050 家", html)
+        self.assertIn("沪深京合计", html)
         self.assertIn("普涨强势", html)
         self.assertIn("3.12", html)
         self.assertIn("成交额", html)
