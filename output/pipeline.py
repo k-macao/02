@@ -65,6 +65,11 @@
      2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
+  10. 「AI 新闻情绪因子」栏目：对当天资讯标题逐条词表评分（S），按热门榜单
+      个股名归因，输出 DNS 日度情绪=(正−负)/总数、MOM 情绪动量=近3有评分日均
+      −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
+      >均值+2σ 标异常）。跨日基线存 output/sentiment_history.json（随日报提交）；
+      冷启动/样本不足明确标注，无个股归因时栏目缺席。规则合成、非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -90,6 +95,7 @@ import argparse
 import random
 import re
 import glob
+import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 
@@ -2588,8 +2594,12 @@ def _panorama_block(pan):
     return "".join(parts)
 
 
-def _collect_report_parts(data, kit):
-    """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。"""
+def _collect_report_parts(data, kit, sentiment_history=None, date_str=None):
+    """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
+
+    sentiment_history: 跨日情绪基线（AI 新闻情绪因子动量/新闻量窗口用）；
+    date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天。
+    """
     market = data.get("实时行情", {})
     pan = data.get("A股大盘全景", {}) or {}
     yt = data.get("港股名家频道", {})
@@ -2691,6 +2701,17 @@ def _collect_report_parts(data, kit):
                 "AI READ", "AI 盘研判",
                 kit.ai_block(ai_result), kit.ai_badge(),
                 "章鱼AI · 多源信号规则合成（非投资建议）",
+            ))
+
+    # AI 新闻情绪因子（个股级 DNS/MOM/ANV/S，紧随 AI 盘研判；无个股归因时缺席）
+    if AI_ANALYSIS_ENABLED:
+        senti_result = build_news_sentiment(data, date_str or _today_str(),
+                                            sentiment_history)
+        if senti_result.get("available"):
+            sections.insert(1, (
+                "NEWS SENTIMENT", "AI 新闻情绪因子",
+                kit.sentiment_block(senti_result), kit.ai_badge(),
+                "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
             ))
 
     # 数据审计栏
@@ -3247,6 +3268,454 @@ def _liquidity_market_block(label, stats):
     )
 
 
+# ============================================================
+# AI 新闻情绪因子（NEWS SENTIMENT FACTORS · 确定性词表规则）
+# ------------------------------------------------------------
+# 对当日资讯标题逐条做情绪评分（HeadlineSentiment），按热门榜单
+# 个股名归因到个股，输出 4 个数据化因子：
+#   DNS 日度新闻情绪 DailyNewsSentiment ＝ (正−负)/总数（仅当天标题，24h 口径）
+#   MOM 情绪动量 SentimentMomentum ＝ 近3个有评分日均值 − 近20个有评分日均值
+#   ANV 异常新闻量 AbnormalNewsVolume ＝ 今日条数 vs 近30天均值±σ（z 值；
+#       今日条数 > 均值+2σ 标异常放量）
+#   S   标题情绪 HeadlineSentiment ＝ 每条标题的词表净情绪（+1/0/−1，附命中词）
+# 跨日窗口依赖 output/sentiment_history.json（随日报由 Actions 提交回库；
+# main 流程：采集后加载 → 渲染 → 保存报告后落盘；--dry-run 只读不写；
+# 同日多次运行按日期键覆盖，保证幂等；零报道日记 total=0、score=None）。
+# 冷启动/样本不足时明确标注口径与 n，不伪造数值；无个股归因时栏目缺席。
+# 如需接大模型做标题标注，只需替换 _score_headline_sentiment（调用方只依赖
+# 返回结构 {"s","pos","neg"}，保留本规则作兜底）。
+# ============================================================
+SENTI_DISPLAY_N = 8        # 情绪栏目最多展示的个股数
+SENTI_MOM_SHORT_N = 3      # 动量短期窗口（有评分日，含今日）
+SENTI_MOM_LONG_N = 20      # 动量长期窗口（有评分日，含今日）
+SENTI_MOM_MIN_SHORT = 2    # 动量短期最少样本
+SENTI_MOM_MIN_LONG = 5     # 动量长期最少样本
+SENTI_VOL_WINDOW_N = 30    # 新闻量历史窗口（天，含零报道日，不含今日）
+SENTI_VOL_MIN_DAYS = 5     # 新闻量最少历史样本
+SENTI_HISTORY_KEEP_DAYS = 45  # 历史文件每只个股保留天数
+SENTIMENT_HISTORY_FILENAME = "sentiment_history.json"
+
+# 情绪词表：以 AI 盘研判 bull/bear 词为底，增加财报/资金/事件类词汇与
+# 繁体变体（港股标题多为繁体）。命中按非重叠最长优先计数。
+_SENTI_POS_WORDS = sorted(set(_AI_BULL_WORDS + [
+    "大涨", "暴涨", "飙升", "飙涨", "涨停", "一字涨停", "历史新高",
+    "好于预期", "盈利", "获利", "扭亏", "扭亏为盈", "增长", "大增",
+    "翻倍", "翻番", "分红", "派息", "回购", "增持", "举牌", "买入评级",
+    "上调评级", "获批", "获准", "中标", "签约", "合作", "收购", "注资",
+    "扩产", "投产", "订单", "放量", "净流入", "流入", "纳入", "利好兑现",
+    "大漲", "暴漲", "飆升", "漲停", "歷史新高", "超預期", "扭虧",
+    "增長", "分紅", "回購", "上調", "買入", "獲批", "中標", "簽約",
+    "收購", "淨流入",
+]))
+_SENTI_NEG_WORDS = sorted(set(_AI_BEAR_WORDS + [
+    "大跌", "重挫", "崩盘", "熔断", "跌停", "一字跌停", "历史新低",
+    "创新低", "下跌", "下滑", "下降", "减少", "骤降", "腰斩", "巨亏",
+    "预亏", "预减", "首亏", "裁员", "召回", "诉讼", "调查", "问询",
+    "立案", "处罚", "违约", "破产", "退市", "停牌", "做空", "降级",
+    "关税", "流出", "净流出", "减持", "套现", "解禁", "计提", "商誉减值",
+    "爆仓", "断供", "地雷", "出逃", "冻结", "崩盤", "熔斷", "歷史新低",
+    "減少", "虧損", "巨虧", "裁員", "訴訟", "調查", "處罰", "違約",
+    "破產", "降級", "關稅", "淨流出", "減持", "套現", "爆倉",
+]))
+_SENTI_NEGATORS = set("不没未无非否莫勿毋别")
+
+
+def _match_words_non_overlap(title, words):
+    """词表最长优先非重叠匹配，返回 [(词, 起始下标)]（按出现顺序）。"""
+    spans = []
+    occupied = [False] * len(title)
+    for word in sorted(words, key=len, reverse=True):
+        if not word:
+            continue
+        start = 0
+        while True:
+            idx = title.find(word, start)
+            if idx < 0:
+                break
+            if not any(occupied[idx:idx + len(word)]):
+                spans.append((word, idx))
+                for j in range(idx, idx + len(word)):
+                    occupied[j] = True
+            start = idx + 1
+    spans.sort(key=lambda item: item[1])
+    return spans
+
+
+def _score_headline_sentiment(title):
+    """标题情绪评分：正负命中数之差取符号，S∈{+1,0,−1}。
+
+    命中词紧邻的前一字为否定词（不/没/未/无/非/否…）时翻转极性。
+    返回 {"s","pos","neg","pos_n","neg_n"}（pos/neg 为展示用命中词，各≤3）。
+    """
+    title = title or ""
+    pos_hits, neg_hits = [], []
+    for word, idx in _match_words_non_overlap(title, _SENTI_POS_WORDS):
+        flipped = idx > 0 and title[idx - 1] in _SENTI_NEGATORS
+        (neg_hits if flipped else pos_hits).append(word)
+    for word, idx in _match_words_non_overlap(title, _SENTI_NEG_WORDS):
+        flipped = idx > 0 and title[idx - 1] in _SENTI_NEGATORS
+        (pos_hits if flipped else neg_hits).append(word)
+    pos_n, neg_n = len(pos_hits), len(neg_hits)
+    net = pos_n - neg_n
+    return {"s": 1 if net > 0 else (-1 if net < 0 else 0),
+            "pos": pos_hits[:3], "neg": neg_hits[:3],
+            "pos_n": pos_n, "neg_n": neg_n}
+
+
+def _extract_stock_universe(hot):
+    """从热门榜单提取个股宇宙 [{market, code, name, key}]（按 key 去重）。"""
+    universe = []
+    seen = set()
+    markets = (hot or {}).get("markets", {}) or {}
+    for market, payload in markets.items():
+        for s in (payload or {}).get("stocks", []) or []:
+            name = (s.get("name") or "").strip().replace(" ", "").replace("\u3000", "")
+            if len(name) < 2:
+                continue
+            code = str(s.get("code") or "").strip()
+            key = f"{market}:{code or name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            universe.append({"market": market, "code": code, "name": name, "key": key})
+    universe.sort(key=lambda u: len(u["name"]), reverse=True)
+    return universe
+
+
+def _attribute_headline(title, universe):
+    """标题归因到个股：标题含个股全名即归因（一条标题可归因多只）。"""
+    if not title:
+        return []
+    return [u for u in universe if u["name"] in title]
+
+
+def _collect_sentiment_headlines(data):
+    """收集参与情绪评分的标题 [{title, source, section}]。
+
+    只收当天（is_today）标题，落实 24h 口径：标题级缺标记时继承来源级，
+    两者都缺省视为非当天（不计入，不断言）。
+    """
+    items = []
+
+    def _take(headlines, source_name, section, source_today):
+        for h in headlines or []:
+            if isinstance(h, dict):
+                title = (h.get("title") or "").strip()
+                if not title:
+                    continue
+                today = h.get("is_today", source_today)
+                src = h.get("source") or source_name
+            elif isinstance(h, str):
+                title = h.strip()
+                if not title:
+                    continue
+                today = source_today
+                src = source_name
+            else:
+                continue
+            if today:
+                items.append({"title": title, "source": src, "section": section})
+
+    google = data.get("全球头条", {}) or {}
+    _take(google.get("headlines"), "Google News", "全球头条", google.get("is_today", False))
+    em = data.get("东财快讯", {}) or {}
+    _take(em.get("headlines"), "东方财富", "东财快讯", em.get("is_today", False))
+    sina = data.get("A股资讯", {}) or {}
+    _take(sina.get("headlines"), "新浪财经", "A股市场", sina.get("is_today", False))
+    yt = data.get("港股名家频道", {}) or {}
+    for ch in yt.get("channels", []) or []:
+        _take(ch.get("videos"), ch.get("name", "港股频道"), "港股名家频道",
+              ch.get("is_today", yt.get("is_today", False)))
+    return items
+
+
+def _load_sentiment_history(path):
+    """读取情绪历史（缺失/损坏 → 空历史并告警，不中断日报）。"""
+    fresh = {"version": 1, "stocks": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except FileNotFoundError:
+        print("  ℹ️ 无情绪历史文件，本次冷启动（动量/新闻量标样本不足）")
+        return fresh
+    except (OSError, ValueError) as exc:
+        print(f"  ⚠️ 情绪历史读取失败（{exc}），本次按冷启动处理")
+        return fresh
+    if not isinstance(history, dict) or not isinstance(history.get("stocks"), dict):
+        print("  ⚠️ 情绪历史结构异常，本次按冷启动处理")
+        return fresh
+    history.setdefault("version", 1)
+    return history
+
+
+def _save_sentiment_history(path, history):
+    """原子落盘情绪历史。"""
+    history["updated_cst"] = _now()
+    _atomic_write(path, json.dumps(history, ensure_ascii=False, indent=1))
+    print(f"  💾 情绪历史已更新: {path}（{len(history.get('stocks', {}))} 只个股有基线）")
+
+
+def _update_sentiment_history(history, date_str, universe, today_counts):
+    """把今日计数并入历史（同日多次运行按日期键覆盖，保证幂等）。
+
+    universe 中零报道个股记 total=0、score=None：无评分，不计情绪均值，
+    计入新闻量基线。每只个股仅保留最近 SENTI_HISTORY_KEEP_DAYS 天。
+    """
+    stocks = history.setdefault("stocks", {})
+    try:
+        cutoff = (datetime.strptime(date_str, "%Y%m%d")
+                  - timedelta(days=SENTI_HISTORY_KEEP_DAYS)).strftime("%Y%m%d")
+    except ValueError:
+        cutoff = ""
+    for stock in universe:
+        entry = stocks.get(stock["key"])
+        if not isinstance(entry, dict):
+            entry = {"market": stock["market"], "code": stock["code"],
+                     "name": stock["name"], "days": {}}
+            stocks[stock["key"]] = entry
+        entry["market"] = stock["market"]
+        entry["code"] = stock["code"]
+        entry["name"] = stock["name"]
+        if not isinstance(entry.get("days"), dict):
+            entry["days"] = {}
+        counts = today_counts.get(stock["key"]) or {}
+        pos = counts.get("pos", 0) or 0
+        neu = counts.get("neu", 0) or 0
+        neg = counts.get("neg", 0) or 0
+        total = counts.get("total", 0) or 0
+        entry["days"][date_str] = {
+            "pos": pos, "neu": neu, "neg": neg, "total": total,
+            "score": round((pos - neg) / total, 4) if total else None,
+        }
+    for key in list(stocks):
+        entry = stocks[key]
+        if not isinstance(entry, dict) or not isinstance(entry.get("days"), dict):
+            del stocks[key]
+            continue
+        for day in [d for d in entry["days"] if d < cutoff]:
+            del entry["days"][day]
+        if not entry["days"]:
+            del stocks[key]
+    return history
+
+
+def _sentiment_momentum(day_scores):
+    """情绪动量：近3个有评分日均值 − 近20个有评分日均值。
+
+    day_scores: [(date, score)] 降序，首位为今日（调用方保证仅含已评分日）。
+    样本不足（短期<2 或 长期<5）时 enough=False，渲染侧明确标注。
+    """
+    short = [s for _, s in day_scores[:SENTI_MOM_SHORT_N]]
+    long = [s for _, s in day_scores[:SENTI_MOM_LONG_N]]
+    short_n, long_n = len(short), len(long)
+    if short_n < SENTI_MOM_MIN_SHORT or long_n < SENTI_MOM_MIN_LONG:
+        return {"enough": False, "short_n": short_n, "long_n": long_n,
+                "need": f"{SENTI_MOM_MIN_SHORT}/{SENTI_MOM_MIN_LONG}"}
+    short_mean = sum(short) / short_n
+    long_mean = sum(long) / long_n
+    value = short_mean - long_mean
+    label = "加速转暖" if value >= 0.15 else ("加速转冷" if value <= -0.15 else "平稳")
+    return {"enough": True, "value": value, "short_mean": short_mean,
+            "long_mean": long_mean, "short_n": short_n, "long_n": long_n,
+            "label": label}
+
+
+def _sentiment_volume(today_total, prior_totals):
+    """异常新闻量：今日条数 vs 历史均值±σ（z 值；>均值+2σ 标异常）。
+
+    prior_totals: 今日之前每日条数（含零报道日）。历史<5 天时
+    enough=False，渲染侧明确标注。
+    """
+    prior_totals = [t for t in prior_totals if type(t) in (int, float)]
+    n = len(prior_totals)
+    if n < SENTI_VOL_MIN_DAYS:
+        return {"enough": False, "n": n, "need": SENTI_VOL_MIN_DAYS,
+                "today": today_total}
+    mean = sum(prior_totals) / n
+    var = sum((t - mean) ** 2 for t in prior_totals) / (n - 1)
+    std = var ** 0.5
+    if std <= 1e-9:
+        z = 0.0 if today_total == mean else (9.99 if today_total > mean else -9.99)
+        z_display = "σ=0"
+    else:
+        z = (today_total - mean) / std
+        z_display = f"{z:+.1f}"
+    abnormal = today_total > mean + 2 * std
+    label = "异常放量" if abnormal else ("交投偏热" if z >= 1 else "正常")
+    return {"enough": True, "today": today_total, "mean": mean, "std": std,
+            "z": z, "z_display": z_display, "abnormal": abnormal, "n": n,
+            "label": label}
+
+
+def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N):
+    """构建 AI 新闻情绪因子结果（渲染与历史落盘共用同一口径）。
+
+    history: _load_sentiment_history 读到的跨日基线（可为 None/{}，冷启动时
+    动量/新闻量标样本不足）。返回 available/stocks/universe/today_counts 等。
+    """
+    history = history if isinstance(history, dict) else {}
+    past = history.get("stocks") or {}
+    universe = _extract_stock_universe(data.get("热门榜单", {}) or {})
+    headlines = _collect_sentiment_headlines(data)
+    per_stock = {}
+    unattributed = 0
+    for order, head in enumerate(headlines):
+        targets = _attribute_headline(head["title"], universe)
+        if not targets:
+            unattributed += 1
+            continue
+        scored = _score_headline_sentiment(head["title"])
+        for stock in targets:
+            slot = per_stock.setdefault(stock["key"], {
+                "info": stock, "pos": 0, "neu": 0, "neg": 0, "headlines": []})
+            if scored["s"] > 0:
+                slot["pos"] += 1
+            elif scored["s"] < 0:
+                slot["neg"] += 1
+            else:
+                slot["neu"] += 1
+            slot["headlines"].append({
+                "title": head["title"], "source": head["source"],
+                "section": head["section"], "s": scored["s"],
+                "pos_hits": scored["pos"], "neg_hits": scored["neg"],
+                "order": order,
+            })
+    stocks = []
+    today_counts = {}
+    for key, slot in per_stock.items():
+        total = slot["pos"] + slot["neu"] + slot["neg"]
+        if total < 1:
+            continue
+        today_counts[key] = {"pos": slot["pos"], "neu": slot["neu"],
+                             "neg": slot["neg"], "total": total}
+        score = (slot["pos"] - slot["neg"]) / total
+        days = (past.get(key) or {}).get("days", {}) or {}
+        prior = sorted(((day, val) for day, val in days.items() if day < date_str),
+                       reverse=True)
+        scored_days = [(day, val["score"]) for day, val in prior
+                       if isinstance(val, dict) and type(val.get("score")) in (int, float)]
+        momentum = _sentiment_momentum([(date_str, round(score, 4))] + scored_days)
+        raw_totals = [val.get("total", 0) for _, val in prior[:SENTI_VOL_WINDOW_N]
+                      if isinstance(val, dict)]
+        volume = _sentiment_volume(total, raw_totals)
+        slot["headlines"].sort(key=lambda h: (-abs(h["s"]), h["order"]))
+        info = slot["info"]
+        stocks.append({
+            "market": info["market"], "code": info["code"], "name": info["name"],
+            "total": total, "pos": slot["pos"], "neu": slot["neu"], "neg": slot["neg"],
+            "score": score,
+            "label": "偏多" if score > 0.2 else ("偏空" if score < -0.2 else "中性"),
+            "momentum": momentum, "volume": volume,
+            "headlines": slot["headlines"],
+        })
+    stocks.sort(key=lambda s: (-s["total"], -abs(s["score"]), s["name"]))
+    return {
+        "available": bool(stocks),
+        "date": date_str,
+        "stocks": stocks[:display_n],
+        "total_matched": len(stocks),
+        "universe_n": len(universe),
+        "scored_headlines": len(headlines) - unattributed,
+        "unattributed_n": unattributed,
+        "universe": universe,
+        "today_counts": today_counts,
+    }
+
+
+def _senti_factor_lines(s):
+    """个股 3 因子的展示文案（双主题共用；返回 [(标签, 文案)]）。"""
+    mom = s["momentum"]
+    if mom["enough"]:
+        mom_line = (f'MOM {mom["value"]:+.2f}（近{mom["short_n"]}日均'
+                    f'{mom["short_mean"]:+.2f} vs 近{mom["long_n"]}日均'
+                    f'{mom["long_mean"]:+.2f} · {mom["label"]}）')
+    else:
+        mom_line = (f'MOM 样本不足（n={mom["short_n"]}/{mom["long_n"]}，'
+                    f'需≥{mom["need"]}，含今日）')
+    vol = s["volume"]
+    if vol["enough"]:
+        flag = " · ⚠异常放量" if vol["abnormal"] else ""
+        vol_line = (f'ANV 今日{vol["today"]}条（近{vol["n"]}天均{vol["mean"]:.1f}条 '
+                    f'σ{vol["std"]:.1f} z={vol["z_display"]} · {vol["label"]}{flag}）')
+    else:
+        vol_line = f'ANV 样本不足（历史n={vol["n"]}，需≥{vol["need"]}天）'
+    return [
+        ("日度情绪", f'DNS {s["score"]:+.2f}（正{s["pos"]}/中{s["neu"]}/负{s["neg"]} · {s["label"]}）'),
+        ("情绪动量", mom_line),
+        ("新闻量", vol_line),
+    ]
+
+
+def _senti_headline_sub(h):
+    """标题行副文案：栏目 · 来源 · 命中词（双主题共用）。"""
+    hits = (h["pos_hits"] or []) + (h["neg_hits"] or [])
+    hit_txt = f'命中：{"/".join(hits[:3])}' if hits else "无情绪词"
+    return f'{h["section"]} · {h["source"]} · {hit_txt}'
+
+
+def _pixel_sentiment_block(res):
+    """像素主题：AI 新闻情绪因子（DNS/MOM/ANV/S 数据化卡片）。"""
+    head = _mini_table([
+        ("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
+        ("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        ("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
+    ])
+    cards = []
+    for s in res["stocks"]:
+        if s["score"] > 0.2:
+            color, icon = C_GREEN, "▲"
+        elif s["score"] < -0.2:
+            color, icon = C_RED, "▼"
+        else:
+            color, icon = C_AMBER, "■"
+        rows = []
+        for h in s["headlines"][:3]:
+            badge, bcolor = {1: ("S+1", C_GREEN), -1: ("S−1", C_RED),
+                             0: ("S0", C_AMBER)}[h["s"]]
+            rows.append(_item_row(
+                "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:60])}',
+                _esc(_senti_headline_sub(h))))
+        more = len(s["headlines"]) - 3
+        if more > 0:
+            rows.append(
+                f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
+                f'line-height:1.7;font-family:{FONT_MONO};">'
+                f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）</div>')
+        body = _mini_table(_senti_factor_lines(s)) + "".join(rows)
+        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+        cards.append(_pixel_panel(f"STOCK SENTI // {_esc(title)} · {s['market']}",
+                                  body, color, icon))
+    note = _note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
+                 "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪 // RULESET v3 // 非投资建议")
+    return head + "".join(cards) + note
+
+
+def gz_sentiment_block(res):
+    """谷藏主题：AI 新闻情绪因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    out = [
+        gz_rowline("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
+        gz_rowline("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        gz_rowline("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
+    ]
+    for s in res["stocks"]:
+        arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
+        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+        out.append(gz_subsection(f'{_esc(title)} · {s["market"]} {arrow}'))
+        for label, line in _senti_factor_lines(s):
+            out.append(gz_rowline(label, _esc(line)))
+        for h in s["headlines"][:3]:
+            badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
+            out.append(gz_item_row(
+                "»", f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:60])}',
+                _senti_headline_sub(h)))
+        more = len(s["headlines"]) - 3
+        if more > 0:
+            out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
+    out.append(gz_note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
+                       "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪。非投资建议。"))
+    return "".join(out)
+
+
 def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=None):
     """结合雅虎最新股票数据与多因子（环境、政治、地缘），各生成一百字左右结论并输出到页面。
 
@@ -3399,6 +3868,7 @@ PIXEL_KIT = _RenderKit(
     source_badge=_source_badge,
     ai_badge=lambda: _badge("AI 合成", "ai"),
     ai_block=_ai_analysis_block,
+    sentiment_block=_pixel_sentiment_block,
     liquidity_block=_liquidity_report_block,
     panorama_block=_panorama_block,
     section=_section,
@@ -3419,6 +3889,7 @@ GUIZANG_KIT = _RenderKit(
     source_badge=lambda item: gz_source_badge(item, on_ink=True),
     ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
     ai_block=gz_ai_analysis_block,
+    sentiment_block=gz_sentiment_block,
     liquidity_block=gz_liquidity_report_block,
     panorama_block=gz_panorama_block,
     section=gz_section,
@@ -3456,22 +3927,27 @@ def _harden_wechat_table_widths(html):
     )
 
 
-def generate_report(data, date_display, date_str, theme=None):
+def generate_report(data, date_display, date_str, theme=None, sentiment_history=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
     theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
+    sentiment_history: 跨日情绪基线（AI 新闻情绪因子用），缺省冷启动。
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
-        html = generate_report_guizang(data, date_display, date_str)
+        html = generate_report_guizang(data, date_display, date_str,
+                                       sentiment_history=sentiment_history)
     else:
-        html = generate_report_pixel(data, date_display, date_str)
+        html = generate_report_pixel(data, date_display, date_str,
+                                     sentiment_history=sentiment_history)
     return _harden_wechat_table_widths(html)
 
 
-def generate_report_guizang(data, date_display, date_str):
+def generate_report_guizang(data, date_display, date_str, sentiment_history=None):
     """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
-    parts = _collect_report_parts(data, GUIZANG_KIT)
+    parts = _collect_report_parts(data, GUIZANG_KIT,
+                                  sentiment_history=sentiment_history,
+                                  date_str=date_str)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -3526,14 +4002,16 @@ def generate_report_guizang(data, date_display, date_str):
     return html
 
 
-def generate_report_pixel(data, date_display, date_str):
+def generate_report_pixel(data, date_display, date_str, sentiment_history=None):
     """生成完整 HTML 日报（旧版 RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）。
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
     - 没有抓到内容的区块不出现在页面主体，仅在数据审计栏留痕；
     - 当天内容检验仍作为推送门禁，但不在页面顶部单独显示横幅。
     """
-    parts = _collect_report_parts(data, PIXEL_KIT)
+    parts = _collect_report_parts(data, PIXEL_KIT,
+                                  sentiment_history=sentiment_history,
+                                  date_str=date_str)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -4206,11 +4684,17 @@ def main():
     # 1. 采集数据
     data = collect_all_data()
 
+    # 1.5 情绪历史：加载跨日基线供 AI 新闻情绪因子用（只读；落盘在报告保存后，
+    #     --dry-run 只读不写；缺失/损坏按冷启动处理，不中断日报）
+    senti_history_path = os.path.join(REPORT_DIR, SENTIMENT_HISTORY_FILENAME)
+    senti_history = _load_sentiment_history(senti_history_path)
+
     # 2. 生成报告
     print("\n📝 正在生成日报...")
     date_display = _date_display()
     date_str = _today_str()
-    html = generate_report(data, date_display, date_str, theme=theme)
+    html = generate_report(data, date_display, date_str, theme=theme,
+                           sentiment_history=senti_history)
     print("  ✅ 日报生成完成")
 
     # 3. dry-run 模式
@@ -4226,6 +4710,17 @@ def main():
 
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
+    # 4.5 情绪历史落盘：把今日个股情绪计数并入跨日基线（同日多次运行按日期键
+    #     覆盖；落盘失败只告警，不影响推送）
+    try:
+        senti_today = build_news_sentiment(data, date_str, senti_history)
+        _save_sentiment_history(
+            senti_history_path,
+            _update_sentiment_history(senti_history, date_str,
+                                      senti_today["universe"],
+                                      senti_today["today_counts"]))
+    except OSError as exc:
+        print(f"  ⚠️ 情绪历史保存失败（{exc}），不影响本次日报与推送")
     # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
