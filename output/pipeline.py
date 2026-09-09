@@ -62,6 +62,19 @@
      港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
      信号分 + 置信度、板块热度、技术速读、风险提示、明日关注主题）。无需大模型 API、
      可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
+     2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
+     风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
+     多因子矩阵不再复述雅虎逐只报价。
+  10. 「AI 新闻情绪因子」栏目：对当天资讯标题逐条词表评分（S），按热门榜单
+      个股名归因，输出 DNS 日度情绪=(正−负)/总数、MOM 情绪动量=近3有评分日均
+      −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
+      >均值+2σ 标异常）。跨日基线存 output/sentiment_history.json（随日报提交）；
+      冷启动/样本不足明确标注，无个股归因时栏目缺席。规则合成、非投资建议。
+  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对当天资讯标题
+      做政策维度识别（货币/监管/扶持/财政/地产/开放/贸易），经关键词矩阵映射到
+      行业受益/受损权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则
+      生成的总结）。触发词被否定修饰时跳过；零政策新闻时栏目缺席。规则合成、
+      非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -87,6 +100,7 @@ import argparse
 import random
 import re
 import glob
+import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 
@@ -158,6 +172,12 @@ DEFAULT_HEADERS = {
 # 需要增删频道或接入新平台时直接改这个列表即可。
 # ------------------------------------------------------------
 CHANNEL_TOP_N = 3
+
+# 正文资讯栏目的展示条数（与 _collect_report_parts 的切片口径一致）。
+# 风险引用去重依赖此口径：超出展示条数的风险标题正文不可见，风险提示保留全文。
+GH_DISPLAY_N = 8    # 全球头条展示前 8 条
+EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
+SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
 
 HK_CHANNELS = [
     # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
@@ -1436,6 +1456,7 @@ GZ_MONO = "monospace"
 KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
 KOBOYO_SECTION_ICONS = {
     "AI READ": "brain",
+    "POLICY SHOCK": "document",
     "MARKET SNAPSHOT": "chart",
     "A-SHARE PANORAMA": "chart",
     "HK GURU CHANNELS": "camera",
@@ -1568,6 +1589,7 @@ def _badge(text, kind="ok"):
 
 _SECTION_ICON_META = {
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
+    "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
     "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
@@ -1657,10 +1679,11 @@ def _source_badge(item):
         return _badge("LIVE", "ok")
     return _badge(f"LAG {item.get('content_date') or '-'}", "warn")
 
-def _item_row(icon, text, sub="", icon_color=C_ACCENT, row_bg="transparent"):
+def _item_row(icon, text, sub="", icon_color=C_ACCENT, row_bg="transparent", anchor=None):
     sub_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
                 f'padding-top:3px;line-height:1.6;font-family:{FONT_MONO};">{sub}</div>' if sub else "")
-    return (f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+    anchor_attr = f' id="{_esc(anchor)}"' if anchor else ""
+    return (f'<table width="100%" cellpadding="0" cellspacing="0"{anchor_attr} style="border-collapse:collapse;'
             f'background:{row_bg};">'
             f'<tr><td width="32" valign="top" style="padding:8px 4px 8px 0;border-bottom:1px solid {C_HAIR};'
             f'font-size:11px;font-weight:900;color:{icon_color};line-height:1.6;'
@@ -1679,17 +1702,20 @@ def _headline_row(it, index=None):
         if it.get("published_cst") and it["published_cst"] != "—":
             parts.append(it["published_cst"])
         sub = " | ".join(parts)
-    return _item_row(f"[{marker}]", _esc(display[:120]), _esc(sub[:140]))
+    anchor = f"h-gh-{index:02d}" if isinstance(index, int) else None
+    return _item_row(f"[{marker}]", _esc(display[:120]), _esc(sub[:140]), anchor=anchor)
 
 def _em_news_row(it, index=None):
     marker = f"{index:02d}" if isinstance(index, int) else "--"
+    anchor = f"h-em-{index:02d}" if isinstance(index, int) else None
     if isinstance(it, dict):
         title = it.get("title") or ""
         sub = " :: ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
-        return _item_row(f"[{marker}]", _esc(title[:120]), _esc(sub[:110]))
-    return _item_row(f"[{marker}]", _esc(it[:120]))
+        return _item_row(f"[{marker}]", _esc(title[:120]), _esc(sub[:110]), anchor=anchor)
+    return _item_row(f"[{marker}]", _esc(it[:120]), anchor=anchor)
 
-def _channel_block(ch):
+def _channel_block(ch, ch_idx=None):
+    """渲染单个港股频道；ch_idx 为正文展示序号（1-based），用于风险引用锚点。"""
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
     url = _esc(ch.get("url", ""))
@@ -1712,7 +1738,8 @@ def _channel_block(ch):
         border_c = C_ACCENT if vi % 2 == 0 else C_CYAN
         label = ">> FEED" if vi % 2 == 0 else ">> UPDATE"
         new_tag = f' <span style="color:{C_ACCENT_MAGENTA};font-weight:900;background:#2A1320;border:1px solid {C_ACCENT_MAGENTA};padding:0 3px;">[NEW]</span>' if v.get("is_today") else ""
-        messages.append((f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:6px;"><tr><td align="left">'
+        anchor_attr = f' id="h-hk-{ch_idx:02d}-{vi + 1:02d}"' if isinstance(ch_idx, int) else ""
+        messages.append((f'<table width="100%" cellpadding="0" cellspacing="0"{anchor_attr} style="border-collapse:collapse;margin-top:6px;"><tr><td align="left">'
                          f'<div style="display:block;max-width:100%;text-align:left;background:{bubble_bg};border:1px solid {border_c};'
                          f'padding:6px 8px;box-shadow:3px 3px 0 #000;font-size:11px;color:{C_INK};line-height:1.6;font-family:{FONT_MONO};">'
                          f'<div style="font-size:9px;font-weight:900;color:{border_c};letter-spacing:1px;">{label} :: {pub}{new_tag}</div>'
@@ -1860,13 +1887,14 @@ def gz_source_badge(item, on_ink=False):
     return gz_badge(f"非当天 {item.get('content_date') or '-'}", "warn", on_ink)
 
 
-def gz_shell(inner, bg=None, pad="20px 0", hair=False):
-    """微信最稳的单元：一张满宽表、一格 td、bgcolor 双写。"""
+def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None):
+    """微信最稳的单元：一张满宽表、一格 td、bgcolor 双写。anchor 为风险引用锚点。"""
     bg_attr = f' bgcolor="{bg}"' if bg else ""
     bg_css = f"background:{bg};" if bg else ""
     hair_css = f"border-bottom:1px solid {GZ_HAIR};" if hair else ""
+    anchor_attr = f' id="{_esc(anchor)}"' if anchor else ""
     return (
-        f'<table width="100%" border="0" cellpadding="0" cellspacing="0"{bg_attr} '
+        f'<table width="100%" border="0" cellpadding="0" cellspacing="0"{bg_attr}{anchor_attr} '
         f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
         f'<tr><td{bg_attr} align="left" valign="top" '
         f'style="padding:{pad};{bg_css}{hair_css}">{inner}</td></tr></table>'
@@ -1928,8 +1956,15 @@ def gz_market_section(market):
     for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
         price_str, pct = _quote_parts(market, label, precision)
         a_rows.append(gz_market_row(label, price_str, pct))
+    # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在行情速览展示；
+    # 动能明细表移除后，这里是它们唯一的展示位置。
+    hk_rows = []
+    for label, precision in [("恒生指数", 2), ("恒生科技", 2)]:
+        price_str, pct = _quote_parts(market, label, precision)
+        hk_rows.append(gz_market_row(label, price_str, pct))
     return (gz_subsection("全球与美股") + "".join(rows)
             + gz_subsection("A股四指数") + "".join(a_rows)
+            + gz_subsection("港股双指数") + "".join(hk_rows)
             + gz_note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
 
 
@@ -2031,13 +2066,13 @@ def gz_panorama_block(pan):
     return "".join(parts)
 
 
-def _gz_news_card(marker, title, sub=""):
+def _gz_news_card(marker, title, sub="", anchor=None):
     # Headlines lead; source and timestamp sit quietly underneath. No list-number chrome.
     meta = (f'<div style="font-size:13px;color:{GZ_META};line-height:1.7;padding-top:8px;">'
             f'{_esc(sub)}</div>' if sub else "")
     return gz_shell(
         f'<div style="font-size:16px;color:{GZ_INK};line-height:1.85;">{title}</div>{meta}',
-        pad="20px 0", hair=True)
+        pad="20px 0", hair=True, anchor=anchor)
 
 
 def gz_headline_row(it, index=None):
@@ -2049,25 +2084,28 @@ def gz_headline_row(it, index=None):
             parts.append(it["source"])
         if it.get("published_cst") and it.get("published_cst") != "—":
             parts.append(it["published_cst"])
-    return _gz_news_card(marker, _esc(display[:120]), " · ".join(parts))
+    anchor = f"h-gh-{index:02d}" if isinstance(index, int) else None
+    return _gz_news_card(marker, _esc(display[:120]), " · ".join(parts), anchor=anchor)
 
 
 def gz_em_news_row(it, index=None):
     marker = f"{index:02d}" if isinstance(index, int) else "—"
+    anchor = f"h-em-{index:02d}" if isinstance(index, int) else None
     if isinstance(it, dict):
         title = it.get("title") or ""
         sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
     else:
         title, sub = it, ""
-    return _gz_news_card(marker, _esc(title[:120]), sub)
+    return _gz_news_card(marker, _esc(title[:120]), sub, anchor=anchor)
 
 
-def gz_item_row(icon, text, sub="", icon_color=None, row_bg=None):
+def gz_item_row(icon, text, sub="", icon_color=None, row_bg=None, anchor=None):
     marker = icon if icon else "—"
-    return _gz_news_card(marker, text, sub)
+    return _gz_news_card(marker, text, sub, anchor=anchor)
 
 
-def gz_channel_block(ch):
+def gz_channel_block(ch, ch_idx=None):
+    """渲染单个港股频道；ch_idx 为正文展示序号（1-based），用于风险引用锚点。"""
     name = _esc(ch.get("name", "?"))
     desc = _esc(ch.get("desc", ""))
     url = _esc(ch.get("url", ""))
@@ -2087,7 +2125,8 @@ def gz_channel_block(ch):
         link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{GZ_INK};text-decoration:none;">{title}</a>'
         new_tag = (f' <span style="color:{GZ_UP};font-weight:700;">当天</span>'
                    if v.get("is_today") else "")
-        items.append(_gz_news_card(f"{vi:02d}", link + new_tag, pub))
+        anchor = f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None
+        items.append(_gz_news_card(f"{vi:02d}", link + new_tag, pub, anchor=anchor))
     head = gz_shell(
         f'<div style="font-size:17px;font-weight:700;color:{GZ_INK};font-family:{GZ_SANS};line-height:1.4;">'
         f'{name_link} · {badge}</div>'
@@ -2179,27 +2218,58 @@ def gz_ai_analysis_block(res):
     else:
         sectors_html = gz_subsection("板块热度") + gz_shell(
             f'<div style="font-size:14px;color:{GZ_FLAT};">暂无板块信号</div>', pad="8px 0")
-    if res["tech_rows"]:
+    tech_stats = res.get("tech_stats") or {}
+    if tech_stats.get("count"):
         band_palette = {"强势": GZ_UP, "偏强": GZ_UP, "震荡": GZ_WARN,
                         "偏弱": GZ_DOWN, "弱势": GZ_DOWN}
-        tech_cards = "".join(
-            gz_rowline(_esc(label),
-                       f'{gz_trend_badge(pct, compact=True)} '
-                       f'<span style="color:{band_palette.get(band, GZ_INK)};">{_esc(band)}</span>')
-            for label, pct, band, _ in res["tech_rows"])
-        tech_html = (gz_subsection("指数动能") + tech_cards
+        ups_n, downs_n = tech_stats.get("ups", 0), tech_stats.get("downs", 0)
+        flats_n = tech_stats.get("flats", 0)
+        breadth = (
+            f'<span style="color:{GZ_UP};font-weight:700;">▲ {ups_n}</span> / '
+            f'<span style="color:{GZ_DOWN};font-weight:700;">▼ {downs_n}</span> / '
+            f'<span style="color:{GZ_FLAT};font-weight:700;">■ {flats_n}</span>'
+            f' · 平均 {gz_trend_badge(tech_stats.get("avg"), compact=True)}')
+        extremes = []
+        for tag, info in (("最强", tech_stats.get("best") or {}),
+                          ("最弱", tech_stats.get("worst") or {})):
+            if info.get("label"):
+                extremes.append(
+                    f'{tag} {_esc(info["label"])} '
+                    f'<span style="color:{band_palette.get(info.get("band"), GZ_INK)};">'
+                    f'{_esc(info.get("band", ""))}</span>')
+        tech_html = (gz_subsection("指数动能")
+                     + gz_rowline(f'指数动能聚合（{tech_stats["count"]} 个指数）', breadth)
+                     + (gz_shell(
+                         f'<div style="font-size:15px;color:{GZ_INK};line-height:1.85;">'
+                         f'动能两极 · {" · ".join(extremes)}</div>', pad="8px 0")
+                        if extremes else "")
                      + gz_shell(
                          f'<div style="font-size:15px;color:{GZ_INK};line-height:1.85;">'
                          f'<span style="color:{GZ_META};">解读 · </span>{_esc(res["tech_read"])}</div>',
-                         pad="8px 0"))
+                         pad="8px 0")
+                     + gz_note("指数明细数值见「行情速览」，此处仅保留动能聚合与解读。"))
     else:
         tech_html = gz_subsection("指数动能") + gz_shell(
             f'<div style="font-size:14px;color:{GZ_FLAT};">暂无行情数据</div>', pad="8px 0")
     if res["risks"]:
-        risk_cards = "".join(
-            gz_item_row("!", _esc(t), _esc(src), icon_color=GZ_DOWN)
-            for t, src in res["risks"])
-        risk_html = gz_subsection("风险提示") + risk_cards
+        risk_cards = []
+        for risk in res["risks"]:
+            if risk.get("shown") and risk.get("anchor"):
+                # 已在正文展示：仅引用定位（栏目 + 序号），全文不重复出现
+                main = (f'<a href="#{_esc(risk["anchor"])}" '
+                        f'style="color:{GZ_INK};font-weight:700;text-decoration:none;">'
+                        f'→ {_esc(_risk_ref_label(risk))}</a>')
+                sub = _risk_ref_detail(risk)
+            else:
+                # 正文截断未展示（如港股频道第 4 条及以后）：保留全文以免信息丢失
+                sub_bits = [risk.get("source") or "", risk.get("time") or ""]
+                if risk.get("keywords"):
+                    sub_bits.append("命中：" + "/".join(risk["keywords"]))
+                main = _esc((risk.get("title") or "")[:110])
+                sub = " · ".join(x for x in sub_bits if x)
+            risk_cards.append(gz_item_row("!", main, sub))
+        risk_html = (gz_subsection("风险提示") + "".join(risk_cards)
+                     + gz_note("已在正文栏目展示的风险条目此处仅引用定位，全文见原栏目，不重复展示。"))
     else:
         risk_html = gz_subsection("风险提示") + gz_shell(
             f'<div style="font-size:15px;color:{GZ_UP};font-weight:700;">未检出显著风险舆情</div>',
@@ -2212,7 +2282,7 @@ def gz_ai_analysis_block(res):
     else:
         watch_html = gz_shell(
             f'<div style="font-size:14px;color:{GZ_FLAT};">暂无关注主题</div>', pad="8px 0")
-    note_html = gz_note("AI 盘研判由公开数据经确定性规则合成。研判概率为规则估算（信号分映射），非统计预测。非投资建议，决策需独立判断。")
+    note_html = gz_note("AI 盘研判由公开数据经确定性规则合成。研判概率为规则估算（信号分映射），非统计预测。指数动能仅保留聚合（明细见行情速览），风险条目与正文重复时仅引用定位。非投资建议，决策需独立判断。")
     return verdict + thesis + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
@@ -2275,20 +2345,10 @@ def _gz_market_change(quotes, labels):
 
 
 def gz_build_multi_factor_matrix_html(liq, hot=None, market=None, data=None):
+    """杂志式信号矩阵。2026-09-09 去重：雅虎逐只报价明细只在「行情速览」展示，
+    此处仅保留方向/概率、资金锚点与三因子观点。"""
     quotes = (market or {}).get("quotes", {}) or {}
     markets = liq.get("markets", {}) or {}
-
-    def _yahoo_info(labels):
-        items = []
-        for lbl in labels:
-            q = quotes.get(lbl)
-            if q and isinstance(q, dict):
-                p = q.get("price", 0)
-                chg = q.get("change_pct", 0)
-                vol = q.get("volume", 0)
-                vol_str = f" 成交{_format_amount(vol)}" if vol else ""
-                items.append(f"{lbl} {p:.2f}（{chg:+.2f}%{vol_str}）")
-        return "；".join(items) if items else "Yahoo 实际公开收盘/报价整合"
 
     def _liq_summary(mk):
         st = markets.get(mk) or {}
@@ -2299,7 +2359,7 @@ def gz_build_multi_factor_matrix_html(liq, hot=None, market=None, data=None):
 
     factor_labels = [("环境", "ENV"), ("政治", "POL"), ("地缘", "GEO")]
 
-    def _matrix(title, change, yahoo, liq_label, views):
+    def _matrix(title, change, liq_label, views):
         prob = _gz_direction_prob(change)
         if change is None:
             head_badge = f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
@@ -2312,7 +2372,7 @@ def gz_build_multi_factor_matrix_html(liq, hot=None, market=None, data=None):
             f'<div style="font-size:17px;font-weight:700;color:{GZ_INK};font-family:{GZ_SANS};line-height:1.4;">{title}</div>'
             f'<div style="font-size:16px;padding-top:6px;">{head_badge}</div>'
             f'<div style="font-size:13px;color:{GZ_META};line-height:1.85;padding-top:8px;">'
-            f'<div>雅虎最新数据 · {_esc(yahoo)}</div>'
+            f'<div>指数数值详见「行情速览」</div>'
             f'<div>资金与交投锚点 · {_esc(liq_label)}</div></div>',
             bg=GZ_PAPER, pad="24px 0")
         factor_cards = []
@@ -2351,17 +2411,16 @@ def gz_build_multi_factor_matrix_html(liq, hot=None, market=None, data=None):
         gz_subsection("MULTI-FACTOR AI THESIS · 信号矩阵")
         + _matrix("整体市场 · 宏观多因子",
                   _gz_market_change(quotes, ["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"]),
-                  _yahoo_info(["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"]),
                   f"各市场样本汇聚 · {_esc(liq.get('summary', '全网资金监测'))}", views_overall)
         + _matrix("A股 · 多因子",
                   _gz_market_change(quotes, ["上证指数", "深证成指"]),
-                  _yahoo_info(["上证指数", "深证成指", "创业板指", "科创50"]), _liq_summary("A股"), views_a)
+                  _liq_summary("A股"), views_a)
         + _matrix("港股 · 多因子",
                   _gz_market_change(quotes, ["恒生指数", "恒生科技"]),
-                  _yahoo_info(["恒生指数", "恒生科技"]), _liq_summary("港股"), views_hk)
+                  _liq_summary("港股"), views_hk)
         + _matrix("美股 · 多因子",
                   _gz_market_change(quotes, ["标普500", "纳斯达克"]),
-                  _yahoo_info(["标普500", "纳斯达克", "微软 MSFT", "Meta META"]), _liq_summary("美股"), views_us)
+                  _liq_summary("美股"), views_us)
     )
 
 
@@ -2441,8 +2500,15 @@ def _pixel_market_section(market):
     for label, precision in [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]:
         value, color = _quote_value(market, label, precision)
         astock_rows.append((label, value, color))
+    # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在行情速览展示；
+    # 动能明细表移除后，这里是它们唯一的展示位置。
+    hk_rows = []
+    for label, precision in [("恒生指数", 2), ("恒生科技", 2)]:
+        value, color = _quote_value(market, label, precision)
+        hk_rows.append((label, value, color))
     return (_subsection("全球与美股") + _data_table(market_rows)
             + _subsection("A股四指数") + _data_table(astock_rows)
+            + _subsection("港股双指数") + _data_table(hk_rows)
             + _note("涨跌幅基于行情源返回的最近两个有效日线收盘价计算；非交易时段显示最近收盘，不以旧日报数值替代。"))
 
 
@@ -2535,8 +2601,14 @@ def _panorama_block(pan):
     return "".join(parts)
 
 
-def _collect_report_parts(data, kit):
-    """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。"""
+def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
+                            policy_result=None):
+    """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
+
+    sentiment_history: 跨日情绪基线（AI 新闻情绪因子动量/新闻量窗口用）；
+    date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天；
+    policy_result: main 1.6 阶段单独构建的政策因子结果，缺省时兜底构建。
+    """
     market = data.get("实时行情", {})
     pan = data.get("A股大盘全景", {}) or {}
     yt = data.get("港股名家频道", {})
@@ -2588,7 +2660,7 @@ def _collect_report_parts(data, kit):
 
     # 港股名家频道：只显示实际抓取到内容的频道
     if yt_live:
-        blocks = "".join(kit.channel_block(ch) for ch in yt_live)
+        blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
         note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
         sections.append((
             "HK GURU CHANNELS", "港股名家频道",
@@ -2601,22 +2673,23 @@ def _collect_report_parts(data, kit):
     # 全球头条（Google News 中文）
     if gh_headlines:
         gh_items = kit.rows("".join(kit.headline_row(it, i)
-                                    for i, it in enumerate(gh_headlines[:8], 1)))
+                                    for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
         sections.append(("GLOBAL HEADLINES", "全球头条", gh_items,
                          kit.source_badge(google), _source_note(google)))
 
     # 东方财富快讯
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
-                                    for i, it in enumerate(em_headlines[:5], 1)))
+                                    for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
         sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
                          kit.source_badge(em),
                          f"{_source_note(em)} · 免费公开数据源"))
 
     # A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
     if sina_headlines:
-        sina_items = kit.rows("".join(kit.item_row(f"{i:02d}", _esc(h[:120]))
-                                      for i, h in enumerate(sina_headlines[:5], 1)))
+        sina_items = kit.rows("".join(kit.item_row(f"{i:02d}", _esc(h[:120]),
+                                                   anchor=f"h-cn-{i:02d}")
+                                      for i, h in enumerate(sina_headlines[:SINA_DISPLAY_N], 1)))
         sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
                          kit.source_badge(sina), _source_note(sina)))
 
@@ -2629,7 +2702,7 @@ def _collect_report_parts(data, kit):
             f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
         ))
 
-    # AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    # AI 盘研判（规则合成综合研判；导读次位，政策因子之后）
     if AI_ANALYSIS_ENABLED:
         ai_result = build_ai_analysis(data)
         if ai_result.get("available"):
@@ -2637,6 +2710,27 @@ def _collect_report_parts(data, kit):
                 "AI READ", "AI 盘研判",
                 kit.ai_block(ai_result), kit.ai_badge(),
                 "章鱼AI · 多源信号规则合成（非投资建议）",
+            ))
+
+    # AI 新闻情绪因子（个股级 DNS/MOM/ANV/S，紧随 AI 盘研判；无个股归因时缺席）
+    if AI_ANALYSIS_ENABLED:
+        senti_result = build_news_sentiment(data, date_str or _today_str(),
+                                            sentiment_history)
+        if senti_result.get("available"):
+            sections.insert(1, (
+                "NEWS SENTIMENT", "AI 新闻情绪因子",
+                kit.sentiment_block(senti_result), kit.ai_badge(),
+                "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
+            ))
+
+    # 政策因子（推送页首位栏目；main 已单独构建，此处仅在缺省时兜底构建）
+    if AI_ANALYSIS_ENABLED:
+        policy = policy_result if policy_result is not None else build_policy_factor(data)
+        if policy.get("available"):
+            sections.insert(0, (
+                "POLICY SHOCK", "政策因子 · 冲击指数",
+                kit.policy_block(policy), kit.ai_badge(),
+                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（非投资建议）",
             ))
 
     # 数据审计栏
@@ -2682,6 +2776,9 @@ def _collect_report_parts(data, kit):
 #   不伪造内容；明确标注「非投资建议」。
 # 2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股，只保留主题行；
 # 个股仅作为板块热度与交投研判的输入。
+# 2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
+# 风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点跳转），
+# 正文截断未展示的（如港股第 4 条及以后）保留全文；多因子矩阵不再复述雅虎逐只报价。
 # 如需接大模型，可在 build_ai_analysis 内增加 LLM 分支（保留本规则作兜底）。
 # ============================================================
 AI_ANALYSIS_ENABLED = True
@@ -2725,6 +2822,28 @@ def _ai_is_risk_title(title):
     if not any(k in title for k in _AI_RISK_KEYWORDS):
         return False
     return not any(n in title for n in _AI_RISK_NEGATION)
+
+
+def _risk_ref_label(risk):
+    """风险引用定位（主题无关）：正文栏目 + 条目序号，与渲染锚点一一对应。"""
+    section = risk.get("section") or ""
+    if risk.get("channel"):
+        section = f"{section} · {risk['channel']}"
+    return f"「{section}」第{risk.get('index', 0):02d}条"
+
+
+def _risk_ref_detail(risk):
+    """引用辅助定位：正文可见的发布时间 + 命中关键词（后者为新增信息）。"""
+    bits = []
+    if risk.get("section") == "全球头条" and risk.get("source"):
+        bits.append(risk["source"])
+    moment = risk.get("time") or ""
+    if moment and moment != "—":
+        bits.append(moment)
+    kws = risk.get("keywords") or []
+    if kws:
+        bits.append("命中：" + "/".join(kws))
+    return " · ".join(bits)
 
 
 def _ai_label(points):
@@ -2788,20 +2907,46 @@ def build_ai_analysis(data):
             texts.append(v.get("title", ""))
     all_text = " ".join(t for t in texts if t)
 
-    # 结构化头条（标题 + 来源），用于风险项展示
+    # 结构化头条（含正文出处定位），用于风险项展示。
+    # 每个条目：title / source / section（正文栏目名）/ index（栏目内序号，1-based，
+    # 与渲染侧展示顺序一致）/ anchor（正文锚点 id）/ shown（该标题是否已在正文
+    # 栏目展示）/ time（发布时间，供无序号栏目定位）/ channel（港股频道名）。
+    # 全球头条 / 东财快讯 / A股资讯的存储条数 == 展示条数（8/5/5），shown 恒为 True；
+    # 港股频道每频道存储最多 8 条、正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
     headlines_struct = []
-    for it in google_headlines:
+    for i, it in enumerate(google_headlines, 1):
         if isinstance(it, dict):
-            headlines_struct.append((it.get("title", ""), it.get("source", "")))
-    for it in em_headlines:
+            headlines_struct.append({
+                "title": it.get("title", ""), "source": it.get("source", ""),
+                "section": "全球头条", "index": i, "anchor": f"h-gh-{i:02d}",
+                "shown": i <= GH_DISPLAY_N,
+                "time": it.get("published_cst") or "", "channel": "",
+            })
+    for i, it in enumerate(em_headlines, 1):
         if isinstance(it, dict):
-            headlines_struct.append((it.get("title", ""), ""))
-    for h in sina_headlines:
+            headlines_struct.append({
+                "title": it.get("title", ""), "source": "东方财富",
+                "section": "东财快讯", "index": i, "anchor": f"h-em-{i:02d}",
+                "shown": i <= EM_DISPLAY_N,
+                "time": it.get("time") or "", "channel": "",
+            })
+    for i, h in enumerate(sina_headlines, 1):
         if isinstance(h, str):
-            headlines_struct.append((h, "新浪财经"))
-    for ch in yt_channels:
-        for v in ch.get("videos", []) or []:
-            headlines_struct.append((v.get("title", ""), ch.get("name", "")))
+            headlines_struct.append({
+                "title": h, "source": "新浪财经",
+                "section": "A股市场", "index": i, "anchor": f"h-cn-{i:02d}",
+                "shown": i <= SINA_DISPLAY_N,
+                "time": "", "channel": "",
+            })
+    for c, ch in enumerate(yt_channels, 1):
+        for v, video in enumerate(ch.get("videos", []) or [], 1):
+            headlines_struct.append({
+                "title": video.get("title", ""), "source": ch.get("name", ""),
+                "section": "港股名家频道", "index": v,
+                "anchor": f"h-hk-{c:02d}-{v:02d}",
+                "shown": v <= CHANNEL_TOP_N,
+                "time": video.get("published_cst") or "", "channel": ch.get("name", ""),
+            })
 
     # 热门榜单个股不再单独列入关注清单（2026-08-06 起 WATCH LIST 只保留主题行）；
     # 个股仍作为 AI 研判输入：板块热度识别与「AI 研判 · 成交量与流动性分析」的活跃标的提及。
@@ -2861,13 +3006,18 @@ def build_ai_analysis(data):
     sectors_strong = sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:4]
 
     # 承压板块：出现在真正风险舆情中的板块
-    risk_titles = [t for t, _ in headlines_struct if _ai_is_risk_title(t)]
+    risk_titles = [h["title"] for h in headlines_struct if _ai_is_risk_title(h["title"])]
     risk_joined = " ".join(risk_titles)
     sectors_weak = [sec for sec, kws in AI_SECTOR_KEYWORDS.items()
                    if any(k in risk_joined for k in kws)][:3]
 
-    # —— 4. 技术速读 ——
+    # —— 4. 技术速读（指数动能聚合；2026-09-09 起不再逐条复述行情数值）——
+    # 行情明细数字的唯一展示位置是「行情速览」；此处只保留聚合（涨跌家数、
+    # 平均涨跌、最强/最弱点名）与 AI 解读，避免同一数字在页内出现三次
+    # （旧版：行情速览 + 指数动能明细表 + 多因子矩阵雅虎明细行）。
+    # tech_rows 保留（兼容既有调用），渲染侧改用 tech_stats。
     tech_rows = []
+    tech_moves = []  # (label, pct, band)，供聚合与最强/最弱点名
     for label, q in quotes.items():
         try:
             pct = float(q["change_pct"])
@@ -2875,8 +3025,19 @@ def build_ai_analysis(data):
             continue
         band, bcolor = _ai_band(pct)
         tech_rows.append((label, f"{pct:+.2f}%", band, bcolor))
+        tech_moves.append((label, pct, band))
     ups = sum(1 for p in changes if p > 0)
     downs = sum(1 for p in changes if p < 0)
+    flats = sum(1 for p in changes if p == 0)
+    tech_avg = (sum(changes) / len(changes)) if changes else None
+    tech_best = max(tech_moves, key=lambda m: m[1]) if tech_moves else None
+    tech_worst = min(tech_moves, key=lambda m: m[1]) if tech_moves else None
+    tech_stats = {
+        "count": len(tech_moves), "ups": ups, "downs": downs, "flats": flats,
+        "avg": tech_avg,
+        "best": {"label": tech_best[0], "band": tech_best[2]} if tech_best else None,
+        "worst": {"label": tech_worst[0], "band": tech_worst[2]} if tech_worst else None,
+    }
     if ups > downs:
         tech_read = "多数指数上行，动能偏强，留意上方整数关口与前高。"
     elif downs > ups:
@@ -2884,8 +3045,24 @@ def build_ai_analysis(data):
     else:
         tech_read = "指数分化/震荡，方向待明朗，宜控制仓位、等待确认。"
 
-    # —— 5. 风险提示 ——
-    risks = [(t, src) for t, src in headlines_struct if t and _ai_is_risk_title(t)][:5]
+    # —— 5. 风险提示（去重引用；2026-09-09 起不再复述正文已展示的标题全文）——
+    # 同一标题只保留首次命中的出处（跨栏目重复标题不再重复列出）；
+    # shown=True 的条目渲染为「栏目 + 序号 + 命中关键词」引用并锚点跳转，
+    # 全文只在正文栏目出现一次；shown=False（正文截断未展示，如港股频道
+    # 第 4 条及以后）的条目保留全文展示，以免信息丢失。
+    risks = []
+    _seen_risk_titles = set()
+    for h in headlines_struct:
+        title = h["title"]
+        if not title or not _ai_is_risk_title(title) or title in _seen_risk_titles:
+            continue
+        _seen_risk_titles.add(title)
+        risks.append({
+            **h,
+            "keywords": [k for k in _AI_RISK_KEYWORDS if k in title][:3],
+        })
+        if len(risks) >= 5:
+            break
 
     # —— 6. 明日关注 ——
     # 2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股（原最多 8 只），
@@ -2903,6 +3080,7 @@ def build_ai_analysis(data):
         "sectors_strong": sectors_strong,
         "sectors_weak": sectors_weak,
         "tech_rows": tech_rows,
+        "tech_stats": tech_stats,
         "tech_read": tech_read,
         "risks": risks,
         "themes": themes,
@@ -2981,32 +3159,66 @@ def _ai_analysis_block(res):
                          f'{" / ".join(_esc(s) for s in res["sectors_weak"])}</div>')
     sectors_html = _pixel_panel("SECTOR SCAN // 板块热度", sectors_body, C_CYAN, "✚")
 
-    # 技术速读：每一项都显示 ▲/▼/■ 高对比徽标，不再只靠文字颜色。
-    if res["tech_rows"]:
-        tech_rows = [
-            (_esc(label),
-             f'{_trend_badge(pct, compact=True)} '
-             f'<span style="display:inline-block;color:{c};font-size:10px;font-weight:900;'
-             f'padding-left:5px;">{_esc(band)}</span>', c)
-            for label, pct, band, c in res["tech_rows"]
-        ]
-        tech_body = _data_table(tech_rows)
+    # 指数动能聚合：明细数值只在「行情速览」展示，此处仅保留聚合与解读（2026-09-09 去重）。
+    tech_stats = res.get("tech_stats") or {}
+    if tech_stats.get("count"):
+        _band_color = {"强势": C_GREEN, "偏强": C_GREEN, "震荡": C_AMBER,
+                       "偏弱": C_RED, "弱势": C_RED}
+        ups_n, downs_n = tech_stats.get("ups", 0), tech_stats.get("downs", 0)
+        flats_n = tech_stats.get("flats", 0)
+        breadth_line = (f'<span style="color:{C_GREEN};font-weight:900;">▲ {ups_n}</span> / '
+                        f'<span style="color:{C_RED};font-weight:900;">▼ {downs_n}</span> / '
+                        f'<span style="color:{C_AMBER};font-weight:900;">■ {flats_n}</span>'
+                        f' · 平均 {_trend_badge(tech_stats.get("avg"), compact=True)}')
+        extremes = []
+        for tag, info in (("最强", tech_stats.get("best") or {}),
+                          ("最弱", tech_stats.get("worst") or {})):
+            if info.get("label"):
+                bcolor = _band_color.get(info.get("band"), C_INK)
+                extremes.append(
+                    f'{tag} <b style="color:{C_INK};">{_esc(info["label"])}</b> '
+                    f'<span style="color:{bcolor};font-weight:900;">'
+                    f'[{_esc(info.get("band", ""))}]</span>')
+        tech_body = _mini_table([
+            (f'指数动能聚合（{tech_stats["count"]} 个指数）', breadth_line),
+            ("动能两极", " · ".join(extremes) if extremes else "—"),
+        ])
     else:
         tech_body = (f'<div style="font-size:11px;color:{C_FAINT};padding:4px 0;'
                      f'font-family:{FONT_MONO};">■ NO MARKET DATA</div>')
     tech_body += (f'<div style="font-size:12px;color:{C_INK};padding:8px 8px 2px;'
                   f'line-height:1.8;font-family:{FONT_MONO};font-weight:700;">'
                   f'<span style="color:{C_VIOLET};font-weight:900;">◆ AI 解读：</span>'
-                  f'{_esc(res["tech_read"])}</div>')
+                  f'{_esc(res["tech_read"])}</div>'
+                  f'<div style="font-size:10px;color:{C_FAINT};padding:2px 8px;'
+                  f'line-height:1.7;font-family:{FONT_MONO};">明细数值见「行情速览」</div>')
     tech_html = _pixel_panel("TECH READ // 指数动能", tech_body, C_VIOLET, "▲")
 
     # 风险与关注分别用红色、黄色面板，视觉层级与语义一致。
+    # 风险条目去重（2026-09-09）：正文已展示的标题仅引用定位，不再复述全文。
     if res["risks"]:
-        risk_body = "".join(
-            _item_row("!", _esc(t), _esc(src), icon_color=C_RED,
-                      row_bg=C_DOWN_BG if i % 2 == 0 else "transparent")
-            for i, (t, src) in enumerate(res["risks"])
-        )
+        risk_rows = []
+        for i, risk in enumerate(res["risks"]):
+            bg = C_DOWN_BG if i % 2 == 0 else "transparent"
+            if risk.get("shown") and risk.get("anchor"):
+                main = (f'<a href="#{_esc(risk["anchor"])}" '
+                        f'style="color:{C_RED};font-weight:900;text-decoration:none;'
+                        f'border-bottom:1px dotted {C_RED};">→ {_esc(_risk_ref_label(risk))}</a>')
+                sub = _risk_ref_detail(risk)
+            else:
+                # 正文截断未展示（如港股频道第 4 条及以后）：保留全文以免信息丢失
+                sub_bits = [risk.get("source") or "", risk.get("time") or ""]
+                if risk.get("keywords"):
+                    sub_bits.append("命中：" + "/".join(risk["keywords"]))
+                main = _esc((risk.get("title") or "")[:110])
+                sub = " | ".join(x for x in sub_bits if x)
+            risk_rows.append(_item_row("!", main, _esc(sub[:140]),
+                                      icon_color=C_RED, row_bg=bg))
+        risk_rows.append(
+            f'<div style="font-size:10px;color:{C_MUTED};padding:6px 0 2px;'
+            f'line-height:1.7;font-family:{FONT_MONO};">'
+            f'已在正文栏目展示的风险条目仅引用定位 // 全文见原栏目，不重复展示</div>')
+        risk_body = "".join(risk_rows)
     else:
         risk_body = (f'<div style="font-size:11px;color:{C_GREEN};padding:4px 0;'
                      f'font-family:{FONT_MONO};font-weight:900;">✓ CLEAR // 未检出显著风险舆情</div>')
@@ -3022,7 +3234,7 @@ def _ai_analysis_block(res):
                       f'font-family:{FONT_MONO};">■ NO WATCH THEME</div>')
     watch_html = _pixel_panel("WATCH LIST // 明日关注", watch_body, C_LEMON, "⌖")
 
-    note_html = _note("AI 盘研判由公开数据经确定性规则合成 // RULESET v3 // 非投资建议，决策需独立判断")
+    note_html = _note("AI 盘研判由公开数据经确定性规则合成 // RULESET v3 // 动能聚合 + 风险引用去重 // 非投资建议，决策需独立判断")
     return hero + conclusion_html + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
@@ -3075,23 +3287,780 @@ def _liquidity_market_block(label, stats):
     )
 
 
-def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=None):
-    """结合雅虎最新股票数据与多因子（环境、政治、地缘），各生成一百字左右结论并输出到页面。"""
-    quotes = (market or {}).get("quotes", {}) or {}
-    markets = liq.get("markets", {}) or {}
-    hot_markets = (hot or {}).get("markets", {}) or {}
+# ============================================================
+# AI 新闻情绪因子（NEWS SENTIMENT FACTORS · 确定性词表规则）
+# ------------------------------------------------------------
+# 对当日资讯标题逐条做情绪评分（HeadlineSentiment），按热门榜单
+# 个股名归因到个股，输出 4 个数据化因子：
+#   DNS 日度新闻情绪 DailyNewsSentiment ＝ (正−负)/总数（仅当天标题，24h 口径）
+#   MOM 情绪动量 SentimentMomentum ＝ 近3个有评分日均值 − 近20个有评分日均值
+#   ANV 异常新闻量 AbnormalNewsVolume ＝ 今日条数 vs 近30天均值±σ（z 值；
+#       今日条数 > 均值+2σ 标异常放量）
+#   S   标题情绪 HeadlineSentiment ＝ 每条标题的词表净情绪（+1/0/−1，附命中词）
+# 跨日窗口依赖 output/sentiment_history.json（随日报由 Actions 提交回库；
+# main 流程：采集后加载 → 渲染 → 保存报告后落盘；--dry-run 只读不写；
+# 同日多次运行按日期键覆盖，保证幂等；零报道日记 total=0、score=None）。
+# 冷启动/样本不足时明确标注口径与 n，不伪造数值；无个股归因时栏目缺席。
+# 如需接大模型做标题标注，只需替换 _score_headline_sentiment（调用方只依赖
+# 返回结构 {"s","pos","neg"}，保留本规则作兜底）。
+# ============================================================
+SENTI_DISPLAY_N = 8        # 情绪栏目最多展示的个股数
+SENTI_MOM_SHORT_N = 3      # 动量短期窗口（有评分日，含今日）
+SENTI_MOM_LONG_N = 20      # 动量长期窗口（有评分日，含今日）
+SENTI_MOM_MIN_SHORT = 2    # 动量短期最少样本
+SENTI_MOM_MIN_LONG = 5     # 动量长期最少样本
+SENTI_VOL_WINDOW_N = 30    # 新闻量历史窗口（天，含零报道日，不含今日）
+SENTI_VOL_MIN_DAYS = 5     # 新闻量最少历史样本
+SENTI_HISTORY_KEEP_DAYS = 45  # 历史文件每只个股保留天数
+SENTIMENT_HISTORY_FILENAME = "sentiment_history.json"
 
-    def _yahoo_info(labels):
-        items = []
-        for lbl in labels:
-            q = quotes.get(lbl)
-            if q and isinstance(q, dict):
-                p = q.get("price", 0)
-                chg = q.get("change_pct", 0)
-                vol = q.get("volume", 0)
-                vol_str = f" Vol:{_format_amount(vol)}" if vol else ""
-                items.append(f"{lbl} {p:.2f}({chg:+.2f}%{vol_str})")
-        return " | ".join(items) if items else "Yahoo 实际公开收盘/报价整合"
+# 情绪词表：以 AI 盘研判 bull/bear 词为底，增加财报/资金/事件类词汇与
+# 繁体变体（港股标题多为繁体）。命中按非重叠最长优先计数。
+_SENTI_POS_WORDS = sorted(set(_AI_BULL_WORDS + [
+    "大涨", "暴涨", "飙升", "飙涨", "涨停", "一字涨停", "历史新高",
+    "好于预期", "盈利", "获利", "扭亏", "扭亏为盈", "增长", "大增",
+    "翻倍", "翻番", "分红", "派息", "回购", "增持", "举牌", "买入评级",
+    "上调评级", "获批", "获准", "中标", "签约", "合作", "收购", "注资",
+    "扩产", "投产", "订单", "放量", "净流入", "流入", "纳入", "利好兑现",
+    "大漲", "暴漲", "飆升", "漲停", "歷史新高", "超預期", "扭虧",
+    "增長", "分紅", "回購", "上調", "買入", "獲批", "中標", "簽約",
+    "收購", "淨流入",
+]))
+_SENTI_NEG_WORDS = sorted(set(_AI_BEAR_WORDS + [
+    "大跌", "重挫", "崩盘", "熔断", "跌停", "一字跌停", "历史新低",
+    "创新低", "下跌", "下滑", "下降", "减少", "骤降", "腰斩", "巨亏",
+    "预亏", "预减", "首亏", "裁员", "召回", "诉讼", "调查", "问询",
+    "立案", "处罚", "违约", "破产", "退市", "停牌", "做空", "降级",
+    "关税", "流出", "净流出", "减持", "套现", "解禁", "计提", "商誉减值",
+    "爆仓", "断供", "地雷", "出逃", "冻结", "崩盤", "熔斷", "歷史新低",
+    "減少", "虧損", "巨虧", "裁員", "訴訟", "調查", "處罰", "違約",
+    "破產", "降級", "關稅", "淨流出", "減持", "套現", "爆倉",
+]))
+_SENTI_NEGATORS = set("不没未无非否莫勿毋别")
+
+
+def _match_words_non_overlap(title, words):
+    """词表最长优先非重叠匹配，返回 [(词, 起始下标)]（按出现顺序）。"""
+    spans = []
+    occupied = [False] * len(title)
+    for word in sorted(words, key=len, reverse=True):
+        if not word:
+            continue
+        start = 0
+        while True:
+            idx = title.find(word, start)
+            if idx < 0:
+                break
+            if not any(occupied[idx:idx + len(word)]):
+                spans.append((word, idx))
+                for j in range(idx, idx + len(word)):
+                    occupied[j] = True
+            start = idx + 1
+    spans.sort(key=lambda item: item[1])
+    return spans
+
+
+def _score_headline_sentiment(title):
+    """标题情绪评分：正负命中数之差取符号，S∈{+1,0,−1}。
+
+    命中词紧邻的前一字为否定词（不/没/未/无/非/否…）时翻转极性。
+    返回 {"s","pos","neg","pos_n","neg_n"}（pos/neg 为展示用命中词，各≤3）。
+    """
+    title = title or ""
+    pos_hits, neg_hits = [], []
+    for word, idx in _match_words_non_overlap(title, _SENTI_POS_WORDS):
+        flipped = idx > 0 and title[idx - 1] in _SENTI_NEGATORS
+        (neg_hits if flipped else pos_hits).append(word)
+    for word, idx in _match_words_non_overlap(title, _SENTI_NEG_WORDS):
+        flipped = idx > 0 and title[idx - 1] in _SENTI_NEGATORS
+        (pos_hits if flipped else neg_hits).append(word)
+    pos_n, neg_n = len(pos_hits), len(neg_hits)
+    net = pos_n - neg_n
+    return {"s": 1 if net > 0 else (-1 if net < 0 else 0),
+            "pos": pos_hits[:3], "neg": neg_hits[:3],
+            "pos_n": pos_n, "neg_n": neg_n}
+
+
+def _extract_stock_universe(hot):
+    """从热门榜单提取个股宇宙 [{market, code, name, key}]（按 key 去重）。"""
+    universe = []
+    seen = set()
+    markets = (hot or {}).get("markets", {}) or {}
+    for market, payload in markets.items():
+        for s in (payload or {}).get("stocks", []) or []:
+            name = (s.get("name") or "").strip().replace(" ", "").replace("\u3000", "")
+            if len(name) < 2:
+                continue
+            code = str(s.get("code") or "").strip()
+            key = f"{market}:{code or name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            universe.append({"market": market, "code": code, "name": name, "key": key})
+    universe.sort(key=lambda u: len(u["name"]), reverse=True)
+    return universe
+
+
+def _attribute_headline(title, universe):
+    """标题归因到个股：标题含个股全名即归因（一条标题可归因多只）。"""
+    if not title:
+        return []
+    return [u for u in universe if u["name"] in title]
+
+
+def _collect_sentiment_headlines(data):
+    """收集参与情绪评分的标题 [{title, source, section}]。
+
+    只收当天（is_today）标题，落实 24h 口径：标题级缺标记时继承来源级，
+    两者都缺省视为非当天（不计入，不断言）。
+    """
+    items = []
+
+    def _take(headlines, source_name, section, source_today):
+        for h in headlines or []:
+            if isinstance(h, dict):
+                title = (h.get("title") or "").strip()
+                if not title:
+                    continue
+                today = h.get("is_today", source_today)
+                src = h.get("source") or source_name
+            elif isinstance(h, str):
+                title = h.strip()
+                if not title:
+                    continue
+                today = source_today
+                src = source_name
+            else:
+                continue
+            if today:
+                items.append({"title": title, "source": src, "section": section})
+
+    google = data.get("全球头条", {}) or {}
+    _take(google.get("headlines"), "Google News", "全球头条", google.get("is_today", False))
+    em = data.get("东财快讯", {}) or {}
+    _take(em.get("headlines"), "东方财富", "东财快讯", em.get("is_today", False))
+    sina = data.get("A股资讯", {}) or {}
+    _take(sina.get("headlines"), "新浪财经", "A股市场", sina.get("is_today", False))
+    yt = data.get("港股名家频道", {}) or {}
+    for ch in yt.get("channels", []) or []:
+        _take(ch.get("videos"), ch.get("name", "港股频道"), "港股名家频道",
+              ch.get("is_today", yt.get("is_today", False)))
+    return items
+
+
+def _load_sentiment_history(path):
+    """读取情绪历史（缺失/损坏 → 空历史并告警，不中断日报）。"""
+    fresh = {"version": 1, "stocks": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except FileNotFoundError:
+        print("  ℹ️ 无情绪历史文件，本次冷启动（动量/新闻量标样本不足）")
+        return fresh
+    except (OSError, ValueError) as exc:
+        print(f"  ⚠️ 情绪历史读取失败（{exc}），本次按冷启动处理")
+        return fresh
+    if not isinstance(history, dict) or not isinstance(history.get("stocks"), dict):
+        print("  ⚠️ 情绪历史结构异常，本次按冷启动处理")
+        return fresh
+    history.setdefault("version", 1)
+    return history
+
+
+def _save_sentiment_history(path, history):
+    """原子落盘情绪历史。"""
+    history["updated_cst"] = _now()
+    _atomic_write(path, json.dumps(history, ensure_ascii=False, indent=1))
+    print(f"  💾 情绪历史已更新: {path}（{len(history.get('stocks', {}))} 只个股有基线）")
+
+
+def _update_sentiment_history(history, date_str, universe, today_counts):
+    """把今日计数并入历史（同日多次运行按日期键覆盖，保证幂等）。
+
+    universe 中零报道个股记 total=0、score=None：无评分，不计情绪均值，
+    计入新闻量基线。每只个股仅保留最近 SENTI_HISTORY_KEEP_DAYS 天。
+    """
+    stocks = history.setdefault("stocks", {})
+    try:
+        cutoff = (datetime.strptime(date_str, "%Y%m%d")
+                  - timedelta(days=SENTI_HISTORY_KEEP_DAYS)).strftime("%Y%m%d")
+    except ValueError:
+        cutoff = ""
+    for stock in universe:
+        entry = stocks.get(stock["key"])
+        if not isinstance(entry, dict):
+            entry = {"market": stock["market"], "code": stock["code"],
+                     "name": stock["name"], "days": {}}
+            stocks[stock["key"]] = entry
+        entry["market"] = stock["market"]
+        entry["code"] = stock["code"]
+        entry["name"] = stock["name"]
+        if not isinstance(entry.get("days"), dict):
+            entry["days"] = {}
+        counts = today_counts.get(stock["key"]) or {}
+        pos = counts.get("pos", 0) or 0
+        neu = counts.get("neu", 0) or 0
+        neg = counts.get("neg", 0) or 0
+        total = counts.get("total", 0) or 0
+        entry["days"][date_str] = {
+            "pos": pos, "neu": neu, "neg": neg, "total": total,
+            "score": round((pos - neg) / total, 4) if total else None,
+        }
+    for key in list(stocks):
+        entry = stocks[key]
+        if not isinstance(entry, dict) or not isinstance(entry.get("days"), dict):
+            del stocks[key]
+            continue
+        for day in [d for d in entry["days"] if d < cutoff]:
+            del entry["days"][day]
+        if not entry["days"]:
+            del stocks[key]
+    return history
+
+
+def _sentiment_momentum(day_scores):
+    """情绪动量：近3个有评分日均值 − 近20个有评分日均值。
+
+    day_scores: [(date, score)] 降序，首位为今日（调用方保证仅含已评分日）。
+    样本不足（短期<2 或 长期<5）时 enough=False，渲染侧明确标注。
+    """
+    short = [s for _, s in day_scores[:SENTI_MOM_SHORT_N]]
+    long = [s for _, s in day_scores[:SENTI_MOM_LONG_N]]
+    short_n, long_n = len(short), len(long)
+    if short_n < SENTI_MOM_MIN_SHORT or long_n < SENTI_MOM_MIN_LONG:
+        return {"enough": False, "short_n": short_n, "long_n": long_n,
+                "need": f"{SENTI_MOM_MIN_SHORT}/{SENTI_MOM_MIN_LONG}"}
+    short_mean = sum(short) / short_n
+    long_mean = sum(long) / long_n
+    value = short_mean - long_mean
+    label = "加速转暖" if value >= 0.15 else ("加速转冷" if value <= -0.15 else "平稳")
+    return {"enough": True, "value": value, "short_mean": short_mean,
+            "long_mean": long_mean, "short_n": short_n, "long_n": long_n,
+            "label": label}
+
+
+def _sentiment_volume(today_total, prior_totals):
+    """异常新闻量：今日条数 vs 历史均值±σ（z 值；>均值+2σ 标异常）。
+
+    prior_totals: 今日之前每日条数（含零报道日）。历史<5 天时
+    enough=False，渲染侧明确标注。
+    """
+    prior_totals = [t for t in prior_totals if type(t) in (int, float)]
+    n = len(prior_totals)
+    if n < SENTI_VOL_MIN_DAYS:
+        return {"enough": False, "n": n, "need": SENTI_VOL_MIN_DAYS,
+                "today": today_total}
+    mean = sum(prior_totals) / n
+    var = sum((t - mean) ** 2 for t in prior_totals) / (n - 1)
+    std = var ** 0.5
+    if std <= 1e-9:
+        z = 0.0 if today_total == mean else (9.99 if today_total > mean else -9.99)
+        z_display = "σ=0"
+    else:
+        z = (today_total - mean) / std
+        z_display = f"{z:+.1f}"
+    abnormal = today_total > mean + 2 * std
+    label = "异常放量" if abnormal else ("交投偏热" if z >= 1 else "正常")
+    return {"enough": True, "today": today_total, "mean": mean, "std": std,
+            "z": z, "z_display": z_display, "abnormal": abnormal, "n": n,
+            "label": label}
+
+
+def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N):
+    """构建 AI 新闻情绪因子结果（渲染与历史落盘共用同一口径）。
+
+    history: _load_sentiment_history 读到的跨日基线（可为 None/{}，冷启动时
+    动量/新闻量标样本不足）。返回 available/stocks/universe/today_counts 等。
+    """
+    history = history if isinstance(history, dict) else {}
+    past = history.get("stocks") or {}
+    universe = _extract_stock_universe(data.get("热门榜单", {}) or {})
+    headlines = _collect_sentiment_headlines(data)
+    per_stock = {}
+    unattributed = 0
+    for order, head in enumerate(headlines):
+        targets = _attribute_headline(head["title"], universe)
+        if not targets:
+            unattributed += 1
+            continue
+        scored = _score_headline_sentiment(head["title"])
+        for stock in targets:
+            slot = per_stock.setdefault(stock["key"], {
+                "info": stock, "pos": 0, "neu": 0, "neg": 0, "headlines": []})
+            if scored["s"] > 0:
+                slot["pos"] += 1
+            elif scored["s"] < 0:
+                slot["neg"] += 1
+            else:
+                slot["neu"] += 1
+            slot["headlines"].append({
+                "title": head["title"], "source": head["source"],
+                "section": head["section"], "s": scored["s"],
+                "pos_hits": scored["pos"], "neg_hits": scored["neg"],
+                "order": order,
+            })
+    stocks = []
+    today_counts = {}
+    for key, slot in per_stock.items():
+        total = slot["pos"] + slot["neu"] + slot["neg"]
+        if total < 1:
+            continue
+        today_counts[key] = {"pos": slot["pos"], "neu": slot["neu"],
+                             "neg": slot["neg"], "total": total}
+        score = (slot["pos"] - slot["neg"]) / total
+        days = (past.get(key) or {}).get("days", {}) or {}
+        prior = sorted(((day, val) for day, val in days.items() if day < date_str),
+                       reverse=True)
+        scored_days = [(day, val["score"]) for day, val in prior
+                       if isinstance(val, dict) and type(val.get("score")) in (int, float)]
+        momentum = _sentiment_momentum([(date_str, round(score, 4))] + scored_days)
+        raw_totals = [val.get("total", 0) for _, val in prior[:SENTI_VOL_WINDOW_N]
+                      if isinstance(val, dict)]
+        volume = _sentiment_volume(total, raw_totals)
+        slot["headlines"].sort(key=lambda h: (-abs(h["s"]), h["order"]))
+        info = slot["info"]
+        stocks.append({
+            "market": info["market"], "code": info["code"], "name": info["name"],
+            "total": total, "pos": slot["pos"], "neu": slot["neu"], "neg": slot["neg"],
+            "score": score,
+            "label": "偏多" if score > 0.2 else ("偏空" if score < -0.2 else "中性"),
+            "momentum": momentum, "volume": volume,
+            "headlines": slot["headlines"],
+        })
+    stocks.sort(key=lambda s: (-s["total"], -abs(s["score"]), s["name"]))
+    return {
+        "available": bool(stocks),
+        "date": date_str,
+        "stocks": stocks[:display_n],
+        "total_matched": len(stocks),
+        "universe_n": len(universe),
+        "scored_headlines": len(headlines) - unattributed,
+        "unattributed_n": unattributed,
+        "universe": universe,
+        "today_counts": today_counts,
+    }
+
+
+def _senti_factor_lines(s):
+    """个股 3 因子的展示文案（双主题共用；返回 [(标签, 文案)]）。"""
+    mom = s["momentum"]
+    if mom["enough"]:
+        mom_line = (f'MOM {mom["value"]:+.2f}（近{mom["short_n"]}日均'
+                    f'{mom["short_mean"]:+.2f} vs 近{mom["long_n"]}日均'
+                    f'{mom["long_mean"]:+.2f} · {mom["label"]}）')
+    else:
+        mom_line = (f'MOM 样本不足（n={mom["short_n"]}/{mom["long_n"]}，'
+                    f'需≥{mom["need"]}，含今日）')
+    vol = s["volume"]
+    if vol["enough"]:
+        flag = " · ⚠异常放量" if vol["abnormal"] else ""
+        vol_line = (f'ANV 今日{vol["today"]}条（近{vol["n"]}天均{vol["mean"]:.1f}条 '
+                    f'σ{vol["std"]:.1f} z={vol["z_display"]} · {vol["label"]}{flag}）')
+    else:
+        vol_line = f'ANV 样本不足（历史n={vol["n"]}，需≥{vol["need"]}天）'
+    return [
+        ("日度情绪", f'DNS {s["score"]:+.2f}（正{s["pos"]}/中{s["neu"]}/负{s["neg"]} · {s["label"]}）'),
+        ("情绪动量", mom_line),
+        ("新闻量", vol_line),
+    ]
+
+
+def _senti_headline_sub(h):
+    """标题行副文案：栏目 · 来源 · 命中词（双主题共用）。"""
+    hits = (h["pos_hits"] or []) + (h["neg_hits"] or [])
+    hit_txt = f'命中：{"/".join(hits[:3])}' if hits else "无情绪词"
+    return f'{h["section"]} · {h["source"]} · {hit_txt}'
+
+
+def _pixel_sentiment_block(res):
+    """像素主题：AI 新闻情绪因子（DNS/MOM/ANV/S 数据化卡片）。"""
+    head = _mini_table([
+        ("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
+        ("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        ("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
+    ])
+    cards = []
+    for s in res["stocks"]:
+        if s["score"] > 0.2:
+            color, icon = C_GREEN, "▲"
+        elif s["score"] < -0.2:
+            color, icon = C_RED, "▼"
+        else:
+            color, icon = C_AMBER, "■"
+        rows = []
+        for h in s["headlines"][:3]:
+            badge, bcolor = {1: ("S+1", C_GREEN), -1: ("S−1", C_RED),
+                             0: ("S0", C_AMBER)}[h["s"]]
+            rows.append(_item_row(
+                "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:60])}',
+                _esc(_senti_headline_sub(h))))
+        more = len(s["headlines"]) - 3
+        if more > 0:
+            rows.append(
+                f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
+                f'line-height:1.7;font-family:{FONT_MONO};">'
+                f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）</div>')
+        body = _mini_table(_senti_factor_lines(s)) + "".join(rows)
+        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+        cards.append(_pixel_panel(f"STOCK SENTI // {_esc(title)} · {s['market']}",
+                                  body, color, icon))
+    note = _note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
+                 "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪 // RULESET v3 // 非投资建议")
+    return head + "".join(cards) + note
+
+
+def gz_sentiment_block(res):
+    """谷藏主题：AI 新闻情绪因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    out = [
+        gz_rowline("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
+        gz_rowline("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        gz_rowline("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
+    ]
+    for s in res["stocks"]:
+        arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
+        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+        out.append(gz_subsection(f'{_esc(title)} · {s["market"]} {arrow}'))
+        for label, line in _senti_factor_lines(s):
+            out.append(gz_rowline(label, _esc(line)))
+        for h in s["headlines"][:3]:
+            badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
+            out.append(gz_item_row(
+                "»", f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:60])}',
+                _senti_headline_sub(h)))
+        more = len(s["headlines"]) - 3
+        if more > 0:
+            out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
+    out.append(gz_note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
+                       "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪。非投资建议。"))
+    return "".join(out)
+
+
+# ============================================================
+# 政策因子（POLICY SHOCK · 确定性关键词矩阵）
+# ------------------------------------------------------------
+# 抓取后、推送前单独构建（main 1.6 阶段），推送页首位栏目渲染。
+# 逻辑：识别政策类新闻（监管/扶持/货币/财政/地产/贸易等维度），经
+# 关键词矩阵映射到行业受益/受损权重，汇总为 PolicyShockIndex：
+#   行业 PSI ＝ 该行业在今日政策新闻中的权重之和（正=受益，负=承压）
+#   大盘 PSI ＝ 宽基权重之和（>0 偏暖 / <0 偏冷 / =0 中性）
+# 维度分两类：固定映射（货币/财政/地产，直接给行业权重）与
+# 行业归因（扶持/监管/开放/贸易，按标题提及的行业落权重；无提及
+# 落宽基小权重并标注宽基）。触发词被否定词修饰时跳过（如"暂不降准"）。
+# 只统计当天标题（复用情绪因子的 24h 采集口径）；零政策新闻时
+# 栏目缺席，不伪造。
+# ============================================================
+POLICY_DISPLAY_INDUSTRIES = 5   # 受益/承压榜单各展示的行业数
+POLICY_DISPLAY_HEADLINES = 8    # 政策新闻逐条展示上限
+
+# 政策维度矩阵：triggers 命中即该维度命中（同一维度每条只计一次，
+# 权重只落一次）；weights 为固定行业映射，needs_industry 为行业归因。
+_POLICY_DIMENSIONS = [
+    {"id": "easing", "label": "货币宽松",
+     "triggers": ["降准", "降息", "双降", "LPR", "MLF", "逆回购", "宽松",
+                  "放水", "加大投放", "呵护流动性", "保持流动性",
+                  "降準", "寬鬆"],
+     "weights": {"银行": -1, "证券": +2, "地产链": +2, "消费": +1,
+                 "科技成长": +1, "大盘": +1}},
+    {"id": "tightening", "label": "货币收紧",
+     "triggers": ["加息", "缩表", "收紧流动性", "回笼资金", "縮表", "收緊"],
+     "weights": {"银行": +1, "证券": -2, "地产链": -2, "消费": -1,
+                 "科技成长": -1, "大盘": -1}},
+    {"id": "support", "label": "产业扶持",
+     "triggers": ["产业政策", "新质生产力", "专项资金", "重大项目",
+                  "大力发展", "政策支持", "培育壮大", "扶持", "补贴",
+                  "国补", "補貼"],
+     "needs_industry": True, "weight": +2, "broad_weight": +1},
+    {"id": "regulation", "label": "监管收紧",
+     "triggers": ["立案调查", "窗口指导", "反垄断", "约谈", "罚单",
+                  "监管", "规范", "整顿", "严查", "重罚",
+                  "監管", "約談", "罰單", "反壟斷", "整頓", "嚴查"],
+     "needs_industry": True, "weight": -2, "broad_weight": -1},
+    {"id": "fiscal", "label": "财政发力",
+     "triggers": ["特别国债", "增发国债", "专项债", "化债", "减税",
+                  "降费", "赤字", "财政", "財政", "專項債", "減稅"],
+     "weights": {"基建链": +2, "消费": +1, "大盘": +1}},
+    {"id": "property_ease", "label": "地产松绑",
+     "triggers": ["认房不认贷", "下调首付", "降低首付", "城中村改造",
+                  "白名单", "松绑", "收储", "鬆綁"],
+     "weights": {"地产链": +2, "银行": +1, "大盘": +1}},
+    {"id": "property_tight", "label": "地产收紧",
+     "triggers": ["限购", "限贷", "限售", "限購", "限貸"],
+     "weights": {"地产链": -2, "银行": -1, "大盘": -1}},
+    {"id": "opening", "label": "开放准入",
+     "triggers": ["负面清单", "对外开放", "扩大开放", "准入", "自贸",
+                  "放开", "试点", "負面清單", "對外開放", "準入",
+                  "自貿", "試點"],
+     "needs_industry": True, "weight": +1, "broad_weight": +1},
+    {"id": "trade_barrier", "label": "贸易壁垒",
+     "triggers": ["实体清单", "出口管制", "加征", "关税", "制裁",
+                  "断供", "關稅", "斷供", "實體清單"],
+     "needs_industry": True, "weight": -2, "broad_weight": -1},
+]
+
+# 行业别名词表（归因维度用；匹配最长优先，如"锂电"优先于"锂"）。
+_POLICY_INDUSTRIES = {
+    "新能源": ["新能源", "光伏", "风电", "储能", "锂电池", "锂电",
+              "充电桩", "新能源", "光伏"],
+    "半导体": ["半导体", "集成电路", "芯片", "晶圆", "半導體", "芯片"],
+    "医药": ["生物医药", "创新药", "医药", "医疗", "疫苗", "中药",
+            "醫藥", "醫療"],
+    "汽车": ["新能源车", "智能驾驶", "无人驾驶", "汽车", "汽車"],
+    "军工": ["军工", "国防", "軍工"],
+    "AI算力": ["人工智能", "大模型", "数据中心", "算力", "机器人", "AI"],
+    "消费": ["食品饮料", "消费", "零售", "白酒", "餐饮", "旅游", "家电"],
+    "地产链": ["房地产", "地产", "楼市", "建材", "水泥",
+              "房地產", "地產"],
+    "银行": ["银行"],
+    "证券": ["证券", "券商", "期货", "證券"],
+    "保险": ["保险", "保險"],
+    "有色金属": ["有色", "稀土", "黄金", "铜", "铝", "锂", "钴",
+                "镍", "鎳"],
+    "煤炭能源": ["煤炭", "石油", "原油", "天然气", "电力", "火电",
+                "水电", "核电"],
+    "钢铁化工": ["钢铁", "化工", "化纤", "纯碱", "鋼鐵"],
+    "农业": ["农业", "种业", "粮食", "猪肉", "养殖"],
+    "传媒游戏": ["传媒", "游戏", "版号", "影视", "廣告", "遊戲"],
+    "基建链": ["工程机械", "基建", "建筑", "高铁", "轨交"],
+    "科技成长": ["平台经济", "互联网", "科技", "软件", "电子", "互聯網"],
+    "出口链": ["跨境电商", "出口", "外贸", "航运", "港口"],
+}
+_POLICY_INDUSTRY_ALIASES = {}
+for _ind_name, _ind_aliases in _POLICY_INDUSTRIES.items():
+    for _alias in _ind_aliases:
+        _POLICY_INDUSTRY_ALIASES.setdefault(_alias, _ind_name)
+_POLICY_INDUSTRY_ALIAS_LIST = list(_POLICY_INDUSTRY_ALIASES)
+
+
+def _match_policy_triggers(title, triggers):
+    """维度触发词匹配：最长优先非重叠；前2字含否定词视为否定表述，跳过。"""
+    hits = []
+    for word, idx in _match_words_non_overlap(title, triggers):
+        window = title[max(0, idx - 2):idx]
+        if any(ch in _SENTI_NEGATORS for ch in window):
+            continue
+        hits.append(word)
+    return hits
+
+
+def _match_policy_industries(title):
+    """标题提及的行业（别名最长优先非重叠匹配，按出现顺序去重）。"""
+    found = []
+    for alias, _ in _match_words_non_overlap(title, _POLICY_INDUSTRY_ALIAS_LIST):
+        industry = _POLICY_INDUSTRY_ALIASES[alias]
+        if industry not in found:
+            found.append(industry)
+    return found
+
+
+def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
+                    winners, losers):
+    """规则生成的政策总结（纯数据转述，无伪造）。"""
+    if policy_n == 0:
+        return "今日未检出显著政策新闻。"
+    dims = "、".join(f"{k}×{v}" for k, v in
+                     sorted(dim_counts.items(), key=lambda kv: (-kv[1], kv[0])))
+    parts = [f"今日检出政策类新闻 {policy_n} 条（占当天资讯 "
+             f"{policy_n}/{total_n}），覆盖维度：{dims}；"
+             f"大盘政策冲击指数 PSI {broad_score:+d}（{broad_label}）。"]
+    if winners:
+        parts.append("受益居前：" + "、".join(
+            f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in winners[:3]) + "。")
+    if losers:
+        parts.append("承压居前：" + "、".join(
+            f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in losers[:3]) + "。")
+    if not winners and not losers:
+        parts.append("各行业冲击相互抵消，无显著受益/承压方向。")
+    return "".join(parts)
+
+
+def build_policy_factor(data):
+    """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
+
+    只统计当天标题（复用情绪因子的 24h 采集口径）。零政策新闻时
+    available=False，栏目缺席。
+    """
+    headlines = _collect_sentiment_headlines(data)
+    industry_scores = {}
+    broad_score = 0
+    broad_count = 0
+    dim_counts = {}
+    policy_heads = []
+    for head in headlines:
+        title = head["title"]
+        hit_dims = []
+        for dim in _POLICY_DIMENSIONS:
+            triggers = _match_policy_triggers(title, dim["triggers"])
+            if triggers:
+                hit_dims.append(dim)
+        if not hit_dims:
+            continue
+        head_industries = []
+        head_net = 0
+        head_dims = []
+        for dim in hit_dims:
+            head_dims.append(dim["label"])
+            dim_counts[dim["label"]] = dim_counts.get(dim["label"], 0) + 1
+            if "weights" in dim:
+                pairs = list(dim["weights"].items())
+            else:
+                mentioned = _match_policy_industries(title)
+                if mentioned:
+                    pairs = [(ind, dim["weight"]) for ind in mentioned]
+                else:
+                    pairs = [("大盘", dim["broad_weight"])]
+            for ind, w in pairs:
+                head_net += w
+                if ind == "大盘":
+                    broad_score += w
+                    broad_count += 1
+                else:
+                    slot = industry_scores.setdefault(
+                        ind, {"score": 0, "count": 0, "dims": set()})
+                    slot["score"] += w
+                    slot["count"] += 1
+                    slot["dims"].add(dim["label"])
+                    if ind not in head_industries:
+                        head_industries.append(ind)
+        policy_heads.append({
+            "title": title, "source": head["source"], "section": head["section"],
+            "dims": head_dims, "industries": head_industries,
+            "direction": 1 if head_net > 0 else (-1 if head_net < 0 else 0),
+            "net": head_net,
+        })
+    industries = [{
+        "name": name, "score": v["score"], "count": v["count"],
+        "dims": sorted(v["dims"]),
+        "direction": "受益" if v["score"] > 0 else ("承压" if v["score"] < 0 else "中性"),
+    } for name, v in industry_scores.items()]
+    industries.sort(key=lambda s: (-s["score"], s["name"]))
+    winners = [s for s in industries if s["score"] > 0][:POLICY_DISPLAY_INDUSTRIES]
+    losers = sorted((s for s in industries if s["score"] < 0),
+                    key=lambda s: (s["score"], s["name"]))[:POLICY_DISPLAY_INDUSTRIES]
+    broad_label = "偏暖" if broad_score > 0 else ("偏冷" if broad_score < 0 else "中性")
+    summary = _policy_summary(len(policy_heads), len(headlines), dim_counts,
+                              broad_score, broad_label, winners, losers)
+    return {
+        "available": bool(policy_heads),
+        "policy_n": len(policy_heads),
+        "total_headlines": len(headlines),
+        "dim_counts": dim_counts,
+        "broad_score": broad_score,
+        "broad_count": broad_count,
+        "broad_label": broad_label,
+        "industries": industries,
+        "winners": winners,
+        "losers": losers,
+        "headlines": policy_heads,
+        "summary": summary,
+    }
+
+
+def _pixel_policy_block(res):
+    """像素主题：政策因子（总结置顶 + PSI 行业榜 + 政策新闻逐条）。"""
+    if res["broad_score"] > 0:
+        color, icon = C_GREEN, "▲"
+    elif res["broad_score"] < 0:
+        color, icon = C_RED, "▼"
+    else:
+        color, icon = C_AMBER, "■"
+    summary_html = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'margin-bottom:10px;border:1px solid {color};background:#0C1020;box-shadow:4px 4px 0 #000;">'
+        f'<tr><td style="padding:10px 12px;">'
+        f'<div style="font-size:9px;color:{color};font-weight:900;font-family:{FONT_MONO};'
+        f'letter-spacing:1px;">POLICY READ // 政策因子总结</div>'
+        f'<div style="font-size:12px;color:{C_INK};font-weight:700;line-height:1.8;'
+        f'font-family:{FONT_MONO};padding-top:4px;">{_esc(res["summary"])}</div>'
+        f'</td></tr></table>')
+    dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
+        res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
+    head = _mini_table([
+        ("政策新闻", f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+        ("大盘冲击", f'PSI <b style="color:{color};">{res["broad_score"]:+d}</b>'
+                     f'（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
+        ("覆盖维度", _esc(dims_line)),
+    ])
+    board = []
+    for s in res["winners"]:
+        board.append((f'▲ {_esc(s["name"])}',
+                      f'PSI <b style="color:{C_GREEN};">+{s["score"]}</b>'
+                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    for s in res["losers"]:
+        board.append((f'▼ {_esc(s["name"])}',
+                      f'PSI <b style="color:{C_RED};">{s["score"]}</b>'
+                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    rows = []
+    for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
+        if h["direction"] > 0:
+            arrow, bcolor = "▲", C_GREEN
+        elif h["direction"] < 0:
+            arrow, bcolor = "▼", C_RED
+        else:
+            arrow, bcolor = "■", C_AMBER
+        inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        rows.append(_item_row(
+            "◆", f'<b style="color:{bcolor};">[{arrow} {h["net"]:+d}]</b> {_esc(h["title"][:60])}',
+            _esc(f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · {h["source"]}')))
+    more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
+    if more > 0:
+        rows.append(
+            f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
+            f'line-height:1.7;font-family:{FONT_MONO};">'
+            f'＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）</div>')
+    body = head + (_mini_table(board) if board else "") + "".join(rows)
+    note = _note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
+                 "触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
+    return summary_html + _pixel_panel("POLICY SHOCK // 政策冲击指数", body, color, icon) + note
+
+
+def gz_policy_block(res):
+    """谷藏主题：政策因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    arrow = "▲" if res["broad_score"] > 0 else ("▼" if res["broad_score"] < 0 else "■")
+    dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
+        res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
+    out = [
+        gz_subsection("POLICY READ · 政策因子总结"),
+        gz_shell(f'<div style="font-size:16px;font-weight:700;color:{GZ_INK};line-height:1.85;">'
+                 f'{arrow} {_esc(res["summary"])}</div>', pad="8px 0"),
+        gz_subsection("大盘冲击与覆盖"),
+        gz_rowline("政策新闻",
+                   f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+        gz_rowline("大盘冲击",
+                   f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
+        gz_rowline("覆盖维度", _esc(dims_line)),
+        gz_subsection("行业冲击榜"),
+    ]
+    for s in res["winners"]:
+        out.append(gz_rowline(
+            f'▲ {_esc(s["name"])}',
+            f'PSI +{s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    for s in res["losers"]:
+        out.append(gz_rowline(
+            f'▼ {_esc(s["name"])}',
+            f'PSI {s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    out.append(gz_subsection("政策新闻逐条"))
+    for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
+        badge = "▲" if h["direction"] > 0 else ("▼" if h["direction"] < 0 else "■")
+        inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        out.append(gz_item_row(
+            "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> {_esc(h["title"][:60])}',
+            f'{_esc("/".join(h["dims"]))} · 影响：{_esc(inds)} · '
+            f'{_esc(h["section"])} · {_esc(h["source"])}'))
+    more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
+    if more > 0:
+        out.append(gz_note(f"＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）。"))
+    out.append(gz_note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
+                       "触发词被否定修饰时跳过。非投资建议。"))
+    return "".join(out)
+
+
+def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=None):
+    """结合雅虎最新股票数据与多因子（环境、政治、地缘），各生成一百字左右结论并输出到页面。
+
+    2026-09-09 去重：雅虎逐只报价明细只在「行情速览」展示，此处仅保留
+    资金锚点与三观点研判，不再复述价格数字。
+    """
+    markets = liq.get("markets", {}) or {}
 
     def _liq_summary(mk):
         st = markets.get(mk) or {}
@@ -3099,7 +4068,7 @@ def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=Non
             return f"{mk}量能样本待复核"
         return f"{mk}流动性得分 {st.get('score', 50)} PTS（{_esc(st.get('tone', '—'))}，集中度 {st.get('top10_share', 0)*100:.1f}%）"
 
-    def _render_mf_card(kicker, title, yahoo_info, liq_label, text, color=C_CYAN):
+    def _render_mf_card(kicker, title, liq_label, text, color=C_CYAN):
         return (
             f'<div style="margin-top:12px;border:1px solid {color};background:#0C1020;'
             f'padding:12px 14px;box-shadow:4px 4px 0 #000;">'
@@ -3108,17 +4077,12 @@ def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=Non
             f'<div style="font-size:13px;font-weight:900;color:{C_LEMON};padding:4px 0;'
             f'font-family:{FONT_MONO};">{title}</div>'
             f'<div style="font-size:10px;color:{C_MUTED};padding-bottom:6px;font-family:{FONT_MONO};'
-            f'border-bottom:1px solid {C_HAIR};"><b>📡 Yahoo 最新数据：</b>{_esc(yahoo_info)}<br>'
+            f'border-bottom:1px solid {C_HAIR};"><b>📡 行情数据：</b>数值详见「行情速览」（Yahoo 实时报价）<br>'
             f'<b>📊 资金与交投锚点：</b>{_esc(liq_label)}</div>'
             f'<div style="font-size:12px;color:{C_INK};line-height:1.8;padding-top:8px;'
             f'font-family:{FONT_MONO};"><b>◆ AI 多因子三观点研判（每观点一句话，约100字）：</b><div style="margin-top:6px;">{text}</div></div>'
             f'</div>'
         )
-
-    overall_yahoo = _yahoo_info(["标普500", "纳斯达克", "道琼斯指数", "WTI 原油"])
-    a_yahoo = _yahoo_info(["上证指数", "深证成指", "创业板指", "科创50"])
-    hk_yahoo = _yahoo_info(["恒生指数", "恒生科技"])
-    us_yahoo = _yahoo_info(["标普500", "纳斯达克", "微软 MSFT", "Meta META"])
 
     overall_text = (
         f'<div style="margin-bottom:4px;"><b>• 观点一（环境）：</b>美联储利率转向预期的博弈持续扰动全球流动性与大宗商品估值中枢。</div>'
@@ -3143,19 +4107,19 @@ def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=Non
 
     card1 = _render_mf_card("GLOBAL MULTI-FACTOR // 宏观多因子研判",
                             "◆ 整体市场 · 雅虎行情、环境·政治·地缘 多因子 AI 结论",
-                            overall_yahoo, f"各市场样本汇聚 · {_esc(liq.get('summary', '全网资金监测'))}",
+                            f"各市场样本汇聚 · {_esc(liq.get('summary', '全网资金监测'))}",
                             overall_text, C_CYAN)
     card2 = _render_mf_card("A-SHARE MULTI-FACTOR // A股多因子研判",
                             "◆ A股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
-                            a_yahoo, _liq_summary("A股"),
+                            _liq_summary("A股"),
                             a_text, C_GREEN)
     card3 = _render_mf_card("HK-SHARE MULTI-FACTOR // 港股多因子研判",
                             "◆ 港股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
-                            hk_yahoo, _liq_summary("港股"),
+                            _liq_summary("港股"),
                             hk_text, C_MAGENTA)
     card4 = _render_mf_card("US-SHARE MULTI-FACTOR // 美股多因子研判",
                             "◆ 美股 · 雅虎行情、成交量、流动性与多因子 AI 结论",
-                            us_yahoo, _liq_summary("美股"),
+                            _liq_summary("美股"),
                             us_text, C_AMBER)
 
     return (
@@ -3242,6 +4206,8 @@ PIXEL_KIT = _RenderKit(
     source_badge=_source_badge,
     ai_badge=lambda: _badge("AI 合成", "ai"),
     ai_block=_ai_analysis_block,
+    sentiment_block=_pixel_sentiment_block,
+    policy_block=_pixel_policy_block,
     liquidity_block=_liquidity_report_block,
     panorama_block=_panorama_block,
     section=_section,
@@ -3262,6 +4228,8 @@ GUIZANG_KIT = _RenderKit(
     source_badge=lambda item: gz_source_badge(item, on_ink=True),
     ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
     ai_block=gz_ai_analysis_block,
+    sentiment_block=gz_sentiment_block,
+    policy_block=gz_policy_block,
     liquidity_block=gz_liquidity_report_block,
     panorama_block=gz_panorama_block,
     section=gz_section,
@@ -3299,22 +4267,33 @@ def _harden_wechat_table_widths(html):
     )
 
 
-def generate_report(data, date_display, date_str, theme=None):
+def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
+                    policy_result=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
     theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
+    sentiment_history: 跨日情绪基线（AI 新闻情绪因子用），缺省冷启动。
+    policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
-        html = generate_report_guizang(data, date_display, date_str)
+        html = generate_report_guizang(data, date_display, date_str,
+                                       sentiment_history=sentiment_history,
+                                       policy_result=policy_result)
     else:
-        html = generate_report_pixel(data, date_display, date_str)
+        html = generate_report_pixel(data, date_display, date_str,
+                                     sentiment_history=sentiment_history,
+                                     policy_result=policy_result)
     return _harden_wechat_table_widths(html)
 
 
-def generate_report_guizang(data, date_display, date_str):
+def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
+                                policy_result=None):
     """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
-    parts = _collect_report_parts(data, GUIZANG_KIT)
+    parts = _collect_report_parts(data, GUIZANG_KIT,
+                                  sentiment_history=sentiment_history,
+                                  date_str=date_str,
+                                  policy_result=policy_result)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -3369,14 +4348,18 @@ def generate_report_guizang(data, date_display, date_str):
     return html
 
 
-def generate_report_pixel(data, date_display, date_str):
+def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
+                              policy_result=None):
     """生成完整 HTML 日报（旧版 RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）。
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
     - 没有抓到内容的区块不出现在页面主体，仅在数据审计栏留痕；
     - 当天内容检验仍作为推送门禁，但不在页面顶部单独显示横幅。
     """
-    parts = _collect_report_parts(data, PIXEL_KIT)
+    parts = _collect_report_parts(data, PIXEL_KIT,
+                                  sentiment_history=sentiment_history,
+                                  date_str=date_str,
+                                  policy_result=policy_result)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -4049,11 +5032,26 @@ def main():
     # 1. 采集数据
     data = collect_all_data()
 
+    # 1.5 情绪历史：加载跨日基线供 AI 新闻情绪因子用（只读；落盘在报告保存后，
+    #     --dry-run 只读不写；缺失/损坏按冷启动处理，不中断日报）
+    senti_history_path = os.path.join(REPORT_DIR, SENTIMENT_HISTORY_FILENAME)
+    senti_history = _load_sentiment_history(senti_history_path)
+
+    # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
+    #     无政策新闻时栏目缺席，不伪造）
+    policy_result = build_policy_factor(data)
+    if policy_result.get("available"):
+        print(f"  📊 政策因子：{policy_result['summary']}")
+    else:
+        print("  📊 政策因子：今日无显著政策新闻，首位栏目缺席")
+
     # 2. 生成报告
     print("\n📝 正在生成日报...")
     date_display = _date_display()
     date_str = _today_str()
-    html = generate_report(data, date_display, date_str, theme=theme)
+    html = generate_report(data, date_display, date_str, theme=theme,
+                           sentiment_history=senti_history,
+                           policy_result=policy_result)
     print("  ✅ 日报生成完成")
 
     # 3. dry-run 模式
@@ -4069,6 +5067,17 @@ def main():
 
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
+    # 4.5 情绪历史落盘：把今日个股情绪计数并入跨日基线（同日多次运行按日期键
+    #     覆盖；落盘失败只告警，不影响推送）
+    try:
+        senti_today = build_news_sentiment(data, date_str, senti_history)
+        _save_sentiment_history(
+            senti_history_path,
+            _update_sentiment_history(senti_history, date_str,
+                                      senti_today["universe"],
+                                      senti_today["today_counts"]))
+    except OSError as exc:
+        print(f"  ⚠️ 情绪历史保存失败（{exc}），不影响本次日报与推送")
     # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
@@ -4133,3 +5142,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
