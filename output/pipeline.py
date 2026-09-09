@@ -65,18 +65,22 @@
      2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
-  10. 「AI 新闻情绪因子」栏目：对当天资讯标题逐条词表评分（S），按热门榜单
-      个股名归因，输出 DNS 日度情绪=(正−负)/总数、MOM 情绪动量=近3有评分日均
+  10. 「AI 新闻情绪因子」栏目：对标题逐条词表评分（S，附命中词），按热门榜单
+      个股名归因。标题窗口为近 SENTI_WINDOW_HOURS=72 小时（含历史存档），
+      输出 DNS 情绪=(正−负)/总数（72h 窗口口径）、MOM 情绪动量=近3有评分日均
       −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
-      >均值+2σ 标异常）。跨日基线存 output/sentiment_history.json（随日报提交）；
-      冷启动/样本不足明确标注；当天标题存在但均未点名榜单个股时，
-      栏目显示「样本不足」占位（不整栏消失），全天无当天标题时栏目缺席。
+      >均值+2σ 标异常；MOM/ANV 与跨日基线按自然日口径，存
+      output/sentiment_history.json，随日报提交）。标题存档存
+      output/news_history.json（每次运行合并本次抓取并按 日期+标题 去重）。
+      冷启动/样本不足明确标注；窗口内标题存在但均未点名榜单个股时，
+      栏目显示「样本不足」占位（不整栏消失），窗口内无标题时栏目缺席。
       渲染位置：各资讯栏目之后、流动性分析之前。规则合成、非投资建议。
-  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对当天资讯标题
-      做政策维度识别（货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据
-      含 CPI / PPI / 社融 / 统计局 等经济数据口径），经关键词矩阵映射到
-      行业受益/受损权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则
-      生成的总结）。触发词被否定修饰时跳过；零政策/宏观新闻时栏目缺席。
+  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对
+      近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度
+      识别（货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI /
+      PPI / 社融 / 统计局 等经济数据口径），经关键词矩阵映射到行业受益/受损
+      权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则生成的总结）。
+      触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。
       规则合成、非投资建议。
 
 退出码约定：
@@ -2605,12 +2609,14 @@ def _panorama_block(pan):
 
 
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
-                            policy_result=None):
+                            policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
 
     sentiment_history: 跨日情绪基线（AI 新闻情绪因子动量/新闻量窗口用）；
     date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天；
-    policy_result: main 1.6 阶段单独构建的政策因子结果，缺省时兜底构建。
+    policy_result: main 1.6 阶段单独构建的政策因子结果，缺省时兜底构建；
+    news_corpus: 跨运行标题存档（output/news_history.json），缺省时因子只用
+    本次抓取标题（测试 / 冷启动路径）。
     """
     market = data.get("实时行情", {})
     pan = data.get("A股大盘全景", {}) or {}
@@ -2643,18 +2649,20 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # ---- 栏目拼版：固定阅读顺序（有内容才渲染，无数据栏目缺席，审计栏永远收尾）----
     # 阅读逻辑：① 政策/宏观先定调 → ② AI 综合研判导读 → ③ 行情数据底座 →
     # ④ A股大盘全景 → ⑤ 全球 / 国内 / A股 / 港股 资讯 → ⑥ 新闻情绪量化
-    #（AI 新闻情绪因子，评分对象即上面的当天标题）→ ⑦ 资金与交投收尾
+    #（AI 新闻情绪因子，评分对象为近 72h 窗口标题，含跨运行存档）→ ⑦ 资金与交投收尾
     #（成交量与流动性分析）→ ⑧ 本次数据可用性（数据审计）。
     blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
 
     # ① 政策因子（推送页首位；宏观/政策先定调——main 已单独构建，此处仅兜底）
     if AI_ANALYSIS_ENABLED:
-        policy = policy_result if policy_result is not None else build_policy_factor(data)
+        if policy_result is None:
+            policy_result = build_policy_factor(data, date_str, news_corpus)
+        policy = policy_result
         if policy.get("available"):
             blocks["POLICY SHOCK"] = (
                 "POLICY SHOCK", "政策因子 · 冲击指数",
                 kit.policy_block(policy), kit.ai_badge(),
-                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（非投资建议）",
+                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（近 15 日窗口，非投资建议）",
             )
 
     # ② AI 盘研判（跨市场综合研判导读，紧随政策因子）
@@ -2721,27 +2729,28 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
         )
 
-    # ⑥ AI 新闻情绪因子（DNS/MOM/ANV/S）：紧随资讯栏目，评分对象即上面的当天标题。
-    #    有归因 → 正常出因子；无归因但有当天标题 → 显示「样本不足」占位（不整栏消失）；
-    #    当天标题为零 → 栏目缺席（与“无数据不出现在页面”一致）。
+    # ⑥ AI 新闻情绪因子（DNS/MOM/ANV/S）：紧随资讯栏目，评分对象为近 72h 标题窗口。
+    #    有归因 → 正常出因子；无归因但窗口内有标题 → 显示「样本不足」占位（不整栏消失）；
+    #    窗口内标题为零 → 栏目缺席（与“无数据不出现在页面”一致）。
     if AI_ANALYSIS_ENABLED:
         senti_result = build_news_sentiment(data, date_str or _today_str(),
-                                            sentiment_history)
+                                            sentiment_history,
+                                            news_corpus=news_corpus)
         if senti_result.get("available"):
             blocks["NEWS SENTIMENT"] = (
                 "NEWS SENTIMENT", "AI 新闻情绪因子",
                 kit.sentiment_block(senti_result), kit.ai_badge(),
-                "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
+                "章鱼AI · 标题情绪词表评分 + 个股归因（近 72h 窗口，非投资建议）",
             )
         else:
-            senti_today_n = ((senti_result.get("scored_headlines") or 0)
-                             + (senti_result.get("unattributed_n") or 0))
-            if senti_today_n > 0:
+            senti_win_n = ((senti_result.get("scored_headlines") or 0)
+                           + (senti_result.get("unattributed_n") or 0))
+            if senti_win_n > 0:
                 blocks["NEWS SENTIMENT"] = (
                     "NEWS SENTIMENT", "AI 新闻情绪因子",
                     kit.sentiment_empty_block(senti_result),
                     kit.senti_empty_badge(),
-                    "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
+                    "章鱼AI · 标题情绪词表评分 + 个股归因（近 72h 窗口，非投资建议）",
                 )
 
     # ⑦ 资金与交投收尾：A股 / 港股 / 美股最近收盘成交量与流动性分析
@@ -3317,18 +3326,20 @@ def _liquidity_market_block(label, stats):
 # ============================================================
 # AI 新闻情绪因子（NEWS SENTIMENT FACTORS · 确定性词表规则）
 # ------------------------------------------------------------
-# 对当日资讯标题逐条做情绪评分（HeadlineSentiment），按热门榜单
-# 个股名归因到个股，输出 4 个数据化因子：
-#   DNS 日度新闻情绪 DailyNewsSentiment ＝ (正−负)/总数（仅当天标题，24h 口径）
+# 对窗口内（近 SENTI_WINDOW_HOURS=72 小时）资讯标题逐条做情绪评分
+# （HeadlineSentiment），按热门榜单个股名归因到个股，输出 4 个因子：
+#   DNS 窗口新闻情绪 ＝ (正−负)/总数（近 72h 标题窗口口径）
 #   MOM 情绪动量 SentimentMomentum ＝ 近3个有评分日均值 − 近20个有评分日均值
 #   ANV 异常新闻量 AbnormalNewsVolume ＝ 今日条数 vs 近30天均值±σ（z 值；
-#       今日条数 > 均值+2σ 标异常放量）
+#       今日条数 > 均值+2σ 标异常放量；MOM/ANV 为自然日口径）
 #   S   标题情绪 HeadlineSentiment ＝ 每条标题的词表净情绪（+1/0/−1，附命中词）
 # 跨日窗口依赖 output/sentiment_history.json（随日报由 Actions 提交回库；
 # main 流程：采集后加载 → 渲染 → 保存报告后落盘；--dry-run 只读不写；
 # 同日多次运行按日期键覆盖，保证幂等；零报道日记 total=0、score=None）。
-# 冷启动/样本不足时明确标注口径与 n，不伪造数值；当天标题存在但均未归因时，
-# 栏目以「样本不足」占位渲染（不整栏消失）；全天无当天标题时才缺席。
+# 标题窗口内容依赖 output/news_history.json（每次运行合并本次抓取标题，
+# 报告保存后原子落盘，随日报一并提交回库）。
+# 冷启动/样本不足时明确标注口径与 n，不伪造数值；窗口内标题存在但均未归因时，
+# 栏目以「样本不足」占位渲染（不整栏消失）；窗口内无标题时才缺席。
 # 如需接大模型做标题标注，只需替换 _score_headline_sentiment（调用方只依赖
 # 返回结构 {"s","pos","neg"}，保留本规则作兜底）。
 # ============================================================
@@ -3341,6 +3352,19 @@ SENTI_VOL_WINDOW_N = 30    # 新闻量历史窗口（天，含零报道日，不
 SENTI_VOL_MIN_DAYS = 5     # 新闻量最少历史样本
 SENTI_HISTORY_KEEP_DAYS = 45  # 历史文件每只个股保留天数
 SENTIMENT_HISTORY_FILENAME = "sentiment_history.json"
+
+# ---- 因子标题窗口（2026-09-09 起从「当天 / 24h」放宽）----
+# 政策因子：近 POLICY_WINDOW_DAYS=15 天内的政策 / 宏观新闻（自然日，含当日）；
+# 新闻情绪因子：近 SENTI_WINDOW_HOURS=72 小时内的新闻（标题窗口）。
+# 单次运行能抓到的标题只有 1-2 天 → 多日窗口依赖跨运行存档
+# output/news_history.json（与 sentiment_history.json 同模式：每次运行合并
+# 本次抓取 → 渲染使用 → 报告保存后原子落盘；GitHub Actions 一并提交回库，
+# 同日重复运行按 日期+标题 去重，幂等）。情绪因子中 MOM / ANV 与跨日基线
+# 仍按自然日口径（每只个股「当日」= 报告日当天新闻的桶），不受 72h 窗口影响。
+SENTI_WINDOW_HOURS = 72          # 情绪标题窗口（小时，截至锚定时刻）
+POLICY_WINDOW_DAYS = 15          # 政策标题窗口（自然日，含锚定日）
+NEWS_HISTORY_KEEP_DAYS = POLICY_WINDOW_DAYS + 3   # 存档保留天数（含窗口余量）
+NEWS_HISTORY_FILENAME = "news_history.json"
 
 # 情绪词表：以 AI 盘研判 bull/bear 词为底，增加财报/资金/事件类词汇与
 # 繁体变体（港股标题多为繁体）。命中按非重叠最长优先计数。
@@ -3436,44 +3460,166 @@ def _attribute_headline(title, universe):
     return [u for u in universe if u["name"] in title]
 
 
-def _collect_sentiment_headlines(data):
-    """收集参与情绪评分的标题 [{title, source, section}]。
+def _factor_anchor_dt(date_str):
+    """因子窗口的锚定时刻（北京时间）。
 
-    只收当天（is_today）标题，落实 24h 口径：标题级缺标记时继承来源级，
-    两者都缺省视为非当天（不计入，不断言）。
+    生产运行（报告日 == 系统今天）→ 锚定当前时刻，保证「近 72 小时」严格从
+    此刻起算；固定日期调用（测试 / 历史演示，报告日 ≠ 今天）→ 锚定报告日
+    23:59:59，让夹具数据可复现、窗口确定性可断言。
+    """
+    try:
+        report_day = datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=CST)
+    except (TypeError, ValueError):
+        return datetime.now(CST)
+    now = datetime.now(CST)
+    if now.strftime("%Y%m%d") == date_str:
+        return now
+    return report_day.replace(hour=23, minute=59, second=59)
+
+
+def _norm_item_ts(value):
+    """把标题级时间规范成 "YYYY-MM-DD HH:MM"（北京时间字符串）；无法解析 → ""。"""
+    if not isinstance(value, str):
+        return ""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})", value.strip())
+    return f"{m.group(1)} {m.group(2)}" if m else ""
+
+
+def _collect_headline_items(data, default_date):
+    """收集本次抓取的全部标题 → [{title, source, section, ts, date}]。
+
+    不再按「是否当天」过滤——是否进入窗口由 _filter_headlines_window 决定。
+    ts = 标题级时间（有真实发布时间才给，如 Google News / 东财 / 港股频道），
+    无发布时间的标题（如新浪滚动字符串）ts=""、date=default_date（采集日）。
     """
     items = []
 
-    def _take(headlines, source_name, section, source_today):
-        for h in headlines or []:
-            if isinstance(h, dict):
-                title = (h.get("title") or "").strip()
-                if not title:
-                    continue
-                today = h.get("is_today", source_today)
-                src = h.get("source") or source_name
-            elif isinstance(h, str):
-                title = h.strip()
-                if not title:
-                    continue
-                today = source_today
-                src = source_name
-            else:
-                continue
-            if today:
-                items.append({"title": title, "source": src, "section": section})
+    def _add(title, source, section, ts_raw):
+        title = (title or "").strip()
+        if not title:
+            return
+        ts = _norm_item_ts(ts_raw)
+        items.append({
+            "title": title[:200], "source": (source or "").strip(),
+            "section": (section or "").strip(),
+            "ts": ts, "date": (ts[:10] if ts else default_date),
+        })
 
     google = data.get("全球头条", {}) or {}
-    _take(google.get("headlines"), "Google News", "全球头条", google.get("is_today", False))
+    for h in google.get("headlines", []) or []:
+        if isinstance(h, dict):
+            _add(h.get("title"), h.get("source"), "全球头条", h.get("published_cst"))
     em = data.get("东财快讯", {}) or {}
-    _take(em.get("headlines"), "东方财富", "东财快讯", em.get("is_today", False))
+    for h in em.get("headlines", []) or []:
+        if isinstance(h, dict):
+            _add(h.get("title"), "东方财富", "东财快讯", h.get("time"))
     sina = data.get("A股资讯", {}) or {}
-    _take(sina.get("headlines"), "新浪财经", "A股市场", sina.get("is_today", False))
+    for h in sina.get("headlines", []) or []:
+        _add(h if isinstance(h, str) else (h.get("title") if isinstance(h, dict) else ""),
+             "新浪财经", "A股市场", "")
     yt = data.get("港股名家频道", {}) or {}
     for ch in yt.get("channels", []) or []:
-        _take(ch.get("videos"), ch.get("name", "港股频道"), "港股名家频道",
-              ch.get("is_today", yt.get("is_today", False)))
+        ch_name = ch.get("name", "港股频道")
+        for v in ch.get("videos", []) or []:
+            _add(v.get("title"), ch_name, "港股名家频道", v.get("published_cst"))
     return items
+
+
+def _filter_headlines_window(items, anchor_dt, days=None, hours=None):
+    """按窗口过滤标题（保留原顺序）。
+
+    - days（政策）：近 N 个自然日（含锚定日）。按标题 date 字段判断——存档中的
+      无时间戳标题以其采集日归档，日归档即落在窗口内；ts 仅作 date 缺省补充；
+    - hours（情绪）：近 N 小时，按标题 ts 精确判断；无时间戳的标题只有在
+      采集日 == 锚定日时才计入（仅当天抓取可确认属于当天资讯，旧日无时间戳
+      标题无法证明落点，宁可排除也不误纳入）。
+    """
+    anchor_date = anchor_dt.strftime("%Y-%m-%d")
+    if days is not None:
+        start_date = (anchor_dt - timedelta(days=max(1, int(days)) - 1)).strftime("%Y-%m-%d")
+    out = []
+    for it in items or []:
+        ts = _norm_item_ts(it.get("ts"))
+        if ts:
+            try:
+                dt = datetime.strptime(ts[:16], "%Y-%m-%d %H:%M").replace(tzinfo=CST)
+            except (TypeError, ValueError):
+                dt = None
+        else:
+            dt = None
+        date = (it.get("date") or "")[:10]
+        if not date and dt is not None:
+            date = dt.strftime("%Y-%m-%d")
+        if days is not None:
+            if not (start_date <= date <= anchor_date):
+                continue
+        if hours is not None:
+            if dt is not None:
+                if not (anchor_dt - timedelta(hours=hours) <= dt <= anchor_dt):
+                    continue
+            else:
+                if date != anchor_date:
+                    continue
+        out.append(it)
+    return out
+
+
+def _load_news_corpus(path):
+    """读取新闻标题存档（缺失/损坏 → 空存档并告警，不中断日报）。"""
+    fresh = {"version": 1, "items": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            corpus = json.load(f)
+    except FileNotFoundError:
+        print("  ℹ️ 无新闻标题存档，本次仅本次抓取标题可用（窗口随运行次数累积）")
+        return fresh
+    except (OSError, ValueError) as exc:
+        print(f"  ⚠️ 新闻标题存档读取失败（{exc}），本次按空存档处理")
+        return fresh
+    if not isinstance(corpus, dict) or not isinstance(corpus.get("items"), list):
+        print("  ⚠️ 新闻标题存档结构异常，本次按空存档处理")
+        return fresh
+    corpus.setdefault("version", 1)
+    return corpus
+
+
+def _save_news_corpus(path, corpus):
+    """原子落盘新闻标题存档。"""
+    corpus["updated_cst"] = _now()
+    _atomic_write(path, json.dumps(corpus, ensure_ascii=False, indent=1))
+    print(f"  💾 新闻标题存档已更新: {path}（{len(corpus.get('items', []))} 条在窗口内）")
+
+
+def _merge_news_corpus(corpus, fresh_items):
+    """把本次抓取并入存档：按 日期+标题 去重（同日重复运行幂等）。"""
+    items = list(corpus.setdefault("items", []))
+    seen = {(it.get("date", ""), it.get("title", "")) for it in items}
+    added = 0
+    for it in fresh_items or []:
+        key = (it.get("date", ""), it.get("title", ""))
+        if not key[1] or key in seen:
+            continue
+        seen.add(key)
+        items.append({"title": it["title"], "source": it.get("source", ""),
+                      "section": it.get("section", ""), "ts": it.get("ts", ""),
+                      "date": it.get("date", "")})
+        added += 1
+    corpus["items"] = items
+    if added:
+        print(f"  🗂 新闻标题存档 +{added} 条（累计 {len(items)} 条）")
+    return corpus
+
+
+def _prune_news_corpus(corpus, anchor_date):
+    """剪掉早于存档窗口的旧标题（按 date 自然日）。"""
+    try:
+        base = datetime.strptime(anchor_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return corpus
+    cutoff = (base - timedelta(days=max(1, NEWS_HISTORY_KEEP_DAYS) - 1)).strftime("%Y-%m-%d")
+    items = [it for it in corpus.get("items", []) if (it.get("date") or "") >= cutoff]
+    corpus["items"] = items
+    return corpus
 
 
 def _load_sentiment_history(path):
@@ -3594,8 +3740,16 @@ def _sentiment_volume(today_total, prior_totals):
             "label": label}
 
 
-def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N):
+def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N,
+                         news_corpus=None):
     """构建 AI 新闻情绪因子结果（渲染与历史落盘共用同一口径）。
+
+    - 标题窗口：近 SENTI_WINDOW_HOURS=72 小时（news_corpus 缺省时退化为只用
+      本次抓取标题，仍按 72h 过滤）；
+    - 个股归因 / 评分 / DNS 展示：基于窗口内全部标题；
+    - MOM / ANV 与历史落盘：按自然日口径——「今日」= 窗口内标题中日期等于
+      报告日的桶（today_counts 只含当日，供 sentiment_history 按日键写历史，
+      与历史基线同量纲）。
 
     history: _load_sentiment_history 读到的跨日基线（可为 None/{}，冷启动时
     动量/新闻量标样本不足）。返回 available/stocks/universe/today_counts 等。
@@ -3603,7 +3757,17 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
     history = history if isinstance(history, dict) else {}
     past = history.get("stocks") or {}
     universe = _extract_stock_universe(data.get("热门榜单", {}) or {})
-    headlines = _collect_sentiment_headlines(data)
+    anchor_dt = _factor_anchor_dt(date_str)
+    anchor_date = anchor_dt.strftime("%Y-%m-%d")
+    try:
+        today_iso = datetime.strptime(date_str, "%Y%m%d").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        today_iso = anchor_date
+    if isinstance(news_corpus, dict) and isinstance(news_corpus.get("items"), list):
+        raw = news_corpus["items"]
+    else:
+        raw = _collect_headline_items(data, anchor_date)
+    headlines = _filter_headlines_window(raw, anchor_dt, hours=SENTI_WINDOW_HOURS)
     per_stock = {}
     unattributed = 0
     for order, head in enumerate(headlines):
@@ -3612,19 +3776,29 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
             unattributed += 1
             continue
         scored = _score_headline_sentiment(head["title"])
+        is_today_item = (head.get("date") or "")[:10] == today_iso
         for stock in targets:
             slot = per_stock.setdefault(stock["key"], {
-                "info": stock, "pos": 0, "neu": 0, "neg": 0, "headlines": []})
+                "info": stock, "pos": 0, "neu": 0, "neg": 0,
+                "day_pos": 0, "day_neu": 0, "day_neg": 0, "headlines": []})
             if scored["s"] > 0:
                 slot["pos"] += 1
+                if is_today_item:
+                    slot["day_pos"] += 1
             elif scored["s"] < 0:
                 slot["neg"] += 1
+                if is_today_item:
+                    slot["day_neg"] += 1
             else:
                 slot["neu"] += 1
+                if is_today_item:
+                    slot["day_neu"] += 1
             slot["headlines"].append({
                 "title": head["title"], "source": head["source"],
                 "section": head["section"], "s": scored["s"],
                 "pos_hits": scored["pos"], "neg_hits": scored["neg"],
+                "date": (head.get("date") or "")[:10],
+                "old": is_today_item is False and bool(head.get("date")),
                 "order": order,
             })
     stocks = []
@@ -3633,18 +3807,23 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         total = slot["pos"] + slot["neu"] + slot["neg"]
         if total < 1:
             continue
-        today_counts[key] = {"pos": slot["pos"], "neu": slot["neu"],
-                             "neg": slot["neg"], "total": total}
         score = (slot["pos"] - slot["neg"]) / total
+        day_total = slot["day_pos"] + slot["day_neu"] + slot["day_neg"]
+        if day_total >= 1:
+            today_counts[key] = {"pos": slot["day_pos"], "neu": slot["day_neu"],
+                                 "neg": slot["day_neg"], "total": day_total}
         days = (past.get(key) or {}).get("days", {}) or {}
         prior = sorted(((day, val) for day, val in days.items() if day < date_str),
                        reverse=True)
         scored_days = [(day, val["score"]) for day, val in prior
                        if isinstance(val, dict) and type(val.get("score")) in (int, float)]
-        momentum = _sentiment_momentum([(date_str, round(score, 4))] + scored_days)
+        today_score = (round((slot["day_pos"] - slot["day_neg"]) / day_total, 4)
+                       if day_total >= 1 else None)
+        day_scores = ([(date_str, today_score)] if today_score is not None else []) + scored_days
+        momentum = _sentiment_momentum(day_scores)
         raw_totals = [val.get("total", 0) for _, val in prior[:SENTI_VOL_WINDOW_N]
                       if isinstance(val, dict)]
-        volume = _sentiment_volume(total, raw_totals)
+        volume = _sentiment_volume(day_total, raw_totals)
         slot["headlines"].sort(key=lambda h: (-abs(h["s"]), h["order"]))
         info = slot["info"]
         stocks.append({
@@ -3664,13 +3843,19 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         "universe_n": len(universe),
         "scored_headlines": len(headlines) - unattributed,
         "unattributed_n": unattributed,
+        "window_hours": SENTI_WINDOW_HOURS,
+        "window_text": f"{anchor_dt:%m-%d %H:%M}",
+        "corpus_n": len(headlines),
         "universe": universe,
         "today_counts": today_counts,
     }
 
 
 def _senti_factor_lines(s):
-    """个股 3 因子的展示文案（双主题共用；返回 [(标签, 文案)]）。"""
+    """个股 3 因子的展示文案（双主题共用；返回 [(标签, 文案)]）。
+
+    DNS 为近 SENTI_WINDOW_HOURS=72h 标题窗口口径；MOM/ANV 为自然日口径。
+    """
     mom = s["momentum"]
     if mom["enough"]:
         mom_line = (f'MOM {mom["value"]:+.2f}（近{mom["short_n"]}日均'
@@ -3687,24 +3872,30 @@ def _senti_factor_lines(s):
     else:
         vol_line = f'ANV 样本不足（历史n={vol["n"]}，需≥{vol["need"]}天）'
     return [
-        ("日度情绪", f'DNS {s["score"]:+.2f}（正{s["pos"]}/中{s["neu"]}/负{s["neg"]} · {s["label"]}）'),
+        (f"{SENTI_WINDOW_HOURS}h 情绪",
+         f'DNS {s["score"]:+.2f}（正{s["pos"]}/中{s["neu"]}/负{s["neg"]} · {s["label"]}）'),
         ("情绪动量", mom_line),
         ("新闻量", vol_line),
     ]
 
 
 def _senti_headline_sub(h):
-    """标题行副文案：栏目 · 来源 · 命中词（双主题共用）。"""
+    """标题行副文案：栏目 · 来源 · 命中词（双主题共用）；72h 窗口内旧日标题前缀日期。"""
     hits = (h["pos_hits"] or []) + (h["neg_hits"] or [])
     hit_txt = f'命中：{"/".join(hits[:3])}' if hits else "无情绪词"
-    return f'{h["section"]} · {h["source"]} · {hit_txt}'
+    base = f'{h["section"]} · {h["source"]} · {hit_txt}'
+    date = (h.get("date") or "")[:10]
+    if h.get("old") and date:
+        return f'{date[5:]} · {base}'
+    return base
 
 
 def _pixel_sentiment_block(res):
     """像素主题：AI 新闻情绪因子（DNS/MOM/ANV/S 数据化卡片）。"""
     head = _mini_table([
-        ("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
-        ("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        ("标题窗口", f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
+        ("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股窗口内有报道'),
+        ("参与评分", f'{res["scored_headlines"]} 条标题已归因评分（窗口内）'),
         ("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
     ])
     cards = []
@@ -3732,44 +3923,46 @@ def _pixel_sentiment_block(res):
         title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
         cards.append(_pixel_panel(f"STOCK SENTI // {_esc(title)} · {s['market']}",
                                   body, color, icon))
-    note = _note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
-                 "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪 // RULESET v3 // 非投资建议")
+    note = _note(f"因子口径：DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
+                 "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日）；S=标题词表净情绪 // RULESET v3 // 非投资建议")
     return head + "".join(cards) + note
 
 
 def _senti_empty_counts(res):
-    """情绪因子占位用的统一计数（双主题共用）。返回 (n_today, universe_n)。"""
+    """情绪因子占位用的统一计数（双主题共用）。返回 (n_window, universe_n)。"""
     n_today = (res.get("scored_headlines") or 0) + (res.get("unattributed_n") or 0)
     universe_n = res.get("universe_n") or 0
     return n_today, universe_n
 
 
 def _pixel_sentiment_empty_block(res):
-    """像素主题：AI 新闻情绪因子「样本不足」占位（无归因时代替整栏消失）。"""
+    """像素主题：AI 新闻情绪因子「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
     n_today, universe_n = _senti_empty_counts(res)
     if universe_n:
-        cover = f"0 / {universe_n} 只榜单个股被当天标题点名"
+        cover = f"0 / {universe_n} 只榜单个股被窗口内标题点名"
     else:
         cover = "热门榜单暂缺 → 无个股宇宙可归因"
     head = _mini_table([
-        ("当天标题", f"{n_today} 条（24h 口径，全部尝试归因）"),
+        ("窗口标题", f"{n_today} 条（近 {SENTI_WINDOW_HOURS}h，全部尝试归因）"),
         ("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n else "0 只（热门榜单暂缺）"),
         ("归因结果", cover),
     ])
     body = (head
-            + _note("DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：当天标题未点名榜单个股 → "
+            + _note(f"DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：近 {SENTI_WINDOW_HOURS}h 标题未点名榜单个股 → "
                     "无样本可出分，明确标注而非伪造。有榜单个股被点名报道时本栏目自动恢复。"))
-    return (_alert(f"SAMPLE INSUFFICIENT // 样本不足：{n_today} 条当天标题均未点名榜单个股", C_AMBER)
+    return (_alert(f"SAMPLE INSUFFICIENT // 样本不足：{n_today} 条标题（近{SENTI_WINDOW_HOURS}h）均未点名榜单个股", C_AMBER)
             + _pixel_panel("STOCK SENTI // 样本不足", body, C_AMBER, "■")
-            + _note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
-                    "ANV:今日条数>30天均值+2σ标异常 // RULESET v3 // 非投资建议"))
+            + _note(f"因子口径：DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
+                    "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日） // RULESET v3 // 非投资建议"))
 
 
 def gz_sentiment_block(res):
     """谷藏主题：AI 新闻情绪因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
     out = [
-        gz_rowline("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股有当天报道'),
-        gz_rowline("参与评分", f'{res["scored_headlines"]} 条标题已归因评分'),
+        gz_rowline("标题窗口",
+                   f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
+        gz_rowline("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股窗口内有报道'),
+        gz_rowline("参与评分", f'{res["scored_headlines"]} 条标题已归因评分（窗口内）'),
         gz_rowline("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
     ]
     for s in res["stocks"]:
@@ -3786,33 +3979,33 @@ def gz_sentiment_block(res):
         more = len(s["headlines"]) - 3
         if more > 0:
             out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
-    out.append(gz_note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
-                       "ANV:今日条数>30天均值+2σ标异常；S=标题词表净情绪。非投资建议。"))
+    out.append(gz_note(f"因子口径：DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
+                       "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日）；S=标题词表净情绪。非投资建议。"))
     return "".join(out)
 
 
 def gz_sentiment_empty_block(res):
-    """谷藏主题：AI 新闻情绪因子「样本不足」占位（无归因时代替整栏消失）。"""
+    """谷藏主题：AI 新闻情绪因子「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
     n_today, universe_n = _senti_empty_counts(res)
     if universe_n:
-        cover = f"0 / {universe_n} 只榜单个股被当天标题点名"
+        cover = f"0 / {universe_n} 只榜单个股被窗口内标题点名"
     else:
         cover = "热门榜单暂缺 → 无个股宇宙可归因"
     out = [
         gz_shell(
             f'<div style="font-size:16px;font-weight:700;color:{GZ_INK};line-height:1.6;">'
-            f'■ 样本不足：{n_today} 条当天标题均未点名榜单个股</div>',
+            f'■ 样本不足：{n_today} 条标题（近{SENTI_WINDOW_HOURS}h）均未点名榜单个股</div>',
             pad="8px 0"),
-        gz_rowline("当天标题", f"{n_today} 条（24h 口径，全部尝试归因）"),
+        gz_rowline("窗口标题", f"{n_today} 条（近 {SENTI_WINDOW_HOURS}h，全部尝试归因）"),
         gz_rowline("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n
                    else "0 只（热门榜单暂缺）"),
         gz_rowline("归因结果", cover),
     ]
     out.append(gz_note(
-        "DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：当天标题未点名榜单个股 → 无样本可出分，"
-        "明确标注而非伪造；有榜单个股被点名报道时本栏目自动恢复。因子口径：DNS=(正−负)/总数"
-        "（仅当天标题）；MOM=近3有评分日均−近20有评分日均；ANV:今日条数>30天均值+2σ标异常。"
-        "非投资建议。"))
+        f"DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：近 {SENTI_WINDOW_HOURS}h 标题未点名榜单个股 → "
+        "无样本可出分，明确标注而非伪造；有榜单个股被点名报道时本栏目自动恢复。因子口径："
+        f"DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
+        "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日）。非投资建议。"))
     return "".join(out)
 
 
@@ -3827,7 +4020,8 @@ def gz_sentiment_empty_block(res):
 # 维度分两类：固定映射（货币/财政/地产/宏观数据，直接给行业权重）与
 # 行业归因（扶持/监管/开放/贸易，按标题提及的行业落权重；无提及
 # 落宽基小权重并标注宽基）。触发词被否定词修饰时跳过（如"暂不降准"）。
-# 只统计当天标题（复用情绪因子的 24h 采集口径）；零政策/宏观新闻时
+# 只统计近 POLICY_WINDOW_DAYS=15 日窗口内标题（复用标题收集器，含历史存档，
+# 无 ts 的标题按 date 判断，当天标题自然在窗口内）；窗口内零政策/宏观新闻时
 # 栏目缺席，不伪造。
 # ============================================================
 POLICY_DISPLAY_INDUSTRIES = 5   # 受益/承压榜单各展示的行业数
@@ -3946,12 +4140,12 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
                     winners, losers):
     """规则生成的政策总结（纯数据转述，无伪造）。"""
     if policy_n == 0:
-        return "今日未检出显著政策新闻。"
+        return "窗口内未检出显著政策新闻。"
     dims = "、".join(f"{k}×{v}" for k, v in
                      sorted(dim_counts.items(), key=lambda kv: (-kv[1], kv[0])))
     # 含「宏观数据」维度（CPI/PPI/统计局等）时，称谓用「政策及宏观数据类新闻」更贴切
     kind = "政策及宏观数据类新闻" if "宏观数据" in dim_counts else "政策类新闻"
-    parts = [f"今日检出{kind} {policy_n} 条（占当天资讯 "
+    parts = [f"近{POLICY_WINDOW_DAYS}日窗口内检出{kind} {policy_n} 条（占窗口资讯 "
              f"{policy_n}/{total_n}），覆盖维度：{dims}；"
              f"大盘政策冲击指数 PSI {broad_score:+d}（{broad_label}）。"]
     if winners:
@@ -3965,13 +4159,25 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
     return "".join(parts)
 
 
-def build_policy_factor(data):
+def build_policy_factor(data, date_str=None, news_corpus=None):
     """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
 
-    只统计当天标题（复用情绪因子的 24h 采集口径）。零政策新闻时
-    available=False，栏目缺席。
+    标题窗口：近 POLICY_WINDOW_DAYS=15 日（自然日，含锚定日；news_corpus 为
+    跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。窗口内零
+    政策/宏观新闻时 available=False，栏目缺席。
     """
-    headlines = _collect_sentiment_headlines(data)
+    anchor_dt = _factor_anchor_dt(date_str) if date_str else datetime.now(CST)
+    anchor_date = anchor_dt.strftime("%Y-%m-%d")
+    if isinstance(news_corpus, dict) and isinstance(news_corpus.get("items"), list):
+        raw = news_corpus["items"]
+    else:
+        raw = _collect_headline_items(data, anchor_date)
+    headlines = _filter_headlines_window(raw, anchor_dt, days=POLICY_WINDOW_DAYS)
+    try:
+        today_iso = datetime.strptime(date_str, "%Y%m%d").strftime("%Y-%m-%d") \
+            if date_str else anchor_date
+    except (TypeError, ValueError):
+        today_iso = anchor_date
     industry_scores = {}
     broad_score = 0
     broad_count = 0
@@ -4013,11 +4219,14 @@ def build_policy_factor(data):
                     slot["dims"].add(dim["label"])
                     if ind not in head_industries:
                         head_industries.append(ind)
+        item_date = (head.get("date") or "")[:10]
         policy_heads.append({
             "title": title, "source": head["source"], "section": head["section"],
             "dims": head_dims, "industries": head_industries,
             "direction": 1 if head_net > 0 else (-1 if head_net < 0 else 0),
             "net": head_net,
+            "date": item_date,
+            "old": item_date not in ("", today_iso),
         })
     industries = [{
         "name": name, "score": v["score"], "count": v["count"],
@@ -4044,6 +4253,8 @@ def build_policy_factor(data):
         "losers": losers,
         "headlines": policy_heads,
         "summary": summary,
+        "window_days": POLICY_WINDOW_DAYS,
+        "corpus_n": len(headlines),
     }
 
 
@@ -4067,7 +4278,8 @@ def _pixel_policy_block(res):
     dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
         res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
     head = _mini_table([
-        ("政策新闻", f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+        ("政策新闻", f'{res["policy_n"]} 条（占近 {res.get("window_days") or POLICY_WINDOW_DAYS} 日窗口资讯 '
+                     f'{res["policy_n"]}/{res["total_headlines"]}）'),
         ("大盘冲击", f'PSI <b style="color:{color};">{res["broad_score"]:+d}</b>'
                      f'（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
         ("覆盖维度", _esc(dims_line)),
@@ -4090,9 +4302,12 @@ def _pixel_policy_block(res):
         else:
             arrow, bcolor = "■", C_AMBER
         inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        sub = f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · {h["source"]}'
+        if h.get("old") and h.get("date"):
+            sub = f'{h["date"][5:]} · {sub}'
         rows.append(_item_row(
             "◆", f'<b style="color:{bcolor};">[{arrow} {h["net"]:+d}]</b> {_esc(h["title"][:60])}',
-            _esc(f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · {h["source"]}')))
+            _esc(sub)))
     more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
     if more > 0:
         rows.append(
@@ -4100,8 +4315,8 @@ def _pixel_policy_block(res):
             f'line-height:1.7;font-family:{FONT_MONO};">'
             f'＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）</div>')
     body = head + (_mini_table(board) if board else "") + "".join(rows)
-    note = _note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
-                 "触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
+    note = _note(f"政策因子口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
+                 "关键词矩阵映射行业权重 → 汇总PSI；触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
     return summary_html + _pixel_panel("POLICY SHOCK // 政策冲击指数", body, color, icon) + note
 
 
@@ -4116,7 +4331,8 @@ def gz_policy_block(res):
                  f'{arrow} {_esc(res["summary"])}</div>', pad="8px 0"),
         gz_subsection("大盘冲击与覆盖"),
         gz_rowline("政策新闻",
-                   f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+                   f'{res["policy_n"]} 条（占近 {res.get("window_days") or POLICY_WINDOW_DAYS} 日窗口资讯 '
+                   f'{res["policy_n"]}/{res["total_headlines"]}）'),
         gz_rowline("大盘冲击",
                    f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
         gz_rowline("覆盖维度", _esc(dims_line)),
@@ -4134,15 +4350,18 @@ def gz_policy_block(res):
     for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
         badge = "▲" if h["direction"] > 0 else ("▼" if h["direction"] < 0 else "■")
         inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        sub = (f'{_esc("/".join(h["dims"]))} · 影响：{_esc(inds)} · '
+               f'{_esc(h["section"])} · {_esc(h["source"])}')
+        if h.get("old") and h.get("date"):
+            sub = f'{h["date"][5:]} · {sub}'
         out.append(gz_item_row(
             "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> {_esc(h["title"][:60])}',
-            f'{_esc("/".join(h["dims"]))} · 影响：{_esc(inds)} · '
-            f'{_esc(h["section"])} · {_esc(h["source"])}'))
+            sub))
     more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
     if more > 0:
         out.append(gz_note(f"＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）。"))
-    out.append(gz_note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
-                       "触发词被否定修饰时跳过。非投资建议。"))
+    out.append(gz_note(f"政策因子口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
+                       "关键词矩阵映射行业权重 → 汇总PSI；触发词被否定修饰时跳过。非投资建议。"))
     return "".join(out)
 
 
@@ -4364,32 +4583,36 @@ def _harden_wechat_table_widths(html):
 
 
 def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
-                    policy_result=None):
+                    policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
     theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
     sentiment_history: 跨日情绪基线（AI 新闻情绪因子用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
+    news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
         html = generate_report_guizang(data, date_display, date_str,
                                        sentiment_history=sentiment_history,
-                                       policy_result=policy_result)
+                                       policy_result=policy_result,
+                                       news_corpus=news_corpus)
     else:
         html = generate_report_pixel(data, date_display, date_str,
                                      sentiment_history=sentiment_history,
-                                     policy_result=policy_result)
+                                     policy_result=policy_result,
+                                     news_corpus=news_corpus)
     return _harden_wechat_table_widths(html)
 
 
 def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
-                                policy_result=None):
+                                policy_result=None, news_corpus=None):
     """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
-                                  policy_result=policy_result)
+                                  policy_result=policy_result,
+                                  news_corpus=news_corpus)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -4445,7 +4668,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 
 
 def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
-                              policy_result=None):
+                              policy_result=None, news_corpus=None):
     """生成完整 HTML 日报（旧版 RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）。
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
@@ -4455,7 +4678,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
     parts = _collect_report_parts(data, PIXEL_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
-                                  policy_result=policy_result)
+                                  policy_result=policy_result,
+                                  news_corpus=news_corpus)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -5133,21 +5357,29 @@ def main():
     senti_history_path = os.path.join(REPORT_DIR, SENTIMENT_HISTORY_FILENAME)
     senti_history = _load_sentiment_history(senti_history_path)
 
+    # 1.5b 新闻标题存档：加载并把本次抓取标题并入（多日窗口 15 日/72h 的内容基础；
+    #     同日重复运行按 日期+标题 去重幂等；读取失败只告警。落盘在报告保存后；
+    #     --dry-run 只读不写）
+    news_history_path = os.path.join(REPORT_DIR, NEWS_HISTORY_FILENAME)
+    date_str = _today_str()
+    fresh_items = _collect_headline_items(data, _today_display())
+    news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
+
     # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
-    #     无政策新闻时栏目缺席，不伪造）
-    policy_result = build_policy_factor(data)
+    #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
+    policy_result = build_policy_factor(data, date_str, news_corpus)
     if policy_result.get("available"):
         print(f"  📊 政策因子：{policy_result['summary']}")
     else:
-        print("  📊 政策因子：今日无显著政策新闻，首位栏目缺席")
+        print(f"  📊 政策因子：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
 
     # 2. 生成报告
     print("\n📝 正在生成日报...")
     date_display = _date_display()
-    date_str = _today_str()
     html = generate_report(data, date_display, date_str, theme=theme,
                            sentiment_history=senti_history,
-                           policy_result=policy_result)
+                           policy_result=policy_result,
+                           news_corpus=news_corpus)
     print("  ✅ 日报生成完成")
 
     # 3. dry-run 模式
@@ -5163,10 +5395,11 @@ def main():
 
     # 4. 保存文件
     output_path = save_report(html, args.output, data)
-    # 4.5 情绪历史落盘：把今日个股情绪计数并入跨日基线（同日多次运行按日期键
-    #     覆盖；落盘失败只告警，不影响推送）
+    # 4.5 历史落盘：把今日个股情绪计数并入跨日基线、把本次标题并入标题存档
+    #     （同日多次运行按日期键/日期+标题覆盖去重，幂等；失败只告警，不影响推送）
     try:
-        senti_today = build_news_sentiment(data, date_str, senti_history)
+        senti_today = build_news_sentiment(data, date_str, senti_history,
+                                           news_corpus=news_corpus)
         _save_sentiment_history(
             senti_history_path,
             _update_sentiment_history(senti_history, date_str,
@@ -5174,6 +5407,12 @@ def main():
                                       senti_today["today_counts"]))
     except OSError as exc:
         print(f"  ⚠️ 情绪历史保存失败（{exc}），不影响本次日报与推送")
+    try:
+        anchor_date = _factor_anchor_dt(date_str).strftime("%Y-%m-%d")
+        _save_news_corpus(news_history_path,
+                          _prune_news_corpus(news_corpus, anchor_date))
+    except OSError as exc:
+        print(f"  ⚠️ 新闻标题存档保存失败（{exc}），不影响本次日报与推送")
     # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
