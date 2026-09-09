@@ -30,8 +30,8 @@
       ① 指数表现——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
       最新价、涨跌幅与成交额；② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、
       涨跌比与情绪定调）；③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
-      ④ 北向资金——港交所 2024-08-19 起停披净买入，仅展示盘后成交总额（可得时）与
-      披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
+      ④ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
+      展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
       净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
@@ -65,15 +65,17 @@
      2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
-  10. 「AI 新闻情绪因子」栏目：对标题逐条词表评分（S，附命中词），按热门榜单
-      个股名归因。标题窗口为近 SENTI_WINDOW_HOURS=72 小时（含历史存档），
-      输出 DNS 情绪=(正−负)/总数（72h 窗口口径）、MOM 情绪动量=近3有评分日均
-      −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
-      >均值+2σ 标异常；MOM/ANV 与跨日基线按自然日口径，存
-      output/sentiment_history.json，随日报提交）。标题存档存
-      output/news_history.json（每次运行合并本次抓取并按 日期+标题 去重）。
-      冷启动/样本不足明确标注；窗口内标题存在但均未点名榜单个股时，
-      栏目显示「样本不足」占位（不整栏消失），窗口内无标题时栏目缺席。
+  10. 「AI 新闻情绪因子」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
+      逐股输出 AI 新闻情绪分与总结评论（含原因）。标题窗口为近
+      SENTI_WINDOW_HOURS=72 小时（含历史存档），对窗口内标题逐条词表评分（S，
+      附命中词）并按热门榜单个股名归因；每只上榜股输出 DNS 情绪=
+      (正−负)/总数（72h 窗口口径）、MOM 情绪动量=近3有评分日均−近20有评分日均、
+      ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，>均值+2σ 标异常；
+      MOM/ANV 与跨日基线按自然日口径，存 output/sentiment_history.json，随日报
+      提交），以及「总结评论 + 原因」（由命中标题、词表、动量与新闻量规则生成）。
+      窗口内无相关点名新闻的上榜股明确显示「暂无评分」与原因，不凭价格涨跌反推
+      新闻情绪；无热门榜单则栏目缺席。标题存档存 output/news_history.json
+      （每次运行合并本次抓取并按 日期+标题 去重）。冷启动/样本不足明确标注。
       渲染位置：各资讯栏目之后、流动性分析之前。规则合成、非投资建议。
   11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对
       近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度
@@ -135,6 +137,11 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
+
+# PushPlus 一对多群组编码（2026-09-09 起默认改为「一对多」推送至群组 oai.1；
+# 可在 PushPlus 后台自定义群组编码，或用环境变量 PUSHPLUS_TOPIC 覆盖；
+# 设为空字符串则回退到一对一直发自己）。
+PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "oai.1")
 
 # ============================================================
 # 推送主题（2026-08-21 起，一对一 / 一对多推送共用）
@@ -827,10 +834,11 @@ def fetch_liquidity_report():
 #     深市 = 深证成指、京市 = 北证50）合计为沪深京市场宽度；
 #   · 成交额：沪深京指数成分成交额（f6，元）合计；上一交易日成交额用
 #     push2his 日 K（fields2=f51,f57）补齐，用于计算环比增减；
-#   · 北向资金：港交所自 2024-08-19 起停止披露北向实时 / 每日净买入额，仅盘后
-#     公布当日成交总额。本模块按东财沪深港通历史接口（kamt.kline）取最近一条
-#     披露记录、以行内最后一个可解析数值作为当日成交总额（亿元）的启发式读取，
-#     读取不到就明确标注暂缺——绝不编造净买入数字；
+#   · 南北向资金：港交所自 2024-08-19 起停止披露南北向实时 / 每日净买入额，仅盘后
+#     公布当日成交总额。本模块按东财数据中心历史报表 RPT_MUTUAL_DEAL_HISTORY 取
+#     最近 N 条披露记录（MUTUAL_TYPE=005 北向合计 / 006 南向合计），按「前一收盘」
+#     规则取最近一个完整交易日（最新行是今天则取前一日；否则取最后一日），
+#     将 DEAL_AMT（百万元）换算为亿元；读取不到就明确标注暂缺——绝不编造净买入数字；
 #   · 板块热力：clist/get 行业板块（fs=m:90+t:2）按涨跌幅排序，取领涨 / 领跌
 #     各 PANORAMA_SECTOR_TOP_N 名，附主力净流入与领涨股。
 # 任何一个子请求失败只影响对应子块；八大指数与市场宽度全失败才整体标记
@@ -846,8 +854,8 @@ PANORAMA_INDEX_SPECS = [
 PANORAMA_BREADTH_SOURCES = [("1.000001", "沪"), ("0.399001", "深"), ("0.899050", "京")]
 PANORAMA_SECTOR_TOP_N = int(os.environ.get("OCTOPUS_PANORAMA_SECTOR_TOP_N", "5"))
 PANORAMA_NORTH_POLICY_NOTE = (
-    "港交所自 2024-08-19 起停止披露北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
-    "本页不再估算净买入，避免把推算当披露。")
+    "港交所自 2024-08-19 起停止披露南北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
+    "本页按最近一个完整交易日（前一收盘）展示北向、南向成交总额，不再估算净买入。")
 
 
 def _panorama_float(val):
@@ -935,35 +943,83 @@ def _fetch_panorama_prev_amounts():
     return out
 
 
-def _fetch_panorama_northbound():
-    """北向资金：2024-08-19 起不再披露净买入，尽力读最近披露的当日成交总额。
+PANORAMA_HSGT_HISTORY_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
-    kamt.kline 的 data.s2n 每行为 "日期,数值,..."；披露口径调整后净买列为 "-"，
-    成交额列仍更新，故取行内最后一个可解析数值作为成交总额（亿元）的启发式近似；
-    读不到任何数值 → available=False 并给出原因（页面明确标注，不造数）。
+
+def _fetch_panorama_northbound():
+    """南北向资金：2024-08-19 起不再披露净买入，读最近完整交易日（前一收盘）成交总额。
+
+    数据源：东财数据中心历史报表 RPT_MUTUAL_DEAL_HISTORY。
+    其中 MUTUAL_TYPE=005 为「北向合计」（沪股通+深股通）、006 为「南向合计」
+    （港股通沪+港股通深）；DEAL_AMT 为该日成交总额（单位：百万元），
+    披露口径调整后北向净买额列缺失，但成交总额仍更新。
+
+    前一天收盘口径：若最新日期记录等于今天，则取它前一日（最近完整交易日）；
+    否则取最后一日（盘前 / 非交易日 / 当日尚未收市场景下，最后一日即最近完整交易日）。
+    读不到任何数值 → available=False / south_available=False 并给出原因。
     """
-    params = {"fields1": "f1,f2,f3,f4", "fields2": "f51,f52,f53,f54,f55,f56",
-              "klt": "101", "lmt": "1"}
-    data = safe_request("https://push2.eastmoney.com/api/qt/kamt.kline/get",
-                        params=params, timeout=12)
+    params = {
+        "reportName": "RPT_MUTUAL_DEAL_HISTORY",
+        "columns": "ALL",
+        "pageNumber": "1",
+        "pageSize": "40",
+        "sortColumns": "TRADE_DATE,MUTUAL_TYPE",
+        "sortTypes": "-1,1",
+        "source": "WEB",
+        "client": "WEB",
+    }
+    data = safe_request(PANORAMA_HSGT_HISTORY_URL, params=params, timeout=12)
     note = PANORAMA_NORTH_POLICY_NOTE
-    try:
-        rows = (((data or {}).get("data") or {}).get("s2n")) or []
-        if not rows:
-            raise ValueError("接口未返回北向记录")
-        parts = str(rows[-1]).split(",")
-        date = parts[0].strip()
-        nums = [x for x in (_panorama_float(v) for v in parts[1:]) if x is not None]
-        if not date:
-            raise ValueError("北向记录缺少日期")
-        if not nums:
+    today_date = _today_display()
+
+    def _pick(rows):
+        """按「前一收盘」规则从 成交总额记录 里取最近一个完整交易日数据。
+
+        rows 为该方向（北向=005 / 南向=006）的逐日记录；
+        DEAL_AMT 单位百万元，转换为亿元（÷100）。
+        """
+        parsed = []
+        for it in rows or []:
+            raw_date = str(it.get("TRADE_DATE") or "")[:10]
+            deal_amt = _panorama_float(it.get("DEAL_AMT"))
+            if not raw_date or deal_amt is None:
+                continue
+            parsed.append((raw_date, deal_amt))
+        parsed.sort(key=lambda item: item[0])
+        if not parsed:
+            return {"available": False, "amount_yi": None, "date": None,
+                    "error": "接口未返回有效记录"}
+        # 最新行是今天 → 取前一行作为「前一收盘」；否则最后一行即最近完整交易日。
+        idx_today = next((i for i, (d, _) in enumerate(parsed) if d == today_date), None)
+        if idx_today is not None and idx_today > 0:
+            date, deal_amt = parsed[idx_today - 1]
+        else:
+            date, deal_amt = parsed[-1]
+        if deal_amt is None:
             return {"available": False, "amount_yi": None, "date": date,
-                    "policy_note": note, "error": "披露口径内暂无成交总额数值"}
-        return {"available": True, "amount_yi": nums[-1], "date": date,
-                "policy_note": note, "error": None}
+                    "error": "披露口径内暂无成交总额数值"}
+        return {"available": True, "amount_yi": deal_amt / 100.0,
+                "date": date, "error": None}
+
+    try:
+        root = ((data or {}).get("result") or {}).get("data") or []
+        north = _pick([it for it in root if str(it.get("MUTUAL_TYPE") or "") == "005"])
+        south = _pick([it for it in root if str(it.get("MUTUAL_TYPE") or "") == "006"])
     except Exception as exc:
-        return {"available": False, "amount_yi": None, "date": None,
-                "policy_note": note, "error": str(exc)}
+        north = {"available": False, "amount_yi": None, "date": None, "error": str(exc)}
+        south = {"available": False, "amount_yi": None, "date": None, "error": str(exc)}
+
+    return {
+        "available": bool(north["available"]),
+        "amount_yi": north["amount_yi"],
+        "date": north["date"],
+        "error": north.get("error"),
+        "south_available": bool(south["available"]),
+        "south_amount_yi": south["amount_yi"],
+        "south_date": south["date"],
+        "south_error": south.get("error"),
+        "policy_note": note,
+    }
 
 
 def _fetch_panorama_sectors():
@@ -1076,10 +1132,12 @@ def fetch_market_panorama():
             "partial": len(amount_by_exch) < 3,
         }
 
-    # ---- 北向资金（成交总额启发式读取 + 披露政策说明）----
+    # ---- 南北向资金（前一收盘成交总额启发式读取 + 披露政策说明）----
     north = _fetch_panorama_northbound()
     if not north.get("available"):
         errors.append(f"北向成交总额: {north.get('error') or '暂缺'}")
+    if not north.get("south_available"):
+        errors.append(f"南向成交总额: {north.get('south_error') or '暂缺'}")
 
     # ---- 板块热力（领涨 / 领跌行业板块）----
     sectors = _fetch_panorama_sectors()
@@ -1095,10 +1153,12 @@ def fetch_market_panorama():
 
     content_date = (quote_time or "")[:10] or _today_display()
     is_today = content_date == _today_display()
+    north_ok = "✓" if (north.get("available") and north.get("south_available")) else \
+               ("部分" if (north.get("available") or north.get("south_available")) else "暂缺")
     print(f"  ✅ 全景复盘：指数 {len(indices)} 只 / "
           f"涨跌家数 {'齐' if breadth else '缺'} / "
           f"板块 {len(sectors['leading'])}+{len(sectors['lagging'])} / "
-          f"北向 {'✓' if north.get('available') else '暂缺'}")
+          f"南北向 {north_ok}")
     return _source_result("东方财富·A股全景", "success",
                           is_today=is_today, content_date=content_date,
                           indices=indices, breadth=breadth, turnover=turnover,
@@ -2044,17 +2104,21 @@ def gz_panorama_block(pan):
             + (gz_rowline(_esc("上一交易日合计（沪深京）"), _format_amount(t["prev_total"]))
                if t.get("prev_total") else ""))
 
-    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    # 4) 南北向资金（前一收盘成交总额 + 披露口径说明）
     north = pan.get("north") or {}
     if north:
-        if north.get("available") and north.get("amount_yi") is not None:
-            val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
-                   f'{north["amount_yi"]:,.2f} 亿元</span>')
-        else:
-            val = f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+        north_val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                     f'{north["amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("available") and north.get("amount_yi") is not None) \
+            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
+        south_val = (f'<span style="font-size:20px;font-weight:700;font-family:{GZ_MONO};">'
+                     f'{north["south_amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("south_available") and north.get("south_amount_yi") is not None) \
+            else f'<span style="color:{GZ_FLAT};">■ 数据暂缺</span>'
         parts.append(
-            gz_subsection("北向资金")
-            + gz_rowline(_esc(f"北向当日成交总额（{north.get('date') or '—'}）"), val)
+            gz_subsection("南北向资金（前一收盘）")
+            + gz_rowline(_esc(f"北向成交总额（{north.get('date') or '—'}）"), north_val)
+            + gz_rowline(_esc(f"南向成交总额（{north.get('south_date') or north.get('date') or '—'}）"), south_val)
             + gz_note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
 
     # 5) 板块热力
@@ -2568,16 +2632,22 @@ def _panorama_block(pan):
             rows.append(("上一交易日合计（沪深京）", _format_amount(t["prev_total"])))
         parts.append(_subsection("成交额") + _mini_table(rows))
 
-    # 4) 北向资金（披露口径说明 + 当日成交总额，可得时）
+    # 4) 南北向资金（前一收盘成交总额 + 披露口径说明）
     north = pan.get("north") or {}
     if north:
-        if north.get("available") and north.get("amount_yi") is not None:
-            val = (f'<span style="color:{C_CYAN};font-weight:900;">'
-                   f'{north["amount_yi"]:,.2f} 亿元</span>')
-        else:
-            val = f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
-        parts.append(_subsection("北向资金")
-                     + _mini_table([(f'北向当日成交总额（{_esc(north.get("date") or "—")}）', val)])
+        north_val = (f'<span style="color:{C_CYAN};font-weight:900;">'
+                     f'{north["amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("available") and north.get("amount_yi") is not None) \
+            else f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
+        south_val = (f'<span style="color:{C_CYAN};font-weight:900;">'
+                     f'{north["south_amount_yi"]:,.2f} 亿元</span>') \
+            if (north.get("south_available") and north.get("south_amount_yi") is not None) \
+            else f'<span style="color:{C_FAINT};">■ 数据暂缺</span>'
+        parts.append(_subsection("南北向资金（前一收盘）")
+                     + _mini_table([
+                         (f'北向成交总额（{_esc(north.get("date") or "—")}）', north_val),
+                         (f'南向成交总额（{_esc(north.get("south_date") or north.get("date") or "—")}）', south_val),
+                     ])
                      + _note(north.get("policy_note") or PANORAMA_NORTH_POLICY_NOTE))
 
     # 5) 板块热力
@@ -2736,11 +2806,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         senti_result = build_news_sentiment(data, date_str or _today_str(),
                                             sentiment_history,
                                             news_corpus=news_corpus)
-        if senti_result.get("available"):
+        if senti_result.get("by_market"):
             blocks["NEWS SENTIMENT"] = (
                 "NEWS SENTIMENT", "AI 新闻情绪因子",
                 kit.sentiment_block(senti_result), kit.ai_badge(),
-                "章鱼AI · 标题情绪词表评分 + 个股归因（近 72h 窗口，非投资建议）",
+                "章鱼AI · 三大市场成交量前5个股新闻情绪分 + 总结评论与原因（近 72h 窗口，非投资建议）",
             )
         else:
             senti_win_n = ((senti_result.get("scored_headlines") or 0)
@@ -2750,7 +2820,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                     "NEWS SENTIMENT", "AI 新闻情绪因子",
                     kit.sentiment_empty_block(senti_result),
                     kit.senti_empty_badge(),
-                    "章鱼AI · 标题情绪词表评分 + 个股归因（近 72h 窗口，非投资建议）",
+                    "章鱼AI · 三大市场成交量前5个股新闻情绪分 + 总结评论与原因（近 72h 窗口，非投资建议）",
                 )
 
     # ⑦ 资金与交投收尾：A股 / 港股 / 美股最近收盘成交量与流动性分析
@@ -3326,8 +3396,11 @@ def _liquidity_market_block(label, stats):
 # ============================================================
 # AI 新闻情绪因子（NEWS SENTIMENT FACTORS · 确定性词表规则）
 # ------------------------------------------------------------
-# 对窗口内（近 SENTI_WINDOW_HOURS=72 小时）资讯标题逐条做情绪评分
-# （HeadlineSentiment），按热门榜单个股名归因到个股，输出 4 个因子：
+# 2026-09-09 起按用户要求改为「逐股」：对最近成交日 A股 / 港股 / 美股
+# 成交量前五（热门榜单 HOT_STOCK_TOP_N），逐只输出 AI 新闻情绪分、总结评论
+# 与原因（由命中标题、词表、MOM 动量、ANV 新闻量确定性规则生成）。
+# 窗口内（近 SENTI_WINDOW_HOURS=72 小时，含历史存档）标题逐条词表评分
+# （HeadlineSentiment），按热门榜单个股名归因，输出 4 个因子：
 #   DNS 窗口新闻情绪 ＝ (正−负)/总数（近 72h 标题窗口口径）
 #   MOM 情绪动量 SentimentMomentum ＝ 近3个有评分日均值 − 近20个有评分日均值
 #   ANV 异常新闻量 AbnormalNewsVolume ＝ 今日条数 vs 近30天均值±σ（z 值；
@@ -3338,12 +3411,12 @@ def _liquidity_market_block(label, stats):
 # 同日多次运行按日期键覆盖，保证幂等；零报道日记 total=0、score=None）。
 # 标题窗口内容依赖 output/news_history.json（每次运行合并本次抓取标题，
 # 报告保存后原子落盘，随日报一并提交回库）。
-# 冷启动/样本不足时明确标注口径与 n，不伪造数值；窗口内标题存在但均未归因时，
-# 栏目以「样本不足」占位渲染（不整栏消失）；窗口内无标题时才缺席。
-# 如需接大模型做标题标注，只需替换 _score_headline_sentiment（调用方只依赖
-# 返回结构 {"s","pos","neg"}，保留本规则作兜底）。
+# 窗口内无相关新闻的上榜股显示「暂无评分」并给出原因，绝不凭价格涨跌反推；
+# 热门榜单缺席时栏目缺席。如需接大模型做标题标注，只需替换
+# _score_headline_sentiment（调用方只依赖返回结构 {"s","pos","neg"}，
+# 保留本规则作兜底）。
 # ============================================================
-SENTI_DISPLAY_N = 8        # 情绪栏目最多展示的个股数
+SENTI_DISPLAY_N = 15       # 情绪栏目最多展示的已归因个股（页面按三大市场成交量前五逐股展示）
 SENTI_MOM_SHORT_N = 3      # 动量短期窗口（有评分日，含今日）
 SENTI_MOM_LONG_N = 20      # 动量长期窗口（有评分日，含今日）
 SENTI_MOM_MIN_SHORT = 2    # 动量短期最少样本
@@ -3801,7 +3874,7 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
                 "old": is_today_item is False and bool(head.get("date")),
                 "order": order,
             })
-    stocks = []
+    all_stocks = []
     today_counts = {}
     for key, slot in per_stock.items():
         total = slot["pos"] + slot["neu"] + slot["neg"]
@@ -3826,20 +3899,23 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         volume = _sentiment_volume(day_total, raw_totals)
         slot["headlines"].sort(key=lambda h: (-abs(h["s"]), h["order"]))
         info = slot["info"]
-        stocks.append({
+        all_stocks.append({
             "market": info["market"], "code": info["code"], "name": info["name"],
+            "key": info["key"],
             "total": total, "pos": slot["pos"], "neu": slot["neu"], "neg": slot["neg"],
             "score": score,
             "label": "偏多" if score > 0.2 else ("偏空" if score < -0.2 else "中性"),
             "momentum": momentum, "volume": volume,
             "headlines": slot["headlines"],
         })
-    stocks.sort(key=lambda s: (-s["total"], -abs(s["score"]), s["name"]))
+    all_stocks.sort(key=lambda s: (-s["total"], -abs(s["score"]), s["name"]))
+    by_market = _build_senti_by_market(data, all_stocks)
     return {
-        "available": bool(stocks),
+        "available": bool(universe),
         "date": date_str,
-        "stocks": stocks[:display_n],
-        "total_matched": len(stocks),
+        "stocks": all_stocks[:display_n],
+        "by_market": by_market,
+        "total_matched": len(all_stocks),
         "universe_n": len(universe),
         "scored_headlines": len(headlines) - unattributed,
         "unattributed_n": unattributed,
@@ -3849,6 +3925,95 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         "universe": universe,
         "today_counts": today_counts,
     }
+
+
+SENTI_MARKET_ORDER = ("A股", "港股", "美股")
+
+
+def _build_senti_stock_comment(s):
+    """按确定性规则生成单只“AI 新闻情绪评分 + 总结评论 + 原因”。
+
+    只使用窗口内真实命中的标题数与词表命中词；无新闻就不评分不评级，
+    绝不凭消息面或价格涨跌反推新闻情绪。
+    """
+    if not s.get("matched"):
+        return ("近72小时无相关点名新闻，AI 暂不评分。",
+                "窗口内标题未点名该股，无新闻证据时不评论其新闻情绪。")
+    score = round(float(s.get("score") or 0.0), 2)
+    total = int(s.get("total") or 0)
+    pos = int(s.get("pos") or 0)
+    neu = int(s.get("neu") or 0)
+    neg = int(s.get("neg") or 0)
+    label = s.get("label") or "中性"
+    comment = (f"AI情绪分 {score:+.2f}（{label}）：近72小时命中 {total} 条相关新闻，"
+               f"正面 {pos} 条 / 中性 {neu} 条 / 负面 {neg} 条。")
+    parts = []
+    hits = []
+    for h in s.get("headlines", []) or []:
+        hits.extend(h.get("pos_hits") or [])
+        hits.extend(h.get("neg_hits") or [])
+    hits = list(dict.fromkeys(hits))[:5]
+    if hits:
+        parts.append("命中情绪词：" + "、".join(hits))
+    pos_heads = [h["title"] for h in s.get("headlines") if h.get("s") and h["s"] > 0]
+    neg_heads = [h["title"] for h in s.get("headlines") if h.get("s") and h["s"] < 0]
+    if pos_heads:
+        parts.append("正面主要来自「" + pos_heads[0][:34] + "」" +
+                     (f"等 {len(pos_heads)} 条" if len(pos_heads) > 1 else ""))
+    if neg_heads:
+        parts.append("负面主要来自「" + neg_heads[0][:34] + "」" +
+                     (f"等 {len(neg_heads)} 条" if len(neg_heads) > 1 else ""))
+    mom = s.get("momentum") or {}
+    if mom.get("enough"):
+        parts.append(f"情绪动量 {float(mom['value']):+.2f}（{mom['label']}）")
+    else:
+        parts.append("情绪动量样本不足")
+    vol = s.get("volume") or {}
+    if vol.get("enough"):
+        parts.append(f"今日新闻量 {vol['today']} 条（{vol['label']}，z={vol['z_display']}）")
+    else:
+        parts.append("新闻量历史样本不足")
+    reason = "；".join(parts) + "。" if parts else "基于窗口内命中标题的词表净情绪合成。"
+    return comment, reason
+
+
+def _build_senti_by_market(data, all_stocks):
+    """把评过分 / 未评分的个股按「A股·港股·美股 成交前五」分组，补上总结评论与原因。
+
+    榜单顺序优先；榜单缺失某市场时该市场不出现；所有上榜个股都会展示，
+    包括窗口内没有相关新闻的股票（matched=False，明确说明无法评分的原因）。
+    """
+    hot = (data or {}).get("热门榜单", {}) or {}
+    by_key = {(s.get("market"), s.get("code") or s.get("name")): s for s in all_stocks}
+    result = []
+    for market in SENTI_MARKET_ORDER:
+        payload = (hot.get("markets") or {}).get(market) or {}
+        rows = (payload.get("stocks") or [])[:HOT_STOCK_TOP_N]
+        if not rows:
+            continue
+        market_stocks = []
+        for it in rows:
+            code = str(it.get("code") or "")
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            matched = by_key.get((market, code or name))
+            if matched:
+                item = dict(matched)
+                item["matched"] = True
+            else:
+                item = {
+                    "market": market, "code": code, "name": name,
+                    "key": f"{market}:{code or name}",
+                    "matched": False, "total": 0, "pos": 0, "neu": 0, "neg": 0,
+                    "score": None, "label": "暂无评分",
+                    "momentum": {"enough": False}, "volume": {"enough": False},
+                    "headlines": [],
+                }
+            item["comment"], item["reason"] = _build_senti_stock_comment(item)
+            market_stocks.append(item)
+        result.append({"market": market, "stocks": market_stocks})
+    return result
 
 
 def _senti_factor_lines(s):
@@ -3891,40 +4056,62 @@ def _senti_headline_sub(h):
 
 
 def _pixel_sentiment_block(res):
-    """像素主题：AI 新闻情绪因子（DNS/MOM/ANV/S 数据化卡片）。"""
+    """像素主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因。"""
+    by_market = res.get("by_market") or []
+    total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
     head = _mini_table([
+        ("标的范围", f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'),
+        ("窗口内有点名", f'{res["total_matched"]} 只（窗口内标题归因）'),
         ("标题窗口", f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
-        ("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股窗口内有报道'),
-        ("参与评分", f'{res["scored_headlines"]} 条标题已归因评分（窗口内）'),
         ("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
     ])
     cards = []
-    for s in res["stocks"]:
-        if s["score"] > 0.2:
-            color, icon = C_GREEN, "▲"
-        elif s["score"] < -0.2:
-            color, icon = C_RED, "▼"
-        else:
-            color, icon = C_AMBER, "■"
-        rows = []
-        for h in s["headlines"][:3]:
-            badge, bcolor = {1: ("S+1", C_GREEN), -1: ("S−1", C_RED),
-                             0: ("S0", C_AMBER)}[h["s"]]
-            rows.append(_item_row(
-                "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:60])}',
-                _esc(_senti_headline_sub(h))))
-        more = len(s["headlines"]) - 3
-        if more > 0:
-            rows.append(
-                f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
-                f'line-height:1.7;font-family:{FONT_MONO};">'
-                f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）</div>')
-        body = _mini_table(_senti_factor_lines(s)) + "".join(rows)
-        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
-        cards.append(_pixel_panel(f"STOCK SENTI // {_esc(title)} · {s['market']}",
-                                  body, color, icon))
-    note = _note(f"因子口径：DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
-                 "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日）；S=标题词表净情绪 // RULESET v3 // 非投资建议")
+    for mb in by_market:
+        cards.append(_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
+        for s in mb.get("stocks") or []:
+            if not s.get("matched"):
+                body = _mini_table([
+                    ("AI 情绪分", "暂无评分"),
+                    ("总结评论", _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")),
+                    ("原因", _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")),
+                ])
+                cards.append(_pixel_panel(
+                    f"STOCK SENTI // {_esc(s['name'])} {_esc(s['code'])} · {s['market']} · ■ 暂无评分",
+                    body, C_AMBER, "■"))
+                continue
+            if s["score"] > 0.2:
+                color, icon = C_GREEN, "▲"
+            elif s["score"] < -0.2:
+                color, icon = C_RED, "▼"
+            else:
+                color, icon = C_AMBER, "■"
+            rows = [
+                ("AI 情绪分", f'<span style="color:{color};font-weight:900;">{s["score"]:+.2f}</span>'
+                              f'（正{s["pos"]}/中{s["neu"]}/负{s["neg"]} · {_esc(s["label"])}）'),
+                ("总结评论", _esc(s.get("comment") or "")),
+                ("原因", _esc(s.get("reason") or "")),
+            ]
+            body = _mini_table(rows) + _mini_table(_senti_factor_lines(s))
+            evidence = []
+            for h in s["headlines"][:3]:
+                badge, bcolor = {1: ("S+1", C_GREEN), -1: ("S−1", C_RED),
+                                 0: ("S0", C_AMBER)}[h["s"]]
+                evidence.append(_item_row(
+                    "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:60])}',
+                    _esc(_senti_headline_sub(h))))
+            more = len(s["headlines"]) - 3
+            if more > 0:
+                evidence.append(
+                    f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
+                    f'line-height:1.7;font-family:{FONT_MONO};">'
+                    f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）</div>')
+            body += "".join(evidence)
+            cards.append(_pixel_panel(
+                f"STOCK SENTI // {_esc(s['name'])} {_esc(s['code'])} · {s['market']} · {_esc(s['label'])}",
+                body, color, icon))
+    note = _note(f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
+                 "总结评论与原因由命中标题/词表、动量与新闻量确定性规则生成；无新闻的榜单个股明确标注「暂无评分」，"
+                 "不凭价格涨跌反推新闻情绪；MOM/ANV 按自然日口径 // RULESET v3 // 非投资建议")
     return head + "".join(cards) + note
 
 
@@ -3957,30 +4144,44 @@ def _pixel_sentiment_empty_block(res):
 
 
 def gz_sentiment_block(res):
-    """谷藏主题：AI 新闻情绪因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    """谷藏主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因。"""
+    by_market = res.get("by_market") or []
+    total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
     out = [
+        gz_rowline("标的范围",
+                   f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'),
+        gz_rowline("窗口内有点名", f"{res['total_matched']} 只（窗口内标题归因）"),
         gz_rowline("标题窗口",
                    f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
-        gz_rowline("覆盖", f'{res["total_matched"]}/{res["universe_n"]} 只榜单个股窗口内有报道'),
-        gz_rowline("参与评分", f'{res["scored_headlines"]} 条标题已归因评分（窗口内）'),
         gz_rowline("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
     ]
-    for s in res["stocks"]:
-        arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
-        title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
-        out.append(gz_subsection(f'{_esc(title)} · {s["market"]} {arrow}'))
-        for label, line in _senti_factor_lines(s):
-            out.append(gz_rowline(label, _esc(line)))
-        for h in s["headlines"][:3]:
-            badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
-            out.append(gz_item_row(
-                "»", f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:60])}',
-                _senti_headline_sub(h)))
-        more = len(s["headlines"]) - 3
-        if more > 0:
-            out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
-    out.append(gz_note(f"因子口径：DNS=(正−负)/总数（近{SENTI_WINDOW_HOURS}h 窗口标题）；MOM=近3有评分日均−近20有评分日均；"
-                       "ANV:今日条数>30天均值+2σ标异常（MOM/ANV 按自然日）；S=标题词表净情绪。非投资建议。"))
+    for mb in by_market:
+        out.append(gz_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
+        for s in mb.get("stocks") or []:
+            if not s.get("matched"):
+                title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+                out.append(gz_subsection(f'{_esc(title)} · {s["market"]} ■ 暂无评分'))
+                out.append(gz_rowline("总结评论", _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")))
+                out.append(gz_rowline("原因", _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")))
+                continue
+            arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
+            title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
+            out.append(gz_subsection(f'{_esc(title)} · {s["market"]} {arrow}'))
+            out.append(gz_rowline("AI 情绪分", _esc(s.get("comment") or "")))
+            out.append(gz_rowline("原因", _esc(s.get("reason") or "")))
+            for label, line in _senti_factor_lines(s):
+                out.append(gz_rowline(label, _esc(line)))
+            for h in s["headlines"][:3]:
+                badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
+                out.append(gz_item_row(
+                    "»", f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:60])}',
+                    _senti_headline_sub(h)))
+            more = len(s["headlines"]) - 3
+            if more > 0:
+                out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
+    out.append(gz_note(f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
+                       "总结评论与原因由命中标题/词表、动量与新闻量确定性规则生成；无新闻的榜单个股明确标注「暂无评分」，"
+                       "不凭价格涨跌反推新闻情绪；MOM/ANV 按自然日口径。非投资建议。"))
     return "".join(out)
 
 
@@ -4902,15 +5103,19 @@ def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=
     return notice, True
 
 
-def push_to_wechat(title, content_html, token=None, template="html", report_name=None):
+def push_to_wechat(title, content_html, token=None, template="html", report_name=None,
+                   topic=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
+    - 默认按「一对多」推送至群组编码 PUSHPLUS_TOPIC（默认 oai.1）；
+      传入 topic 可临时覆盖，传空字符串则回退一对一；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
     token = token or PUSHPLUS_TOKEN
+    topic = topic if topic is not None else PUSHPLUS_TOPIC
 
     if not token:
         print("⚠️ 未设置 PUSHPLUS_TOKEN，跳过推送")
@@ -4918,7 +5123,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
         print("   （在 GitHub Actions 中请确认仓库 Settings → Secrets → PUSHPLUS_TOKEN 已配置）")
         return False
 
-    print(f"📤 正在推送到微信 (PushPlus, template={template})...")
+    mode = f"一对多群组 {topic}" if topic else "一对一"
+    print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
     if template == "html":
         content_html, was_truncated = _truncate_html_for_push(
             content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
@@ -4931,6 +5137,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
         "content": content_html,
         "template": template,
     }
+    if topic:
+        payload["topic"] = topic
     attempts = (0, *PUSH_RETRY_BACKOFF)
     last_error = "未知错误"
 

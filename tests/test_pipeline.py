@@ -818,6 +818,25 @@ class PushResultTests(unittest.TestCase):
         self.assertEqual(calls["json"]["template"], "txt")
         self.assertEqual(calls["json"]["token"], "abc")
         self.assertEqual(calls["json"]["title"], "标题")
+        self.assertEqual(calls["json"]["topic"], "oai.1")   # 默认一对多群组
+
+    def test_push_to_wechat_group_topic_can_be_overridden_or_disabled(self):
+        """PUSHPLUS_TOPIC 可覆盖群组；传空串可回退一对一（不发送 topic 字段）。"""
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(json or {})
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", "custom-group"):
+            self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc"))
+        self.assertEqual(calls[-1]["topic"], "custom-group")
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", ""):
+            self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc"))
+        self.assertNotIn("topic", calls[-1])                 # 一对一不携带 topic
 
     def test_push_to_wechat_returns_false_on_error_code(self):
         with patch.object(pipeline, "requests",
@@ -1311,7 +1330,7 @@ class MarketPanoramaTests(unittest.TestCase):
             for i in range(pipeline.PANORAMA_SECTOR_TOP_N)
         ]
 
-    def _install_fake_requests(self, with_kline=True, with_kamt=True, with_sectors=True):
+    def _install_fake_requests(self, with_kline=True, with_hsgt=True, with_sectors=True):
         def fake(url, params=None, **kw):
             if "ulist.np" in url:
                 return {"data": {"diff": self._indices_diff()}}
@@ -1321,10 +1340,13 @@ class MarketPanoramaTests(unittest.TestCase):
                 base = {"1.000001": 4.8e11, "0.399001": 6.0e11, "0.899050": 7.0e9}[
                     (params or {}).get("secid")]
                 return {"data": {"klines": [f"2026-09-07,{base}", f"2026-09-08,{base * 1.05:.0f}"]}}
-            if "kamt.kline" in url:
-                if not with_kamt:
+            if "datacenter-web.eastmoney.com" in url:
+                if not with_hsgt:
                     return None
-                return {"data": {"s2n": ["2026-09-08,-,1350.25"], "n2s": []}}
+                return {"result": {"data": [
+                    {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 135025.0},
+                    {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 8850.0},
+                ]}}
             if "clist/get" in url:
                 if not with_sectors:
                     return None
@@ -1365,11 +1387,14 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertAlmostEqual(t["prev_total"], 4.8e11 + 6.0e11 + 7.0e9)
         self.assertAlmostEqual(t["chg_pct"], (t["total"] / t["prev_total"] - 1) * 100, places=6)
 
-        # ④ 北向资金：净买列为 "-"，取行内最后一个数值作为成交总额（亿元）
+        # ④ 南北向资金：RPT_MUTUAL_DEAL_HISTORY 的 005/006 成交总额（百万元→亿元）
         north = result["north"]
         self.assertTrue(north["available"])
         self.assertEqual(north["amount_yi"], 1350.25)
         self.assertEqual(north["date"], "2026-09-08")
+        self.assertTrue(north["south_available"])
+        self.assertEqual(north["south_amount_yi"], 88.50)
+        self.assertEqual(north["south_date"], "2026-09-08")
         self.assertIn("2024-08-19", north["policy_note"])
 
         # ⑤ 板块热力：领涨 TOP 涨幅降序、领跌 TOP 跌幅最深在前
@@ -1393,7 +1418,7 @@ class MarketPanoramaTests(unittest.TestCase):
 
     def test_fetch_market_panorama_degrades_per_subblock(self):
         # 指数 / 宽度在线，K 线、北向、板块全挂：整体仍 success，对应子块缺席并标 partial
-        with self._install_fake_requests(with_kline=False, with_kamt=False, with_sectors=False):
+        with self._install_fake_requests(with_kline=False, with_hsgt=False, with_sectors=False):
             result = pipeline.fetch_market_panorama()
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["indices"]), 8)
@@ -1401,9 +1426,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIsNone(result["turnover"]["prev_total"])
         self.assertIsNone(result["turnover"]["chg_pct"])
         self.assertFalse(result["north"]["available"])
+        self.assertFalse(result["north"]["south_available"])
         self.assertEqual(result["sectors"], {"leading": [], "lagging": []})
         self.assertTrue(result["partial"])
         self.assertIn("北向", result["error"])
+        self.assertIn("南向", result["error"])
         self.assertIn("板块热力", result["error"])
 
     def test_breadth_mood_thresholds(self):
@@ -1413,6 +1440,45 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertEqual(pipeline._panorama_breadth_mood(0.5), "偏空承压")
         self.assertEqual(pipeline._panorama_breadth_mood(0.49), "普跌弱势")
         self.assertEqual(pipeline._panorama_breadth_mood(None), "数据不足")
+
+    def test_northbound_previous_close_selection_when_latest_row_is_today(self):
+        """最新行日期==今天时，取它前一行作为「前一收盘」（南向同规则）。"""
+        payload = {"result": {"data": [
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 10000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 20000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 30000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 1000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 2000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 3000.0},
+        ]}}
+        with patch.object(pipeline, "safe_request", return_value=payload), \
+             patch.object(pipeline, "_today_display", return_value="2026-09-08"):
+            north = pipeline._fetch_panorama_northbound()
+        self.assertTrue(north["available"])
+        self.assertEqual(north["date"], "2026-09-07")
+        self.assertEqual(north["amount_yi"], 200.0)   # 20000 百万元 ÷ 100
+        self.assertTrue(north["south_available"])
+        self.assertEqual(north["south_date"], "2026-09-07")
+        self.assertEqual(north["south_amount_yi"], 20.0)
+
+    def test_northbound_uses_last_row_when_latest_is_not_today(self):
+        """最新行不是今天（盘前/非交易日/休市）时，最后一行即最近完整交易日。"""
+        payload = {"result": {"data": [
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 10000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 20000.0},
+            {"MUTUAL_TYPE": "005", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 30000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-04 00:00:00", "DEAL_AMT": 1000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-07 00:00:00", "DEAL_AMT": 2000.0},
+            {"MUTUAL_TYPE": "006", "TRADE_DATE": "2026-09-08 00:00:00", "DEAL_AMT": 3000.0},
+        ]}}
+        with patch.object(pipeline, "safe_request", return_value=payload), \
+             patch.object(pipeline, "_today_display", return_value="2026-09-09"):
+            north = pipeline._fetch_panorama_northbound()
+        self.assertTrue(north["available"])
+        self.assertEqual(north["date"], "2026-09-08")
+        self.assertEqual(north["amount_yi"], 300.0)
+        self.assertEqual(north["south_date"], "2026-09-08")
+        self.assertEqual(north["south_amount_yi"], 30.0)
 
     def test_format_amount_keeps_minus_sign_for_main_outflow(self):
         # 板块主力净流入（f62）常为负：负号必须保留，不能只显示绝对值或原始大数
@@ -1445,6 +1511,8 @@ class MarketPanoramaTests(unittest.TestCase):
                       "by_market": {"沪": 5.1e11, "深": 6.2e11, "京": 8.0e9},
                       "partial": False},
             north={"available": True, "amount_yi": 1350.25, "date": "2026-09-08",
+                   "south_available": True, "south_amount_yi": 88.50,
+                   "south_date": "2026-09-08",
                    "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": None},
             sectors={
                 "leading": [{"code": "BK100", "name": "领涨板块甲", "chg_pct": 3.50,
@@ -1467,8 +1535,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("普涨强势", html)
         self.assertIn("3.12", html)
         self.assertIn("成交额", html)
+        self.assertIn("南北向资金（前一收盘）", html)
         self.assertIn("北向资金", html)
         self.assertIn("1,350.25 亿元", html)
+        self.assertIn("南向成交总额", html)
+        self.assertIn("88.50 亿元", html)
         self.assertIn("2024-08-19", html)          # 披露口径说明
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
@@ -1488,7 +1559,11 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("涨跌家数", html)
         self.assertIn("▲ 上涨 4,050 家", html)
         self.assertIn("普涨强势", html)
+        self.assertIn("南北向资金（前一收盘）", html)
         self.assertIn("北向资金", html)
+        self.assertIn("南向成交总额", html)
+        self.assertIn("1,350.25 亿元", html)
+        self.assertIn("88.50 亿元", html)
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
 
@@ -1497,6 +1572,8 @@ class MarketPanoramaTests(unittest.TestCase):
         data["A股大盘全景"] = pipeline._source_result(
             "东方财富·A股全景", "unavailable", indices=[], breadth=None, turnover=None,
             north={"available": False, "amount_yi": None, "date": None,
+                   "south_available": False, "south_amount_yi": None,
+                   "south_date": None,
                    "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": "offline"},
             sectors={"leading": [], "lagging": []}, quote_time=None, error="offline")
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
@@ -1856,6 +1933,41 @@ class NewsSentimentFactorTests(unittest.TestCase):
             history = pipeline._load_sentiment_history(str(path))
             self.assertEqual(history["stocks"], {})
 
+    def test_by_market_top5_with_per_stock_comment_reason(self):
+        res = pipeline.build_news_sentiment(self._senti_data(), "20260802", None)
+        by_market = res["by_market"]
+        self.assertEqual([m["market"] for m in by_market], ["A股", "港股", "美股"])
+        for mb in by_market:
+            self.assertEqual(len(mb["stocks"]), pipeline.HOT_STOCK_TOP_N)
+        a3 = next(s for s in by_market[0]["stocks"] if s["code"] == "000003")
+        self.assertTrue(a3["matched"])
+        self.assertAlmostEqual(a3["score"], 1.0)
+        self.assertIn("AI情绪分", a3["comment"])
+        self.assertIn("近72小时命中 2 条相关新闻", a3["comment"])
+        self.assertIn("命中情绪词", a3["reason"])
+        self.assertIn("正面主要来自", a3["reason"])
+        hk1 = next(s for s in by_market[1]["stocks"] if s["code"] == "000001")
+        self.assertTrue(hk1["matched"])
+        self.assertAlmostEqual(hk1["score"], -1.0)
+        self.assertIn("负面主要来自", hk1["reason"])
+        a0 = next(s for s in by_market[0]["stocks"] if s["code"] == "000000")
+        self.assertFalse(a0["matched"])
+        self.assertIsNone(a0["score"])
+        self.assertIn("近72小时无相关点名新闻", a0["comment"])
+        self.assertIn("窗口内标题未点名该股", a0["reason"])
+        self.assertIn("暂无评分", a0["label"])
+
+    def test_build_news_sentiment_available_without_match(self):
+        # 无归因但榜单存在 → 栏目仍可渲染（逐股「暂无评分」），available 由榜单宇宙决定
+        res = pipeline.build_news_sentiment(
+            NewLayoutRenderingTests()._rich_data(), "20260802", None)
+        self.assertTrue(res["available"])
+        self.assertTrue(res["by_market"])
+        self.assertEqual(res["total_matched"], 0)
+        stocks = [s for mb in res["by_market"] for s in mb["stocks"]]
+        self.assertTrue(all(not s["matched"] for s in stocks))
+        self.assertTrue(all(s["score"] is None for s in stocks))
+
     def test_pixel_render_contains_factors(self):
         html = pipeline.generate_report(
             self._senti_data(), "2026年8月2日 · 周日", "20260802",
@@ -1870,6 +1982,9 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("S−1", html)
         self.assertIn("命中：大涨", html)
         self.assertIn("样本不足", html)  # 无历史的港股股票1
+        self.assertIn("总结评论", html)   # 2026-09-09 逐股 AI 总结评论
+        self.assertIn("原因", html)      # 逐股评论原因
+        self.assertIn("A股 · 成交量前5", html)
 
     def test_guizang_render_contains_factors(self):
         html = pipeline.generate_report(
@@ -1880,25 +1995,37 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("▲ S+1", html)  # 黑白模式用符号区分方向
         self.assertIn("▼ S−1", html)
         self.assertIn("MOM +0.67", html)
+        self.assertIn("总结评论", html)
+        self.assertIn("原因", html)
+        self.assertIn("A股 · 成交量前5", html)
 
-    def test_placeholder_shown_without_attribution(self):
-        # 2026-09-09 起：当天标题存在但均未点名榜单个股 → 显示「样本不足」占位，不再整栏消失
+    def test_per_stock_render_without_attribution(self):
+        # 2026-09-09 起：窗口内标题未点名任何榜单个股时，栏目仍按三大市场成交量前五
+        # 逐股展示「暂无评分 + 总结评论 + 原因」，不伪造 DNS 数值。
         data = NewLayoutRenderingTests()._rich_data()  # 标题未提及任何榜单个股
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
             self.assertIn("AI 新闻情绪因子", html)
-            self.assertIn("样本不足", html)
-            self.assertIn("均未点名榜单个股", html)
+            for market in ("A股", "港股", "美股"):
+                self.assertIn(f"{market} · 成交量前5", html)
+            for name in ("A股股票0", "A股股票4", "港股股票0", "港股股票4",
+                         "美股股票0", "美股股票4"):
+                self.assertIn(name, html)
+            self.assertIn("暂无评分", html)
+            self.assertIn("总结评论", html)
+            self.assertIn("原因", html)
             self.assertNotIn("DNS +", html)   # 无归因 → 不出因子数值
             self.assertNotIn("S+1", html)
 
-    def test_absent_without_any_today_headline(self):
-        # 全天无当天标题 → 栏目缺席（与“无数据不出现在页面”一致，不显示占位）
+    def test_absent_without_hot_rankings(self):
+        # 热门榜单（个股宇宙）缺席且无当天标题 → 栏目缺席
         data = NewLayoutRenderingTests()._rich_data()
         for src in ("全球头条", "东财快讯", "港股名家频道"):
             data[src] = pipeline._source_result(src, "unavailable", headlines=[],
                                                 channels=[], error="offline")
+        data["热门榜单"] = pipeline._source_result(
+            "东方财富热门榜", "unavailable", markets={}, error="offline")
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
@@ -2188,6 +2315,9 @@ class SectionReadingOrderTests(unittest.TestCase):
                 src, "unavailable", headlines=[], channels=[], error="offline")
         data["A股资讯"] = pipeline._source_result(
             "新浪财经", "unavailable", headlines=[], error="offline")
+        # 热门榜单缺席 → 新闻情绪因子无「三大市场前五」可迭代，栏目缺席
+        data["热门榜单"] = pipeline._source_result(
+            "东方财富热门榜", "unavailable", markets={}, error="offline")
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
         order = ["LVL 01 // AI READ", "LVL 02 // MARKET SNAPSHOT",
