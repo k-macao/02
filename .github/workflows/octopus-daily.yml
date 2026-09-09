@@ -1,3 +1,60 @@
+name: 🐙 章鱼AI · 每日自动推送
+
+on:
+  schedule:
+    # 每天北京时间 08:00 自动运行（UTC 00:00）
+    - cron: "0 0 * * *"
+    # 每天北京时间 21:00 晚间补充推送，取消注释即可生效
+    # - cron: "0 13 * * *"
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "仅采集预览，不推送"
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  octopus-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 声明仓库写入权限，解决git push 403问题
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 安装依赖
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet requests
+
+      - name: 🐙 运行章鱼AI流水线
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 兜底空值，兼容定时触发场景
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "运行模式：预览模式（不推送）"
+            python3 output/pipeline.py --dry-run
+          else
+            python3 output/pipeline.py
+          fi
+
       - name: 📤 提交生成的日报
         # 即使推送失败，只要文件生成了就提交
         if: always()
