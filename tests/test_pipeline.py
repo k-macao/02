@@ -1954,7 +1954,7 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertFalse(a0["matched"])
         self.assertIsNone(a0["score"])
         self.assertIn("近72小时无相关点名新闻", a0["comment"])
-        self.assertIn("窗口内标题未点名该股", a0["reason"])
+        self.assertIn("窗口内标题未通过精确名/别名代码/行业概念归因到该股", a0["reason"])
         self.assertIn("暂无评分", a0["label"])
 
     def test_build_news_sentiment_available_without_match(self):
