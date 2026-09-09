@@ -3463,6 +3463,102 @@ _SENTI_NEG_WORDS = sorted(set(_AI_BEAR_WORDS + [
 ]))
 _SENTI_NEGATORS = set("不没未无非否莫勿毋别")
 
+# ---- 个股别名 / 行业概念归因（2026-09-09 增强）----
+# 别名词典：{别名 → (market, code)}，用于标题中出现的简称 / 英文名 / 俗称归因。
+# 仅覆盖高频出现的通用别名，不依赖大模型；新别名可在此追加。
+_STOCK_ALIASES = {
+    # A 股
+    "宁德时代": ("A股", "300750"), "宁德": ("A股", "300750"), "CATL": ("A股", "300750"),
+    "中际旭创": ("A股", "300308"), "旭创": ("A股", "300308"),
+    "东山精密": ("A股", "002384"),
+    "新易盛": ("A股", "300502"),
+    "亨通光电": ("A股", "600487"), "亨通": ("A股", "600487"),
+    "比亚迪": ("A股", "002594"), "BYD": ("A股", "002594"),
+    "中国平安": ("A股", "601318"), "平安": ("A股", "601318"),
+    "贵州茅台": ("A股", "600519"), "茅台": ("A股", "600519"),
+    "招商银行": ("A股", "600036"), "招行": ("A股", "600036"),
+    "工商银行": ("A股", "601398"), "工行": ("A股", "601398"),
+    "建设银行": ("A股", "601939"), "建行": ("A股", "601939"),
+    "农业银行": ("A股", "601288"), "农行": ("A股", "601288"),
+    "中国银行": ("A股", "601988"),
+    "中信证券": ("A股", "600030"), "中信": ("A股", "600030"),
+    "隆基绿能": ("A股", "601012"), "隆基": ("A股", "601012"),
+    "紫金矿业": ("A股", "601899"), "紫金": ("A股", "601899"),
+    "中芯国际": ("A股", "688981"), "中芯": ("A股", "688981"),
+    "海康威视": ("A股", "002415"), "海康": ("A股", "002415"),
+    "立讯精密": ("A股", "002475"), "立讯": ("A股", "002475"),
+    "药明康德": ("A股", "603259"), "药明": ("A股", "603259"),
+    "恒瑞医药": ("A股", "600276"), "恒瑞": ("A股", "600276"),
+    "三一重工": ("A股", "600031"), "三一": ("A股", "600031"),
+    "科大讯飞": ("A股", "002230"), "讯飞": ("A股", "002230"),
+    "龙版传媒": ("A股", "605577"), "龙版": ("A股", "605577"),
+    "江波龙": ("A股", "301308"),
+    # 港股
+    "腾讯": ("港股", "00700"), "腾讯控股": ("港股", "00700"),
+    "美团": ("港股", "03690"),
+    "阿里巴巴": ("港股", "09988"), "阿里": ("港股", "09988"),
+    "小米": ("港股", "01810"), "小米集团": ("港股", "01810"),
+    "快手": ("港股", "01024"),
+    "京东": ("港股", "09618"), "京东集团": ("港股", "09618"),
+    "百度": ("港股", "09888"), "百度集团": ("港股", "09888"),
+    "网易": ("港股", "09999"),
+    "友邦": ("港股", "01299"), "友邦保险": ("港股", "01299"), "AIA": ("港股", "01299"),
+    "海底捞": ("港股", "06862"),
+    "优地机器人": ("港股", "02549"),
+    "稀美资源": ("港股", "01536"),
+    "长和": ("港股", "00001"), "长实": ("港股", "01113"),
+    "汇丰": ("港股", "00005"), "汇丰控股": ("港股", "00005"),
+    "港交所": ("港股", "00388"),
+    # 美股
+    "英伟达": ("美股", "NVDA"), "NVIDIA": ("美股", "NVDA"),
+    "苹果": ("美股", "AAPL"), "Apple": ("美股", "AAPL"),
+    "特斯拉": ("美股", "TSLA"), "Tesla": ("美股", "TSLA"),
+    "微软": ("美股", "MSFT"), "Microsoft": ("美股", "MSFT"),
+    "谷歌": ("美股", "GOOGL"), "Google": ("美股", "GOOGL"), "Alphabet": ("美股", "GOOGL"),
+    "亚马逊": ("美股", "AMZN"), "Amazon": ("美股", "AMZN"),
+    "Meta": ("美股", "META"), "脸书": ("美股", "META"), "Facebook": ("美股", "META"),
+    "博通": ("美股", "AVGO"), "Broadcom": ("美股", "AVGO"), "AVGO": ("美股", "AVGO"),
+    "台积电": ("美股", "TSM"), "TSMC": ("美股", "TSM"),
+    "AMD": ("美股", "AMD"),
+    "Intel": ("美股", "INTC"), "英特尔": ("美股", "INTC"),
+    "美光": ("美股", "MU"), "Micron": ("美股", "MU"),
+    "OpenAI": ("美股", "NVDA"),  # OpenAI 新闻通常与 NVDA 高度相关
+    "Anthropic": ("美股", "NVDA"),  # AI 安全公司，归入 AI 算力链
+}
+
+# 行业 / 概念板块关键词 → 关联个股（market, code）列表。
+# 标题提到行业 / 概念时，关联相关上榜个股（弱归因，标记 tag="sector"）。
+_SECTOR_KEYWORDS = {
+    "AI": [("A股", "300308"), ("A股", "300502"), ("美股", "NVDA"), ("港股", "00700"), ("港股", "09888")],
+    "人工智能": [("A股", "300308"), ("A股", "300502"), ("美股", "NVDA"), ("港股", "00700")],
+    "机器人": [("A股", "300308"), ("港股", "02549")],
+    "人形机器人": [("A股", "300308"), ("港股", "02549")],
+    "光模块": [("A股", "300308"), ("A股", "300502")],
+    "半导体": [("A股", "688981"), ("美股", "NVDA"), ("美股", "AMD"), ("美股", "INTC"), ("美股", "MU")],
+    "芯片": [("A股", "688981"), ("美股", "NVDA"), ("美股", "AMD"), ("美股", "INTC"), ("美股", "MU")],
+    "新能源": [("A股", "300750"), ("A股", "601012"), ("A股", "002594"), ("港股", "01810")],
+    "锂电": [("A股", "300750")],
+    "电池": [("A股", "300750")],
+    "光伏": [("A股", "601012")],
+    "消费": [("A股", "600519"), ("港股", "06862"), ("港股", "03690")],
+    "白酒": [("A股", "600519")],
+    "银行": [("A股", "601318"), ("A股", "600036"), ("A股", "601398"), ("A股", "601939")],
+    "券商": [("A股", "600030")],
+    "黄金": [("A股", "601899"), ("港股", "00388")],
+    "石油": [("港股", "00857")],
+    "天然气": [("港股", "00857")],
+    "房地产": [("港股", "00001"), ("港股", "01113")],
+    "恒指": [("港股", "02800"), ("港股", "02828")],
+    "恒生": [("港股", "02800"), ("港股", "02828")],
+    "恒生科技": [("港股", "03033")],
+    "标普": [("美股", "SPY")],
+    "纳斯达克": [("美股", "QQQ")],
+    "纳指": [("美股", "QQQ")],
+    "期权": [("美股", "SPY"), ("美股", "QQQ")],
+    "CPI": [("A股", "601318"), ("A股", "600036")],
+    "PPI": [("A股", "601899")],
+}
+
 
 def _match_words_non_overlap(title, words):
     """词表最长优先非重叠匹配，返回 [(词, 起始下标)]（按出现顺序）。"""
@@ -3527,10 +3623,61 @@ def _extract_stock_universe(hot):
 
 
 def _attribute_headline(title, universe):
-    """标题归因到个股：标题含个股全名即归因（一条标题可归因多只）。"""
+    """标题归因到个股（增强版 2026-09-09）：
+
+    三层归因：
+    1. 精确全名匹配（标题含 universe 中个股全名）；
+    2. 别名 / 代码匹配（标题含 _STOCK_ALIASES 中的别名，或含个股代码）；
+    3. 行业 / 概念板块归因（标题含 _SECTOR_KEYWORDS 中的关键词，弱归因）。
+
+    返回 [universe_item]，每个 universe_item 额外带 tag 字段：
+    - "name"  = 精确全名匹配
+    - "alias" = 别名 / 代码匹配
+    - "sector" = 行业概念弱归因
+    一条标题可归因多只。去重（同一 key 只归因一次，优先强归因）。
+    """
     if not title:
         return []
-    return [u for u in universe if u["name"] in title]
+    universe_by_key = {u["key"]: u for u in universe}
+    matched = {}  # key → (universe_item, tag_priority)
+    # 1) 精确全名
+    for u in universe:
+        if u["name"] in title:
+            if u["key"] not in matched:
+                item = dict(u)
+                item["tag"] = "name"
+                matched[u["key"]] = (item, 0)
+    # 2) 别名 / 代码
+    for alias, (mkt, code) in _STOCK_ALIASES.items():
+        if alias not in title:
+            continue
+        target_key = f"{mkt}:{code}"
+        if target_key in universe_by_key and target_key not in matched:
+            item = dict(universe_by_key[target_key])
+            item["tag"] = "alias"
+            matched[target_key] = (item, 1)
+    # 代码直接匹配（如标题含 "300308"）
+    for u in universe:
+        if u["key"] in matched:
+            continue
+        code = u.get("code") or ""
+        if code and len(code) >= 3 and code in title:
+            item = dict(u)
+            item["tag"] = "alias"
+            matched[u["key"]] = (item, 1)
+    # 3) 行业 / 概念（弱归因，只补充未被强归因的 key）
+    for keyword, targets in _SECTOR_KEYWORDS.items():
+        if keyword not in title:
+            continue
+        for mkt, code in targets:
+            target_key = f"{mkt}:{code}"
+            if target_key in universe_by_key and target_key not in matched:
+                item = dict(universe_by_key[target_key])
+                item["tag"] = "sector"
+                matched[target_key] = (item, 2)
+    # 按优先级排序（name > alias > sector）
+    result = [item for item, _ in sorted(matched.values(), key=lambda x: x[1])]
+    return result
 
 
 def _factor_anchor_dt(date_str):
@@ -3843,17 +3990,29 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
     headlines = _filter_headlines_window(raw, anchor_dt, hours=SENTI_WINDOW_HOURS)
     per_stock = {}
     unattributed = 0
+    unattributed_headlines = []  # 未归因标题（用于"热门话题"子栏目）
     for order, head in enumerate(headlines):
         targets = _attribute_headline(head["title"], universe)
+        scored = _score_headline_sentiment(head["title"])
         if not targets:
             unattributed += 1
+            unattributed_headlines.append({
+                "title": head["title"], "source": head["source"],
+                "section": head["section"], "s": scored["s"],
+                "pos_hits": scored["pos"], "neg_hits": scored["neg"],
+                "date": (head.get("date") or "")[:10],
+                "old": (head.get("date") or "")[:10] != today_iso and bool(head.get("date")),
+                "order": order,
+            })
             continue
-        scored = _score_headline_sentiment(head["title"])
         is_today_item = (head.get("date") or "")[:10] == today_iso
         for stock in targets:
+            tag = stock.get("tag", "name")
             slot = per_stock.setdefault(stock["key"], {
                 "info": stock, "pos": 0, "neu": 0, "neg": 0,
-                "day_pos": 0, "day_neu": 0, "day_neg": 0, "headlines": []})
+                "day_pos": 0, "day_neu": 0, "day_neg": 0, "headlines": [],
+                "tags": set()})
+            slot["tags"].add(tag)
             if scored["s"] > 0:
                 slot["pos"] += 1
                 if is_today_item:
@@ -3872,7 +4031,7 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
                 "pos_hits": scored["pos"], "neg_hits": scored["neg"],
                 "date": (head.get("date") or "")[:10],
                 "old": is_today_item is False and bool(head.get("date")),
-                "order": order,
+                "order": order, "tag": tag,
             })
     all_stocks = []
     today_counts = {}
@@ -3899,6 +4058,8 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         volume = _sentiment_volume(day_total, raw_totals)
         slot["headlines"].sort(key=lambda h: (-abs(h["s"]), h["order"]))
         info = slot["info"]
+        tags = slot.get("tags", set())
+        best_tag = "name" if "name" in tags else ("alias" if "alias" in tags else "sector")
         all_stocks.append({
             "market": info["market"], "code": info["code"], "name": info["name"],
             "key": info["key"],
@@ -3907,9 +4068,22 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
             "label": "偏多" if score > 0.2 else ("偏空" if score < -0.2 else "中性"),
             "momentum": momentum, "volume": volume,
             "headlines": slot["headlines"],
+            "best_tag": best_tag,
         })
     all_stocks.sort(key=lambda s: (-s["total"], -abs(s["score"]), s["name"]))
     by_market = _build_senti_by_market(data, all_stocks)
+    # 未归因标题情绪关键词频率（不重复展示标题本身，避免与正文重复）
+    unattr_keyword_freq = {}
+    for h in unattributed_headlines:
+        for w in (h.get("pos_hits") or []):
+            unattr_keyword_freq[w] = unattr_keyword_freq.get(w, 0) + 1
+        for w in (h.get("neg_hits") or []):
+            unattr_keyword_freq[w] = unattr_keyword_freq.get(w, 0) + 1
+    unattr_pos_n = sum(1 for h in unattributed_headlines if h.get("s") and h["s"] > 0)
+    unattr_neg_n = sum(1 for h in unattributed_headlines if h.get("s") and h["s"] < 0)
+    unattr_neu_n = sum(1 for h in unattributed_headlines if h.get("s") == 0)
+    # 跨市场情绪总览
+    market_summary = _build_market_sentiment_summary(all_stocks, by_market)
     return {
         "available": bool(universe),
         "date": date_str,
@@ -3919,11 +4093,64 @@ def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N
         "universe_n": len(universe),
         "scored_headlines": len(headlines) - unattributed,
         "unattributed_n": unattributed,
+        "unattributed_pos_n": unattr_pos_n,
+        "unattributed_neg_n": unattr_neg_n,
+        "unattributed_neu_n": unattr_neu_n,
+        "unattributed_keywords": sorted(unattr_keyword_freq.items(),
+                                        key=lambda x: -x[1])[:10],
         "window_hours": SENTI_WINDOW_HOURS,
         "window_text": f"{anchor_dt:%m-%d %H:%M}",
         "corpus_n": len(headlines),
         "universe": universe,
         "today_counts": today_counts,
+        "market_summary": market_summary,
+    }
+
+
+def _build_market_sentiment_summary(all_stocks, by_market):
+    """构建跨市场情绪总览（渲染用）：整体 DNS、各市场情绪、最热/最冷个股。"""
+    if not all_stocks:
+        return {"available": False}
+    total_pos = sum(s["pos"] for s in all_stocks)
+    total_neg = sum(s["neg"] for s in all_stocks)
+    total_neu = sum(s["neu"] for s in all_stocks)
+    total_n = total_pos + total_neg + total_neu
+    overall_dns = (total_pos - total_neg) / total_n if total_n else 0
+    overall_label = "偏多" if overall_dns > 0.2 else ("偏空" if overall_dns < -0.2 else "中性")
+    # 各市场情绪
+    market_dns = {}
+    for mb in by_market:
+        mkt = mb["market"]
+        mkt_stocks = [s for s in mb.get("stocks") or [] if s.get("matched")]
+        if not mkt_stocks:
+            market_dns[mkt] = {"matched": 0, "dns": None, "label": "暂无"}
+            continue
+        mkt_pos = sum(s["pos"] for s in mkt_stocks)
+        mkt_neg = sum(s["neg"] for s in mkt_stocks)
+        mkt_neu = sum(s["neu"] for s in mkt_stocks)
+        mkt_n = mkt_pos + mkt_neg + mkt_neu
+        mkt_dns = (mkt_pos - mkt_neg) / mkt_n if mkt_n else 0
+        mkt_label = "偏多" if mkt_dns > 0.2 else ("偏空" if mkt_dns < -0.2 else "中性")
+        market_dns[mkt] = {"matched": len(mkt_stocks), "total": mkt_n,
+                           "dns": round(mkt_dns, 2), "label": mkt_label,
+                           "pos": mkt_pos, "neg": mkt_neg, "neu": mkt_neu}
+    # 最热 / 最冷个股（仅已匹配的）
+    matched = [s for s in all_stocks if s["total"] >= 1]
+    hottest = max(matched, key=lambda s: s["score"]) if matched else None
+    coldest = min(matched, key=lambda s: s["score"]) if matched else None
+    most_covered = max(matched, key=lambda s: s["total"]) if matched else None
+    return {
+        "available": True,
+        "overall_dns": round(overall_dns, 2),
+        "overall_label": overall_label,
+        "total_n": total_n,
+        "total_pos": total_pos,
+        "total_neg": total_neg,
+        "total_neu": total_neu,
+        "market_dns": market_dns,
+        "hottest": hottest,
+        "coldest": coldest,
+        "most_covered": most_covered,
     }
 
 
@@ -3931,21 +4158,32 @@ SENTI_MARKET_ORDER = ("A股", "港股", "美股")
 
 
 def _build_senti_stock_comment(s):
-    """按确定性规则生成单只“AI 新闻情绪评分 + 总结评论 + 原因”。
+    """按确定性规则生成单只"AI 新闻情绪评分 + 总结评论 + 原因"（2026-09-09 丰富版）。
 
     只使用窗口内真实命中的标题数与词表命中词；无新闻就不评分不评级，
     绝不凭消息面或价格涨跌反推新闻情绪。
     """
     if not s.get("matched"):
         return ("近72小时无相关点名新闻，AI 暂不评分。",
-                "窗口内标题未点名该股，无新闻证据时不评论其新闻情绪。")
+                "窗口内标题未通过精确名/别名代码/行业概念归因到该股，无新闻证据时不评论其新闻情绪。")
     score = round(float(s.get("score") or 0.0), 2)
     total = int(s.get("total") or 0)
     pos = int(s.get("pos") or 0)
     neu = int(s.get("neu") or 0)
     neg = int(s.get("neg") or 0)
     label = s.get("label") or "中性"
-    comment = (f"AI情绪分 {score:+.2f}（{label}）：近72小时命中 {total} 条相关新闻，"
+    # 归因类型统计
+    tag_counts = {}
+    for h in s.get("headlines", []) or []:
+        t = h.get("tag", "name")
+        tag_counts[t] = tag_counts.get(t, 0) + 1
+    tag_labels = {"name": "精确名", "alias": "别名/代码", "sector": "行业概念"}
+    tag_order = ("name", "alias", "sector")
+    tag_parts = [f'{tag_labels.get(t, t)}{n}条' for t, n in
+                 sorted(tag_counts.items(), key=lambda x: tag_order.index(x[0])
+                        if x[0] in tag_order else 99)]
+    tag_note = f"（归因：{' / '.join(tag_parts)}）" if tag_parts else ""
+    comment = (f"AI情绪分 {score:+.2f}（{label}）：近72小时命中 {total} 条相关新闻{tag_note}，"
                f"正面 {pos} 条 / 中性 {neu} 条 / 负面 {neg} 条。")
     parts = []
     hits = []
@@ -3957,12 +4195,25 @@ def _build_senti_stock_comment(s):
         parts.append("命中情绪词：" + "、".join(hits))
     pos_heads = [h["title"] for h in s.get("headlines") if h.get("s") and h["s"] > 0]
     neg_heads = [h["title"] for h in s.get("headlines") if h.get("s") and h["s"] < 0]
+    neu_heads = [h["title"] for h in s.get("headlines") if h.get("s") == 0]
     if pos_heads:
-        parts.append("正面主要来自「" + pos_heads[0][:34] + "」" +
+        parts.append("正面主要来自「" + pos_heads[0][:40] + "」" +
                      (f"等 {len(pos_heads)} 条" if len(pos_heads) > 1 else ""))
     if neg_heads:
-        parts.append("负面主要来自「" + neg_heads[0][:34] + "」" +
+        parts.append("负面主要来自「" + neg_heads[0][:40] + "」" +
                      (f"等 {len(neg_heads)} 条" if len(neg_heads) > 1 else ""))
+    if neu_heads and not pos_heads and not neg_heads:
+        parts.append("中性报道为主：「" + neu_heads[0][:40] + "」" +
+                     (f"等 {len(neu_heads)} 条" if len(neu_heads) > 1 else ""))
+    # 来源分布
+    source_counts = {}
+    for h in s.get("headlines", []) or []:
+        sec = h.get("section", "")
+        source_counts[sec] = source_counts.get(sec, 0) + 1
+    if source_counts:
+        src_parts = [f'{sec}{n}条' for sec, n in
+                     sorted(source_counts.items(), key=lambda x: -x[1])]
+        parts.append("来源：" + "、".join(src_parts))
     mom = s.get("momentum") or {}
     if mom.get("enough"):
         parts.append(f"情绪动量 {float(mom['value']):+.2f}（{mom['label']}）")
@@ -4056,15 +4307,59 @@ def _senti_headline_sub(h):
 
 
 def _pixel_sentiment_block(res):
-    """像素主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因。"""
+    """像素主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
     by_market = res.get("by_market") or []
     total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
-    head = _mini_table([
+    ms = res.get("market_summary") or {}
+    overview_rows = [
         ("标的范围", f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'),
-        ("窗口内有点名", f'{res["total_matched"]} 只（窗口内标题归因）'),
+        ("窗口内有点名", f'{res["total_matched"]} 只（精确名/别名代码/行业概念归因）'),
         ("标题窗口", f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
-        ("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
-    ])
+        ("归因未命中", f'{res["unattributed_n"]} 条（已入下方「市场情绪关键词」）'),
+    ]
+    head = _mini_table(overview_rows)
+    # 市场情绪全景
+    summary_cards = []
+    if ms.get("available"):
+        arrow = "▲" if ms["overall_dns"] > 0.2 else ("▼" if ms["overall_dns"] < -0.2 else "■")
+        if ms["overall_dns"] > 0.2:
+            color = C_GREEN
+        elif ms["overall_dns"] < -0.2:
+            color = C_RED
+        else:
+            color = C_AMBER
+        summary_rows = [
+            ("整体 DNS", f'<span style="color:{color};font-weight:900;">{ms["overall_dns"]:+.2f}</span>'
+                         f'（{ms["overall_label"]} · 正{ms["total_pos"]}/中{ms["total_neu"]}/负{ms["total_neg"]}）'),
+        ]
+        for mkt in SENTI_MARKET_ORDER:
+            md = ms.get("market_dns", {}).get(mkt)
+            if not md:
+                continue
+            if md.get("dns") is None:
+                summary_rows.append((f"{mkt}", f'■ 窗口内无匹配'))
+            else:
+                mkt_color = C_GREEN if md["dns"] > 0.2 else (C_RED if md["dns"] < -0.2 else C_AMBER)
+                summary_rows.append((
+                    f"{mkt}",
+                    f'<span style="color:{mkt_color};font-weight:900;">DNS {md["dns"]:+.2f}</span>'
+                    f'（{md["label"]} · {md["matched"]}只）'))
+        callouts = []
+        if ms.get("hottest"):
+            h = ms["hottest"]
+            callouts.append(f'最暖：{h["name"]}（{h["score"]:+.2f}）')
+        if ms.get("coldest") and ms["coldest"]["key"] != (ms.get("hottest") or {}).get("key"):
+            c = ms["coldest"]
+            callouts.append(f'最冷：{c["name"]}（{c["score"]:+.2f}）')
+        if ms.get("most_covered"):
+            m = ms["most_covered"]
+            callouts.append(f'最多：{m["name"]}（{m["total"]}条）')
+        if callouts:
+            summary_rows.append(("关键信号", " · ".join(callouts)))
+        summary_cards.append(_pixel_panel(
+            f"MARKET OVERVIEW // {arrow} {ms['overall_label']}",
+            _mini_table(summary_rows), color, arrow))
+    # 逐市场逐股
     cards = []
     for mb in by_market:
         cards.append(_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
@@ -4093,27 +4388,48 @@ def _pixel_sentiment_block(res):
             ]
             body = _mini_table(rows) + _mini_table(_senti_factor_lines(s))
             evidence = []
-            for h in s["headlines"][:3]:
+            for h in s["headlines"][:5]:
                 badge, bcolor = {1: ("S+1", C_GREEN), -1: ("S−1", C_RED),
                                  0: ("S0", C_AMBER)}[h["s"]]
+                tag_mark = ""
+                if h.get("tag") == "alias":
+                    tag_mark = ' <span style="font-size:10px;color:#888;">[别名]</span>'
+                elif h.get("tag") == "sector":
+                    tag_mark = ' <span style="font-size:10px;color:#888;">[行业]</span>'
                 evidence.append(_item_row(
-                    "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:60])}',
+                    "»", f'<b style="color:{bcolor};">[{badge}]</b> {_esc(h["title"][:70])}{tag_mark}',
                     _esc(_senti_headline_sub(h))))
-            more = len(s["headlines"]) - 3
+            more = len(s["headlines"]) - 5
             if more > 0:
                 evidence.append(
                     f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
                     f'line-height:1.7;font-family:{FONT_MONO};">'
-                    f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）</div>')
+                    f'＋其余 {more} 条已计入因子（按情绪强度仅展示前 5 条）</div>')
             body += "".join(evidence)
             cards.append(_pixel_panel(
                 f"STOCK SENTI // {_esc(s['name'])} {_esc(s['code'])} · {s['market']} · {_esc(s['label'])}",
                 body, color, icon))
+    # 未归因市场级情绪关键词
+    unattr_n = res.get("unattributed_n") or 0
+    unattr_keywords = res.get("unattributed_keywords") or []
+    topic_cards = []
+    if unattr_n > 0:
+        topic_rows = [
+            ("未归因", f'{unattr_n} 条（正{res.get("unattributed_pos_n") or 0}/中{res.get("unattributed_neu_n") or 0}/负{res.get("unattributed_neg_n") or 0}）'),
+        ]
+        if unattr_keywords:
+            kw_parts = [f'{kw}×{n}' for kw, n in unattr_keywords[:8]]
+            topic_rows.append(("高频情绪词", "、".join(kw_parts)))
+        else:
+            topic_rows.append(("高频情绪词", "无显著情绪词命中"))
+        topic_cards.append(_pixel_panel(
+            f"MARKET MOOD // 未归因{unattr_n}条市场级情绪",
+            _mini_table(topic_rows), C_AMBER, "■"))
     note = _note(f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
+                 "归因三层：精确名 → 别名/代码 → 行业/概念关键词（后两者标[别名]/[行业]）；"
                  "总结评论与原因由命中标题/词表、动量与新闻量确定性规则生成；无新闻的榜单个股明确标注「暂无评分」，"
                  "不凭价格涨跌反推新闻情绪；MOM/ANV 按自然日口径 // RULESET v3 // 非投资建议")
-    return head + "".join(cards) + note
-
+    return head + "".join(summary_cards) + "".join(cards) + "".join(topic_cards) + note
 
 def _senti_empty_counts(res):
     """情绪因子占位用的统一计数（双主题共用）。返回 (n_window, universe_n)。"""
@@ -4144,44 +4460,116 @@ def _pixel_sentiment_empty_block(res):
 
 
 def gz_sentiment_block(res):
-    """谷藏主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因。"""
+    """谷藏主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
     by_market = res.get("by_market") or []
     total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
-    out = [
-        gz_rowline("标的范围",
-                   f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'),
-        gz_rowline("窗口内有点名", f"{res['total_matched']} 只（窗口内标题归因）"),
-        gz_rowline("标题窗口",
-                   f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'),
-        gz_rowline("未归因", f'{res["unattributed_n"]} 条（大盘/行业级，不硬归因）'),
-    ]
+    ms = res.get("market_summary") or {}
+    out = []
+    # ① 总览信息
+    out.append(gz_rowline("标的范围",
+               f'A股/港股/美股 成交量前 {HOT_STOCK_TOP_N} · 共 {total_stocks} 只'))
+    out.append(gz_rowline("窗口内有点名",
+               f"{res['total_matched']} 只（窗口内标题归因：精确名/别名代码/行业概念）"))
+    out.append(gz_rowline("标题窗口",
+               f'近 {res.get("window_hours") or SENTI_WINDOW_HOURS} 小时（截至 {res.get("window_text") or "—"}）'))
+    out.append(gz_rowline("归因未命中",
+               f'{res["unattributed_n"]} 条（已入下方「市场情绪关键词」）'))
+    # ② 市场情绪全景
+    if ms.get("available"):
+        arrow = "▲" if ms["overall_dns"] > 0.2 else ("▼" if ms["overall_dns"] < -0.2 else "■")
+        out.append(gz_subsection(f'市场情绪全景 {arrow} {ms["overall_label"]}'))
+        out.append(gz_rowline(
+            "整体 DNS",
+            f'{ms["overall_dns"]:+.2f}（{ms["overall_label"]} · '
+            f'正{ms["total_pos"]}/中{ms["total_neu"]}/负{ms["total_neg"]} · '
+            f'共{ms["total_n"]}条归因标题）'))
+        # 各市场情绪
+        for mkt in SENTI_MARKET_ORDER:
+            md = ms.get("market_dns", {}).get(mkt)
+            if not md:
+                continue
+            if md.get("dns") is None:
+                out.append(gz_rowline(f"{mkt}", f'■ 窗口内无匹配（{md.get("matched", 0)} 只归因）'))
+            else:
+                mkt_arrow = "▲" if md["dns"] > 0.2 else ("▼" if md["dns"] < -0.2 else "■")
+                out.append(gz_rowline(
+                    f"{mkt} {mkt_arrow}",
+                    f'DNS {md["dns"]:+.2f}（{md["label"]} · '
+                    f'{md["matched"]}只 · 正{md["pos"]}/中{md["neu"]}/负{md["neg"]}）'))
+        # 最热/最冷/最多
+        callouts = []
+        if ms.get("hottest"):
+            h = ms["hottest"]
+            callouts.append(f'情绪最暖：{h["name"]}（DNS {h["score"]:+.2f} · {h["label"]}）')
+        if ms.get("coldest") and ms["coldest"]["key"] != (ms.get("hottest") or {}).get("key"):
+            c = ms["coldest"]
+            callouts.append(f'情绪最冷：{c["name"]}（DNS {c["score"]:+.2f} · {c["label"]}）')
+        if ms.get("most_covered"):
+            m = ms["most_covered"]
+            callouts.append(f'报道最多：{m["name"]}（{m["total"]}条）')
+        if callouts:
+            out.append(gz_rowline("关键信号", _esc(" · ".join(callouts))))
+    # ③ 逐市场逐股
     for mb in by_market:
         out.append(gz_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
         for s in mb.get("stocks") or []:
             if not s.get("matched"):
                 title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
                 out.append(gz_subsection(f'{_esc(title)} · {s["market"]} ■ 暂无评分'))
-                out.append(gz_rowline("总结评论", _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")))
-                out.append(gz_rowline("原因", _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")))
+                out.append(gz_rowline("总结评论",
+                    _esc(s.get("comment") or "窗口内无相关新闻，AI 暂不评分。")))
+                out.append(gz_rowline("原因",
+                    _esc(s.get("reason") or "窗口内标题未点名该股，无新闻证据时不评论。")))
                 continue
             arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
             title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
-            out.append(gz_subsection(f'{_esc(title)} · {s["market"]} {arrow}'))
+            tag_label = {"name": "精确名", "alias": "别名/代码", "sector": "行业概念"}.get(
+                s.get("best_tag", "name"), "")
+            out.append(gz_subsection(
+                f'{_esc(title)} · {s["market"]} {arrow}'
+                f' <span style="font-size:12px;color:{GZ_META};font-weight:400;">归因：{tag_label}</span>'))
             out.append(gz_rowline("AI 情绪分", _esc(s.get("comment") or "")))
             out.append(gz_rowline("原因", _esc(s.get("reason") or "")))
             for label, line in _senti_factor_lines(s):
                 out.append(gz_rowline(label, _esc(line)))
-            for h in s["headlines"][:3]:
+            for h in s["headlines"][:5]:
                 badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
+                tag_mark = ""
+                if h.get("tag") == "alias":
+                    tag_mark = f' <span style="font-size:11px;color:{GZ_META};">[别名]</span>'
+                elif h.get("tag") == "sector":
+                    tag_mark = f' <span style="font-size:11px;color:{GZ_META};">[行业]</span>'
                 out.append(gz_item_row(
-                    "»", f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:60])}',
+                    "»",
+                    f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:70])}{tag_mark}',
                     _senti_headline_sub(h)))
-            more = len(s["headlines"]) - 3
+            more = len(s["headlines"]) - 5
             if more > 0:
-                out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 3 条）。"))
-    out.append(gz_note(f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
-                       "总结评论与原因由命中标题/词表、动量与新闻量确定性规则生成；无新闻的榜单个股明确标注「暂无评分」，"
-                       "不凭价格涨跌反推新闻情绪；MOM/ANV 按自然日口径。非投资建议。"))
+                out.append(gz_note(f"＋其余 {more} 条已计入因子（按情绪强度仅展示前 5 条）。"))
+    # ④ 未归因市场级情绪关键词（避免重复展示已在正文出现的标题）
+    unattr_n = res.get("unattributed_n") or 0
+    unattr_keywords = res.get("unattributed_keywords") or []
+    if unattr_n > 0:
+        out.append(gz_subsection(f'市场情绪关键词 · 未归因{unattr_n}条'))
+        out.append(gz_shell(
+            f'<div style="font-size:13px;color:{GZ_META};line-height:1.7;">'
+            f'以下标题未点名任何榜单个股，但反映市场级情绪主题。'
+            f'正面{res.get("unattributed_pos_n") or 0}条 / '
+            f'中性{res.get("unattributed_neu_n") or 0}条 / '
+            f'负面{res.get("unattributed_neg_n") or 0}条。</div>',
+            pad="4px 0 12px"))
+        if unattr_keywords:
+            kw_parts = [f'{kw}×{n}' for kw, n in unattr_keywords[:8]]
+            out.append(gz_rowline("高频情绪词", _esc("、".join(kw_parts))))
+        else:
+            out.append(gz_rowline("高频情绪词", _esc("无显著情绪词命中")))
+    # ⑤ 方法论脚注
+    out.append(gz_note(
+        f"AI 新闻情绪分按近{SENTI_WINDOW_HOURS}h 窗口标题词表评分逐股合成；"
+        "归因三层：精确名 → 别名/代码 → 行业/概念关键词（后两者标[别名]/[行业]）；"
+        "总结评论与原因由命中标题/词表、动量与新闻量确定性规则生成；"
+        "无新闻的榜单个股明确标注「暂无评分」，不凭价格涨跌反推新闻情绪；"
+        "MOM/ANV 按自然日口径。非投资建议。"))
     return "".join(out)
 
 
