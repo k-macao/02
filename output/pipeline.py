@@ -69,12 +69,15 @@
       个股名归因，输出 DNS 日度情绪=(正−负)/总数、MOM 情绪动量=近3有评分日均
       −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
       >均值+2σ 标异常）。跨日基线存 output/sentiment_history.json（随日报提交）；
-      冷启动/样本不足明确标注，无个股归因时栏目缺席。规则合成、非投资建议。
+      冷启动/样本不足明确标注；当天标题存在但均未点名榜单个股时，
+      栏目显示「样本不足」占位（不整栏消失），全天无当天标题时栏目缺席。
+      渲染位置：各资讯栏目之后、流动性分析之前。规则合成、非投资建议。
   11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对当天资讯标题
-      做政策维度识别（货币/监管/扶持/财政/地产/开放/贸易），经关键词矩阵映射到
+      做政策维度识别（货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据
+      含 CPI / PPI / 社融 / 统计局 等经济数据口径），经关键词矩阵映射到
       行业受益/受损权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则
-      生成的总结）。触发词被否定修饰时跳过；零政策新闻时栏目缺席。规则合成、
-      非投资建议。
+      生成的总结）。触发词被否定修饰时跳过；零政策/宏观新闻时栏目缺席。
+      规则合成、非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -2637,101 +2640,125 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
 
-    sections = []  # (kicker_en, title, content, badge_html, caption)
+    # ---- 栏目拼版：固定阅读顺序（有内容才渲染，无数据栏目缺席，审计栏永远收尾）----
+    # 阅读逻辑：① 政策/宏观先定调 → ② AI 综合研判导读 → ③ 行情数据底座 →
+    # ④ A股大盘全景 → ⑤ 全球 / 国内 / A股 / 港股 资讯 → ⑥ 新闻情绪量化
+    #（AI 新闻情绪因子，评分对象即上面的当天标题）→ ⑦ 资金与交投收尾
+    #（成交量与流动性分析）→ ⑧ 本次数据可用性（数据审计）。
+    blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
 
-    # 行情速览
+    # ① 政策因子（推送页首位；宏观/政策先定调——main 已单独构建，此处仅兜底）
+    if AI_ANALYSIS_ENABLED:
+        policy = policy_result if policy_result is not None else build_policy_factor(data)
+        if policy.get("available"):
+            blocks["POLICY SHOCK"] = (
+                "POLICY SHOCK", "政策因子 · 冲击指数",
+                kit.policy_block(policy), kit.ai_badge(),
+                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（非投资建议）",
+            )
+
+    # ② AI 盘研判（跨市场综合研判导读，紧随政策因子）
+    if AI_ANALYSIS_ENABLED:
+        ai_result = build_ai_analysis(data)
+        if ai_result.get("available"):
+            blocks["AI READ"] = (
+                "AI READ", "AI 盘研判",
+                kit.ai_block(ai_result), kit.ai_badge(),
+                "章鱼AI · 多源信号规则合成（非投资建议）",
+            )
+
+    # ③ 行情速览（数据底座；逐项行情的唯一展示位置）
     if market.get("status") == "success":
         data_date = market.get("content_date") or "—"
-        sections.append((
+        blocks["MARKET SNAPSHOT"] = (
             "MARKET SNAPSHOT", "行情速览（实时）",
             kit.market_section(market),
             kit.source_badge(market),
             f"{_source_note(market)} · 数据日期 {data_date}",
-        ))
+        )
 
-    # A股大盘全景复盘（指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
+    # ④ A股大盘全景复盘（指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
     if pan.get("status") == "success":
-        sections.append((
+        blocks["A-SHARE PANORAMA"] = (
             "A-SHARE PANORAMA", "A股大盘全景复盘",
             kit.panorama_block(pan),
             kit.source_badge(pan),
             f"{_source_note(pan)} · 数据截至 {_esc(pan.get('quote_time') or '—')}",
-        ))
+        )
 
-    # 港股名家频道：只显示实际抓取到内容的频道
-    if yt_live:
-        blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
-        note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
-        sections.append((
-            "HK GURU CHANNELS", "港股名家频道",
-            blocks + kit.note(f"数据来自各频道公开 RSS；{note}。带 NEW · 当天 标记的内容发布于今天（北京时间）；"
-                              f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
-            kit.source_badge(yt),
-            f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
-        ))
-
-    # 全球头条（Google News 中文）
+    # ⑤ 资讯栏目一：全球头条（Google News 中文）
     if gh_headlines:
         gh_items = kit.rows("".join(kit.headline_row(it, i)
                                     for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
-        sections.append(("GLOBAL HEADLINES", "全球头条", gh_items,
-                         kit.source_badge(google), _source_note(google)))
+        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", "全球头条", gh_items,
+                                      kit.source_badge(google), _source_note(google))
 
-    # 东方财富快讯
+    # ⑤ 资讯栏目二：东方财富快讯
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
                                     for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
-        sections.append(("EASTMONEY WIRE", "东方财富快讯", em_items,
-                         kit.source_badge(em),
-                         f"{_source_note(em)} · 免费公开数据源"))
+        blocks["EASTMONEY WIRE"] = ("EASTMONEY WIRE", "东方财富快讯", em_items,
+                                    kit.source_badge(em),
+                                    f"{_source_note(em)} · 免费公开数据源")
 
-    # A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
+    # ⑤ 资讯栏目三：A股市场（四指数行情已并入「行情速览」，这里只展示新浪资讯）
     if sina_headlines:
         sina_items = kit.rows("".join(kit.item_row(f"{i:02d}", _esc(h[:120]),
                                                    anchor=f"h-cn-{i:02d}")
                                       for i, h in enumerate(sina_headlines[:SINA_DISPLAY_N], 1)))
-        sections.append(("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
-                         kit.source_badge(sina), _source_note(sina)))
+        blocks["A-SHARE DESK"] = ("A-SHARE DESK", "A股市场（实时行情 + 资讯）", sina_items,
+                                  kit.source_badge(sina), _source_note(sina))
 
-    # A股 / 港股 / 美股最近收盘成交量与流动性报告（AI 研判 & 100字多因子结论）
-    if liq.get("status") == "success" or market.get("status") == "success":
-        sections.append((
-            "A/H/US LIQUIDITY", "AI 研判 · 最近 A股、港股、美股成交量与流动性分析",
-            kit.liquidity_block(liq, hot, market, data),
-            kit.source_badge(liq),
-            f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
-        ))
+    # ⑤ 资讯栏目四：港股名家频道（只显示实际抓取到内容的频道）
+    if yt_live:
+        channel_blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
+        note = f"本次 {len(yt_live)}/{len(HK_CHANNELS)} 个频道可自动抓取"
+        blocks["HK GURU CHANNELS"] = (
+            "HK GURU CHANNELS", "港股名家频道",
+            channel_blocks + kit.note(f"数据来自各频道公开 RSS；{note}。带 NEW · 当天 标记的内容发布于今天（北京时间）；"
+                                      f"每个频道列出最新 {CHANNEL_TOP_N} 条。"),
+            kit.source_badge(yt),
+            f"{_source_note(yt)} · 内容最新日期 {_esc(yt.get('content_date') or '—')}",
+        )
 
-    # AI 盘研判（规则合成综合研判；导读次位，政策因子之后）
-    if AI_ANALYSIS_ENABLED:
-        ai_result = build_ai_analysis(data)
-        if ai_result.get("available"):
-            sections.insert(0, (
-                "AI READ", "AI 盘研判",
-                kit.ai_block(ai_result), kit.ai_badge(),
-                "章鱼AI · 多源信号规则合成（非投资建议）",
-            ))
-
-    # AI 新闻情绪因子（个股级 DNS/MOM/ANV/S，紧随 AI 盘研判；无个股归因时缺席）
+    # ⑥ AI 新闻情绪因子（DNS/MOM/ANV/S）：紧随资讯栏目，评分对象即上面的当天标题。
+    #    有归因 → 正常出因子；无归因但有当天标题 → 显示「样本不足」占位（不整栏消失）；
+    #    当天标题为零 → 栏目缺席（与“无数据不出现在页面”一致）。
     if AI_ANALYSIS_ENABLED:
         senti_result = build_news_sentiment(data, date_str or _today_str(),
                                             sentiment_history)
         if senti_result.get("available"):
-            sections.insert(1, (
+            blocks["NEWS SENTIMENT"] = (
                 "NEWS SENTIMENT", "AI 新闻情绪因子",
                 kit.sentiment_block(senti_result), kit.ai_badge(),
                 "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
-            ))
+            )
+        else:
+            senti_today_n = ((senti_result.get("scored_headlines") or 0)
+                             + (senti_result.get("unattributed_n") or 0))
+            if senti_today_n > 0:
+                blocks["NEWS SENTIMENT"] = (
+                    "NEWS SENTIMENT", "AI 新闻情绪因子",
+                    kit.sentiment_empty_block(senti_result),
+                    kit.senti_empty_badge(),
+                    "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
+                )
 
-    # 政策因子（推送页首位栏目；main 已单独构建，此处仅在缺省时兜底构建）
-    if AI_ANALYSIS_ENABLED:
-        policy = policy_result if policy_result is not None else build_policy_factor(data)
-        if policy.get("available"):
-            sections.insert(0, (
-                "POLICY SHOCK", "政策因子 · 冲击指数",
-                kit.policy_block(policy), kit.ai_badge(),
-                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（非投资建议）",
-            ))
+    # ⑦ 资金与交投收尾：A股 / 港股 / 美股最近收盘成交量与流动性分析
+    if liq.get("status") == "success" or market.get("status") == "success":
+        blocks["A/H/US LIQUIDITY"] = (
+            "A/H/US LIQUIDITY", "AI 研判 · 最近 A股、港股、美股成交量与流动性分析",
+            kit.liquidity_block(liq, hot, market, data),
+            kit.source_badge(liq),
+            f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
+        )
+
+    # 按固定阅读顺序输出（未命中 / 无数据的栏目自然缺席）
+    sections = [blocks[k] for k in (
+        "POLICY SHOCK", "AI READ", "MARKET SNAPSHOT", "A-SHARE PANORAMA",
+        "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK", "HK GURU CHANNELS",
+        "NEWS SENTIMENT", "A/H/US LIQUIDITY",
+    ) if k in blocks]
 
     # 数据审计栏
     if today_n > 0:
@@ -3300,7 +3327,8 @@ def _liquidity_market_block(label, stats):
 # 跨日窗口依赖 output/sentiment_history.json（随日报由 Actions 提交回库；
 # main 流程：采集后加载 → 渲染 → 保存报告后落盘；--dry-run 只读不写；
 # 同日多次运行按日期键覆盖，保证幂等；零报道日记 total=0、score=None）。
-# 冷启动/样本不足时明确标注口径与 n，不伪造数值；无个股归因时栏目缺席。
+# 冷启动/样本不足时明确标注口径与 n，不伪造数值；当天标题存在但均未归因时，
+# 栏目以「样本不足」占位渲染（不整栏消失）；全天无当天标题时才缺席。
 # 如需接大模型做标题标注，只需替换 _score_headline_sentiment（调用方只依赖
 # 返回结构 {"s","pos","neg"}，保留本规则作兜底）。
 # ============================================================
@@ -3709,6 +3737,34 @@ def _pixel_sentiment_block(res):
     return head + "".join(cards) + note
 
 
+def _senti_empty_counts(res):
+    """情绪因子占位用的统一计数（双主题共用）。返回 (n_today, universe_n)。"""
+    n_today = (res.get("scored_headlines") or 0) + (res.get("unattributed_n") or 0)
+    universe_n = res.get("universe_n") or 0
+    return n_today, universe_n
+
+
+def _pixel_sentiment_empty_block(res):
+    """像素主题：AI 新闻情绪因子「样本不足」占位（无归因时代替整栏消失）。"""
+    n_today, universe_n = _senti_empty_counts(res)
+    if universe_n:
+        cover = f"0 / {universe_n} 只榜单个股被当天标题点名"
+    else:
+        cover = "热门榜单暂缺 → 无个股宇宙可归因"
+    head = _mini_table([
+        ("当天标题", f"{n_today} 条（24h 口径，全部尝试归因）"),
+        ("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n else "0 只（热门榜单暂缺）"),
+        ("归因结果", cover),
+    ])
+    body = (head
+            + _note("DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：当天标题未点名榜单个股 → "
+                    "无样本可出分，明确标注而非伪造。有榜单个股被点名报道时本栏目自动恢复。"))
+    return (_alert(f"SAMPLE INSUFFICIENT // 样本不足：{n_today} 条当天标题均未点名榜单个股", C_AMBER)
+            + _pixel_panel("STOCK SENTI // 样本不足", body, C_AMBER, "■")
+            + _note("因子口径：DNS=(正−负)/总数（仅当天标题）；MOM=近3有评分日均−近20有评分日均；"
+                    "ANV:今日条数>30天均值+2σ标异常 // RULESET v3 // 非投资建议"))
+
+
 def gz_sentiment_block(res):
     """谷藏主题：AI 新闻情绪因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
     out = [
@@ -3735,18 +3791,43 @@ def gz_sentiment_block(res):
     return "".join(out)
 
 
+def gz_sentiment_empty_block(res):
+    """谷藏主题：AI 新闻情绪因子「样本不足」占位（无归因时代替整栏消失）。"""
+    n_today, universe_n = _senti_empty_counts(res)
+    if universe_n:
+        cover = f"0 / {universe_n} 只榜单个股被当天标题点名"
+    else:
+        cover = "热门榜单暂缺 → 无个股宇宙可归因"
+    out = [
+        gz_shell(
+            f'<div style="font-size:16px;font-weight:700;color:{GZ_INK};line-height:1.6;">'
+            f'■ 样本不足：{n_today} 条当天标题均未点名榜单个股</div>',
+            pad="8px 0"),
+        gz_rowline("当天标题", f"{n_today} 条（24h 口径，全部尝试归因）"),
+        gz_rowline("个股宇宙", f"{universe_n} 只（来自热门榜单）" if universe_n
+                   else "0 只（热门榜单暂缺）"),
+        gz_rowline("归因结果", cover),
+    ]
+    out.append(gz_note(
+        "DNS/MOM/ANV 需要「标题→榜单个股」的归因样本：当天标题未点名榜单个股 → 无样本可出分，"
+        "明确标注而非伪造；有榜单个股被点名报道时本栏目自动恢复。因子口径：DNS=(正−负)/总数"
+        "（仅当天标题）；MOM=近3有评分日均−近20有评分日均；ANV:今日条数>30天均值+2σ标异常。"
+        "非投资建议。"))
+    return "".join(out)
+
+
 # ============================================================
 # 政策因子（POLICY SHOCK · 确定性关键词矩阵）
 # ------------------------------------------------------------
 # 抓取后、推送前单独构建（main 1.6 阶段），推送页首位栏目渲染。
-# 逻辑：识别政策类新闻（监管/扶持/货币/财政/地产/贸易等维度），经
+# 逻辑：识别政策类新闻（监管/扶持/货币/财政/地产/贸易/宏观数据等维度），经
 # 关键词矩阵映射到行业受益/受损权重，汇总为 PolicyShockIndex：
 #   行业 PSI ＝ 该行业在今日政策新闻中的权重之和（正=受益，负=承压）
 #   大盘 PSI ＝ 宽基权重之和（>0 偏暖 / <0 偏冷 / =0 中性）
-# 维度分两类：固定映射（货币/财政/地产，直接给行业权重）与
+# 维度分两类：固定映射（货币/财政/地产/宏观数据，直接给行业权重）与
 # 行业归因（扶持/监管/开放/贸易，按标题提及的行业落权重；无提及
 # 落宽基小权重并标注宽基）。触发词被否定词修饰时跳过（如"暂不降准"）。
-# 只统计当天标题（复用情绪因子的 24h 采集口径）；零政策新闻时
+# 只统计当天标题（复用情绪因子的 24h 采集口径）；零政策/宏观新闻时
 # 栏目缺席，不伪造。
 # ============================================================
 POLICY_DISPLAY_INDUSTRIES = 5   # 受益/承压榜单各展示的行业数
@@ -3795,6 +3876,15 @@ _POLICY_DIMENSIONS = [
      "triggers": ["实体清单", "出口管制", "加征", "关税", "制裁",
                   "断供", "關稅", "斷供", "實體清單"],
      "needs_industry": True, "weight": -2, "broad_weight": -1},
+    # 宏观数据（2026-09-09 增补）：CPI / PPI / 社融 / 统计局等经济数据口径。
+    # 规则启发式：按“数据温和向好”统一计中性偏暖（CPI 回升利多消费与再通胀链、
+    # PPI 涨幅扩大利多上游资源），方向细分留给后续增强；触发词同样受否定修饰保护。
+    {"id": "macro", "label": "宏观数据",
+     "triggers": ["CPI", "PPI", "PMI", "社融", "M2", "GDP", "新增信贷",
+                  "新增人民币贷款", "社会消费品零售总额", "工业增加值",
+                  "统计局", "经济数据", "宏观数据", "通胀", "物价", "通脹"],
+     "weights": {"大盘": +1, "消费": +1, "有色金属": +1,
+                 "煤炭能源": +1, "钢铁化工": +1}},
 ]
 
 # 行业别名词表（归因维度用；匹配最长优先，如"锂电"优先于"锂"）。
@@ -3859,7 +3949,9 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
         return "今日未检出显著政策新闻。"
     dims = "、".join(f"{k}×{v}" for k, v in
                      sorted(dim_counts.items(), key=lambda kv: (-kv[1], kv[0])))
-    parts = [f"今日检出政策类新闻 {policy_n} 条（占当天资讯 "
+    # 含「宏观数据」维度（CPI/PPI/统计局等）时，称谓用「政策及宏观数据类新闻」更贴切
+    kind = "政策及宏观数据类新闻" if "宏观数据" in dim_counts else "政策类新闻"
+    parts = [f"今日检出{kind} {policy_n} 条（占当天资讯 "
              f"{policy_n}/{total_n}），覆盖维度：{dims}；"
              f"大盘政策冲击指数 PSI {broad_score:+d}（{broad_label}）。"]
     if winners:
@@ -4207,6 +4299,8 @@ PIXEL_KIT = _RenderKit(
     ai_badge=lambda: _badge("AI 合成", "ai"),
     ai_block=_ai_analysis_block,
     sentiment_block=_pixel_sentiment_block,
+    sentiment_empty_block=_pixel_sentiment_empty_block,
+    senti_empty_badge=lambda: _badge("样本不足", "warn"),
     policy_block=_pixel_policy_block,
     liquidity_block=_liquidity_report_block,
     panorama_block=_panorama_block,
@@ -4229,6 +4323,8 @@ GUIZANG_KIT = _RenderKit(
     ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
     ai_block=gz_ai_analysis_block,
     sentiment_block=gz_sentiment_block,
+    sentiment_empty_block=gz_sentiment_empty_block,
+    senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
     policy_block=gz_policy_block,
     liquidity_block=gz_liquidity_report_block,
     panorama_block=gz_panorama_block,
