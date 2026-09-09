@@ -1,5 +1,146 @@
 {
  "version": 1,
- "stocks": {},
- "updated_cst": "2026-09-09 12:44:39"
+ "stocks": {
+  "港股:07709": {
+   "market": "港股",
+   "code": "07709",
+   "name": "南方东英SK海力士每日杠杆最多2x",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:06869": {
+   "market": "港股",
+   "code": "06869",
+   "name": "长飞光纤光缆",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:300308": {
+   "market": "A股",
+   "code": "300308",
+   "name": "中际旭创",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:600487": {
+   "market": "A股",
+   "code": "600487",
+   "name": "亨通光电",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:002384": {
+   "market": "A股",
+   "code": "002384",
+   "name": "东山精密",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:300750": {
+   "market": "A股",
+   "code": "300750",
+   "name": "宁德时代",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:02800": {
+   "market": "港股",
+   "code": "02800",
+   "name": "盈富基金",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:00700": {
+   "market": "港股",
+   "code": "00700",
+   "name": "腾讯控股",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:300502": {
+   "market": "A股",
+   "code": "300502",
+   "name": "新易盛",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:06862": {
+   "market": "港股",
+   "code": "06862",
+   "name": "海底捞",
+   "days": {
+    "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  }
+ },
+ "updated_cst": "2026-09-09 12:54:49"
 }
