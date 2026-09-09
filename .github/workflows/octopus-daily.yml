@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           # 兜底空值，兼容定时触发场景
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
-          
+
           if [ "$DRY_RUN" = "true" ]; then
             echo "运行模式：预览模式（不推送）"
             python3 output/pipeline.py --dry-run
@@ -62,10 +62,10 @@ jobs:
           set -euo pipefail
           git config user.name "octopus-bot"
           git config user.email "bot@octopus.ai"
-          
+
           # 通配符匹配失败不报错，兼容无日报文件的场景
-          git add output/daily_report_*.html output/latest.html 2>/dev/null || true
-          
+          git add output/daily_report_*.html output/latest.html output/sentiment_history.json 2>/dev/null || true
+
           if git diff --cached --quiet; then
             echo "无新内容，跳过提交。"
           else
