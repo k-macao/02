@@ -36,10 +36,10 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 6,
+     "neg": 1,
+     "total": 7,
+     "score": -0.1429
     }
    }
   },
@@ -92,10 +92,10 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 2,
+     "neg": 1,
+     "total": 3,
+     "score": -0.3333
     }
    }
   },
@@ -106,10 +106,10 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 3,
+     "neg": 1,
+     "total": 4,
+     "score": -0.25
     }
    }
   },
@@ -120,10 +120,10 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 3,
+     "neg": 1,
+     "total": 4,
+     "score": -0.25
     }
    }
   },
@@ -177,9 +177,9 @@
     "20260909": {
      "pos": 0,
      "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neg": 1,
+     "total": 1,
+     "score": -1.0
     }
    }
   },
@@ -204,10 +204,10 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 3,
+     "neg": 1,
+     "total": 4,
+     "score": -0.25
     }
    }
   },
@@ -232,13 +232,13 @@
    "days": {
     "20260909": {
      "pos": 0,
-     "neu": 0,
-     "neg": 0,
-     "total": 0,
-     "score": null
+     "neu": 2,
+     "neg": 1,
+     "total": 3,
+     "score": -0.3333
     }
    }
   }
  },
- "updated_cst": "2026-09-09 19:24:41"
+ "updated_cst": "2026-09-09 21:25:36"
 }
