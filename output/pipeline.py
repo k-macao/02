@@ -70,6 +70,11 @@
       −近20有评分日均、ANV 异常新闻量=今日条数 vs 近30天均值±σ（z 值，
       >均值+2σ 标异常）。跨日基线存 output/sentiment_history.json（随日报提交）；
       冷启动/样本不足明确标注，无个股归因时栏目缺席。规则合成、非投资建议。
+  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对当天资讯标题
+      做政策维度识别（货币/监管/扶持/财政/地产/开放/贸易），经关键词矩阵映射到
+      行业受益/受损权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则
+      生成的总结）。触发词被否定修饰时跳过；零政策新闻时栏目缺席。规则合成、
+      非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -1451,6 +1456,7 @@ GZ_MONO = "monospace"
 KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
 KOBOYO_SECTION_ICONS = {
     "AI READ": "brain",
+    "POLICY SHOCK": "document",
     "MARKET SNAPSHOT": "chart",
     "A-SHARE PANORAMA": "chart",
     "HK GURU CHANNELS": "camera",
@@ -1583,6 +1589,7 @@ def _badge(text, kind="ok"):
 
 _SECTION_ICON_META = {
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
+    "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
     "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
@@ -2594,11 +2601,13 @@ def _panorama_block(pan):
     return "".join(parts)
 
 
-def _collect_report_parts(data, kit, sentiment_history=None, date_str=None):
+def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
+                            policy_result=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
 
     sentiment_history: 跨日情绪基线（AI 新闻情绪因子动量/新闻量窗口用）；
-    date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天。
+    date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天；
+    policy_result: main 1.6 阶段单独构建的政策因子结果，缺省时兜底构建。
     """
     market = data.get("实时行情", {})
     pan = data.get("A股大盘全景", {}) or {}
@@ -2693,7 +2702,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None):
             f"{_source_note(liq)} · 雅虎股票数据 & 多因子100字结论",
         ))
 
-    # AI 盘研判（规则合成综合研判，作为导读首位栏目）
+    # AI 盘研判（规则合成综合研判；导读次位，政策因子之后）
     if AI_ANALYSIS_ENABLED:
         ai_result = build_ai_analysis(data)
         if ai_result.get("available"):
@@ -2712,6 +2721,16 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None):
                 "NEWS SENTIMENT", "AI 新闻情绪因子",
                 kit.sentiment_block(senti_result), kit.ai_badge(),
                 "章鱼AI · 标题情绪词表评分 + 个股归因（非投资建议）",
+            ))
+
+    # 政策因子（推送页首位栏目；main 已单独构建，此处仅在缺省时兜底构建）
+    if AI_ANALYSIS_ENABLED:
+        policy = policy_result if policy_result is not None else build_policy_factor(data)
+        if policy.get("available"):
+            sections.insert(0, (
+                "POLICY SHOCK", "政策因子 · 冲击指数",
+                kit.policy_block(policy), kit.ai_badge(),
+                "章鱼AI · 政策关键词矩阵 + 行业冲击评分（非投资建议）",
             ))
 
     # 数据审计栏
@@ -3716,6 +3735,325 @@ def gz_sentiment_block(res):
     return "".join(out)
 
 
+# ============================================================
+# 政策因子（POLICY SHOCK · 确定性关键词矩阵）
+# ------------------------------------------------------------
+# 抓取后、推送前单独构建（main 1.6 阶段），推送页首位栏目渲染。
+# 逻辑：识别政策类新闻（监管/扶持/货币/财政/地产/贸易等维度），经
+# 关键词矩阵映射到行业受益/受损权重，汇总为 PolicyShockIndex：
+#   行业 PSI ＝ 该行业在今日政策新闻中的权重之和（正=受益，负=承压）
+#   大盘 PSI ＝ 宽基权重之和（>0 偏暖 / <0 偏冷 / =0 中性）
+# 维度分两类：固定映射（货币/财政/地产，直接给行业权重）与
+# 行业归因（扶持/监管/开放/贸易，按标题提及的行业落权重；无提及
+# 落宽基小权重并标注宽基）。触发词被否定词修饰时跳过（如"暂不降准"）。
+# 只统计当天标题（复用情绪因子的 24h 采集口径）；零政策新闻时
+# 栏目缺席，不伪造。
+# ============================================================
+POLICY_DISPLAY_INDUSTRIES = 5   # 受益/承压榜单各展示的行业数
+POLICY_DISPLAY_HEADLINES = 8    # 政策新闻逐条展示上限
+
+# 政策维度矩阵：triggers 命中即该维度命中（同一维度每条只计一次，
+# 权重只落一次）；weights 为固定行业映射，needs_industry 为行业归因。
+_POLICY_DIMENSIONS = [
+    {"id": "easing", "label": "货币宽松",
+     "triggers": ["降准", "降息", "双降", "LPR", "MLF", "逆回购", "宽松",
+                  "放水", "加大投放", "呵护流动性", "保持流动性",
+                  "降準", "寬鬆"],
+     "weights": {"银行": -1, "证券": +2, "地产链": +2, "消费": +1,
+                 "科技成长": +1, "大盘": +1}},
+    {"id": "tightening", "label": "货币收紧",
+     "triggers": ["加息", "缩表", "收紧流动性", "回笼资金", "縮表", "收緊"],
+     "weights": {"银行": +1, "证券": -2, "地产链": -2, "消费": -1,
+                 "科技成长": -1, "大盘": -1}},
+    {"id": "support", "label": "产业扶持",
+     "triggers": ["产业政策", "新质生产力", "专项资金", "重大项目",
+                  "大力发展", "政策支持", "培育壮大", "扶持", "补贴",
+                  "国补", "補貼"],
+     "needs_industry": True, "weight": +2, "broad_weight": +1},
+    {"id": "regulation", "label": "监管收紧",
+     "triggers": ["立案调查", "窗口指导", "反垄断", "约谈", "罚单",
+                  "监管", "规范", "整顿", "严查", "重罚",
+                  "監管", "約談", "罰單", "反壟斷", "整頓", "嚴查"],
+     "needs_industry": True, "weight": -2, "broad_weight": -1},
+    {"id": "fiscal", "label": "财政发力",
+     "triggers": ["特别国债", "增发国债", "专项债", "化债", "减税",
+                  "降费", "赤字", "财政", "財政", "專項債", "減稅"],
+     "weights": {"基建链": +2, "消费": +1, "大盘": +1}},
+    {"id": "property_ease", "label": "地产松绑",
+     "triggers": ["认房不认贷", "下调首付", "降低首付", "城中村改造",
+                  "白名单", "松绑", "收储", "鬆綁"],
+     "weights": {"地产链": +2, "银行": +1, "大盘": +1}},
+    {"id": "property_tight", "label": "地产收紧",
+     "triggers": ["限购", "限贷", "限售", "限購", "限貸"],
+     "weights": {"地产链": -2, "银行": -1, "大盘": -1}},
+    {"id": "opening", "label": "开放准入",
+     "triggers": ["负面清单", "对外开放", "扩大开放", "准入", "自贸",
+                  "放开", "试点", "負面清單", "對外開放", "準入",
+                  "自貿", "試點"],
+     "needs_industry": True, "weight": +1, "broad_weight": +1},
+    {"id": "trade_barrier", "label": "贸易壁垒",
+     "triggers": ["实体清单", "出口管制", "加征", "关税", "制裁",
+                  "断供", "關稅", "斷供", "實體清單"],
+     "needs_industry": True, "weight": -2, "broad_weight": -1},
+]
+
+# 行业别名词表（归因维度用；匹配最长优先，如"锂电"优先于"锂"）。
+_POLICY_INDUSTRIES = {
+    "新能源": ["新能源", "光伏", "风电", "储能", "锂电池", "锂电",
+              "充电桩", "新能源", "光伏"],
+    "半导体": ["半导体", "集成电路", "芯片", "晶圆", "半導體", "芯片"],
+    "医药": ["生物医药", "创新药", "医药", "医疗", "疫苗", "中药",
+            "醫藥", "醫療"],
+    "汽车": ["新能源车", "智能驾驶", "无人驾驶", "汽车", "汽車"],
+    "军工": ["军工", "国防", "軍工"],
+    "AI算力": ["人工智能", "大模型", "数据中心", "算力", "机器人", "AI"],
+    "消费": ["食品饮料", "消费", "零售", "白酒", "餐饮", "旅游", "家电"],
+    "地产链": ["房地产", "地产", "楼市", "建材", "水泥",
+              "房地產", "地產"],
+    "银行": ["银行"],
+    "证券": ["证券", "券商", "期货", "證券"],
+    "保险": ["保险", "保險"],
+    "有色金属": ["有色", "稀土", "黄金", "铜", "铝", "锂", "钴",
+                "镍", "鎳"],
+    "煤炭能源": ["煤炭", "石油", "原油", "天然气", "电力", "火电",
+                "水电", "核电"],
+    "钢铁化工": ["钢铁", "化工", "化纤", "纯碱", "鋼鐵"],
+    "农业": ["农业", "种业", "粮食", "猪肉", "养殖"],
+    "传媒游戏": ["传媒", "游戏", "版号", "影视", "廣告", "遊戲"],
+    "基建链": ["工程机械", "基建", "建筑", "高铁", "轨交"],
+    "科技成长": ["平台经济", "互联网", "科技", "软件", "电子", "互聯網"],
+    "出口链": ["跨境电商", "出口", "外贸", "航运", "港口"],
+}
+_POLICY_INDUSTRY_ALIASES = {}
+for _ind_name, _ind_aliases in _POLICY_INDUSTRIES.items():
+    for _alias in _ind_aliases:
+        _POLICY_INDUSTRY_ALIASES.setdefault(_alias, _ind_name)
+_POLICY_INDUSTRY_ALIAS_LIST = list(_POLICY_INDUSTRY_ALIASES)
+
+
+def _match_policy_triggers(title, triggers):
+    """维度触发词匹配：最长优先非重叠；前2字含否定词视为否定表述，跳过。"""
+    hits = []
+    for word, idx in _match_words_non_overlap(title, triggers):
+        window = title[max(0, idx - 2):idx]
+        if any(ch in _SENTI_NEGATORS for ch in window):
+            continue
+        hits.append(word)
+    return hits
+
+
+def _match_policy_industries(title):
+    """标题提及的行业（别名最长优先非重叠匹配，按出现顺序去重）。"""
+    found = []
+    for alias, _ in _match_words_non_overlap(title, _POLICY_INDUSTRY_ALIAS_LIST):
+        industry = _POLICY_INDUSTRY_ALIASES[alias]
+        if industry not in found:
+            found.append(industry)
+    return found
+
+
+def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
+                    winners, losers):
+    """规则生成的政策总结（纯数据转述，无伪造）。"""
+    if policy_n == 0:
+        return "今日未检出显著政策新闻。"
+    dims = "、".join(f"{k}×{v}" for k, v in
+                     sorted(dim_counts.items(), key=lambda kv: (-kv[1], kv[0])))
+    parts = [f"今日检出政策类新闻 {policy_n} 条（占当天资讯 "
+             f"{policy_n}/{total_n}），覆盖维度：{dims}；"
+             f"大盘政策冲击指数 PSI {broad_score:+d}（{broad_label}）。"]
+    if winners:
+        parts.append("受益居前：" + "、".join(
+            f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in winners[:3]) + "。")
+    if losers:
+        parts.append("承压居前：" + "、".join(
+            f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in losers[:3]) + "。")
+    if not winners and not losers:
+        parts.append("各行业冲击相互抵消，无显著受益/承压方向。")
+    return "".join(parts)
+
+
+def build_policy_factor(data):
+    """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
+
+    只统计当天标题（复用情绪因子的 24h 采集口径）。零政策新闻时
+    available=False，栏目缺席。
+    """
+    headlines = _collect_sentiment_headlines(data)
+    industry_scores = {}
+    broad_score = 0
+    broad_count = 0
+    dim_counts = {}
+    policy_heads = []
+    for head in headlines:
+        title = head["title"]
+        hit_dims = []
+        for dim in _POLICY_DIMENSIONS:
+            triggers = _match_policy_triggers(title, dim["triggers"])
+            if triggers:
+                hit_dims.append(dim)
+        if not hit_dims:
+            continue
+        head_industries = []
+        head_net = 0
+        head_dims = []
+        for dim in hit_dims:
+            head_dims.append(dim["label"])
+            dim_counts[dim["label"]] = dim_counts.get(dim["label"], 0) + 1
+            if "weights" in dim:
+                pairs = list(dim["weights"].items())
+            else:
+                mentioned = _match_policy_industries(title)
+                if mentioned:
+                    pairs = [(ind, dim["weight"]) for ind in mentioned]
+                else:
+                    pairs = [("大盘", dim["broad_weight"])]
+            for ind, w in pairs:
+                head_net += w
+                if ind == "大盘":
+                    broad_score += w
+                    broad_count += 1
+                else:
+                    slot = industry_scores.setdefault(
+                        ind, {"score": 0, "count": 0, "dims": set()})
+                    slot["score"] += w
+                    slot["count"] += 1
+                    slot["dims"].add(dim["label"])
+                    if ind not in head_industries:
+                        head_industries.append(ind)
+        policy_heads.append({
+            "title": title, "source": head["source"], "section": head["section"],
+            "dims": head_dims, "industries": head_industries,
+            "direction": 1 if head_net > 0 else (-1 if head_net < 0 else 0),
+            "net": head_net,
+        })
+    industries = [{
+        "name": name, "score": v["score"], "count": v["count"],
+        "dims": sorted(v["dims"]),
+        "direction": "受益" if v["score"] > 0 else ("承压" if v["score"] < 0 else "中性"),
+    } for name, v in industry_scores.items()]
+    industries.sort(key=lambda s: (-s["score"], s["name"]))
+    winners = [s for s in industries if s["score"] > 0][:POLICY_DISPLAY_INDUSTRIES]
+    losers = sorted((s for s in industries if s["score"] < 0),
+                    key=lambda s: (s["score"], s["name"]))[:POLICY_DISPLAY_INDUSTRIES]
+    broad_label = "偏暖" if broad_score > 0 else ("偏冷" if broad_score < 0 else "中性")
+    summary = _policy_summary(len(policy_heads), len(headlines), dim_counts,
+                              broad_score, broad_label, winners, losers)
+    return {
+        "available": bool(policy_heads),
+        "policy_n": len(policy_heads),
+        "total_headlines": len(headlines),
+        "dim_counts": dim_counts,
+        "broad_score": broad_score,
+        "broad_count": broad_count,
+        "broad_label": broad_label,
+        "industries": industries,
+        "winners": winners,
+        "losers": losers,
+        "headlines": policy_heads,
+        "summary": summary,
+    }
+
+
+def _pixel_policy_block(res):
+    """像素主题：政策因子（总结置顶 + PSI 行业榜 + 政策新闻逐条）。"""
+    if res["broad_score"] > 0:
+        color, icon = C_GREEN, "▲"
+    elif res["broad_score"] < 0:
+        color, icon = C_RED, "▼"
+    else:
+        color, icon = C_AMBER, "■"
+    summary_html = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'margin-bottom:10px;border:1px solid {color};background:#0C1020;box-shadow:4px 4px 0 #000;">'
+        f'<tr><td style="padding:10px 12px;">'
+        f'<div style="font-size:9px;color:{color};font-weight:900;font-family:{FONT_MONO};'
+        f'letter-spacing:1px;">POLICY READ // 政策因子总结</div>'
+        f'<div style="font-size:12px;color:{C_INK};font-weight:700;line-height:1.8;'
+        f'font-family:{FONT_MONO};padding-top:4px;">{_esc(res["summary"])}</div>'
+        f'</td></tr></table>')
+    dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
+        res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
+    head = _mini_table([
+        ("政策新闻", f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+        ("大盘冲击", f'PSI <b style="color:{color};">{res["broad_score"]:+d}</b>'
+                     f'（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
+        ("覆盖维度", _esc(dims_line)),
+    ])
+    board = []
+    for s in res["winners"]:
+        board.append((f'▲ {_esc(s["name"])}',
+                      f'PSI <b style="color:{C_GREEN};">+{s["score"]}</b>'
+                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    for s in res["losers"]:
+        board.append((f'▼ {_esc(s["name"])}',
+                      f'PSI <b style="color:{C_RED};">{s["score"]}</b>'
+                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    rows = []
+    for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
+        if h["direction"] > 0:
+            arrow, bcolor = "▲", C_GREEN
+        elif h["direction"] < 0:
+            arrow, bcolor = "▼", C_RED
+        else:
+            arrow, bcolor = "■", C_AMBER
+        inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        rows.append(_item_row(
+            "◆", f'<b style="color:{bcolor};">[{arrow} {h["net"]:+d}]</b> {_esc(h["title"][:60])}',
+            _esc(f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · {h["source"]}')))
+    more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
+    if more > 0:
+        rows.append(
+            f'<div style="font-size:10px;color:{C_MUTED};padding:4px 0;'
+            f'line-height:1.7;font-family:{FONT_MONO};">'
+            f'＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）</div>')
+    body = head + (_mini_table(board) if board else "") + "".join(rows)
+    note = _note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
+                 "触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
+    return summary_html + _pixel_panel("POLICY SHOCK // 政策冲击指数", body, color, icon) + note
+
+
+def gz_policy_block(res):
+    """谷藏主题：政策因子（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    arrow = "▲" if res["broad_score"] > 0 else ("▼" if res["broad_score"] < 0 else "■")
+    dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
+        res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
+    out = [
+        gz_subsection("POLICY READ · 政策因子总结"),
+        gz_shell(f'<div style="font-size:16px;font-weight:700;color:{GZ_INK};line-height:1.85;">'
+                 f'{arrow} {_esc(res["summary"])}</div>', pad="8px 0"),
+        gz_subsection("大盘冲击与覆盖"),
+        gz_rowline("政策新闻",
+                   f'{res["policy_n"]} 条（占当天资讯 {res["policy_n"]}/{res["total_headlines"]}）'),
+        gz_rowline("大盘冲击",
+                   f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
+        gz_rowline("覆盖维度", _esc(dims_line)),
+        gz_subsection("行业冲击榜"),
+    ]
+    for s in res["winners"]:
+        out.append(gz_rowline(
+            f'▲ {_esc(s["name"])}',
+            f'PSI +{s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    for s in res["losers"]:
+        out.append(gz_rowline(
+            f'▼ {_esc(s["name"])}',
+            f'PSI {s["score"]}（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    out.append(gz_subsection("政策新闻逐条"))
+    for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
+        badge = "▲" if h["direction"] > 0 else ("▼" if h["direction"] < 0 else "■")
+        inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
+        out.append(gz_item_row(
+            "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> {_esc(h["title"][:60])}',
+            f'{_esc("/".join(h["dims"]))} · 影响：{_esc(inds)} · '
+            f'{_esc(h["section"])} · {_esc(h["source"])}'))
+    more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
+    if more > 0:
+        out.append(gz_note(f"＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）。"))
+    out.append(gz_note("政策因子口径：政策维度触发词命中标题→关键词矩阵映射行业权重→汇总PSI；"
+                       "触发词被否定修饰时跳过。非投资建议。"))
+    return "".join(out)
+
+
 def _build_multi_factor_ai_conclusions_html(liq, hot=None, market=None, data=None):
     """结合雅虎最新股票数据与多因子（环境、政治、地缘），各生成一百字左右结论并输出到页面。
 
@@ -3869,6 +4207,7 @@ PIXEL_KIT = _RenderKit(
     ai_badge=lambda: _badge("AI 合成", "ai"),
     ai_block=_ai_analysis_block,
     sentiment_block=_pixel_sentiment_block,
+    policy_block=_pixel_policy_block,
     liquidity_block=_liquidity_report_block,
     panorama_block=_panorama_block,
     section=_section,
@@ -3890,6 +4229,7 @@ GUIZANG_KIT = _RenderKit(
     ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
     ai_block=gz_ai_analysis_block,
     sentiment_block=gz_sentiment_block,
+    policy_block=gz_policy_block,
     liquidity_block=gz_liquidity_report_block,
     panorama_block=gz_panorama_block,
     section=gz_section,
@@ -3927,27 +4267,33 @@ def _harden_wechat_table_widths(html):
     )
 
 
-def generate_report(data, date_display, date_str, theme=None, sentiment_history=None):
+def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
+                    policy_result=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
     theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
     sentiment_history: 跨日情绪基线（AI 新闻情绪因子用），缺省冷启动。
+    policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     """
     theme = _resolve_push_theme(theme)
     if theme == "guizang":
         html = generate_report_guizang(data, date_display, date_str,
-                                       sentiment_history=sentiment_history)
+                                       sentiment_history=sentiment_history,
+                                       policy_result=policy_result)
     else:
         html = generate_report_pixel(data, date_display, date_str,
-                                     sentiment_history=sentiment_history)
+                                     sentiment_history=sentiment_history,
+                                     policy_result=policy_result)
     return _harden_wechat_table_widths(html)
 
 
-def generate_report_guizang(data, date_display, date_str, sentiment_history=None):
+def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
+                                policy_result=None):
     """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标与单列留白；不依赖脚本。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
-                                  date_str=date_str)
+                                  date_str=date_str,
+                                  policy_result=policy_result)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -4002,7 +4348,8 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     return html
 
 
-def generate_report_pixel(data, date_display, date_str, sentiment_history=None):
+def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
+                              policy_result=None):
     """生成完整 HTML 日报（旧版 RETRO PIXEL 排版：终端 + 关卡 + 审计 + COLOPHON）。
 
     - 每个区块都带来源、抓取时间与「当天/非当天/无数据」徽标；
@@ -4011,7 +4358,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None):
     """
     parts = _collect_report_parts(data, PIXEL_KIT,
                                   sentiment_history=sentiment_history,
-                                  date_str=date_str)
+                                  date_str=date_str,
+                                  policy_result=policy_result)
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
@@ -4689,12 +5037,21 @@ def main():
     senti_history_path = os.path.join(REPORT_DIR, SENTIMENT_HISTORY_FILENAME)
     senti_history = _load_sentiment_history(senti_history_path)
 
+    # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
+    #     无政策新闻时栏目缺席，不伪造）
+    policy_result = build_policy_factor(data)
+    if policy_result.get("available"):
+        print(f"  📊 政策因子：{policy_result['summary']}")
+    else:
+        print("  📊 政策因子：今日无显著政策新闻，首位栏目缺席")
+
     # 2. 生成报告
     print("\n📝 正在生成日报...")
     date_display = _date_display()
     date_str = _today_str()
     html = generate_report(data, date_display, date_str, theme=theme,
-                           sentiment_history=senti_history)
+                           sentiment_history=senti_history,
+                           policy_result=policy_result)
     print("  ✅ 日报生成完成")
 
     # 3. dry-run 模式

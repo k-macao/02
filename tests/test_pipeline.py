@@ -533,7 +533,8 @@ class RetroPixelVisualTests(unittest.TestCase):
 
         self.assertIn("OCTOPUS_OS v3.0", html)
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
-        self.assertIn("LVL 01 // AI READ", html)
+        self.assertIn("LVL 01 // POLICY SHOCK", html)  # 政策因子固定首位
+        self.assertIn("LVL 02 // AI READ", html)
         self.assertIn("AI CORE OUTPUT", html)
         self.assertIn("AI 主结论 // CORE THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
@@ -1843,6 +1844,152 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("DNS +1.00", html)  # 日度因子不受影响
         self.assertIn("MOM 样本不足", html)
         self.assertIn("ANV 样本不足", html)
+
+
+class PolicyFactorTests(unittest.TestCase):
+    """政策因子：关键词矩阵 / 行业 PSI / 总结 / 首位渲染。"""
+
+    def _policy_data(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        data["全球头条"]["headlines"].extend([
+            {"title": "央行宣布降准0.5个百分点释放长期资金", "source": "新华社",
+             "url": "", "published_cst": "2026-08-02 09:00", "is_today": True},
+            {"title": "新能源汽车补贴政策延续，最高补2万", "source": "财联社",
+             "url": "", "published_cst": "2026-08-02 10:00", "is_today": True},
+            {"title": "美国加征半导体关税，商务部回应", "source": "环球网",
+             "url": "", "published_cst": "2026-08-02 11:00", "is_today": True},
+            {"title": "机构预计短期暂不降息", "source": "旧逻辑",
+             "url": "", "published_cst": "2026-08-02 12:00", "is_today": True},
+            {"title": "昨日：证监会约谈多家券商", "source": "旧源",
+             "url": "", "published_cst": "2026-08-01 10:00", "is_today": False},
+        ])
+        data["东财快讯"]["headlines"].append({
+            "title": "证监会约谈多家券商，严查违规行为", "source": "东方财富",
+            "url": "", "time": "2026-08-02 13:00", "is_today": True})
+        return data
+
+    def _minimal_data(self, titles_today):
+        return {"全球头条": pipeline._source_result(
+            "test", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": t, "source": "s", "url": "",
+                        "published_cst": "2026-08-02 10:00", "is_today": True}
+                       for t in titles_today])}
+
+    def test_easing_fixed_weights(self):
+        res = pipeline.build_policy_factor(
+            self._minimal_data(["央行宣布降准0.5个百分点释放长期资金"]))
+        self.assertTrue(res["available"])
+        scores = {s["name"]: s["score"] for s in res["industries"]}
+        self.assertEqual(scores, {"银行": -1, "证券": 2, "地产链": 2,
+                                  "消费": 1, "科技成长": 1})
+        self.assertEqual(res["broad_score"], 1)
+        self.assertEqual(res["broad_label"], "偏暖")
+        self.assertEqual(res["dim_counts"], {"货币宽松": 1})
+
+    def test_support_attributes_mentioned_industries(self):
+        res = pipeline.build_policy_factor(
+            self._minimal_data(["新能源汽车补贴政策延续，最高补2万"]))
+        scores = {s["name"]: s["score"] for s in res["industries"]}
+        self.assertEqual(scores, {"新能源": 2, "汽车": 2})
+        self.assertEqual(res["broad_score"], 0)  # 有行业归因，不落宽基
+        head = res["headlines"][0]
+        self.assertEqual(head["dims"], ["产业扶持"])
+        self.assertEqual(head["direction"], 1)
+
+    def test_regulation_without_industry_falls_to_broad(self):
+        res = pipeline.build_policy_factor(
+            self._minimal_data(["监管部门发布新规规范行业发展"]))
+        self.assertTrue(res["available"])
+        self.assertEqual(res["industries"], [])
+        self.assertEqual(res["broad_score"], -1)
+        self.assertEqual(res["broad_label"], "偏冷")
+        self.assertEqual(res["headlines"][0]["industries"], [])
+
+    def test_negated_trigger_skipped(self):
+        res = pipeline.build_policy_factor(self._minimal_data(
+            ["机构预计短期暂不降息", "央行年内不会降准"]))
+        self.assertFalse(res["available"])  # 否定修饰的触发词不计入
+        self.assertEqual(res["policy_n"], 0)
+
+    def test_non_today_excluded(self):
+        data = {"全球头条": pipeline._source_result(
+            "test", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": "央行宣布降准0.5个百分点", "source": "s",
+                        "url": "", "published_cst": "2026-08-01 10:00",
+                        "is_today": False}])}
+        res = pipeline.build_policy_factor(data)
+        self.assertFalse(res["available"])
+
+    def test_multi_trigger_same_dimension_counts_once(self):
+        res = pipeline.build_policy_factor(
+            self._minimal_data(["降准降息双落地"]))
+        self.assertEqual(res["dim_counts"], {"货币宽松": 1})  # 同维度只计一次
+        scores = {s["name"]: s["score"] for s in res["industries"]}
+        self.assertEqual(scores["证券"], 2)  # 权重只落一次
+
+    def test_traditional_triggers(self):
+        res = pipeline.build_policy_factor(
+            self._minimal_data(["人行降準0.5厘釋放流動性"]))
+        self.assertTrue(res["available"])
+        self.assertEqual(res["broad_score"], 1)
+        self.assertEqual(res["dim_counts"], {"货币宽松": 1})
+
+    def test_aggregation_and_summary(self):
+        res = pipeline.build_policy_factor(self._policy_data())
+        # 央行降准 + 美联储降息 + 补贴 + 关税 + 约谈 = 5 条（否定/非当天已排除）
+        self.assertEqual(res["policy_n"], 5)
+        self.assertEqual(res["dim_counts"],
+                         {"货币宽松": 2, "产业扶持": 1, "监管收紧": 1, "贸易壁垒": 1})
+        self.assertEqual(res["broad_score"], 2)
+        self.assertEqual(res["broad_label"], "偏暖")
+        self.assertEqual([w["score"] for w in res["winners"]], [4, 2, 2, 2, 2])
+        self.assertEqual(
+            {w["name"] for w in res["winners"]},
+            {"地产链", "科技成长", "新能源", "汽车", "消费"})
+        self.assertEqual([w["name"] for w in res["losers"]], ["半导体", "银行"])
+        # 证券多空相抵（+4/−2）后仍在榜上
+        sec = [s for s in res["industries"] if s["name"] == "证券"][0]
+        self.assertEqual((sec["score"], sec["count"]), (2, 3))
+        self.assertIn("政策类新闻 5 条", res["summary"])
+        self.assertIn("PSI +2", res["summary"])
+        self.assertIn("偏暖", res["summary"])
+        self.assertIn("货币宽松×2", res["summary"])
+
+    def test_pixel_renders_first_with_summary(self):
+        html = pipeline.generate_report(
+            self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
+        self.assertIn("LVL 01 // POLICY SHOCK", html)
+        self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
+        self.assertIn("政策冲击指数", html)
+        self.assertIn("PSI +2", html)
+        self.assertIn("政策类新闻 5 条", html)
+        self.assertIn("地产链", html)
+
+    def test_guizang_renders_first_with_summary(self):
+        html = pipeline.generate_report(
+            self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
+        self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
+        self.assertIn("PSI +2", html)
+        self.assertIn("政策类新闻 5 条", html)
+        self.assertIn("承压居前", html)
+
+    def test_absent_without_policy_news(self):
+        data = self._minimal_data(["美股三大指数集体收涨"])
+        for theme in ("pixel", "guizang"):
+            html = pipeline.generate_report(
+                data, "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertNotIn("政策因子", html)
+
+    def test_main_stage_result_honored(self):
+        data = self._policy_data()
+        html = pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="pixel",
+            policy_result={"available": False})  # main 阶段结果优先
+        self.assertNotIn("政策因子", html)
+        html2 = pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="pixel",
+            policy_result=None)  # 缺省时渲染侧兜底构建
+        self.assertIn("政策因子", html2)
 
 
 if __name__ == "__main__":
