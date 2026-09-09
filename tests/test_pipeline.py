@@ -618,7 +618,9 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn('width="33%"', html)
         self.assertNotIn("font-size:8px", html)
         self.assertIn("bgcolor=", html.lower())
-        self.assertIn("font-size:16px", html)
+        self.assertIn("font-size:10px", html)          # 普通正文极小
+        self.assertIn("font-size:56px", html)          # 刊头主标题极大
+        self.assertIn("font-size:44px", html)          # 栏目标题 / 突出数字极大
 
     def test_minimal_news_card_leads_with_title_and_keeps_source(self):
         html = pipeline.gz_headline_row({
@@ -644,14 +646,14 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("<style", low)
         self.assertNotIn("<script", low)
         images = re.findall(r'<img\b[^>]*>', html)
-        # 图片 = 每个栏目标题 1 枚大图标 + 刊头 64px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
+        # 图片 = 每个栏目标题 1 枚极大图标 + 刊头 128px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
         self.assertEqual(len(images), html.count("<h2 ") + 1 + len(pipeline.KOBOYO_MASTHEAD_ICONS))
         for image in images:
             self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z]+\.svg"')
             self.assertIn('alt=""', image)
             self.assertIn('aria-hidden="true"', image)
-            self.assertRegex(image, r'width="(?:32|40|64)"')
-            self.assertRegex(image, r'height="(?:32|40|64)"')
+            self.assertRegex(image, r'width="(?:72|96|128)"')
+            self.assertRegex(image, r'height="(?:72|96|128)"')
         self.assertNotIn("<svg", low)                 # 只用链接，不内嵌或保存图标
         self.assertNotIn("data:image", low)
         self.assertNotIn("link rel", low)             # 无外部 CSS
@@ -670,9 +672,9 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertIn("letter-spacing:", heading)
             self.assertIn("font-weight:700", heading)   # 标题统一加粗宋体
         for h1 in re.findall(r'<h1\b[^>]*>', html):
-            self.assertIn("font-size:34px", h1)          # 主标题加大
+            self.assertIn("font-size:56px", h1)          # 主标题极大
         for h2 in re.findall(r'<h2\b[^>]*>', html):
-            self.assertIn("font-size:26px", h2)          # 栏目标题加大
+            self.assertIn("font-size:44px", h2)          # 栏目标题极大
         # 刊头多图标显示：全部栏目手绘图标在刊头再排一行
         for slug in pipeline.KOBOYO_MASTHEAD_ICONS:
             self.assertIn(f'icons/svg/{slug}.svg', html)
@@ -692,7 +694,7 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertIn("正文", without_images)
         icon = pipeline.gz_icon('../invalid" onerror="alert(1)', 200)
         self.assertIn('/document.svg"', icon)
-        self.assertIn('width="64"', icon)
+        self.assertIn(f'width="{pipeline.GZ_ICON_MAX}"', icon)
         self.assertNotIn('onerror', icon)
         self.assertIn('loading="eager"', pipeline.gz_icon("octopus", 48, masthead=True))
         self.assertIn('loading="lazy"', pipeline.gz_icon("brain"))
