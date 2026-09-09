@@ -1,3 +1,53 @@
+name: 🐙 章鱼AI · 手动抓取推送
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_push:
+        description: "仅生成日报，不推送到微信"
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  octopus-manual-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 安装依赖
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet requests
+
+      - name: 🐙 抓取最新动态数据并推送
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          NO_PUSH="${{ github.event.inputs.no_push || 'false' }}"
+
+          if [ "$NO_PUSH" = "true" ]; then
+            echo "运行模式：仅生成，不推送"
+            python3 output/pipeline.py --no-push
+          else
+            echo "运行模式：抓取最新数据 → 生成 → 推送"
+            python3 output/pipeline.py
+          fi
+
       - name: 📤 提交生成的日报
         if: always()
         run: |
