@@ -1632,8 +1632,9 @@ class NewsSentimentFactorTests(unittest.TestCase):
              "url": "", "published_cst": "2026-08-02 12:00", "is_today": True},
             {"title": "港股股票1暴跌，爆雷风险预警", "source": "智通财经",
              "url": "", "published_cst": "2026-08-02 11:00", "is_today": True},
-            {"title": "昨日旧闻：A股股票3不涨令人失望", "source": "旧源",
-             "url": "", "published_cst": "2026-08-01 10:00", "is_today": False},
+            # 72h 窗口（2026-08-02 23:59 起算）之外 → 不计入情绪评分/归因
+            {"title": "7月30日旧闻：A股股票3不涨令人失望", "source": "旧源",
+             "url": "", "published_cst": "2026-07-30 08:00", "is_today": False},
         ])
         return data
 
@@ -1677,16 +1678,67 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertEqual(r["s"], 1)
         self.assertTrue(r["pos"])
 
-    def test_attribution_and_24h_filter(self):
+    def test_attribution_and_72h_window(self):
         res = pipeline.build_news_sentiment(self._senti_data(), "20260802", None)
         self.assertTrue(res["available"])
         self.assertEqual(res["total_matched"], 2)
-        self.assertEqual(res["scored_headlines"], 3)  # 3 条当天标题被归因
+        self.assertEqual(res["scored_headlines"], 3)  # 3 条窗口内标题被归因
         self.assertEqual(res["unattributed_n"], 3)    # 全球头条/东财/港股频道各1条大盘级
         a3 = [s for s in res["stocks"] if s["code"] == "000003"][0]
-        self.assertEqual(a3["total"], 2)  # 非当天旧闻未计入
+        self.assertEqual(a3["total"], 2)  # 72h 窗口之外（07-30）旧闻未计入
         self.assertEqual(a3["score"], 1.0)
         self.assertEqual(a3["label"], "偏多")
+        # 与报告日同一自然日的标题才进入「今日」桶（供 MOM/ANV 与历史落盘）
+        self.assertEqual(res["today_counts"]["A股:000003"]["total"], 2)
+
+    def test_72h_window_includes_recent_prior_day(self):
+        # 报告日前 48h 内（08-01）的标题计入 DNS 窗口，但只落 08-01，不进今日桶
+        data = NewLayoutRenderingTests()._rich_data()
+        corpus = {"version": 1, "items": [
+            {"title": "A股股票3大涨创新高，机构上调评级", "source": "华尔街见闻",
+             "section": "全球头条", "ts": "2026-08-02 10:00", "date": "2026-08-02"},
+            {"title": "A股股票3获北向资金净流入超十亿", "source": "财联社",
+             "section": "全球头条", "ts": "2026-08-02 12:00", "date": "2026-08-02"},
+            {"title": "A股股票3昨晚暴跌，爆雷风险预警", "source": "智通财经",
+             "section": "东财快讯", "ts": "2026-08-01 23:00", "date": "2026-08-01"},
+        ]}
+        res = pipeline.build_news_sentiment(data, "20260802", None,
+                                            news_corpus=corpus)
+        a3 = [s for s in res["stocks"] if s["code"] == "000003"][0]
+        self.assertEqual((a3["pos"], a3["neg"]), (2, 1))     # 72h 窗口含 08-01
+        self.assertAlmostEqual(a3["score"], 1 / 3)
+        self.assertEqual(a3["headlines"][-1]["old"], True)   # 旧日标题带 old 标记
+        self.assertIn("08-01", pipeline._senti_headline_sub(a3["headlines"][-1]))
+        self.assertEqual(res["today_counts"]["A股:000003"]["total"], 2)  # 今日桶只含 08-02
+
+    def test_news_corpus_merge_dedupe_prune_roundtrip(self):
+        # news_history.json 的 合并(按 日期+标题 去重) / 剪枝 / 损坏回退
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "news_history.json")
+            corpus = pipeline._load_news_corpus(path)  # 缺失 → 空存档
+            self.assertEqual(corpus["items"], [])
+            fresh = [
+                {"title": "央行降准0.5个百分点", "date": "2026-08-02",
+                 "source": "新华社", "section": "全球头条", "ts": "2026-08-02 09:00"},
+                {"title": "央行降准0.5个百分点", "date": "2026-08-02",  # 同日重复 → 去重
+                 "source": "财联社", "section": "东财快讯", "ts": "2026-08-02 10:00"},
+                {"title": "统计局公布CPI", "date": "2026-08-01",
+                 "source": "统计局", "section": "全球头条", "ts": ""},
+            ]
+            pipeline._merge_news_corpus(corpus, fresh)
+            pipeline._merge_news_corpus(corpus, fresh)  # 幂等：再并一次不增加
+            self.assertEqual(len(corpus["items"]), 2)
+            pipeline._save_news_corpus(path, corpus)
+            loaded = pipeline._load_news_corpus(path)
+            self.assertEqual(len(loaded["items"]), 2)
+            loaded["items"].append({"title": "老新闻", "date": "2026-07-01",
+                                    "source": "", "section": "", "ts": ""})
+            pipeline._prune_news_corpus(loaded, "2026-08-02")  # 保留 ~18 日
+            self.assertEqual([i["title"] for i in loaded["items"]],
+                             ["央行降准0.5个百分点", "统计局公布CPI"])
+            bad_path = str(Path(directory) / "broken.json")
+            Path(bad_path).write_text("not json{{{", encoding="utf-8")
+            self.assertEqual(pipeline._load_news_corpus(bad_path)["items"], [])
 
     def test_daily_score_math(self):
         data = NewLayoutRenderingTests()._rich_data()
@@ -1829,12 +1881,29 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("▼ S−1", html)
         self.assertIn("MOM +0.67", html)
 
-    def test_section_absent_without_attribution(self):
+    def test_placeholder_shown_without_attribution(self):
+        # 2026-09-09 起：当天标题存在但均未点名榜单个股 → 显示「样本不足」占位，不再整栏消失
         data = NewLayoutRenderingTests()._rich_data()  # 标题未提及任何榜单个股
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertIn("AI 新闻情绪因子", html)
+            self.assertIn("样本不足", html)
+            self.assertIn("均未点名榜单个股", html)
+            self.assertNotIn("DNS +", html)   # 无归因 → 不出因子数值
+            self.assertNotIn("S+1", html)
+
+    def test_absent_without_any_today_headline(self):
+        # 全天无当天标题 → 栏目缺席（与“无数据不出现在页面”一致，不显示占位）
+        data = NewLayoutRenderingTests()._rich_data()
+        for src in ("全球头条", "东财快讯", "港股名家频道"):
+            data[src] = pipeline._source_result(src, "unavailable", headlines=[],
+                                                channels=[], error="offline")
+        for theme in ("pixel", "guizang"):
+            html = pipeline.generate_report(
+                data, "2026年8月2日 · 周日", "20260802", theme=theme)
             self.assertNotIn("AI 新闻情绪因子", html)
+            self.assertNotIn("样本不足：", html)
 
     def test_cold_start_renders_with_insufficient_labels(self):
         html = pipeline.generate_report(
@@ -1847,7 +1916,13 @@ class NewsSentimentFactorTests(unittest.TestCase):
 
 
 class PolicyFactorTests(unittest.TestCase):
-    """政策因子：关键词矩阵 / 行业 PSI / 总结 / 首位渲染。"""
+    """政策因子：关键词矩阵 / 行业 PSI / 总结 / 首位渲染。
+
+    2026-09-09 起标题窗口放宽为近 15 个自然日（含报告日）：
+    单日无政策但近 15 日有政策/宏观新闻时栏目照常出现；更早（窗口外）
+    的标题不参与。引擎调用统一带 date_str=报告日（YYYYMMDD）固定锚点，
+    与生产 main() 一致。
+    """
 
     def _policy_data(self):
         data = NewLayoutRenderingTests()._rich_data()
@@ -1860,6 +1935,7 @@ class PolicyFactorTests(unittest.TestCase):
              "url": "", "published_cst": "2026-08-02 11:00", "is_today": True},
             {"title": "机构预计短期暂不降息", "source": "旧逻辑",
              "url": "", "published_cst": "2026-08-02 12:00", "is_today": True},
+            # 报告日前一天（08-01）的政策旧闻：15 日窗口内 → 计入，标 old
             {"title": "昨日：证监会约谈多家券商", "source": "旧源",
              "url": "", "published_cst": "2026-08-01 10:00", "is_today": False},
         ])
@@ -1877,7 +1953,7 @@ class PolicyFactorTests(unittest.TestCase):
 
     def test_easing_fixed_weights(self):
         res = pipeline.build_policy_factor(
-            self._minimal_data(["央行宣布降准0.5个百分点释放长期资金"]))
+            self._minimal_data(["央行宣布降准0.5个百分点释放长期资金"]), "20260802")
         self.assertTrue(res["available"])
         scores = {s["name"]: s["score"] for s in res["industries"]}
         self.assertEqual(scores, {"银行": -1, "证券": 2, "地产链": 2,
@@ -1885,10 +1961,15 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertEqual(res["broad_score"], 1)
         self.assertEqual(res["broad_label"], "偏暖")
         self.assertEqual(res["dim_counts"], {"货币宽松": 1})
+        self.assertEqual(res["window_days"], 15)   # 标题窗口 = 近 15 自然日
+        self.assertEqual(res["total_headlines"], 1)
+        head = res["headlines"][0]
+        self.assertEqual(head["date"], "2026-08-02")
+        self.assertFalse(head["old"])              # 当日标题不带日期前缀
 
     def test_support_attributes_mentioned_industries(self):
         res = pipeline.build_policy_factor(
-            self._minimal_data(["新能源汽车补贴政策延续，最高补2万"]))
+            self._minimal_data(["新能源汽车补贴政策延续，最高补2万"]), "20260802")
         scores = {s["name"]: s["score"] for s in res["industries"]}
         self.assertEqual(scores, {"新能源": 2, "汽车": 2})
         self.assertEqual(res["broad_score"], 0)  # 有行业归因，不落宽基
@@ -1898,7 +1979,7 @@ class PolicyFactorTests(unittest.TestCase):
 
     def test_regulation_without_industry_falls_to_broad(self):
         res = pipeline.build_policy_factor(
-            self._minimal_data(["监管部门发布新规规范行业发展"]))
+            self._minimal_data(["监管部门发布新规规范行业发展"]), "20260802")
         self.assertTrue(res["available"])
         self.assertEqual(res["industries"], [])
         self.assertEqual(res["broad_score"], -1)
@@ -1907,39 +1988,58 @@ class PolicyFactorTests(unittest.TestCase):
 
     def test_negated_trigger_skipped(self):
         res = pipeline.build_policy_factor(self._minimal_data(
-            ["机构预计短期暂不降息", "央行年内不会降准"]))
+            ["机构预计短期暂不降息", "央行年内不会降准"]), "20260802")
         self.assertFalse(res["available"])  # 否定修饰的触发词不计入
         self.assertEqual(res["policy_n"], 0)
 
-    def test_non_today_excluded(self):
+    def test_prior_day_policy_news_within_window_counts_as_old(self):
+        # 15 日窗口含报告日前一天：08-01 的降准标题计入，并带 old 标记
         data = {"全球头条": pipeline._source_result(
             "test", "success", is_today=True, content_date="2026-08-02",
             headlines=[{"title": "央行宣布降准0.5个百分点", "source": "s",
                         "url": "", "published_cst": "2026-08-01 10:00",
                         "is_today": False}])}
-        res = pipeline.build_policy_factor(data)
+        res = pipeline.build_policy_factor(data, "20260802")
+        self.assertTrue(res["available"])
+        self.assertEqual(res["policy_n"], 1)
+        self.assertEqual(res["headlines"][0]["date"], "2026-08-01")
+        self.assertTrue(res["headlines"][0]["old"])  # 旧日标题渲染 MM-DD 前缀
+        self.assertEqual(res["headlines"][0]["old"], True)
+
+    def test_outside_15day_window_excluded(self):
+        # 2026-08-02 − 14 自然日 = 07-19 起；07-15 的旧闻在窗口外 → 不参与
+        data = {"全球头条": pipeline._source_result(
+            "test", "success", is_today=True, content_date="2026-08-02",
+            headlines=[{"title": "央行宣布降准0.5个百分点", "source": "s",
+                        "url": "", "published_cst": "2026-07-15 10:00",
+                        "is_today": False}])}
+        res = pipeline.build_policy_factor(data, "20260802")
         self.assertFalse(res["available"])
+        self.assertEqual(res["policy_n"], 0)
+        self.assertEqual(res["total_headlines"], 0)
 
     def test_multi_trigger_same_dimension_counts_once(self):
         res = pipeline.build_policy_factor(
-            self._minimal_data(["降准降息双落地"]))
+            self._minimal_data(["降准降息双落地"]), "20260802")
         self.assertEqual(res["dim_counts"], {"货币宽松": 1})  # 同维度只计一次
         scores = {s["name"]: s["score"] for s in res["industries"]}
         self.assertEqual(scores["证券"], 2)  # 权重只落一次
 
     def test_traditional_triggers(self):
         res = pipeline.build_policy_factor(
-            self._minimal_data(["人行降準0.5厘釋放流動性"]))
+            self._minimal_data(["人行降準0.5厘釋放流動性"]), "20260802")
         self.assertTrue(res["available"])
         self.assertEqual(res["broad_score"], 1)
         self.assertEqual(res["dim_counts"], {"货币宽松": 1})
 
     def test_aggregation_and_summary(self):
-        res = pipeline.build_policy_factor(self._policy_data())
-        # 央行降准 + 美联储降息 + 补贴 + 关税 + 约谈 = 5 条（否定/非当天已排除）
-        self.assertEqual(res["policy_n"], 5)
+        res = pipeline.build_policy_factor(self._policy_data(), "20260802")
+        # 降息 + 降准 + 补贴 + 关税 + 约谈×2（含 08-01 旧闻，15 日窗口内）
+        # = 6 条；「暂不降息」否定不计入
+        self.assertEqual(res["policy_n"], 6)
+        self.assertEqual(res["total_headlines"], 9)
         self.assertEqual(res["dim_counts"],
-                         {"货币宽松": 2, "产业扶持": 1, "监管收紧": 1, "贸易壁垒": 1})
+                         {"货币宽松": 2, "产业扶持": 1, "监管收紧": 2, "贸易壁垒": 1})
         self.assertEqual(res["broad_score"], 2)
         self.assertEqual(res["broad_label"], "偏暖")
         self.assertEqual([w["score"] for w in res["winners"]], [4, 2, 2, 2, 2])
@@ -1947,13 +2047,33 @@ class PolicyFactorTests(unittest.TestCase):
             {w["name"] for w in res["winners"]},
             {"地产链", "科技成长", "新能源", "汽车", "消费"})
         self.assertEqual([w["name"] for w in res["losers"]], ["半导体", "银行"])
-        # 证券多空相抵（+4/−2）后仍在榜上
+        # 证券多空相抵（+2/+2/−2/−2）后 score 归零但仍在榜上
         sec = [s for s in res["industries"] if s["name"] == "证券"][0]
-        self.assertEqual((sec["score"], sec["count"]), (2, 3))
-        self.assertIn("政策类新闻 5 条", res["summary"])
+        self.assertEqual((sec["score"], sec["count"]), (0, 4))
+        self.assertIn("近15日窗口内检出政策类新闻 6 条", res["summary"])
+        self.assertIn("（占窗口资讯 6/9）", res["summary"])
         self.assertIn("PSI +2", res["summary"])
         self.assertIn("偏暖", res["summary"])
         self.assertIn("货币宽松×2", res["summary"])
+        # 08-01 旧闻计入并带 old 标记（渲染时加 MM-DD 前缀）
+        yesterday = [h for h in res["headlines"] if "昨日" in h["title"]][0]
+        self.assertTrue(yesterday["old"])
+        self.assertEqual(yesterday["date"], "2026-08-01")
+        self.assertEqual(yesterday["dims"], ["监管收紧"])
+
+    def test_macro_data_dimension_counts_cpi_ppi(self):
+        # 2026-09-09 增补：CPI/PPI/统计局等宏观数据视为政策因子输入，
+        # 让“0 政策新闻”的宏观数据日也能出栏目（不再整日缺席）
+        res = pipeline.build_policy_factor(self._minimal_data(
+            ["国家统计局：8月份CPI同比温和回升，PPI同比涨幅扩大"]), "20260802")
+        self.assertTrue(res["available"])
+        self.assertEqual(res["policy_n"], 1)
+        self.assertEqual(res["dim_counts"], {"宏观数据": 1})
+        self.assertEqual(res["broad_score"], 1)   # 中性偏暖启发式 → 大盘 PSI +1
+        names = {s["name"] for s in res["winners"]}
+        self.assertIn("消费", names)               # CPI 回升利多消费
+        self.assertIn("有色金属", names)           # PPI 涨幅扩大利多上游资源
+        self.assertIn("政策及宏观数据类新闻 1 条", res["summary"])
 
     def test_pixel_renders_first_with_summary(self):
         html = pipeline.generate_report(
@@ -1962,16 +2082,20 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
         self.assertIn("政策冲击指数", html)
         self.assertIn("PSI +2", html)
-        self.assertIn("政策类新闻 5 条", html)
+        self.assertIn("政策类新闻 6 条", html)
         self.assertIn("地产链", html)
+        # 旧日政策标题以 MM-DD 前缀标注
+        self.assertIn("08-01 ·", html)
+        self.assertIn("昨日：证监会约谈多家券商", html)
 
     def test_guizang_renders_first_with_summary(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
         self.assertIn("PSI +2", html)
-        self.assertIn("政策类新闻 5 条", html)
+        self.assertIn("政策类新闻 6 条", html)
         self.assertIn("承压居前", html)
+        self.assertIn("08-01 ·", html)
 
     def test_absent_without_policy_news(self):
         data = self._minimal_data(["美股三大指数集体收涨"])
@@ -1990,6 +2114,91 @@ class PolicyFactorTests(unittest.TestCase):
             data, "2026年8月2日 · 周日", "20260802", theme="pixel",
             policy_result=None)  # 缺省时渲染侧兜底构建
         self.assertIn("政策因子", html2)
+
+
+
+class SectionReadingOrderTests(unittest.TestCase):
+    """2026-09-09：按阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
+
+    阅读顺序：政策因子 → AI 盘研判 → 行情速览 → A股大盘全景 → 资讯
+    （全球头条 → 东财快讯 → A股市场 → 港股名家频道）→ AI 新闻情绪因子 →
+    流动性分析 → 本次数据可用性（审计）。无数据栏目缺席但不打乱其余顺序。
+    """
+
+    def _full_data(self):
+        data = NewsSentimentFactorTests()._senti_data()  # 行情/频道/全球/东财/榜单 + 个股标题
+        data["全球头条"]["headlines"].append({
+            "title": "央行宣布降准0.5个百分点释放长期资金", "source": "新华社",
+            "url": "", "published_cst": "2026-08-02 09:00", "is_today": True})
+        data["A股资讯"] = pipeline._source_result(
+            "新浪财经", "success", is_today=True, content_date="2026-08-02",
+            headlines=["A股市场放量上涨，沪指重返整数关口"])
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        data["A港美流动性"] = LiquidityReportTests()._liquidity_data()
+        return data
+
+    # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
+    # AI 盘研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
+    GUIZANG_ORDER = [
+        "政策因子 · 冲击指数</h2>",
+        "AI 盘研判</h2>",
+        "行情速览（实时）</h2>",
+        "A股大盘全景复盘</h2>",
+        "全球头条</h2>",
+        "东方财富快讯</h2>",
+        "A股市场（实时行情 + 资讯）</h2>",
+        "港股名家频道</h2>",
+        "AI 新闻情绪因子</h2>",
+        "AI 研判 · 最近 A股、港股、美股成交量与流动性分析</h2>",
+        "本次数据可用性 · 当天检验</h2>",
+    ]
+
+    def test_guizang_section_reading_order(self):
+        html = pipeline.generate_report(
+            self._full_data(), "2026年8月2日 · 周日", "20260802")  # 默认 guizang
+        positions = [html.find(h) for h in self.GUIZANG_ORDER]
+        self.assertNotIn(-1, positions, "存在未渲染的栏目标题")
+        self.assertEqual(positions, sorted(positions),
+                         "栏目顺序不符合阅读逻辑:\n" + "\n".join(
+                             f"  {h}: {p}" for h, p in zip(self.GUIZANG_ORDER, positions)))
+
+    def test_pixel_lvl_numbering_follows_reading_order(self):
+        html = pipeline.generate_report(
+            self._full_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
+        order = [
+            "LVL 01 // POLICY SHOCK", "LVL 02 // AI READ",
+            "LVL 03 // MARKET SNAPSHOT", "LVL 04 // A-SHARE PANORAMA",
+            "LVL 05 // GLOBAL HEADLINES", "LVL 06 // EASTMONEY WIRE",
+            "LVL 07 // A-SHARE DESK", "LVL 08 // HK GURU CHANNELS",
+            "LVL 09 // NEWS SENTIMENT", "LVL 10 // A/H/US LIQUIDITY",
+            "LVL 11 // DATA AUDIT",
+        ]
+        positions = [html.find(s) for s in order]
+        self.assertNotIn(-1, positions, "存在未渲染的 LVL 关卡")
+        self.assertEqual(positions, sorted(positions),
+                         "LVL 关卡编号顺序不符合阅读逻辑:\n" + "\n".join(
+                             f"  {s}: {p}" for s, p in zip(order, positions)))
+
+    def test_order_skips_missing_sections_without_shifting_rest(self):
+        # 无新闻/无政策/无情绪归因（缺席栏目）时，剩余栏目顺序与编号仍正确：
+        # AI 研判（行情+榜单可单独出信号）→ 行情 → 全景 → 流动性 → 审计
+        data = self._full_data()
+        for src in ("全球头条", "东财快讯", "港股名家频道"):
+            data[src] = pipeline._source_result(
+                src, "unavailable", headlines=[], channels=[], error="offline")
+        data["A股资讯"] = pipeline._source_result(
+            "新浪财经", "unavailable", headlines=[], error="offline")
+        html = pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        order = ["LVL 01 // AI READ", "LVL 02 // MARKET SNAPSHOT",
+                 "LVL 03 // A-SHARE PANORAMA", "LVL 04 // A/H/US LIQUIDITY",
+                 "LVL 05 // DATA AUDIT"]
+        positions = [html.find(s) for s in order]
+        self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
+        self.assertEqual(positions, sorted(positions))
+        # 已缺席的栏目不得以 LVL 关卡出现
+        self.assertNotRegex(html, r"LVL \d // POLICY SHOCK")
+        self.assertNotRegex(html, r"LVL \d // NEWS SENTIMENT")
 
 
 if __name__ == "__main__":
