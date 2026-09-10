@@ -73,13 +73,14 @@
       新闻情绪；无热门榜单则栏目缺席。标题存档存 output/news_history.json
       （每次运行合并本次抓取并按 日期+标题 去重）。冷启动/样本不足明确标注。
       渲染位置：各资讯栏目之后。规则合成、非投资建议。
-  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。对
-      近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度
-      识别（货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI /
-      PPI / 社融 / 统计局 等经济数据口径），经关键词矩阵映射到行业受益/受损
-      权重，汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则生成的总结）。
-      触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。
-      规则合成、非投资建议。
+  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
+      直接读取中国政府网「最新政策」官方页面，保留发布日期与 gov.cn 原文链接；
+      近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度识别
+      （货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI / PPI /
+      社融 / 统计局 等经济数据口径），经关键词矩阵映射到行业受益/受损权重，
+      汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则生成的总结）。官方条例、
+      规划、办法等没有方向性触发词时按中性「政策发布」纳入；触发词被否定修饰时跳过；
+      窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -107,6 +108,8 @@ import re
 import glob
 import json
 import xml.etree.ElementTree as ET
+from html import unescape as _html_unescape
+from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -510,9 +513,175 @@ def fetch_google_news():
                           is_today=is_today, content_date=content_date,
                           headlines=items[:8])
 
-
+# 数据源 2：国家政策官方网站（中国政府网「最新政策」）
 # ============================================================
-# 数据源 2：东方财富快讯（免费 API，5 条最新新闻）
+# 中国政府网是国务院办公厅主办的中央人民政府门户网站。这里直接读取其「最新政策」
+# 页面，不经过搜索引擎、转载媒体或 RSSHub；每条政策保留政府网原文链接与发布日期，
+# 作为政策因子的独立输入。页面结构偶有调整，因此解析采用标准库正则，并只接受
+# gov.cn/zhengce/ 下的政策正文链接，避免把导航、图片和第三方链接误计入因子。
+GOV_POLICY_URL = "https://www.gov.cn/zhengce/zuixin/"
+GOV_POLICY_FALLBACK_URL = "https://www.gov.cn/zhengce/"
+GOV_POLICY_URLS = (GOV_POLICY_URL, GOV_POLICY_FALLBACK_URL)
+GOV_POLICY_SOURCE_NAME = "中国政府网·最新政策"
+NATIONAL_POLICY_TOP_N = int(os.environ.get("OCTOPUS_NATIONAL_POLICY_TOP_N", "30"))
+
+_GOV_POLICY_ARTICLE_RE = re.compile(
+    r"/zhengce/(?:content/)?20\d{2}(?:(?:\d{2})|(?:[-_/]\d{1,2}){1,2})/content_\d+\.html?$",
+    re.I,
+)
+_GOV_POLICY_DATE_RE = re.compile(
+    r"(?<!\d)(20\d{2})\s*(?:[-/.年－—])\s*(\d{1,2})\s*(?:[-/.月－—])\s*(\d{1,2})\s*(?:日|号)?",
+)
+
+
+def _strip_html_text(fragment):
+    """去掉 HTML 标签并解码实体，供政府网列表标题/日期解析使用。"""
+    fragment = fragment or ""
+    fragment = re.sub(r"(?is)<(script|style)\b[^>]*>.*?</\1>", " ", fragment)
+    fragment = re.sub(r"<[^>]+>", " ", fragment)
+    fragment = _html_unescape(fragment).replace("\xa0", " ").replace("\u3000", " ")
+    return re.sub(r"\s+", " ", fragment).strip()
+
+
+def _normalise_policy_date(value):
+    """把政府网常见的 YYYY-MM-DD / YYYY/MM/DD / 中文日期归一化。"""
+    if not value:
+        return ""
+    match = _GOV_POLICY_DATE_RE.search(str(value))
+    if not match:
+        return ""
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
+def _gov_policy_date_after_anchor(html_text, anchor_end, anchor_start):
+    """从政策链接所在列表项提取发布日期；没有明确日期时返回空字符串。
+
+    日期必须来自链接附近的可见列表文本，不从 URL 的月份或抓取日期推断，
+    这样不会把未知发布日期伪装成当天政策。
+    """
+    lower = html_text.lower()
+    item_end_match = re.search(r"</li\s*>", lower[anchor_end:anchor_end + 1200], re.I)
+    if item_end_match:
+        item_end = anchor_end + item_end_match.start()
+    else:
+        # 非 li 模板也常把每项写成连续的 div/a；避免把下一条政策的日期
+        # 错配给当前标题，只在下一个链接前寻找当前项的尾部日期。
+        next_anchor = re.search(r"<a\b", lower[anchor_end:], re.I)
+        item_end = (anchor_end + next_anchor.start()
+                    if next_anchor else anchor_end + 800)
+    item_end = min(len(html_text), item_end)
+    tail = _strip_html_text(html_text[anchor_end:item_end])
+    date = _normalise_policy_date(tail)
+    if date:
+        return date
+
+    # 少数模板把日期放在链接前的同一 <li> 中。
+    item_start = lower.rfind("<li", 0, anchor_start)
+    if item_start >= 0:
+        prefix = _strip_html_text(html_text[item_start:anchor_start])
+        date = _normalise_policy_date(prefix)
+    return date
+
+
+def _parse_gov_policy_html(html_text, limit=None):
+    """解析中国政府网「最新政策」列表，返回带官方原文链接的政策条目。
+
+    返回字段兼容新闻标题存档：title/source/url/date/published_cst/is_today/official。
+    只有政策正文链接会被接受；没有日期的条目仍保留展示，但不会进入自然日政策窗口。
+    """
+    if isinstance(html_text, bytes):
+        html_text = html_text.decode("utf-8", errors="replace")
+    if not isinstance(html_text, str) or not html_text.strip():
+        return []
+    try:
+        limit = max(1, int(NATIONAL_POLICY_TOP_N if limit is None else limit))
+    except (TypeError, ValueError):
+        limit = 30
+
+    items, seen = [], set()
+    anchor_re = re.compile(r"<a\b(?P<attrs>[^>]*)>(?P<body>.*?)</a\s*>", re.I | re.S)
+    for match in anchor_re.finditer(html_text):
+        attrs = match.group("attrs")
+        href_match = re.search(r'\bhref\s*=\s*(["\'])(.*?)\1', attrs, re.I | re.S)
+        if not href_match:
+            continue
+        href = _html_unescape(href_match.group(2).strip())
+        url = urljoin(GOV_POLICY_URL, href)
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme not in {"http", "https"} or not (
+                host == "gov.cn" or host.endswith(".gov.cn")):
+            continue
+        path = parsed.path or ""
+        if not _GOV_POLICY_ARTICLE_RE.search(path):
+            continue
+        title = _strip_html_text(match.group("body"))
+        if len(title) < 2:
+            continue
+        date = _gov_policy_date_after_anchor(html_text, match.end(), match.start())
+        key = (url, title)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({
+            "title": title[:200],
+            "source": "中国政府网",
+            "url": url,
+            "date": date,
+            "time": date,
+            "published_cst": date or "—",
+            "is_today": bool(date and date == _today_display()),
+            "official": True,
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def fetch_gov_policy():
+    """抓取中国政府网最新政策，作为政策因子的官方发布信息源。
+
+    优先读取 ``/zhengce/zuixin/``，该页面失败或结构变化时再读取政策首页。
+    不以历史存档兜底：抓不到官方页面就明确返回 unavailable。
+    """
+    print("📡 正在抓取中国政府网·最新政策（政策因子官方源）...")
+    failures = []
+    for url in GOV_POLICY_URLS:
+        html_text = safe_request(url, is_json=False, timeout=15)
+        items = _parse_gov_policy_html(html_text)
+        if not items:
+            failures.append(f"{url}: 未解析到政策正文")
+            continue
+        dates = [it["date"] for it in items if it.get("date")]
+        content_date = max(dates) if dates else None
+        is_today = any(it.get("is_today") for it in items)
+        print(f"  ✅ 中国政府网抓取 {len(items)} 条最新政策（最新发布 {content_date or '日期暂缺'}）")
+        return _source_result(
+            GOV_POLICY_SOURCE_NAME, "success", is_today=is_today,
+            content_date=content_date, headlines=items,
+            official=True, page_url=url,
+            error="；".join(failures[:1]) or None,
+            partial=len(items) < min(5, NATIONAL_POLICY_TOP_N),
+        )
+
+    print("  ⚠️ 中国政府网最新政策暂不可用，不使用历史政策兜底")
+    return _source_result(
+        GOV_POLICY_SOURCE_NAME, "unavailable", headlines=[], official=True,
+        page_url=GOV_POLICY_URL, error="；".join(failures[:2]) or "未取得官方政策信息",
+    )
+
+
+# 公开两个语义等价的入口，便于外部定时任务/测试按「国家政策」或「政府网」命名调用。
+fetch_national_policy = fetch_gov_policy
+fetch_national_policy_updates = fetch_gov_policy
+fetch_national_policies = fetch_gov_policy
+
+
+# 数据源 3：东方财富快讯（免费 API，5 条最新新闻）
 # ============================================================
 EASTMONEY_NEWS_URLS = [
     "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns",
@@ -566,7 +735,7 @@ def fetch_eastmoney_news():
 
 
 # ============================================================
-# 数据源 3：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
+# 数据源 4：热门榜单（最近交易日收盘后 A股/港股/美股 成交量前五）
 # ============================================================
 HOT_STOCK_TOP_N = 5
 
@@ -627,10 +796,7 @@ def fetch_hot_stocks():
 
 
 # ============================================================
-# 数据源 4.5：A股大盘全景复盘
-
-# ============================================================
-# 数据源 4.5：A股大盘全景复盘
+# 数据源 5：A股大盘全景复盘
 # （指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
 # ------------------------------------------------------------
 # 使用东方财富 push2 / push2his 免费公开接口（与「热门榜单」同源）：
@@ -973,7 +1139,7 @@ def fetch_market_panorama():
 
 
 # ============================================================
-# 数据源 5：A股资讯（新浪财经）
+# 数据源 6：A股资讯（新浪财经）
 # ============================================================
 def fetch_sina_headlines():
     """抓取新浪财经 A 股资讯"""
@@ -1018,7 +1184,7 @@ def fetch_sina_headlines():
                           headlines=headlines[:5])
 
 
-# 数据源 6：港股名家频道（YouTube / 通用 RSS / 需登录平台）
+# 数据源 7：港股名家频道（YouTube / 通用 RSS / 需登录平台）
 # ============================================================
 def resolve_channel_id(channel):
     """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
@@ -1226,6 +1392,9 @@ def collect_all_data():
     data["实时行情"] = fetch_market_snapshot()
     time.sleep(0.5)
     data["A股大盘全景"] = fetch_market_panorama()
+    time.sleep(0.5)
+    # 政策因子的独立官方输入：直接读取中国政府网最新政策，不以媒体转载替代。
+    data["国家政策"] = fetch_gov_policy()
     time.sleep(0.5)
     data["港股名家频道"] = fetch_hk_channels()
     time.sleep(0.5)
@@ -2410,6 +2579,10 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     """
     market = data.get("实时行情", {})
     pan = data.get("A股大盘全景", {}) or {}
+    # 官方源作为政策因子输入；兼容外部调用仍使用旧的「中国政府网」键名。
+    gov_policy = data.get("国家政策")
+    if not isinstance(gov_policy, dict):
+        gov_policy = data.get("中国政府网", {}) or {}
     yt = data.get("港股名家频道", {})
     yt_live = yt.get("channels", [])        # 已抓取到内容的频道
     google = data.get("全球头条", {})
@@ -2423,6 +2596,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     source_items = [
         ("实时行情", market),
         ("A股大盘全景", pan),
+        ("国家政策（中国政府网）", gov_policy),
         ("港股名家频道", yt),
         ("全球头条", google),
         ("A股资讯", sina),
@@ -3364,25 +3538,39 @@ def _norm_item_ts(value):
     return f"{m.group(1)} {m.group(2)}" if m else ""
 
 
+def _norm_item_date(value):
+    """把标题级日期规范成 ``YYYY-MM-DD``；支持政府网的中文/斜杠日期。"""
+    return _normalise_policy_date(value) if value else ""
+
+
 def _collect_headline_items(data, default_date):
-    """收集本次抓取的全部标题 → [{title, source, section, ts, date}]。
+    """收集本次抓取的全部标题 → [{title, source, section, ts, date, ...}]。
 
     不再按「是否当天」过滤——是否进入窗口由 _filter_headlines_window 决定。
     ts = 标题级时间（有真实发布时间才给，如 Google News / 东财 / 港股频道），
-    无发布时间的标题（如新浪滚动字符串）ts=""、date=default_date（采集日）。
+    无发布时间的标题（如新浪滚动字符串）ts=""、date=default_date（采集日）；
+    中国政府网条目还保留 url/official 字段供政策因子溯源。
     """
     items = []
 
-    def _add(title, source, section, ts_raw):
+    def _add(title, source, section, ts_raw, *, date_raw=None, url="", official=False):
         title = (title or "").strip()
         if not title:
             return
         ts = _norm_item_ts(ts_raw)
-        items.append({
+        # date_raw=None 表示沿用旧来源的采集日兜底；官方政策源显式传入 date，
+        # 缺失发布日期时保留空值，避免把未知日期误算为当天政策。
+        date = (_norm_item_date(date_raw) if date_raw is not None
+                else (ts[:10] if ts else default_date))
+        item = {
             "title": title[:200], "source": (source or "").strip(),
-            "section": (section or "").strip(),
-            "ts": ts, "date": (ts[:10] if ts else default_date),
-        })
+            "section": (section or "").strip(), "ts": ts, "date": date,
+        }
+        if url:
+            item["url"] = str(url).strip()
+        if official:
+            item["official"] = True
+        items.append(item)
 
     google = data.get("全球头条", {}) or {}
     for h in google.get("headlines", []) or []:
@@ -3401,6 +3589,23 @@ def _collect_headline_items(data, default_date):
         ch_name = ch.get("name", "港股频道")
         for v in ch.get("videos", []) or []:
             _add(v.get("title"), ch_name, "港股名家频道", v.get("published_cst"))
+
+    # 中国政府网官方政策单独进入标题存档；政策因子会在同一窗口内对其做矩阵映射。
+    # 兼容手工调用传入的旧键名「中国政府网」。
+    gov_policy = data.get("国家政策")
+    if not isinstance(gov_policy, dict):
+        gov_policy = data.get("中国政府网", {}) or {}
+    for h in gov_policy.get("headlines", []) or []:
+        if isinstance(h, dict):
+            # 解析器会显式写入 date；兼容外部传入的只有 published_cst/time
+            # 的官方记录，但仍不向缺失日期回填采集日。
+            date_raw = (h["date"] if "date" in h
+                        else (h.get("published_cst") or h.get("time", "")))
+            _add(
+                h.get("title"), h.get("source") or "中国政府网", "国家政策",
+                h.get("published_cst") or h.get("time", ""),
+                date_raw=date_raw, url=h.get("url", ""), official=True,
+            )
     return items
 
 
@@ -3470,18 +3675,47 @@ def _save_news_corpus(path, corpus):
 
 
 def _merge_news_corpus(corpus, fresh_items):
-    """把本次抓取并入存档：按 日期+标题 去重（同日重复运行幂等）。"""
+    """把本次抓取并入存档：按 日期+标题 去重（同日重复运行幂等）。
+
+    官方政策条目即使和媒体标题同名，也会为已有记录补上中国政府网原文链接、
+    官方来源与发布日期；这样同一条政策不会因多个资讯源重复计权，同时保留官方溯源。
+    """
     items = list(corpus.setdefault("items", []))
-    seen = {(it.get("date", ""), it.get("title", "")) for it in items}
+    positions = {
+        (it.get("date", ""), it.get("title", "")): index
+        for index, it in enumerate(items)
+        if isinstance(it, dict)
+    }
     added = 0
     for it in fresh_items or []:
-        key = (it.get("date", ""), it.get("title", ""))
-        if not key[1] or key in seen:
+        if not isinstance(it, dict):
             continue
-        seen.add(key)
-        items.append({"title": it["title"], "source": it.get("source", ""),
-                      "section": it.get("section", ""), "ts": it.get("ts", ""),
-                      "date": it.get("date", "")})
+        key = (it.get("date", ""), it.get("title", ""))
+        if not key[1]:
+            continue
+        if key in positions:
+            # 同标题优先采用官方来源；普通来源缺失 URL 时也可补入已有链接，
+            # 但不会让媒体信息覆盖已经确认的中国政府网官方记录。
+            existing = items[positions[key]]
+            is_official = bool(it.get("official"))
+            if is_official and not existing.get("official"):
+                existing["source"] = it.get("source", existing.get("source", ""))
+                existing["section"] = it.get("section", existing.get("section", ""))
+                existing["official"] = True
+            if it.get("url") and (is_official or not existing.get("url")):
+                existing["url"] = it["url"]
+            if it.get("ts") and (is_official or not existing.get("ts")):
+                existing["ts"] = it["ts"]
+            continue
+        positions[key] = len(items)
+        entry = {"title": it["title"], "source": it.get("source", ""),
+                 "section": it.get("section", ""), "ts": it.get("ts", ""),
+                 "date": it.get("date", "")}
+        if it.get("url"):
+            entry["url"] = it["url"]
+        if it.get("official"):
+            entry["official"] = True
+        items.append(entry)
         added += 1
     corpus["items"] = items
     if added:
@@ -4276,6 +4510,8 @@ def gz_sentiment_empty_block(res):
 # 维度分两类：固定映射（货币/财政/地产/宏观数据，直接给行业权重）与
 # 行业归因（扶持/监管/开放/贸易，按标题提及的行业落权重；无提及
 # 落宽基小权重并标注宽基）。触发词被否定词修饰时跳过（如"暂不降准"）。
+# 中国政府网条目额外带 official=True：即使标题没有方向性触发词，也按「政策发布」
+# 中性维度纳入政策因子并保留官方原文链接，避免官方发布的条例/规划因标题措辞不同而漏检。
 # 只统计近 POLICY_WINDOW_DAYS=15 日窗口内标题（复用标题收集器，含历史存档，
 # 无 ts 的标题按 date 判断，当天标题自然在窗口内）；窗口内零政策/宏观新闻时
 # 栏目缺席，不伪造。
@@ -4337,6 +4573,14 @@ _POLICY_DIMENSIONS = [
                  "煤炭能源": +1, "钢铁化工": +1}},
 ]
 
+# 官方列表里的条例、规划、办法等本身就是政策信息，但标题不一定含有「扶持」或
+# 「监管」触发词。仅对 official=True 的政府网条目使用该中性兜底维度，避免普通
+# 媒体标题中的「发布」被误判；权重为 0，表示已纳入政策信息但不擅自判断方向。
+_OFFICIAL_POLICY_DIMENSION = {
+    "id": "official_publication", "label": "政策发布",
+    "weights": {"大盘": 0},
+}
+
 # 行业别名词表（归因维度用；匹配最长优先，如"锂电"优先于"锂"）。
 _POLICY_INDUSTRIES = {
     "新能源": ["新能源", "光伏", "风电", "储能", "锂电池", "锂电",
@@ -4393,7 +4637,7 @@ def _match_policy_industries(title):
 
 
 def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
-                    winners, losers):
+                    winners, losers, official_n=0):
     """规则生成的政策总结（纯数据转述，无伪造）。"""
     if policy_n == 0:
         return "窗口内未检出显著政策新闻。"
@@ -4404,6 +4648,8 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
     parts = [f"近{POLICY_WINDOW_DAYS}日窗口内检出{kind} {policy_n} 条（占窗口资讯 "
              f"{policy_n}/{total_n}），覆盖维度：{dims}；"
              f"大盘政策冲击指数 PSI {broad_score:+d}（{broad_label}）。"]
+    if official_n:
+        parts.append(f"其中中国政府网官方发布 {official_n} 条。")
     if winners:
         parts.append("受益居前：" + "、".join(
             f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in winners[:3]) + "。")
@@ -4411,7 +4657,10 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
         parts.append("承压居前：" + "、".join(
             f'{w["name"]}{w["score"]:+d}（{w["count"]}条）' for w in losers[:3]) + "。")
     if not winners and not losers:
-        parts.append("各行业冲击相互抵消，无显著受益/承压方向。")
+        if official_n and set(dim_counts).issubset({"政策发布"}):
+            parts.append("已纳入中国政府网官方政策发布信息，但标题未给出明确方向；行业冲击暂不判定。")
+        else:
+            parts.append("各行业冲击相互抵消，无显著受益/承压方向。")
     return "".join(parts)
 
 
@@ -4419,8 +4668,9 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
     """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
 
     标题窗口：近 POLICY_WINDOW_DAYS=15 日（自然日，含锚定日；news_corpus 为
-    跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。窗口内零
-    政策/宏观新闻时 available=False，栏目缺席。
+    跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。中国政府网
+    直接发布的条目带 official=True、官方原文 URL；即使没有方向性触发词也按
+    「政策发布」中性维度纳入。窗口内零政策/宏观新闻时 available=False，栏目缺席。
     """
     anchor_dt = _factor_anchor_dt(date_str) if date_str else datetime.now(CST)
     anchor_date = anchor_dt.strftime("%Y-%m-%d")
@@ -4438,6 +4688,7 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
     broad_score = 0
     broad_count = 0
     dim_counts = {}
+    official_n = 0
     policy_heads = []
     for head in headlines:
         title = head["title"]
@@ -4446,6 +4697,10 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
             triggers = _match_policy_triggers(title, dim["triggers"])
             if triggers:
                 hit_dims.append(dim)
+        # 直采的政府网政策正文是官方政策证据。没有方向性词时也保留为中性
+        # 政策事件，确保「条例/规划/决定」等正式发布信息不被资讯词表漏掉。
+        if not hit_dims and head.get("official"):
+            hit_dims.append(_OFFICIAL_POLICY_DIMENSION)
         if not hit_dims:
             continue
         head_industries = []
@@ -4476,8 +4731,13 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
                     if ind not in head_industries:
                         head_industries.append(ind)
         item_date = (head.get("date") or "")[:10]
+        is_official = bool(head.get("official"))
+        if is_official:
+            official_n += 1
         policy_heads.append({
-            "title": title, "source": head["source"], "section": head["section"],
+            "title": title, "source": head.get("source", ""),
+            "section": head.get("section", ""), "url": head.get("url", ""),
+            "official": is_official,
             "dims": head_dims, "industries": head_industries,
             "direction": 1 if head_net > 0 else (-1 if head_net < 0 else 0),
             "net": head_net,
@@ -4495,10 +4755,11 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
                     key=lambda s: (s["score"], s["name"]))[:POLICY_DISPLAY_INDUSTRIES]
     broad_label = "偏暖" if broad_score > 0 else ("偏冷" if broad_score < 0 else "中性")
     summary = _policy_summary(len(policy_heads), len(headlines), dim_counts,
-                              broad_score, broad_label, winners, losers)
+                              broad_score, broad_label, winners, losers, official_n)
     return {
         "available": bool(policy_heads),
         "policy_n": len(policy_heads),
+        "official_n": official_n,
         "total_headlines": len(headlines),
         "dim_counts": dim_counts,
         "broad_score": broad_score,
@@ -4512,6 +4773,31 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
         "window_days": POLICY_WINDOW_DAYS,
         "corpus_n": len(headlines),
     }
+
+
+def _policy_headline_markup(headline, color=C_INK):
+    """渲染政策标题，并为官方发布条目保留可点击的原文链接。
+
+    标题来自外部页面，正文必须先转义；仅允许 http/https 链接进入 href，
+    避免把存档中的异常值变成脚本属性。中国政府网解析器本身还会限制域名为
+    ``*.gov.cn``，这里的通用校验用于兼容手工注入的测试/历史数据。
+    """
+    title = _esc((headline.get("title") or "")[:60])
+    url = str(headline.get("url") or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
+        title = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:none;'
+                 f'border-bottom:1px dotted {color};">{title}</a>')
+        if headline.get("official"):
+            title += (f' <span style="font-size:10px;color:{color};font-weight:900;">'
+                      "[官方原文]</span>")
+    return title
+
+
+def _policy_source_text(headline):
+    """政策条目的可读来源标签；官方条目明确标注发布主体。"""
+    source = headline.get("source") or "政策资讯"
+    return f"{source}（官方发布）" if headline.get("official") else source
 
 
 def _pixel_policy_block(res):
@@ -4540,6 +4826,8 @@ def _pixel_policy_block(res):
                      f'（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
         ("覆盖维度", _esc(dims_line)),
     ])
+    if res.get("official_n"):
+        head += _mini_table([("官方来源", f'中国政府网官方发布 {res["official_n"]} 条')])
     board = []
     for s in res["winners"]:
         board.append((f'▲ {_esc(s["name"])}',
@@ -4558,12 +4846,13 @@ def _pixel_policy_block(res):
         else:
             arrow, bcolor = "■", C_AMBER
         inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
-        sub = f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · {h["source"]}'
+        sub = (f'{"/".join(h["dims"])} · 影响：{inds} · {h["section"]} · '
+               f'{_policy_source_text(h)}')
         if h.get("old") and h.get("date"):
             sub = f'{h["date"][5:]} · {sub}'
         rows.append(_item_row(
-            "◆", f'<b style="color:{bcolor};">[{arrow} {h["net"]:+d}]</b> {_esc(h["title"][:60])}',
-            _esc(sub)))
+            "◆", f'<b style="color:{bcolor};">[{arrow} {h["net"]:+d}]</b> '
+            f'{_policy_headline_markup(h, C_INK)}', _esc(sub)))
     more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
     if more > 0:
         rows.append(
@@ -4594,8 +4883,10 @@ def gz_policy_block(res):
              f'PSI {res["broad_score"]:+d}（{res["broad_count"]}次映射 · {res["broad_label"]}）'),
             ("覆盖维度", _esc(dims_line)),
         ]),
-        gz_subsection("行业冲击榜"),
     ]
+    if res.get("official_n"):
+        out.append(gz_kv_table([("官方来源", f'中国政府网官方发布 {res["official_n"]} 条')]))
+    out.append(gz_subsection("行业冲击榜"))
     board = []
     for s in res["winners"]:
         board.append([
@@ -4618,12 +4909,12 @@ def gz_policy_block(res):
         badge = "▲" if h["direction"] > 0 else ("▼" if h["direction"] < 0 else "■")
         inds = "、".join(h["industries"][:4]) if h["industries"] else "大盘（宽基）"
         sub = (f'{_esc("/".join(h["dims"]))} · 影响：{_esc(inds)} · '
-               f'{_esc(h["section"])} · {_esc(h["source"])}')
+               f'{_esc(h["section"])} · {_esc(_policy_source_text(h))}')
         if h.get("old") and h.get("date"):
             sub = f'{h["date"][5:]} · {sub}'
         out.append(gz_item_row(
-            "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> {_esc(h["title"][:60])}',
-            sub))
+            "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> '
+            f'{_policy_headline_markup(h, GZ_INK)}', sub))
     more = len(res["headlines"]) - POLICY_DISPLAY_HEADLINES
     if more > 0:
         out.append(gz_note(f"＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）。"))
@@ -4904,7 +5195,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 > TREND KEY: [▲ 涨 / UP] [▼ 跌 / DOWN] [■ 平 / FLAT] [◆ AI CORE]
 </div>
 <div style="font-size:9px;color:{C_FAINT};letter-spacing:.5px;line-height:1.6;padding-top:6px;font-family:{FONT_MONO};">
-DATA_SRC: HK GURU (YT/RSS) · Google News · EastMoney (Wire/Liquid) · Sina · AI_RULE<br>
+DATA_SRC: China Gov Policy · HK GURU (YT/RSS) · Google News · EastMoney · Sina · AI_RULE<br>
 SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-PIXEL-QUEST v3<br>
 <span style="color:{C_ACCENT};">█</span><span style="color:{C_CYAN};">▓</span><span style="color:{C_ACCENT_MAGENTA};">▒</span> PRESS START TO CONTINUE
 </div>

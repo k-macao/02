@@ -2250,6 +2250,102 @@ class PolicyFactorTests(unittest.TestCase):
 
 
 
+class NationalPolicySourceTests(unittest.TestCase):
+    """中国政府网官方政策源：解析、降级、存档和双主题溯源。"""
+
+    GOV_HTML = """
+    <html><body>
+      <ul class="policy-list">
+        <li><a href="/zhengce/content/2026/08/content_7070001.htm">
+          <span>国务院关于推进绿色低碳发展的意见</span>
+        </a><span class="date">2026年8月2日</span></li>
+        <li><a href="https://www.gov.cn/zhengce/202607/content_7070002.html">
+          国务院办公厅关于做好就业工作的通知
+        </a><time>2026-07-31</time></li>
+        <li><a href="/zhengce/content/2026/08/content_7070003.htm">没有日期的政策办法</a></li>
+        <li><a href="https://example.com/zhengce/content/2026/08/content_7070004.htm">
+          第三方转载，不应作为官方政策
+        </a><span>2026-08-02</span></li>
+        <li><a href="/zhengce/202608/index.htm">政策栏目导航，不是正文</a></li>
+        <li><a href="javascript:alert(1)">脚本链接</a></li>
+      </ul>
+    </body></html>
+    """
+
+    def test_parser_keeps_only_official_policy_articles_and_dates(self):
+        items = pipeline._parse_gov_policy_html(self.GOV_HTML, limit=10)
+        self.assertEqual([item["title"] for item in items], [
+            "国务院关于推进绿色低碳发展的意见",
+            "国务院办公厅关于做好就业工作的通知",
+            "没有日期的政策办法",
+        ])
+        self.assertEqual(items[0]["url"],
+                         "https://www.gov.cn/zhengce/content/2026/08/content_7070001.htm")
+        self.assertEqual(items[0]["date"], "2026-08-02")
+        self.assertEqual(items[1]["date"], "2026-07-31")
+        self.assertEqual(items[2]["date"], "")
+        self.assertEqual(items[2]["published_cst"], "—")
+        self.assertTrue(all(item["official"] for item in items))
+
+    def test_parser_accepts_bytes_and_limit(self):
+        items = pipeline._parse_gov_policy_html(self.GOV_HTML.encode("utf-8"), limit=2)
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["source"], "中国政府网")
+
+    def test_fetch_falls_back_to_policy_home(self):
+        with patch.object(pipeline, "safe_request", side_effect=[None, self.GOV_HTML]) as request:
+            result = pipeline.fetch_gov_policy()
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["official"])
+        self.assertEqual(result["page_url"], pipeline.GOV_POLICY_FALLBACK_URL)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(len(result["headlines"]), 3)
+
+    def test_fetch_is_explicitly_unavailable_without_history_fallback(self):
+        with patch.object(pipeline, "safe_request", return_value=None):
+            result = pipeline.fetch_gov_policy()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["headlines"], [])
+        self.assertTrue(result["official"])
+        self.assertIn("gov.cn", result["page_url"])
+
+    def test_official_fields_reach_corpus_and_neutral_policy_factor(self):
+        parsed = pipeline._parse_gov_policy_html(self.GOV_HTML, limit=1)
+        data = {"国家政策": pipeline._source_result(
+            "中国政府网·最新政策", "success", headlines=parsed)}
+        items = pipeline._collect_headline_items(data, "2026-08-02")
+        self.assertEqual(items[0]["url"], parsed[0]["url"])
+        self.assertTrue(items[0]["official"])
+        corpus = {"version": 1, "items": []}
+        pipeline._merge_news_corpus(corpus, items)
+        self.assertEqual(corpus["items"][0]["url"], parsed[0]["url"])
+        self.assertTrue(corpus["items"][0]["official"])
+
+        result = pipeline.build_policy_factor(data, "20260802")
+        self.assertTrue(result["available"])
+        self.assertEqual(result["official_n"], 1)
+        self.assertEqual(result["dim_counts"], {"政策发布": 1})
+        self.assertIn("中国政府网官方发布 1 条", result["summary"])
+
+    def test_both_themes_render_safe_official_original_link(self):
+        data = {"国家政策": pipeline._source_result(
+            "中国政府网·最新政策", "success", headlines=[{
+                "title": "国务院发布稳增长政策",
+                "source": "中国政府网",
+                "url": "https://www.gov.cn/zhengce/content/2026/08/content_7070009.htm?a=1&b=2",
+                "date": "2026-08-02",
+                "published_cst": "2026-08-02",
+                "official": True,
+            }])}
+        for theme in ("pixel", "guizang"):
+            html = pipeline.generate_report(
+                data, "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertIn("官方原文", html)
+            self.assertIn("中国政府网（官方发布）", html)
+            self.assertIn("https://www.gov.cn/zhengce/content/2026/08/content_7070009.htm?a=1&amp;b=2", html)
+            self.assertLess(html.find("政策因子"), html.find("本次数据可用性"))
+
+
 class SectionReadingOrderTests(unittest.TestCase):
     """2026-09-09：按阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
 
