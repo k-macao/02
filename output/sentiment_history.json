@@ -40,6 +40,13 @@
      "neg": 1,
      "total": 7,
      "score": -0.1429
+    },
+    "20260910": {
+     "pos": 3,
+     "neu": 2,
+     "neg": 0,
+     "total": 5,
+     "score": 0.6
     }
    }
   },
@@ -63,6 +70,13 @@
    "name": "东山精密",
    "days": {
     "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260910": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -96,6 +110,13 @@
      "neg": 1,
      "total": 3,
      "score": -0.3333
+    },
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 2,
+     "total": 2,
+     "score": -1.0
     }
    }
   },
@@ -110,6 +131,13 @@
      "neg": 1,
      "total": 4,
      "score": -0.25
+    },
+    "20260910": {
+     "pos": 1,
+     "neu": 1,
+     "neg": 0,
+     "total": 2,
+     "score": 0.5
     }
    }
   },
@@ -152,6 +180,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -161,6 +196,13 @@
    "name": "标普500ETF-SPDR",
    "days": {
     "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260910": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -180,6 +222,13 @@
      "neg": 1,
      "total": 1,
      "score": -1.0
+    },
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -194,6 +243,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260910": {
+     "pos": 1,
+     "neu": 0,
+     "neg": 0,
+     "total": 1,
+     "score": 1.0
     }
    }
   },
@@ -238,7 +294,105 @@
      "score": -0.3333
     }
    }
+  },
+  "美股:META": {
+   "market": "美股",
+   "code": "META",
+   "name": "MetaPlatformsInc-A",
+   "days": {
+    "20260910": {
+     "pos": 1,
+     "neu": 0,
+     "neg": 0,
+     "total": 1,
+     "score": 1.0
+    }
+   }
+  },
+  "港股:09988": {
+   "market": "港股",
+   "code": "09988",
+   "name": "阿里巴巴-W",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:300394": {
+   "market": "A股",
+   "code": "300394",
+   "name": "天孚通信",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:000988": {
+   "market": "A股",
+   "code": "000988",
+   "name": "华工科技",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:600176": {
+   "market": "A股",
+   "code": "600176",
+   "name": "中国巨石",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:02513": {
+   "market": "港股",
+   "code": "02513",
+   "name": "智谱",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "美股:AAPL": {
+   "market": "美股",
+   "code": "AAPL",
+   "name": "苹果",
+   "days": {
+    "20260910": {
+     "pos": 0,
+     "neu": 2,
+     "neg": 0,
+     "total": 2,
+     "score": 0.0
+    }
+   }
   }
  },
- "updated_cst": "2026-09-10 11:05:19"
+ "updated_cst": "2026-09-10 12:06:34"
 }
