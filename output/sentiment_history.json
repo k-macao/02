@@ -68,6 +68,13 @@
      "neg": 1,
      "total": 3,
      "score": -0.3333
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -110,6 +117,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -119,6 +133,13 @@
    "name": "宁德时代",
    "days": {
     "20260909": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260916": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -159,6 +180,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 1,
+     "neu": 0,
+     "neg": 0,
+     "total": 1,
+     "score": 1.0
     }
    }
   },
@@ -187,6 +215,13 @@
      "neg": 1,
      "total": 2,
      "score": -0.5
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -208,6 +243,13 @@
      "neg": 1,
      "total": 1,
      "score": -1.0
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -257,6 +299,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 1,
+     "total": 1,
+     "score": -1.0
     }
    }
   },
@@ -287,6 +336,13 @@
      "score": null
     },
     "20260915": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260916": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -327,6 +383,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -362,6 +425,13 @@
      "neg": 2,
      "total": 2,
      "score": -1.0
+    },
+    "20260916": {
+     "pos": 1,
+     "neu": 0,
+     "neg": 0,
+     "total": 1,
+     "score": 1.0
     }
    }
   },
@@ -390,6 +460,13 @@
      "neg": 2,
      "total": 3,
      "score": -0.6667
+    },
+    "20260916": {
+     "pos": 1,
+     "neu": 0,
+     "neg": 0,
+     "total": 1,
+     "score": 1.0
     }
    }
   },
@@ -439,6 +516,13 @@
      "neg": 0,
      "total": 1,
      "score": 1.0
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -551,6 +635,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -642,9 +733,30 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "港股:00981": {
+   "market": "港股",
+   "code": "00981",
+   "name": "中芯国际",
+   "days": {
+    "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   }
  },
- "updated_cst": "2026-09-15 12:24:14"
+ "updated_cst": "2026-09-16 12:19:58"
 }
