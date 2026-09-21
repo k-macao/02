@@ -96,6 +96,13 @@
      "neg": 0,
      "total": 4,
      "score": 0.25
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -133,6 +140,13 @@
      "score": null
     },
     "20260919": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260921": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -250,6 +264,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -306,6 +327,13 @@
      "neg": 0,
      "total": 4,
      "score": 0.25
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 1,
+     "neg": 0,
+     "total": 1,
+     "score": 0.0
     }
    }
   },
@@ -355,6 +383,13 @@
      "neg": 0,
      "total": 4,
      "score": 0.25
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -432,6 +467,13 @@
      "neg": 0,
      "total": 1,
      "score": 0.0
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -490,6 +532,13 @@
      "score": null
     },
     "20260919": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260921": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -621,6 +670,13 @@
      "neg": 0,
      "total": 1,
      "score": 0.0
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -677,6 +733,13 @@
      "neg": 1,
      "total": 5,
      "score": 0.0
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -719,6 +782,13 @@
      "neg": 1,
      "total": 2,
      "score": -0.5
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -782,6 +852,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 1,
+     "neg": 0,
+     "total": 1,
+     "score": 0.0
     }
    }
   },
@@ -859,6 +936,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -903,6 +987,13 @@
      "score": null
     },
     "20260918": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260921": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -1055,6 +1146,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1099,7 +1197,21 @@
      "score": 0.0
     }
    }
+  },
+  "A股:688825": {
+   "market": "A股",
+   "code": "688825",
+   "name": "长鑫科技",
+   "days": {
+    "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
   }
  },
- "updated_cst": "2026-09-20 12:26:13"
+ "updated_cst": "2026-09-21 12:24:15"
 }
