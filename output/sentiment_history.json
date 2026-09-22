@@ -33,6 +33,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -103,6 +110,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 1,
+     "neg": 0,
+     "total": 1,
+     "score": 0.0
     }
    }
   },
@@ -175,6 +189,13 @@
      "score": null
     },
     "20260916": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260922": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -271,6 +292,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -329,6 +357,13 @@
      "score": 0.25
     },
     "20260921": {
+     "pos": 0,
+     "neu": 1,
+     "neg": 0,
+     "total": 1,
+     "score": 0.0
+    },
+    "20260922": {
      "pos": 0,
      "neu": 1,
      "neg": 0,
@@ -474,6 +509,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -544,6 +586,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -602,6 +651,13 @@
      "score": null
     },
     "20260919": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260922": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -677,6 +733,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 1,
+     "neu": 1,
+     "neg": 0,
+     "total": 2,
+     "score": 0.5
     }
    }
   },
@@ -810,6 +873,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -858,6 +928,13 @@
      "neu": 1,
      "neg": 0,
      "total": 1,
+     "score": 0.0
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 2,
+     "neg": 0,
+     "total": 2,
      "score": 0.0
     }
    }
@@ -1090,6 +1167,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1209,9 +1293,44 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "美股:AMD": {
+   "market": "美股",
+   "code": "AMD",
+   "name": "超威半导体",
+   "days": {
+    "20260922": {
+     "pos": 1,
+     "neu": 1,
+     "neg": 0,
+     "total": 2,
+     "score": 0.5
+    }
+   }
+  },
+  "A股:688008": {
+   "market": "A股",
+   "code": "688008",
+   "name": "澜起科技",
+   "days": {
+    "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   }
  },
- "updated_cst": "2026-09-21 12:24:15"
+ "updated_cst": "2026-09-22 12:19:38"
 }
