@@ -117,6 +117,13 @@
      "neg": 0,
      "total": 1,
      "score": 0.0
+    },
+    "20260924": {
+     "pos": 1,
+     "neu": 2,
+     "neg": 1,
+     "total": 4,
+     "score": 0.0
     }
    }
   },
@@ -299,6 +306,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 1,
+     "total": 1,
+     "score": -1.0
     }
    }
   },
@@ -369,6 +383,13 @@
      "neg": 0,
      "total": 1,
      "score": 0.0
+    },
+    "20260924": {
+     "pos": 1,
+     "neu": 2,
+     "neg": 0,
+     "total": 3,
+     "score": 0.3333
     }
    }
   },
@@ -425,6 +446,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 1,
+     "neu": 2,
+     "neg": 0,
+     "total": 3,
+     "score": 0.3333
     }
    }
   },
@@ -516,6 +544,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -593,6 +628,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -658,6 +700,13 @@
      "score": null
     },
     "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260924": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -740,6 +789,13 @@
      "neg": 0,
      "total": 2,
      "score": 0.5
+    },
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -803,6 +859,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 1,
+     "neu": 2,
+     "neg": 0,
+     "total": 3,
+     "score": 0.3333
     }
    }
   },
@@ -875,6 +938,13 @@
      "score": null
     },
     "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260924": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -1076,6 +1146,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1169,6 +1246,13 @@
      "score": null
     },
     "20260922": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260924": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -1330,7 +1414,49 @@
      "score": null
     }
    }
+  },
+  "港股:01888": {
+   "market": "港股",
+   "code": "01888",
+   "name": "建滔积层板",
+   "days": {
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:300285": {
+   "market": "A股",
+   "code": "300285",
+   "name": "国瓷材料",
+   "days": {
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
+  },
+  "A股:600641": {
+   "market": "A股",
+   "code": "600641",
+   "name": "先导基电",
+   "days": {
+    "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
   }
  },
- "updated_cst": "2026-09-23 12:16:40"
+ "updated_cst": "2026-09-24 12:12:45"
 }
