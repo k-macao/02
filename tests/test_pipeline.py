@@ -145,7 +145,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 8)  # 8 个数据源（2026-09-08 新增「A股大盘全景」；Reddit / 韩股已移除）
+        self.assertEqual(meta["total_sources"], 8)  # 8 个基础数据源（2026-09-08 新增「A股大盘全景」）；Reddit 情绪因子另计，本样本未含
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -417,7 +417,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 8)  # 数据源共 8 个（2026-09-08 新增「A股大盘全景」；Reddit / 韩股已移除）
+        self.assertEqual(meta["total_sources"], 8)  # 8 个基础数据源（2026-09-08 新增「A股大盘全景」）；Reddit 情绪因子另计，本样本未含
 
 
 class RetroPixelVisualTests(unittest.TestCase):
