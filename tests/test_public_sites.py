@@ -363,14 +363,15 @@ class PublicSitesTests(unittest.TestCase):
             "Seeking Alpha": pipeline._public_site_result("Seeking Alpha", [
                 {"title": "Actual public research", "url": "https://seekingalpha.com/article/1",
                  "detail": "发布于 2026-09-27 08:00", "is_today": True}]),
-            "实时行情": pipeline._source_result("sample quote", "success", quotes={}),
+            "实时行情": pipeline._source_result("sample quote", "success", quotes={
+                "标普500": {"price": 6123.45, "change_pct": 1.25}}),
         }
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
-                self.assertLess(titles.index("每日量化策略投研"),
-                                titles.index("行情速览（实时）"))
-                self.assertEqual(titles[-1], "本次数据可用性 · 当天检验")
+                # 结论先行 → 行情数据 → 投研资讯 → 盘点收尾
+                self.assertLess(titles.index("行情速览"), titles.index("每日量化策略投研"))
+                self.assertEqual(titles[-1], "盘点总结")
 
     def test_two_themes_render_audited_sites_and_preserve_today_gate(self):
         results = {name: pipeline._public_site_result(name, [], error="受限或没有新文章")
@@ -393,14 +394,14 @@ class PublicSitesTests(unittest.TestCase):
                 self.assertIn("每日量化策略投研", report)
                 self.assertIn("Seeking Alpha", report)
                 self.assertIn("CompaniesMarketCap", report)
+                # 失败站点只在盘点总结的「数据覆盖」里点名，不展开说明
+                self.assertIn("暂缺：", report)
                 self.assertIn("MacroMicro", report)
-                self.assertIn("ETF Database", report)
-                self.assertIn("StockAnalysis", report)
                 self.assertIn("FRED", report)
-                self.assertIn(pipeline.PUBLIC_SITE_DESCRIPTIONS["MacroMicro"], report)
-                self.assertIn("受限或没有新文章", report)
-                self.assertIn("今日抓取", report)
-                self.assertIn("仅为今日抓取快照，非当日发布", report)
+                self.assertNotIn(pipeline.PUBLIC_SITE_DESCRIPTIONS["MacroMicro"], report)
+                self.assertNotIn("受限或没有新文章", report)
+                self.assertIn("今日抓取" if theme == "guizang" else "SNAPSHOT", report)
+                self.assertNotIn("今日抓取快照，非今日财报", report)   # 纯说明性详情已剔除
                 self.assertIn("https://seekingalpha.com/article/1?source=feed&amp;topic=stock", report)
                 self.assertNotIn("onerror", report)
                 self.assertNotIn('href="javascript:', report)
@@ -419,8 +420,9 @@ class PublicSitesTests(unittest.TestCase):
         self.assertFalse(pipeline.check_push_eligibility(failed)[0])
         for theme in ("guizang", "pixel"):
             report = pipeline.generate_report(failed, "2026年9月27日 · 周日", "20260927", theme=theme)
-            self.assertNotIn("每日量化策略投研", report)  # 失败仅在审计中列出
-            self.assertIn("HTTP 403", report)
+            self.assertNotIn("每日量化策略投研", report)  # 失败仅在盘点总结里点名
+            self.assertIn("暂缺：", report)
+            self.assertNotIn("HTTP 403", report)
             self.assertEqual(pipeline._report_meta(report)["total_sources"], 18)
 
 
