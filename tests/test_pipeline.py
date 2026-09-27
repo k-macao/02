@@ -942,6 +942,330 @@ class PushTruncationTests(unittest.TestCase):
         self.assertEqual(out, html)
 
 
+class PushMultipartTests(unittest.TestCase):
+    """日报超过单条上限（默认 10 万字）时分条完整推送（2026-09-28）。
+
+    旧行为在 10 万字处截断：25 万字的日报只有前四成送达微信，近六成内容每天被丢掉。
+    新行为按栏目边界把日报拆成 N 条「各自完整可渲染」的消息，全部送达：
+      · 每条都在上限内、标签自闭合、沿用同一份页面外壳（微信端排版与单条推送一致）；
+      · 所有栏目按原顺序逐字送达，可见文字零丢失；
+      · 每条标题与正文横幅都标明「第 i/N 条」，读者知道还有后续；
+      · 任意一条失败即停止并返回 False（调用方发失败告警、Actions 显红），不假装成功。
+    """
+
+    # 测试用的单条上限按主题分别取：都必须明显大于该主题的「外壳开销」
+    # （刊头 + 页脚 + 闭合标签，guizang ≈5.0k / pixel ≈11.1k），才能真实触发按栏目分条。
+    LIMIT = {"guizang": 12000, "pixel": 20000}
+    # 比单个栏目还小的上限：逼出「栏目内按标签边界细分」这条兜底路径
+    TIGHT = {"guizang": 8000, "pixel": 14000}
+    REPORT_NAME = "daily_report_20260928.html"
+
+    # ---------- 工具 ----------
+    @staticmethod
+    def _data():
+        """离线构造的样本数据：够渲染出多个栏目，不发任何网络请求。"""
+        return {
+            "Reddit": pipeline._public_site_result("Reddit", [
+                {"title": f"散户热帖 {i}",
+                 "url": "https://www.reddit.com/r/stocks/comments/s0/t0/",
+                 "detail": "100 赞 · 20 评论", "published_cst": "2026-09-28 09:00",
+                 "community": "r/stocks", "is_today": True} for i in range(5)],
+                latest="2026-09-28"),
+            "实时行情": pipeline._source_result(
+                "quote", "success", is_today=True, content_date="2026-09-28",
+                quotes={"标普500": {"price": 6123.45, "change_pct": 1.25}}),
+        }
+
+    def _report(self, theme="guizang"):
+        """用真实渲染器产出一份带分条标记的日报（两个主题都要能被拆分）。"""
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False), \
+             patch.object(pipeline, "HK_QUANT_ENABLED", False):
+            return pipeline.generate_report(self._data(), "2026年9月28日 · 周一",
+                                            "20260928", theme=theme)
+
+    @staticmethod
+    def _visible(html):
+        """去掉注释、标签与空白后的可见文字（用于「一个字都不丢」的比对）。"""
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+        return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", html))
+
+    @staticmethod
+    def _balanced(html):
+        """所有非 void 标签都成对闭合（半截标签会让微信端整页排版崩坏）。"""
+        stack = []
+        for m in pipeline._TAG_RE.finditer(html):
+            tag, closing = m.group("tag").lower(), bool(m.group("close"))
+            if tag in pipeline._VOID_TAGS:
+                continue
+            if closing:
+                if not stack or stack[-1] != tag:
+                    return False
+                stack.pop()
+            else:
+                stack.append(tag)
+        return not stack
+
+    @staticmethod
+    def _body(html):
+        """原日报的正文区（第一个分条标记 → 页脚标记之间）。"""
+        return html[html.index(pipeline.PART_BREAK_MARK) + len(pipeline.PART_BREAK_MARK):
+                    html.index(pipeline.DOC_FOOT_MARK)]
+
+    @staticmethod
+    def _sections(html):
+        return [s for s in PushMultipartTests._body(html).split(pipeline.PART_BREAK_MARK)
+                if s.strip()]
+
+    def _chunks(self, html, parts, limit):
+        """从每条消息里剥出「正文块」（去掉外壳、条序横幅与页脚），用于逐字比对。"""
+        tail = html[html.index(pipeline.DOC_FOOT_MARK) + len(pipeline.DOC_FOOT_MARK):]
+        theme = pipeline._report_theme(html)
+        chunks = []
+        for index, part in enumerate(parts, 1):
+            banner = pipeline._build_part_banner(
+                index, len(parts), theme, limit,
+                tail_cut=(index == len(parts) and "已自动截断" in part))
+            start = part.index(banner) + len(banner)
+            chunks.append(part[start:len(part) - len(tail)])
+        return chunks
+
+    # ---------- 渲染侧：标记必须存在，否则推送只能退回截断 ----------
+    def test_generated_reports_carry_split_marks_in_both_themes(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html = self._report(theme)
+                self.assertGreaterEqual(html.count(pipeline.PART_BREAK_MARK), 3)
+                self.assertEqual(html.count(pipeline.DOC_FOOT_MARK), 1)
+                self.assertIn(f'name="octopus-theme" content="{theme}"', html)
+                # 标记顺序：刊头 → 各栏目 → 页脚 → 闭合标签
+                self.assertLess(html.index(pipeline.PART_BREAK_MARK),
+                                html.index(pipeline.DOC_FOOT_MARK))
+                self.assertTrue(self._balanced(html))
+                self.assertGreaterEqual(len(self._sections(html)), 3)
+
+    def test_marks_are_invisible_comments_and_survive_table_hardening(self):
+        html = self._report()
+        for mark in (pipeline.PART_BREAK_MARK, pipeline.DOC_FOOT_MARK):
+            self.assertTrue(mark.startswith("<!--") and mark.endswith("-->"))
+        self.assertEqual(pipeline._harden_wechat_table_widths(html).count(pipeline.PART_BREAK_MARK),
+                         html.count(pipeline.PART_BREAK_MARK))
+
+    # ---------- 拆分侧：每条都合法、都不超限、内容不丢 ----------
+    def test_parts_are_within_limit_and_each_a_complete_balanced_document(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.LIMIT[theme]
+                self.assertGreater(len(html), limit)          # 确实需要分条
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+                self.assertIsNotNone(parts)
+                self.assertGreater(len(parts), 1)
+                self.assertLessEqual(len(parts), pipeline.PUSHPLUS_MAX_PARTS)
+                for index, part in enumerate(parts, 1):
+                    with self.subTest(part=index):
+                        self.assertLessEqual(len(part), limit)
+                        self.assertTrue(self._balanced(part))
+                        self.assertTrue(part.startswith("<!DOCTYPE html>"))
+                        self.assertTrue(part.rstrip().endswith("</html>"))
+                        # 每条都是独立完整的一页：页脚免责声明也在
+                        # （guizang 作「仅供参考」，pixel 作「仅供投资参考」）
+                        self.assertIn("非投资建议", part)
+                        self.assertIn('<meta name="octopus-report-date" content="20260928">', part)
+
+    def test_every_section_is_delivered_verbatim_and_in_order(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.LIMIT[theme]
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+                sections = self._sections(html)
+                stream = "".join(self._chunks(html, parts, limit))
+                cursor = 0
+                for index, section in enumerate(sections, 1):
+                    with self.subTest(section=index):
+                        at = stream.find(section, cursor)
+                        self.assertGreaterEqual(at, 0, f"第 {index} 栏没送达（内容被丢了）")
+                        cursor = at + len(section)             # 顺序也必须与原日报一致
+                # 逐字相同：拼接后的正文 == 原日报正文（只少了分条标记本身）
+                self.assertEqual(stream,
+                                 self._body(html).replace(pipeline.PART_BREAK_MARK, ""))
+
+    def test_visible_text_is_not_lost_even_when_a_section_must_be_cut(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.TIGHT[theme]
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME,
+                                                      max_parts=400)
+                self.assertIsNotNone(parts)
+                self.assertTrue(all(len(p) <= limit for p in parts))
+                self.assertTrue(all(self._balanced(p) for p in parts))
+                self.assertEqual(self._visible("".join(self._chunks(html, parts, limit))),
+                                 self._visible(self._body(html)))
+
+    def test_part_banner_and_title_show_sequence(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+        total = len(parts)
+        self.assertGreater(total, 1)
+        for index, part in enumerate(parts, 1):
+            with self.subTest(part=index):
+                self.assertIn(f"第 {index}/{total} 条", part)
+                self.assertIn(f"（第 {index}/{total} 条）</title>", part)
+                if index < total:
+                    self.assertIn(f"接下条 {index + 1}/{total}", part)
+                else:
+                    self.assertNotIn("接下条", part)
+
+    # ---------- 兜底：条数超上限 / 旧版文件 / 外壳过大 ----------
+    def test_part_count_cap_stays_honest_about_undelivered_tail(self):
+        html, limit = self._report(), self.TIGHT["guizang"]
+        parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME, max_parts=3)
+        self.assertIsNotNone(parts)
+        self.assertEqual(len(parts), 3)                        # 不超过条数上限
+        self.assertTrue(all(len(p) <= limit for p in parts))
+        self.assertTrue(all(self._balanced(p) for p in parts))
+        self.assertIn("已自动截断", parts[-1])                  # 收尾条如实说明被截断
+        self.assertIn("完整日报", parts[-1])                    # 并给出完整版入口
+        self.assertIn("已达单次推送条数上限", parts[-1])
+        self.assertNotIn("已自动截断", parts[0])                # 前面的条不许谎称截断
+
+    def test_html_without_marks_falls_back_to_truncation(self):
+        legacy = ("<html><body><table><tr><td>" + "<div>旧版段落</div>" * 900
+                  + "</td></tr></table></body></html>")
+        self.assertNotIn(pipeline.PART_BREAK_MARK, legacy)
+        self.assertIsNone(pipeline._split_html_for_push(legacy, 6000, "old.html"))
+        out, truncated = pipeline._truncate_html_for_push(legacy, 6000, "old.html")
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(out), 6000)
+
+    def test_shell_bigger_than_limit_returns_none(self):
+        html = self._report()
+        # 上限连刊头都装不下 → 拆了也没意义，交给截断兜底
+        self.assertIsNone(pipeline._split_html_for_push(html, 400, self.REPORT_NAME))
+
+    def test_short_html_is_returned_as_is(self):
+        html = self._report()
+        self.assertEqual(pipeline._split_html_for_push(html, len(html) + 1), [html])
+
+    # ---------- 推送侧：多条依次发送、失败即停 ----------
+    def _push(self, html, responses, limit=None, multipart=True):
+        sent, sleeps = [], []
+        it = iter(responses)
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            resp = next(it)
+            if isinstance(resp, Exception):
+                raise resp
+            return resp
+
+        fake_time = types.SimpleNamespace(sleep=lambda s: sleeps.append(s))
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", limit or self.LIMIT["guizang"]), \
+             patch.object(pipeline, "PUSHPLUS_MULTIPART", multipart), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "time", fake_time):
+            ok = pipeline.push_to_wechat("🐙 章鱼AI日报 09/28 09:00", html,
+                                         token="abc", template="html",
+                                         report_name=self.REPORT_NAME)
+        return ok, sent, sleeps
+
+    def test_push_sends_every_part_with_numbered_titles(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        ok, sent, sleeps = self._push(html, [_FakeResp(200)] * expected, limit=limit)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), expected)                  # 每条都真的发出去了
+        for index, payload in enumerate(sent, 1):
+            with self.subTest(part=index):
+                self.assertEqual(payload["title"],
+                                 f"🐙 章鱼AI日报 09/28 09:00 ({index}/{expected})")
+                self.assertLessEqual(len(payload["content"]), limit)
+                self.assertEqual(payload["template"], "html")
+                self.assertNotIn("topic", payload)             # 默认仍是一对一
+        # 条与条之间按 PUSHPLUS_PART_DELAY 间隔，降低触发频率限制的概率
+        self.assertEqual(sleeps.count(pipeline.PUSHPLUS_PART_DELAY), expected - 1)
+
+    def test_push_covers_the_whole_report_not_just_the_first_part(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        ok, sent, _ = self._push(html, [_FakeResp(200)] * expected, limit=limit)
+        self.assertTrue(ok)
+        delivered = "".join(payload["content"] for payload in sent)
+        for section in self._sections(html):
+            self.assertIn(section, delivered)                  # 每一栏都在推送流里
+        self.assertEqual(self._visible(delivered).count("散户热帖"),
+                         self._visible(html).count("散户热帖"))
+
+    def test_push_stops_at_first_failed_part_and_returns_false(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        total = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        self.assertGreaterEqual(total, 3)
+        responses = ([_FakeResp(200), _FakeResp(500, "今日发送次数已达上限")]
+                     + [_FakeResp(200)] * total)
+        ok, sent, _ = self._push(html, responses, limit=limit)
+        self.assertFalse(ok)                                   # 未全部送达 → 失败（Actions 显红）
+        self.assertEqual(len(sent), 2)                         # 第 2 条失败后不再发第 3 条
+
+    def test_part_retry_uses_backoff_then_continues(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        total = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        responses = ([_FakeResp(500, "发送太频繁，请稍后再试"), _FakeResp(200)]
+                     + [_FakeResp(200)] * (total - 1))
+        ok, sent, sleeps = self._push(html, responses, limit=limit)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), total + 1)                 # 第 1 条重试一次后成功
+        self.assertIn(pipeline.PUSH_RETRY_BACKOFF[0], sleeps)  # 走的是既有退避节奏
+
+    def test_short_report_still_pushes_as_single_message(self):
+        html = self._report()
+        ok, sent, sleeps = self._push(html, [_FakeResp(200)], limit=len(html) + 1000)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)                         # 不超限就不拆，行为不变
+        self.assertEqual(sent[0]["title"], "🐙 章鱼AI日报 09/28 09:00")
+        self.assertEqual(sent[0]["content"], html)             # 原样发送，不加横幅
+        self.assertEqual(sleeps, [])
+
+    def test_multipart_switch_off_restores_legacy_truncation(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        ok, sent, _ = self._push(html, [_FakeResp(200)], limit=limit, multipart=False)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)                         # 只发一条
+        self.assertLessEqual(len(sent[0]["content"]), limit)
+        self.assertIn("已自动截断", sent[0]["content"])         # 旧行为：截断 + 完整版链接
+
+    def test_txt_alerts_are_never_split(self):
+        sent = []
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            return _FakeResp(200)
+
+        text = "告警正文" * 5000                                # 纯文本告警即使超长也不拆
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", 6000), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            ok = pipeline.push_to_wechat("🐙 告警", text, token="abc", template="txt")
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["content"], text)
+
+    def test_group_topic_is_carried_into_every_part(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        sent = []
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", limit), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", "oai.1"), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
+            ok = pipeline.push_to_wechat("🐙 章鱼AI日报 09/28 09:00", html, token="abc",
+                                         report_name=self.REPORT_NAME)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), expected)
+        self.assertTrue(all(p["topic"] == "oai.1" for p in sent))   # 一对多同样分条送达
+
+
 class PushRetryTests(unittest.TestCase):
     """可恢复错误按退避重试；配额/凭证/未知业务错误不重试（2026-08-01 Actions 显红修复）。"""
 

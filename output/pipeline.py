@@ -57,10 +57,18 @@
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
-  8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
-     PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
-     截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
-     始终保留完整版。
+  8. PushPlus 内容上限与「分条完整推送」（2026-09-28 起）：单条上限按会员额度 10 万字
+     （可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时**不再截断丢内容**，
+     而是按栏目边界拆成 N 条消息依次推送（标题追加 1/N、2/N…，条间等待
+     PUSHPLUS_PART_DELAY 秒避开频率限制）：每条 = 原文档头部外壳（含刊头）+ 条序横幅 +
+     若干完整栏目 + 页脚与闭合标签，因此每条都是独立、标签平衡、样式一致的 HTML，
+     微信端排版与单条推送相同，全部内容按原顺序送达。单个栏目自身就超预算时，再按完整
+     标签边界细分并在续片里原样重开父标签，同样不丢字。所需条数超过 PUSHPLUS_MAX_PARTS
+     （默认 12）时，前 N-1 条完整推送、收尾条截断并附「完整日报」链接，且横幅如实说明
+     未推完，绝不假装全文已送达。PUSHPLUS_MULTIPART=0 可整体关闭分条，回退到旧的
+     「按标签边界截断 + 完整版链接」；旧版日报文件没有分条标记时同样自动回退。
+     注意：分条会按条数消耗 PushPlus 当日额度（25 万字日报约 3 条）。
+     磁盘 / GitHub 上的日报文件始终是一份完整版，不受推送拆分影响。
   9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股头条、
      港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
      信号分 + 置信度、板块热度、技术速读、风险提示、明日关注主题）。无需大模型 API、
@@ -175,6 +183,24 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
+# 完整推送（2026-09-28 起）：单条上限固定按 10 万字（会员额度），但日报不再被截断——
+# 超过上限时按「完整标签边界 + 栏目边界」拆成多条微信消息（1/n、2/n…）依次推送，
+# 全部内容都会送达。每条消息都是结构完整、标签自闭合的独立 HTML，
+# 并沿用原文档的 <head>／外层包裹与页尾，微信端排版与单条推送一致。
+# PUSHPLUS_MULTIPART=0 可关闭拆分，回退到旧行为（按标签边界截断 + 完整版链接）。
+PUSHPLUS_MULTIPART = str(os.environ.get("PUSHPLUS_MULTIPART", "1")).strip().lower() not in ("0", "false", "no")
+# 多条推送之间的间隔秒数，避免触发 PushPlus「发送频繁」频率限制（每条仍各自退避重试）。
+PUSHPLUS_PART_DELAY = float(os.environ.get("PUSHPLUS_PART_DELAY", "2"))
+# 渲染时插入的两个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
+#   PART_BREAK_MARK —— 每个栏目之前，拆分时切在这里，保证每条消息都从完整栏目开始；
+#   DOC_FOOT_MARK   —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
+# 有了这两个标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
+# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 页脚 + 闭合标签，
+# 微信端排版与单条推送完全一致，且全部内容按原顺序送达。
+PART_BREAK_MARK = "<!--SPLIT-->"
+DOC_FOOT_MARK = "<!--FOOT-->"
+# 单份日报最多拆成多少条（防御性上限：正常 25 万字日报约 3 条）
+PUSHPLUS_MAX_PARTS = int(os.environ.get("PUSHPLUS_MAX_PARTS", "12"))
 
 # 默认「一对一」直发自己（不携带 topic 字段）；如需一对多群组推送，
 # 显式设置环境变量 PUSHPLUS_TOPIC=群组编码（例如 oai.1）。
@@ -5860,8 +5886,10 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
+    # 每个栏目前都插入分条标记（含第一栏）：日报超过微信单条上限时，推送侧据此
+    # 按「完整栏目」把日报拆成多条消息，绝不把某一栏切成两半，也不丢任何内容。
     content_html = "".join(
-        GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+        PART_BREAK_MARK + GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
     generated_at = _now()
     masthead_title_bar = gz_shell(
@@ -5881,6 +5909,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="guizang">
 <title>{REPORT_TITLE}</title>
 </head>
 <body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:{GZ_FS_BODY}px;font-weight:{GZ_W_BODY};line-height:1.85;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;word-wrap:break-word;">
@@ -5900,6 +5929,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 
 {content_html}
 
+{DOC_FOOT_MARK}
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;background:{GZ_PAPER};">
 <tr><td bgcolor="{GZ_PAPER}" align="left" valign="top" style="padding:40px 0 56px;background:{GZ_PAPER};">
 <div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:12px;">
@@ -5935,8 +5965,9 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
     content_n = parts["content_n"]
 
     # 6. 拼版：栏目编号按渲染顺序生成（只在场的栏目占用编号）
+    # 每个栏目前都插入分条标记（含第一栏），供超长日报按完整栏目分条推送
     content_html = "".join(
-        PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+        PART_BREAK_MARK + PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
 
     # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
@@ -5951,6 +5982,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="pixel">
 <title>章鱼AI · 财经作战日志 | RETRO PIXEL EDITION</title>
 </head>
 <body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
@@ -6013,6 +6045,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <!-- 内容关卡列表 -->
 {content_html}
 
+{DOC_FOOT_MARK}
 <!-- 版权页 colophon：像素终端关机界面 -->
 <div style="border-top:1px solid {C_ACCENT};margin-top:26px;padding-top:12px;background:#0F1222;padding:12px;">
 <div style="font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;">{ _heart(C_ACCENT, 10) } OCTOPUS-CHAN // SYSTEM SHUTDOWN</div>
@@ -6151,14 +6184,224 @@ def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=
     return notice, True
 
 
+# ------------------------------------------------------------
+# PushPlus 分条完整推送（2026-09-28 起）
+# ------------------------------------------------------------
+# 日报（含港股量化引擎后）常有 15~25 万字，远超单条 10 万字上限；旧做法在 10 万字处
+# 截断，等于每天有近六成内容根本没送到微信。改为「分条完整推送」：
+#   渲染时在栏目前插入分条标记（PART_BREAK_MARK）、在页脚前插入 DOC_FOOT_MARK，
+#   于是任意一份日报都能被切成 头部外壳 + 若干完整栏目 + 页脚外壳 三段；
+#   拆分时按栏目边界装箱，每条消息都是「结构完整、标签自闭合、样式一致」的独立 HTML，
+#   微信端读起来就是同一份日报的连续几页，一个字都不丢。
+# 单个栏目自身就超预算时，再按完整标签边界切，并在续片里原样重开父标签（保留属性），
+# 因此任何上限配置下都不会丢内容、也不会出现半截标签导致的整页排版崩坏。
+
+def _opening_tag_name(open_tag):
+    """从完整开标签原文里取标签名（小写）；解析失败返回空串。"""
+    m = re.match(r"<\s*([a-zA-Z][a-zA-Z0-9]*)", open_tag or "")
+    return m.group(1).lower() if m else ""
+
+
+def _scan_open_tags(html, limit):
+    """扫描 html 前 limit 字符内的完整标签，返回可安全切点列表。
+
+    元素为 (标签结束位置, 未闭合开标签原文列表)；开标签保留原始属性，
+    续片据此原样重开父容器，样式不会丢。
+    """
+    stack = []
+    candidates = []
+    for m in _TAG_RE.finditer(html):
+        if m.end() > limit:
+            break
+        tag, closing = m.group("tag").lower(), bool(m.group("close"))
+        if tag not in _VOID_TAGS:
+            if closing:
+                if stack and _opening_tag_name(stack[-1]) == tag:
+                    stack.pop()
+                # 不匹配时保持栈不变：由逆序补闭合保证结果合法
+            else:
+                stack.append(m.group(0))
+        candidates.append((m.end(), list(stack)))
+    return candidates
+
+
+def _closers_for(stack):
+    """按逆序为未闭合标签栈生成闭合标签串。"""
+    return "".join(f"</{_opening_tag_name(t)}>" for t in reversed(stack))
+
+
+def _split_long_fragment(fragment, budget):
+    """把单个超长片段切成若干「各自标签平衡」的片段；续片原样重开被切断的父标签。
+
+    返回片段列表（至少 1 个）。切不动时（budget 连一个标签都放不下）原样返回，
+    由调用方决定回退策略——绝不静默丢内容。
+    """
+    if budget <= 0 or len(fragment) <= budget:
+        return [fragment]
+    pieces = []
+    rest = fragment
+    for _ in range(PUSHPLUS_MAX_PARTS * 8):     # 防御性上限，正常远远用不到
+        if len(rest) <= budget:
+            break
+        picked = None
+        for end, stack in reversed(_scan_open_tags(rest, budget)):
+            closers = _closers_for(stack)
+            if end + len(closers) <= budget and end > 0:
+                picked = (end, stack, closers)
+                break
+        if picked is None:
+            break                               # 无法在预算内找到合法切点
+        end, stack, closers = picked
+        reopened = "".join(stack)               # 续片要原样重开的父标签（含原始属性）
+        if end <= len(reopened):
+            # 切点还没跨过被重开的标签：这一刀没有实质进展（正文是一整段无标签长文本），
+            # 继续切只会原地打转 → 交回调用方走截断兜底，绝不发出半截标签。
+            break
+        pieces.append(rest[:end] + closers)
+        rest = reopened + rest[end:]
+        if not rest:
+            break
+    pieces.append(rest)
+    return [p for p in pieces if p]
+
+
+def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False):
+    """分条推送的条序横幅：告诉读者这是第几条 / 共几条，以及为什么要分条。
+
+    tail_cut=True 用于「条数已达 PUSHPLUS_MAX_PARTS 上限」的收尾条：
+    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文。
+    """
+    limit = limit or PUSHPLUS_MAX_CONTENT_CHARS
+    if tail_cut:
+        text = (f"📄 第 {index}/{total} 条 · 已达单次推送条数上限"
+                f"（PUSHPLUS_MAX_PARTS={total}），本条之后的内容见文末完整日报链接")
+    else:
+        text = (f"📄 第 {index}/{total} 条 · 完整日报共 {total} 条"
+                f"（单条上限 {limit // 10000 or 1} 万字，按栏目拆分，内容不缺失）")
+        if index < total:
+            text += f" · 接下条 {index + 1}/{total}"
+    if theme == "pixel":
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
+                f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
+                f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
+    return (f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
+            f'bgcolor="{GZ_INK}" style="width:100%!important;border-collapse:collapse;'
+            f'table-layout:fixed;background:{GZ_INK};margin:0 0 8px;">'
+            f'<tr><td align="left" valign="top" style="padding:10px 16px;">'
+            f'<div style="font-size:{GZ_FS_META + 1}px;color:{GZ_PAPER};'
+            f'font-weight:{GZ_W_BOLD};line-height:1.6;font-family:{GZ_SANS};">'
+            f'{text}</div></td></tr></table>')
+
+
+def _report_theme(html):
+    """从日报 HTML 里读出渲染主题（供分条横幅配色）；读不出来按默认主题处理。"""
+    m = re.search(r'name="octopus-theme"\s+content="([^"]+)"', html or "")
+    theme = (m.group(1) if m else "").strip().lower()
+    return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
+
+
+def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
+    """把超过单条上限的日报 HTML 拆成 N 条「各自完整可渲染」的消息；返回 list[str]。
+
+    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 原文档页脚与闭合标签，
+    因此每条都是独立、标签平衡、样式一致的 HTML，微信端排版与单条推送完全相同。
+    全部内容按原文顺序送达，不做任何删减。
+
+    返回 None 表示无法安全拆分（旧版文件没有分条标记 / 外壳本身就超上限 /
+    需要的条数超过 max_parts），调用方应回退到 _truncate_html_for_push。
+    """
+    # 上限与条数上限都在调用时解析（而不是写进默认参数），环境变量与测试都能覆盖
+    limit = limit if limit is not None else PUSHPLUS_MAX_CONTENT_CHARS
+    max_parts = max_parts if max_parts is not None else PUSHPLUS_MAX_PARTS
+    if limit <= 0 or len(html) <= limit:
+        return [html] if html else None
+
+    first_break = html.find(PART_BREAK_MARK)
+    foot_at = html.find(DOC_FOOT_MARK)
+    if first_break < 0 or foot_at < 0 or foot_at <= first_break:
+        print("  ⚠️ 该 HTML 没有分条锚点（旧版日报文件？），无法按栏目拆分")
+        return None
+
+    shell = html[:first_break]                   # doctype/head/body/刊头 + 未闭合的外层容器
+    tail = html[foot_at + len(DOC_FOOT_MARK):]   # 页脚 + 全部闭合标签
+    body = html[first_break + len(PART_BREAK_MARK):foot_at]
+    sections = [s for s in body.split(PART_BREAK_MARK) if s.strip()]
+    if not sections:
+        return None
+
+    theme = _report_theme(html)
+    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字预留）+ 安全余量
+    banner_w = max(len(_build_part_banner(i, max(max_parts, len(sections)), theme, limit))
+                   for i in (1, max(max_parts, len(sections))))
+    overhead = len(shell) + len(tail) + banner_w + 64
+    budget = limit - overhead
+    if budget < 2000:
+        print(f"  ⚠️ 单条上限 {limit:,} 字太小：刊头+页脚+横幅已占 {overhead:,} 字，"
+              f"正文只剩 {budget:,} 字，拆分没有意义")
+        return None
+
+    # 装箱：优先整栏装进一条；单栏超预算时再按标签边界细分（内容不丢）
+    chunks, current, current_len = [], [], 0
+    for section in sections:
+        for piece in _split_long_fragment(section, budget):
+            if current and current_len + len(piece) > budget:
+                chunks.append("".join(current))
+                current, current_len = [], 0
+            current.append(piece)
+            current_len += len(piece)
+    if current:
+        chunks.append("".join(current))
+    if not chunks:
+        return None
+
+    # 条数超过安全上限（只会在把单条上限调得极小时发生）：前 max_parts-1 条完整推送，
+    # 最后一条装到上限为止并附「完整日报」链接——比退回单条截断多送达十几倍内容，
+    # 且如实告知未推完，绝不假装全文已送达。
+    tail_cut = len(chunks) > max_parts
+    if tail_cut:
+        keep = max(max_parts - 1, 1)
+        print(f"  ⚠️ 完整推送需要 {len(chunks)} 条，超过 PUSHPLUS_MAX_PARTS={max_parts}："
+              f"前 {keep} 条完整推送，其余内容压进第 {keep + 1} 条并附完整日报链接"
+              f"（如需全部送达，请调高 PUSHPLUS_MAX_PARTS 或 PUSHPLUS_MAX_CONTENT_CHARS）")
+        chunks = chunks[:keep] + ["".join(chunks[keep:])]
+
+    total = len(chunks)
+    title_re = re.compile(r"(<title>)(.*?)(</title>)", re.S)
+    parts = []
+    for index, chunk in enumerate(chunks, 1):
+        last_cut = tail_cut and index == total
+        banner = _build_part_banner(index, total, theme, limit, tail_cut=last_cut)
+        head = shell
+        if total > 1:
+            # 让每条的浏览器/微信标题也带上条序，正文横幅之外再多一层提示
+            head = title_re.sub(
+                lambda m: f"{m.group(1)}{m.group(2)}（第 {index}/{total} 条）{m.group(3)}",
+                shell, count=1)
+        part = head + banner + chunk + tail
+        if len(part) > limit:
+            if not last_cut:
+                # 只可能是「一整段没有标签边界的超长正文」切不开：宁可回退到截断，
+                # 也绝不发出超过平台上限的内容（平台自己截断会切在标签中间，整页排版崩坏）
+                print(f"  ⚠️ 第 {index}/{total} 条装不进 {limit:,} 字且无法在标签边界切开"
+                      f"（正文存在超长无标签文本），本次不做分条")
+                return None
+            part, _ = _truncate_html_for_push(part, limit, report_name)
+        parts.append(part)
+    return parts
+
+
 def push_to_wechat(title, content_html, token=None, template="html", report_name=None,
                    topic=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
     - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
       或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
+    - 日报 HTML 超过单条上限（PUSHPLUS_MAX_CONTENT_CHARS，默认 10 万字）时**不丢内容**：
+      按栏目边界拆成多条消息依次推送（标题追加 1/N、2/N…），全部内容都会送达；
+      拆分不可用时（旧版文件没有分条标记）才回退到「按标签边界截断 + 完整版链接」；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
-      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
+      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次），多条推送时每条各自享有重试；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
@@ -6173,12 +6416,53 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
-    if template == "html":
+    if template == "html" and len(content_html) > PUSHPLUS_MAX_CONTENT_CHARS:
+        parts = _split_html_for_push(content_html, PUSHPLUS_MAX_CONTENT_CHARS,
+                                     report_name) if PUSHPLUS_MULTIPART else None
+        if parts:
+            print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
+                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
+                  f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
+            return _push_html_parts(title, parts, token=token, topic=topic)
+        if PUSHPLUS_MULTIPART:
+            print("  ↩️ 已回退到旧的单条推送：按完整标签边界截断 + 末尾附完整日报链接")
         content_html, was_truncated = _truncate_html_for_push(
             content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
         if was_truncated:
             print(f"  ⚠️ 日报 HTML 超过 PushPlus 上限 {PUSHPLUS_MAX_CONTENT_CHARS} 字符，"
                   f"已按完整标签边界截断后推送（磁盘上的完整版不受影响）")
+    return _push_one_message(title, content_html, token=token, template=template,
+                             topic=topic)
+
+
+def _push_html_parts(title, parts, token=None, topic=None):
+    """按顺序推送拆分后的多条正文；全部成功才返回 True。
+
+    - 每条标题追加「(i/N)」，微信消息列表里一眼能看出条序，也避免标题完全重复被去重；
+    - 条与条之间等待 PUSHPLUS_PART_DELAY 秒，降低触发「发送频繁」的概率；
+    - 任意一条最终失败即停止后续条并返回 False（调用方会发失败告警、以退出码 1 结束），
+      日志里明确写出「已送达 i-1 条 / 共 N 条」，不掩盖部分送达的事实。
+    """
+    total = len(parts)
+    for index, part in enumerate(parts, 1):
+        if index > 1 and PUSHPLUS_PART_DELAY > 0:
+            print(f"  ⏳ 等待 {PUSHPLUS_PART_DELAY:g}s 后推送第 {index}/{total} 条"
+                  f"（避开 PushPlus 频率限制）...")
+            time.sleep(PUSHPLUS_PART_DELAY)
+        print(f"  📄 第 {index}/{total} 条（{len(part):,} 字）...")
+        if not _push_one_message(f"{title} ({index}/{total})", part, token=token,
+                                 template="html", topic=topic):
+            print(f"  ❌ 第 {index}/{total} 条推送失败：已送达 {index - 1} 条，"
+                  f"剩余 {total - index + 1} 条未发送（完整日报未全部送达）")
+            return False
+    print(f"  ✅ 完整日报已全部送达（共 {total} 条消息）")
+    return True
+
+
+def _push_one_message(title, content_html, token=None, template="html", topic=None):
+    """发送单条 PushPlus 消息（含退避重试）；返回 True/False。"""
+    token = token or PUSHPLUS_TOKEN
+    topic = topic if topic is not None else PUSHPLUS_TOPIC
     payload = {
         "token": token,
         "title": title,
@@ -6297,6 +6581,8 @@ def build_push_failure_alert_text(reason, data=None, report_path=None):
         "或在 PushPlus 升级套餐后更新 Secrets；",
         "· 若提示 token 无效 / 已失效：到 pushplus.plus 重新获取，"
         "并更新仓库 Settings → Secrets → PUSHPLUS_TOKEN；",
+        "· 若日报被拆成多条推送（标题带 1/N、2/N…）：任意一条失败就会停止后续条，"
+        "微信里只有前几条；重跑一次即可重新完整推送（Actions 手动运行或 manual_push.sh）；",
         "· 手动重新推送：Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow，"
         "或本地 ./output/manual_push.sh --force。",
         f"报告文件：{os.path.basename(report_path) if report_path else '—'}",

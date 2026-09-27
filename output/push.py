@@ -18,6 +18,10 @@
 
 推送方式:
   默认 PushPlus「一对一」直发自己（无 topic）；显式设置 PUSHPLUS_TOPIC 才发到群组。
+
+超长日报（> 单条 10 万字上限）:
+  自动按栏目边界拆成多条消息完整推送（标题带 1/N、2/N…），内容一个字不丢；
+  磁盘上的日报始终是一份完整文件。PUSHPLUS_MULTIPART=0 可回退到旧的截断推送。
 """
 import os
 import sys
