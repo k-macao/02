@@ -1751,7 +1751,7 @@ GZ_DOWN_INK = GZ_DOWN
 GZ_FLAT_INK = GZ_FLAT
 GZ_WARN = GZ_INK
 GZ_WARN_INK = GZ_WARN
-REPORT_TITLE = "章鱼 AI·全景分析 —AI 深度研报"
+REPORT_TITLE = "章鱼 AI·全景分析 —量化策略（趋势跟踪）"
 # 字体：全篇统一圆体 + 粗字重，为墨水屏（电子墨水 / Kindle / e-reader）优化。
 #   'Yuanti SC' 是苹果官方简体圆体（iOS 13+ / macOS 10.15+），圆笔无衬线、字腔开阔，
 #   在 16 级灰阶的墨水屏上笔画不糊、字距不挤，是当前最合适的首选。
