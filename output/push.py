@@ -11,14 +11,13 @@
   python3 output/push.py --list                 # 列出已生成的日报（不清理）
 
 页面风格（一对一 / 一对多推送共用同一份日报 HTML）:
-  默认主题 guizang（电子杂志 × 电子墨水，参考 guizang-ppt-skill Style A：
-  浅灰正文 + 深灰 Hero、荧光绿衬线标题、等宽元信息、发丝线、大留白、
-  rowline 纵向表格、杂志式信号矩阵因子分析；纯内联样式，无 JS/外部CSS/WebGL）。
+  默认主题 guizang（电子杂志 × 电子墨水：白底黑字正文，缩小的黑底白字标题，
+  圆体、实线分隔与大留白；纯内联样式，无 JS / 外部 CSS / WebGL）。
   切回旧版像素主题: python3 output/push.py --theme pixel
   或环境变量: OCTOPUS_PUSH_THEME=pixel
 
 推送方式:
-  默认 PushPlus「一对多」群组 oai.1（环境变量 PUSHPLUS_TOPIC 可改群组，置空回退一对一）。
+  默认 PushPlus「一对一」直发自己（无 topic）；显式设置 PUSHPLUS_TOPIC 才发到群组。
 """
 import os
 import sys
