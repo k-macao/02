@@ -1460,16 +1460,17 @@ FONT_MONO = "'Courier New', Courier, monospace"
 
 # ============================================================
 # GUIZANG 主题调色板：简洁研报（保留主题名，兼容既有推送配置）
-# —— 日式黑白编辑排版、宋体标题与留白；涨跌 / 风险由符号和文字表达。
+# —— 黑白编辑排版、圆体粗标题与留白（墨水屏优先）；涨跌 / 风险由符号和文字表达。
 # ============================================================
-GZ_PAPER = "#FFFFFF"        # 页面与正文统一白底
-GZ_PAPER_TINT = "#F7F7F7"   # 仅用于首屏结论
-GZ_INK = "#171717"          # 正文与标题
+GZ_PAPER = "#FFFFFF"        # 页面与正文统一白底（墨水屏只有黑/白，不铺任何灰底）
+GZ_PAPER_TINT = GZ_PAPER    # 旧版 7% 灰底在墨水屏上会抖成脏点，首屏结论改纯白 + 粗分隔线
+GZ_INK = "#000000"          # 正文与标题：墨水屏纯黑最锐利
 GZ_INK_TINT = GZ_PAPER      # 兼容旧调用，不再使用深色幕封
-GZ_HAIR = "#E5E5E5"         # 轻分隔线
+GZ_HAIR = "#8A8A8A"         # 分隔线：1px 发丝线在墨水屏上会断裂/消失，改为 2px 中灰
 GZ_HAIR_INK = GZ_HAIR
+GZ_HAIR_W = 2               # 分隔线粗细（墨水屏需要够粗才稳定显示）
 GZ_CREAM = GZ_INK
-GZ_META = "#6B6B6B"         # 次要文字
+GZ_META = "#3A3A3A"         # 次要文字：#6B6B6B 在墨水屏 16 级灰阶上偏淡，加深保证可读
 GZ_META_INK = GZ_META
 GZ_NEON = GZ_INK            # 旧版标题 token，不再使用荧光色
 GZ_UP = GZ_INK             # 黑白模式：用 ▲ 涨 / ▼ 跌 / ■ 平 区分
@@ -1481,23 +1482,63 @@ GZ_FLAT_INK = GZ_FLAT
 GZ_WARN = GZ_INK
 GZ_WARN_INK = GZ_WARN
 REPORT_TITLE = "章鱼 AI·全景分析 —AI 深度研报"
-# 字体分工（Style A 铁律）：衬线 = 标题重音，非衬线 = 正文信息密度，等宽 = 元信息节奏。
-# 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数百次，
-# 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。这里只保留微信/iOS/Android
-# 都有可靠回退的短字体栈，视觉不变，但一份完整日报可减少约 2.6 万字符。
-GZ_SERIF = "'Hiragino Mincho ProN','Songti SC',STSong,SimSun,serif"
-GZ_SANS = "-apple-system,'PingFang SC',sans-serif"
-GZ_MONO = "monospace"
+# 字体：全篇统一圆体 + 粗字重，为墨水屏（电子墨水 / Kindle / e-reader）优化。
+#   'Yuanti SC' 是苹果官方简体圆体（iOS 13+ / macOS 10.15+），圆笔无衬线、字腔开阔，
+#   在 16 级灰阶的墨水屏上笔画不糊、字距不挤，是当前最合适的首选。
+#   'Hiragino Maru Gothic ProN'（日文圆体）补位；'PingFang SC' 兜底简体，
+#   Android 无系统简体圆体，会落到系统黑体——回退后仍是粗体高对比，不会变细发丝。
+# 微信会把每个内联 font-family 原样计入消息长度；长字体栈在一份日报中重复数十次，
+# 曾令 11.6 万字符的正文触发 PushPlus 10 万字符截断。因此全篇只保留这一条短栈，
+# 并让 GZ_SERIF / GZ_SANS / GZ_MONO 三个历史 token 全部指向它——标题、正文、元信息
+# 不再各用各的字体栈，一处改动即全篇生效，字符成本也比三栈并存更低。
+GZ_FONT = "'Yuanti SC','Hiragino Maru Gothic ProN','PingFang SC',sans-serif"
+GZ_SERIF = GZ_FONT         # 兼容旧调用：标题（不再用衬线，统一圆体）
+GZ_SANS = GZ_FONT          # 兼容旧调用：正文
+GZ_MONO = GZ_FONT          # 兼容旧调用：元信息（不再用等宽）
+GZ_W_BODY = 500            # 墨水屏不要细笔画：正文用 Medium
+GZ_W_BOLD = 700            # 标题 / 徽标 / 数值：Bold
 # 字号阶梯：图标极大、刊头/栏目/关键数字极大、普通字极小（微信详情页可缩放）。
 GZ_ICON_MASTHEAD = 128   # 刊头章鱼
 GZ_ICON_SECTION = 96     # 栏目图标（落在标题上方）
 GZ_ICON_ROW = 72         # 刊头栏目图标横排
 GZ_ICON_MIN, GZ_ICON_MAX = 16, 160
-GZ_FS_DISPLAY = 56       # 刊头主标题
-GZ_FS_SECTION = 44       # 栏目标题 / 市场倾向
-GZ_FS_PRICE = 36         # 行情价格、成交额等关键数字
-GZ_FS_BODY = 10          # 普通正文
-GZ_FS_META = 9           # 次要说明与元信息
+
+
+# 环境变量 OCTOPUS_FONT_SCALE 一处控制 guizang 主题的全部字号（默认 0.85＝整体缩小）。
+DEFAULT_FONT_SCALE = 0.85
+GZ_FS_FLOOR = 7
+
+
+def _resolve_font_scale(value=None):
+    """归一化字号缩放系数：空值 / 非法值回落到 0.85，范围夹在 0.5–1.5 之间。"""
+    raw = value if value is not None else os.environ.get("OCTOPUS_FONT_SCALE", "")
+    try:
+        scale = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_FONT_SCALE
+    if scale != scale or scale in (float("inf"), float("-inf")):  # NaN / inf
+        return DEFAULT_FONT_SCALE
+    return max(0.5, min(1.5, scale))
+
+
+def _gz_fs(base, scale=None):
+    """把设计基准字号按缩放系数四舍五入，保留原有阶梯比例与层级关系。
+
+    日报页面上所有字号都经过这一个函数，``OCTOPUS_FONT_SCALE`` 一处调整即可整体
+    放大或缩小（图标尺寸是独立常量，不受此系数影响）。下限 7px 防止极端系数下
+    元信息被压到不可读；用「加 0.5 再取整」而非 ``round()``，避免 10×0.85=8.5 被
+    银行家舍入成 8，让正文与元信息塌成同一字号。
+    """
+    factor = _resolve_font_scale() if scale is None else _resolve_font_scale(scale)
+    return max(GZ_FS_FLOOR, int(base * factor + 0.5))
+
+
+GZ_FS_DISPLAY = _gz_fs(56)    # 刊头主标题
+GZ_FS_SECTION = _gz_fs(44)    # 栏目标题 / 市场倾向
+GZ_FS_PRICE = _gz_fs(36)      # 行情价格、成交额等关键数字
+GZ_FS_BODY = _gz_fs(10)       # 普通正文
+GZ_FS_META = _gz_fs(9)        # 次要说明与元信息
+GZ_FS_METER = _gz_fs(14)      # 信号格 ●○ 字号
 
 
 # Koboyo 官方图标详情页公开的 SVG 直链；不下载、不内嵌、不代理。
@@ -1915,8 +1956,10 @@ def gz_trend_badge(value, compact=False):
     return f'<span style="color:{color};font-weight:700;">{label}</span>'
 
 
-def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_HAIR, size=14):
+def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_HAIR, size=None):
     """信号格放大到可读字号；微信忽略 letter-spacing 也仍能看出实心/空心。"""
+    if size is None:
+        size = GZ_FS_METER
     maximum = max(1, int(maximum or 1))
     n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
     return (f'<span style="color:{lit};font-size:{size}px;">{ "●" * n }</span>'
@@ -1930,7 +1973,7 @@ def gz_badge(text, kind="ok", on_ink=False):
     else:
         styles = {"ok": GZ_UP, "warn": GZ_WARN, "bad": GZ_DOWN, "ai": GZ_INK}
     color = styles.get(kind, GZ_INK)
-    return f'<span style="color:{color};font-weight:400;font-size:{GZ_FS_META}px;">{_esc(text)}</span>'
+    return f'<span style="color:{color};font-weight:{GZ_W_BOLD};font-size:{GZ_FS_META}px;">{_esc(text)}</span>'
 
 
 def gz_source_badge(item, on_ink=False):
@@ -1941,17 +1984,20 @@ def gz_source_badge(item, on_ink=False):
     return gz_badge(f"非当天 {item.get('content_date') or '-'}", "warn", on_ink)
 
 
-def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None):
-    """微信最稳的单元：一张满宽表、一格 td、bgcolor 双写。anchor 为风险引用锚点。"""
+def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None, border_css=""):
+    """微信最稳的单元：一张满宽表、一格 td、bgcolor 双写。anchor 为风险引用锚点。
+
+    border_css 用于墨水屏分区：灰底会被墨水屏抖成脏点，改用实线边框划分区块。
+    """
     bg_attr = f' bgcolor="{bg}"' if bg else ""
     bg_css = f"background:{bg};" if bg else ""
-    hair_css = f"border-bottom:1px solid {GZ_HAIR};" if hair else ""
+    hair_css = f"border-bottom:{GZ_HAIR_W}px solid {GZ_HAIR};" if hair else ""
     anchor_attr = f' id="{_esc(anchor)}"' if anchor else ""
     return (
         f'<table width="100%" border="0" cellpadding="0" cellspacing="0"{bg_attr}{anchor_attr} '
         f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
         f'<tr><td{bg_attr} align="left" valign="top" '
-        f'style="padding:{pad};{bg_css}{hair_css}">{inner}</td></tr></table>'
+        f'style="padding:{pad};{bg_css}{hair_css}{border_css}">{inner}</td></tr></table>'
     )
 
 
@@ -1987,14 +2033,14 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None):
     def _cell(html, i, *, head=False, kv_label=False, anchor=None):
         pad_r = "0" if i == n - 1 else "10px"
         if head:
-            border = f"border-bottom:1px solid {GZ_INK};"
+            border = f"border-bottom:{GZ_HAIR_W}px solid {GZ_INK};"
             size, color, weight = GZ_FS_META, GZ_META, "700"
         elif kv_label:
-            border = f"border-bottom:1px solid {GZ_HAIR};"
-            size, color, weight = GZ_FS_META, GZ_META, "400"
+            border = f"border-bottom:{GZ_HAIR_W}px solid {GZ_HAIR};"
+            size, color, weight = GZ_FS_META, GZ_META, GZ_W_BODY
         else:
-            border = f"border-bottom:1px solid {GZ_HAIR};"
-            size, color, weight = GZ_FS_BODY, GZ_INK, "400"
+            border = f"border-bottom:{GZ_HAIR_W}px solid {GZ_HAIR};"
+            size, color, weight = GZ_FS_BODY, GZ_INK, GZ_W_BODY
         align = aligns[i]
         id_attr = f' id="{_esc(anchor)}"' if anchor else ""
         return (
@@ -2044,7 +2090,7 @@ def gz_note(text):
 def gz_subsection(text):
     return gz_shell(
         f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SANS};'
-        f'padding-top:8px;border-top:1px solid {GZ_HAIR};line-height:1.5;">{text}</div>',
+        f'padding-top:8px;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};line-height:1.5;">{text}</div>',
         pad="28px 0 12px")
 
 
@@ -2295,7 +2341,7 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """日式编辑栏目：大号 Koboyo 手绘图标、加粗宋体大标题、留白与细线。"""
+    """编辑栏目：大号 Koboyo 手绘图标、加粗圆体大标题、留白与实线（墨水屏）。"""
     content = content or ""
     if content.lstrip().startswith("<tr"):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
@@ -2304,7 +2350,7 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
            if caption else "")
     badge = (f'<div style="font-size:{GZ_FS_META}px;padding-top:8px;">{badge_html}</div>' if badge_html else "")
     head = gz_shell(
-        f'<h2 style="margin:0;border-top:1px solid {GZ_HAIR};padding-top:28px;'
+        f'<h2 style="margin:0;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:28px;'
         f'font-size:{GZ_FS_SECTION}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1px;line-height:1.7;">'
         f'{gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"))}{title}</h2>{cap}{badge}', bg=GZ_PAPER, pad="40px 0 16px")
     body = gz_shell(content, bg=GZ_PAPER, pad="0 0 12px")
@@ -2330,9 +2376,12 @@ def gz_ai_analysis_block(res):
         bg=GZ_PAPER, pad="24px 0")
     thesis = gz_shell(
         f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};">先看结论</div>'
-        f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;padding-top:6px;font-weight:400;">'
+        f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;padding-top:6px;font-weight:{GZ_W_BODY};">'
         f'{_esc(res["reason"])}</div>',
-        bg=GZ_PAPER_TINT, pad="24px")
+        # 旧版靠 7% 灰底区分首屏结论；墨水屏上灰底会抖成脏点，改用纯白 + 上下粗黑线分区。
+        bg=GZ_PAPER, pad="24px",
+        border_css=f"border-top:{GZ_HAIR_W}px solid {GZ_INK};"
+                   f"border-bottom:{GZ_HAIR_W}px solid {GZ_HAIR};")
     if res["sectors_strong"]:
         sectors_html = gz_subsection("板块热度") + gz_data_table(
             ["板块", "提及"],
@@ -4423,7 +4472,7 @@ def gz_sentiment_block(res):
                 s.get("best_tag", "name"), "")
             out.append(gz_subsection(
                 f'{_esc(title)} · {s["market"]} {arrow}'
-                f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};font-weight:400;">归因：{tag_label}</span>'))
+                f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};font-weight:{GZ_W_BODY};">归因：{tag_label}</span>'))
             stock_pairs = [
                 ("AI 情绪分", _esc(s.get("comment") or "")),
                 ("原因", _esc(s.get("reason") or "")),
@@ -5029,7 +5078,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
 
 def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
                                 policy_result=None, news_corpus=None):
-    """日式黑白研报：加粗宋体大标题、Koboyo 直链大图标、结构化数据表格与单列留白；不依赖脚本。"""
+    """黑白研报（墨水屏优先）：加粗圆体大标题、Koboyo 直链大图标、结构化数据表格与单列留白；不依赖脚本。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
@@ -5056,7 +5105,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="octopus-total-sources" content="{total}">
 <title>{REPORT_TITLE}</title>
 </head>
-<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.85;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;word-wrap:break-word;">
+<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:{GZ_FS_BODY}px;font-weight:{GZ_W_BODY};line-height:1.85;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;word-wrap:break-word;">
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;background:{GZ_PAPER};">
 <tr><td align="center" valign="top" style="padding:0 24px;">
 <table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;max-width:760px;margin:0 auto;border-collapse:collapse;table-layout:fixed;"><tr><td>
@@ -5075,7 +5124,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;background:{GZ_PAPER};">
 <tr><td bgcolor="{GZ_PAPER}" align="left" valign="top" style="padding:40px 0 56px;background:{GZ_PAPER};">
-<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;border-top:1px solid {GZ_HAIR};padding-top:12px;">
+<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:12px;">
 仅供投资参考，非投资建议。未抓取到内容的栏目自动隐藏，不以历史内容充数。
 </div>
 </td></tr>
