@@ -198,19 +198,55 @@ GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
 
-# 每日量化策略趋势跟踪线索：源头数据只保留 Reddit 一个来源（2026-09-27 起由十站投研精简）。
-# 只读取公开热帖 feed，不登录、不绕过付费墙、不复制帖子正文；
-# 扫描 10 个财经 / 投资 / 金融 / 经济类板块，每个板块取热门帖子 5 条作为样本数据，
-# 捕捉散户讨论风向与热门标的。板块顺序同时用于抓取、栏目和审计展示。
-PUBLIC_SITE_NAMES = ("Reddit",)
+# 每日量化策略趋势跟踪线索：社交媒体 + 论坛多来源（2026-09-27 起由 Reddit 单源扩展）。
+# 只读取公开 feed / 公开 API，不登录、不绕过付费墙、不复制帖子正文；
+# 需登录或付费 API 的平台（X/推特、Discord、雪球、微博、知乎等）不接入、不伪造其内容。
+# 捕捉散户讨论风向与热门标的；各来源独立降级，无数据的来源不进正文、只在审计中留痕。
+PUBLIC_SITE_NAMES = ("Reddit", "StockTwits", "Hacker News", "ApeWisdom")
 PUBLIC_SITE_URLS = {
     "Reddit": "https://www.reddit.com/",
+    "StockTwits": "https://stocktwits.com/",
+    "Hacker News": "https://news.ycombinator.com/",
+    "ApeWisdom": "https://apewisdom.io/",
 }
 PUBLIC_SITE_DESCRIPTIONS = {
-    "Reddit": "散户讨论风向与热门标的：10 个财经/投资/金融/经济类板块各取热门帖子 5 条为样本",
+    "Reddit": "散户论坛风向：10 个财经/投资/金融/经济类板块各取热门帖子 5 条为样本",
+    "StockTwits": "trader 社交媒体：8 个热门标的各取最新发帖 5 条为样本（含发帖人看多/看空标注）",
+    "Hacker News": "论坛深读：6 组金融/量化关键词检索近 72h 讨论帖，按点赞取前 8 条",
+    "ApeWisdom": "社媒提及趋势榜：聚合 Reddit/StockTwits 等的股票提及排名前 10（今日抓取快照）",
 }
 PUBLIC_SITE_WINDOW_HOURS = 72  # 帖子按发布时间过滤
-REDDIT_POSTS_PER_BOARD = 5     # 每个板块的热门帖样本条数
+REDDIT_POSTS_PER_BOARD = 5     # Reddit 每个板块的热门帖样本条数
+
+# StockTwits：公开符号流（api.stocktwits.com/api/2/streams/symbol/{SYM}.json，无需 Key）。
+# 固定观察清单（宽基 ETF + 超大盘科技股），顺序同时用于抓取、栏目和审计展示。
+STOCKTWITS_POSTS_PER_SYMBOL = 5  # 每个标的的最新发帖样本条数
+STOCKTWITS_SYMBOLS = (
+    ("SPY", "标普500ETF"),
+    ("QQQ", "纳指100ETF"),
+    ("NVDA", "英伟达"),
+    ("TSLA", "特斯拉"),
+    ("AAPL", "苹果"),
+    ("MSFT", "微软"),
+    ("AMD", "AMD"),
+    ("META", "Meta"),
+)
+
+# Hacker News：Algolia 公开检索 API（hn.algolia.com，无需 Key）。
+# 每组关键词一次检索，标题正则二次过滤（quant 不误伤 quantum），合并后按点赞取前 N 条。
+HN_TOP_N = 8
+HN_QUERIES = (
+    ("quant", r"\bquants?\b", "量化"),
+    ("algorithmic trading", r"\balgorithmic\s+trading\b", "算法交易"),
+    ("hedge fund", r"\bhedge\s+funds?\b", "对冲基金"),
+    ("stock market", r"\bstock\s+market\b", "股市"),
+    ("federal reserve", r"\bfederal\s+reserve\b|\bFOMC\b", "美联储"),
+    ("inflation", r"\binflation\w*\b", "通胀"),
+)
+
+# ApeWisdom：社媒股票提及趋势聚合榜（apewisdom.io 公开 API，无需 Key）。
+# 榜单为「过去 24 小时提及最多」，取前 N 条；快照语义：当天采集 ≠ 当天发布。
+APEWISDOM_TOP_N = 10
 
 HK_CHANNELS = [
     # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
@@ -1409,21 +1445,28 @@ def fetch_hk_channels():
 
 
 # ============================================================
-# 每日量化策略趋势跟踪线索：单一来源 Reddit（仅标题/热度/原始链接，不复制帖子正文）
+# 每日量化策略趋势跟踪线索：多来源社媒/论坛（仅标题/热度/原始链接，不复制帖子正文）
 # ============================================================
+# 外链主机白名单按来源维护，防止外部标题/链接注入日报；校验时默认放行全部可信主机。
 _PUBLIC_ALLOWED_HOSTS = {
-    "reddit.com", "www.reddit.com", "old.reddit.com",
+    "Reddit": ("reddit.com", "www.reddit.com", "old.reddit.com"),
+    "StockTwits": ("stocktwits.com", "www.stocktwits.com"),
+    "Hacker News": ("news.ycombinator.com",),
+    "ApeWisdom": ("apewisdom.io", "www.apewisdom.io"),
 }
+_PUBLIC_ALLOWED_HOSTS_ALL = frozenset(
+    host for hosts in _PUBLIC_ALLOWED_HOSTS.values() for host in hosts)
 
 
-def _public_url(raw, base=""):
+def _public_url(raw, base="", hosts=None):
     """外链仅允许已列出的源站 HTTPS 主机，防止外部标题/链接注入日报。"""
+    allowed = _PUBLIC_ALLOWED_HOSTS_ALL if hosts is None else frozenset(hosts)
     if not raw or any(c.isspace() or c in ('<', '>', '\\') for c in str(raw).strip()):
         return ""
     try:
         url = urljoin(base, str(raw).strip())
         parsed = urlparse(url)
-        if (parsed.scheme != "https" or parsed.hostname not in _PUBLIC_ALLOWED_HOSTS
+        if (parsed.scheme != "https" or parsed.hostname not in allowed
                 or parsed.username or parsed.password or parsed.port not in (None, 443)):
             return ""
     except ValueError:
@@ -1630,10 +1673,291 @@ def fetch_reddit():
     return _public_site_result(name, items, latest=latest, note=note, error=error)
 
 
+# ------------------------------------------------------------
+# StockTwits：trader 社交媒体（公开符号流，仅正文摘要/发帖时间/作者/多空标注）
+# ------------------------------------------------------------
+def _stocktwits_items(payload, symbol, label, *, now=None):
+    """解析公开符号流的最新发帖：只保留可验证时间、合法外链与作者标注的多空立场。"""
+    try:
+        messages = payload["messages"]
+    except (TypeError, KeyError):
+        return [], None
+    if not isinstance(messages, list):
+        return [], None
+    now = now or datetime.now(CST)
+    items, latest, seen = [], None, set()
+    for msg in messages:
+        if len(items) >= STOCKTWITS_POSTS_PER_SYMBOL:
+            break
+        if not isinstance(msg, dict):
+            continue
+        try:
+            published = datetime.strptime(str(msg.get("created_at") or ""), "%Y-%m-%dT%H:%M:%SZ") \
+                .replace(tzinfo=timezone.utc).astimezone(CST)
+        except ValueError:
+            continue  # 无显式 UTC 时区的时间不可验证，直接剔除
+        user = msg.get("user") if isinstance(msg.get("user"), dict) else {}
+        username = _public_text(user.get("username"), 30)
+        body = _public_text(str(msg.get("body") or "").replace("\n", " "), 125)
+        if not (username and body):
+            continue
+        url = _public_url(f"/{username}/message/{msg.get('id')}", "https://stocktwits.com/",
+                          hosts=_PUBLIC_ALLOWED_HOSTS["StockTwits"])
+        if not url or url in seen:
+            continue
+        try:
+            basic = ((msg.get("entities") or {}).get("sentiment") or {}).get("basic") or ""
+        except AttributeError:
+            basic = ""
+        if basic not in ("Bullish", "Bearish"):
+            basic = ""
+        if not latest or published > latest:
+            latest = published
+        seen.add(url)
+        stance = {"Bullish": " · 标注看多", "Bearish": " · 标注看空"}.get(basic, "")
+        pub = published.strftime("%Y-%m-%d %H:%M")
+        items.append({
+            "title": body,
+            "url": url,
+            "detail": f"发布于 {pub}（北京时间） · @{username}{stance}",
+            "published_cst": pub,
+            "community": f"${symbol}",
+            "symbol_label": label,
+            "sentiment": basic,
+            "is_today": published.date() == now.date(),
+        })
+    return items, (latest.strftime("%Y-%m-%d") if latest else None)
+
+
+def fetch_stocktwits():
+    """逐标的并行读取 StockTwits 公开符号流（无需 API Key）；全不可用时如实暂缺。
+
+    每个标的取最新发帖 5 条作为样本；多空立场是发帖人自行标注，不代表本报告判断。
+    """
+    name = "StockTwits"
+    now = datetime.now(CST)
+    headers = {**_REDDIT_HEADERS, "Accept": "application/json"}
+
+    def _fetch_symbol(sym_label):
+        symbol, label = sym_label
+        payload = safe_request(
+            f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json",
+            headers=headers, timeout=8)
+        return symbol, *_stocktwits_items(payload, symbol, label, now=now)
+
+    symbol_results = {}
+    with ThreadPoolExecutor(max_workers=len(STOCKTWITS_SYMBOLS)) as executor:
+        futures = {executor.submit(_fetch_symbol, sym): sym for sym in STOCKTWITS_SYMBOLS}
+        for future in futures:
+            sym, items, latest = None, [], None
+            try:
+                sym, items, latest = future.result()
+            except Exception:
+                pass
+            if sym:
+                symbol_results[sym] = (items, latest)
+
+    items, unavailable, latest = [], [], None
+    for symbol, _label in STOCKTWITS_SYMBOLS:
+        sym_items, sym_latest = symbol_results.get(symbol, ([], None))
+        if sym_latest and (not latest or sym_latest > latest):
+            latest = sym_latest
+        if sym_items:
+            items.extend(sym_items)
+        else:
+            unavailable.append(f"${symbol}")
+    note = ("只收录公开发帖的正文摘要、作者与自标注多空立场作为趋势跟踪线索；"
+            "观点未经核实，不构成投资建议。")
+    if unavailable:
+        note += " 暂缺（访问受限或无公开新帖）：" + "、".join(unavailable) + "。"
+    error = "八个标的的公开符号流均不可用"
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+# ------------------------------------------------------------
+# Hacker News：论坛深读（Algolia 公开检索，金融/量化关键词，按点赞排序）
+# ------------------------------------------------------------
+def _hn_items(payload, keyword_re, label, *, now=None):
+    """解析一次 Algolia 检索结果：标题须命中关键词正则，链接指向 HN 讨论帖。"""
+    try:
+        hits = payload["hits"]
+    except (TypeError, KeyError):
+        return [], None
+    if not isinstance(hits, list):
+        return [], None
+    now = now or datetime.now(CST)
+    items, latest, seen = [], None, set()
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        raw_date = str(hit.get("created_at") or "")
+        if not raw_date.endswith("Z"):
+            continue  # 无显式 UTC 时区的时间不可验证
+        try:
+            published = datetime.strptime(raw_date, "%Y-%m-%dT%H:%M:%SZ") \
+                .replace(tzinfo=timezone.utc).astimezone(CST)
+        except ValueError:
+            continue
+        title = _public_text(hit.get("title"), 125)
+        if not title or not re.search(keyword_re, title, re.I):
+            continue
+        url = _public_url(f"/item?id={hit.get('objectID')}", "https://news.ycombinator.com/",
+                          hosts=_PUBLIC_ALLOWED_HOSTS["Hacker News"])
+        if not url or url in seen or not _public_recent(published, now):
+            continue
+        if not latest or published > latest:
+            latest = published
+        seen.add(url)
+        try:
+            points = int(hit.get("points") or 0)
+            comments = int(hit.get("num_comments") or 0)
+        except (TypeError, ValueError):
+            points, comments = 0, 0
+        heat = ""
+        if points > 0:
+            heat += f" · {points:,} 赞"
+        if comments > 0:
+            heat += f" · {comments:,} 讨论"
+        pub = published.strftime("%Y-%m-%d %H:%M")
+        items.append({
+            "title": title,
+            "url": url,
+            "detail": f"发布于 {pub}（北京时间）{heat}",
+            "published_cst": pub,
+            "community": f"HN·{label}",
+            "points": points,
+            "is_today": published.date() == now.date(),
+        })
+    return items, (latest.strftime("%Y-%m-%d") if latest else None)
+
+
+def fetch_hackernews():
+    """并行检索 6 组金融/量化关键词的近 72h 讨论帖，合并去重后按点赞取前 8 条。
+
+    链接统一指向 HN 讨论页（论坛本体）；外部文章 URL 不作为栏目外链。
+    """
+    name = "Hacker News"
+    now = datetime.now(CST)
+    headers = {**_REDDIT_HEADERS, "Accept": "application/json"}
+
+    def _fetch_query(query_pack):
+        query, keyword_re, label = query_pack
+        payload = safe_request(
+            "https://hn.algolia.com/api/v1/search_by_date",
+            headers=headers,
+            params={"query": query, "tags": "story", "hitsPerPage": 15},
+            timeout=8)
+        return _hn_items(payload, keyword_re, label, now=now)
+
+    by_url, latest = {}, None
+    with ThreadPoolExecutor(max_workers=len(HN_QUERIES)) as executor:
+        futures = {executor.submit(_fetch_query, qp): qp for qp in HN_QUERIES}
+        for future in futures:
+            try:
+                items, query_latest = future.result()
+            except Exception:
+                items, query_latest = [], None
+            for it in items:
+                by_url.setdefault(it["url"], it)
+            if query_latest and (not latest or query_latest > latest):
+                latest = query_latest
+
+    items = sorted(by_url.values(),
+                   key=lambda it: (-(it.get("points") or 0), it.get("published_cst") or ""),
+                   )[:HN_TOP_N]
+    note = ("只收录公开讨论帖的标题、点赞与讨论数作为趋势跟踪线索；"
+            "观点未经核实，不构成投资建议。")
+    if not items:
+        note += " 近72小时无命中标题的讨论帖。"
+    error = "六组关键词的公开检索均不可用或近72小时无命中"
+    # _hn_items 返回的 latest 已是 %Y-%m-%d 字符串（ISO 日期可直接比较大小）
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+# ------------------------------------------------------------
+# ApeWisdom：社媒股票提及趋势聚合榜（公开 API，今日抓取快照）
+# ------------------------------------------------------------
+def _apewisdom_items(payload, *, now=None):
+    """解析社媒提及趋势榜：只保留可核验的排名/提及/热度数字，24h 对比生成升降标注。"""
+    try:
+        results = payload["results"]
+    except (TypeError, KeyError):
+        return [], None
+    if not isinstance(results, list):
+        return [], None
+    now = now or datetime.now(CST)
+
+    def _int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    items, seen = [], set()
+    for row in results:
+        if len(items) >= APEWISDOM_TOP_N:
+            break
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,6}", ticker) or ticker in seen:
+            continue
+        rank, mentions, upvotes = _int(row.get("rank")), _int(row.get("mentions")), _int(row.get("upvotes"))
+        if rank is None or mentions is None:
+            continue
+        url = _public_url(f"/stocks/{ticker}/", "https://apewisdom.io/",
+                          hosts=_PUBLIC_ALLOWED_HOSTS["ApeWisdom"])
+        if not url:
+            continue
+        prev_rank = _int(row.get("rank_24h_ago"))
+        prev_mentions = _int(row.get("mentions_24h_ago"))
+        if prev_rank is None or prev_rank <= 0:
+            trend = "新上榜"
+        elif prev_rank > rank:
+            trend = f"▲ 较24h前升 {prev_rank - rank} 位"
+        elif prev_rank < rank:
+            trend = f"▼ 较24h前降 {rank - prev_rank} 位"
+        else:
+            trend = "■ 排名持平"
+        name_txt = _public_text(row.get("name"), 40) or ticker
+        detail = (f"提及 {mentions:,} 次"
+                  + (f"（24h 前 {prev_mentions:,} 次）" if prev_mentions is not None else "")
+                  + (f" · 热度 {upvotes:,}" if upvotes is not None else "")
+                  + f" · 榜单第 {rank} · {trend}")
+        seen.add(ticker)
+        items.append({
+            "title": f"{ticker} · {name_txt}",
+            "url": url,
+            "detail": detail,
+            "published_cst": now.strftime("%Y-%m-%d %H:%M"),
+            "community": f"${ticker}",
+            "is_today": True,
+        })
+    return items, (now.strftime("%Y-%m-%d") if items else None)
+
+
+def fetch_apewisdom():
+    """读取社媒提及趋势榜前 10（聚合 Reddit/StockTwits 等）；快照语义，不冒充实时发帖。"""
+    name = "ApeWisdom"
+    now = datetime.now(CST)
+    headers = {**_REDDIT_HEADERS, "Accept": "application/json"}
+    payload = safe_request("https://apewisdom.io/api/v1.0/filter/all-stocks",
+                           headers=headers, timeout=10)
+    items, _latest = _apewisdom_items(payload, now=now)
+    note = ("榜单为「过去 24 小时社媒提及最多」的采集时点快照，"
+            "只作趋势参考；观点未经核实，不构成投资建议。")
+    error = "社媒提及趋势榜公开接口不可用"
+    return _public_site_result(name, items, latest=now.strftime("%Y-%m-%d"),
+                               snapshot=True, note=note, error=error)
+
+
 def fetch_public_sites():
-    """单一来源 Reddit 独立运行，失败不会拖垮主日报；始终返回审计记录。"""
+    """多来源社媒/论坛采集彼此隔离，单个来源失败不会拖垮主日报；始终返回审计记录。"""
     fetchers = (
         ("Reddit", fetch_reddit),
+        ("StockTwits", fetch_stocktwits),
+        ("Hacker News", fetch_hackernews),
+        ("ApeWisdom", fetch_apewisdom),
     )
     results = {}
     with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
@@ -1650,7 +1974,7 @@ def fetch_public_sites():
                 result = _public_site_result(name, [], error="公开数据解析失败或暂时不可用")
             results[name] = result
             print(f"  {'✅' if result['status'] == 'success' else '⚠️'} {name}: "
-                  f"{len(result.get('items') or [])} 条热帖样本")
+                  f"{len(result.get('items') or [])} 条线索样本")
     return results
 
 
@@ -1686,7 +2010,8 @@ def collect_all_data():
     data["热门榜单"] = fetch_hot_stocks()
     time.sleep(0.5)
 
-    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十个板块热门帖）...")
+    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十板块 · StockTwits 八标的 · "
+          "Hacker News 金融关键词 · ApeWisdom 提及榜）...")
     data.update(fetch_public_sites())
 
     print("\n✅ 数据采集完成！")
@@ -2910,40 +3235,67 @@ def _short_source(item):
 
 
 def _trend_clues_block(data, kit):
-    """两主题共用：Reddit 趋势跟踪线索 —— 10 个板块的热门帖样本（每板块至多 5 条）。
+    """两主题共用：社媒/论坛趋势跟踪线索 —— Reddit / StockTwits / Hacker News / ApeWisdom。
 
-    无数据的板块不进正文；缺失板块只在盘点总结的「数据覆盖」里点名。
+    每个来源独立降级：抓取成功且有条目才进正文；缺失来源只在盘点总结的「数据覆盖」里点名。
     """
     color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
-    source = data.get("Reddit") or {}
-    if source.get("status") != "success":
-        return ""
-    by_board = {}
-    for item in source.get("items") or []:
-        if isinstance(item, dict):
-            by_board.setdefault(str(item.get("community") or ""), []).append(item)
     rows = []
-    homepage = _public_url(PUBLIC_SITE_URLS["Reddit"])
-    latest = _public_text(source.get("content_date") or "", 30)
-    heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
-               f'<b>Reddit</b></a> {kit.source_badge(source)}')
-    rows.append(kit.item_row("", heading, _esc(latest)))
-    for community, label in _REDDIT_BOARDS:
-        board_items = [it for it in by_board.get(f"r/{community}", [])
-                       if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
-        if not board_items:
+    for name in PUBLIC_SITE_NAMES:
+        source = data.get(name) or {}
+        source_items = [it for it in (source.get("items") or []) if isinstance(it, dict)]
+        if source.get("status") != "success" or not source_items:
             continue
-        rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
-                                 f"热门帖样本 {len(board_items)} 条"))
-        for pick_no, item in enumerate(board_items, 1):
-            url = _public_url(item.get("url"), PUBLIC_SITE_URLS["Reddit"])
+        homepage = _public_url(PUBLIC_SITE_URLS[name])
+        heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
+                   f'<b>{_esc(name)}</b></a> · {_esc(PUBLIC_SITE_DESCRIPTIONS[name])}'
+                   f' {kit.source_badge(source)}')
+        sub = "今日抓取快照（榜单为采集时点数据）" if source.get("snapshot") \
+            else _esc(_public_text(source.get("content_date") or "", 30))
+        rows.append(kit.item_row("▤", heading, sub))
+
+        # 分组子标题顺序与采集端一致（Reddit 板块 / StockTwits 标的 / HN 关键词组）。
+        group_order = []
+        if name == "Reddit":
+            group_order = [(f"r/{board}", label) for board, label in _REDDIT_BOARDS]
+        elif name == "StockTwits":
+            group_order = [(f"${sym}", label) for sym, label in STOCKTWITS_SYMBOLS]
+        elif name == "Hacker News":
+            group_order = [(f"HN·{label}", "") for _q, _re_, label in HN_QUERIES]
+
+        by_group = {}
+        for it in source_items:
+            by_group.setdefault(str(it.get("community") or ""), []).append(it)
+
+        def _render_item(pick_no, item):
+            url = _public_url(item.get("url"))
             title = _public_text(item.get("title"), 235)
             if not (url and title):
-                continue
+                return ""
             link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
                     f'{_esc(title)}</a>')
-            rows.append(kit.item_row(f"{pick_no:02d}", link,
-                                     _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
+            return kit.item_row(f"{pick_no:02d}", link,
+                                _esc(_concise_detail(_public_text(item.get("detail"), 210))))
+
+        for group, label in group_order:
+            group_cap = HN_TOP_N if name == "Hacker News" else REDDIT_POSTS_PER_BOARD
+            group_items = by_group.pop(group, [])[:group_cap]
+            if not group_items:
+                continue
+            sub_noun = "热门帖样本" if name == "Reddit" else (
+                "最新发帖" if name == "StockTwits" else "讨论热帖")
+            group_head = f'<b>{_esc(group)}</b>' + (f' · {_esc(label)}' if label else "")
+            rows.append(kit.item_row("▤", group_head, f"{sub_noun} {len(group_items)} 条"))
+            for pick_no, item in enumerate(group_items, 1):
+                row = _render_item(pick_no, item)
+                if row:
+                    rows.append(row)
+        # 无分组语义的来源（ApeWisdom 榜单）直接铺开；已分组来源的条目必须归属分组。
+        if not group_order:
+            for pick_no, item in enumerate(source_items[:APEWISDOM_TOP_N], 1):
+                row = _render_item(pick_no, item)
+                if row:
+                    rows.append(row)
     return kit.rows("".join(rows)) if rows else ""
 
 
@@ -3202,27 +3554,42 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             detail += "，承压 " + "、".join(_esc(str(l.get('name'))) for l in losers[:2])
         notes["POLICY SHOCK"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
 
-    # ④ 趋势跟踪线索（Reddit）：多空词命中 + 热股提取 → 散户情绪判断
-    reddit = data.get("Reddit") or {}
-    if reddit.get("status") == "success" and reddit.get("items"):
-        items = [it for it in reddit["items"] if isinstance(it, dict)]
+    # ④ 趋势跟踪线索（Reddit / StockTwits / Hacker News / ApeWisdom）：
+    #    多空词 + 发帖人立场标注 + 热股/提及榜提取 → 散户情绪判断
+    trend_items, trend_sources = [], 0
+    for name in PUBLIC_SITE_NAMES:
+        src = data.get(name) or {}
+        if src.get("status") == "success" and src.get("items"):
+            trend_sources += 1
+            trend_items.extend(it for it in src["items"] if isinstance(it, dict))
+    if trend_items:
         bull = bear = 0
         tickers = {}
-        for it in items:
+        for it in trend_items:
             title = str(it.get("title") or "")
             bull += len(_REDDIT_BULL_RE.findall(title))
             bear += len(_REDDIT_BEAR_RE.findall(title))
+            stance = str(it.get("sentiment") or "")
+            if stance == "Bullish":
+                bull += 1
+            elif stance == "Bearish":
+                bear += 1
             for sym in _REDDIT_TICKER_RE.findall(title):
                 key = sym.upper()
                 tickers[key] = tickers.get(key, 0) + 1
         prob = _ai_judge_prob(bull, bear)
         _mark, label = _ai_judge_label(prob)
-        boards_n = len({it.get("community") for it in items if it.get("community")})
         top = [f"{s}×{c}" for s, c in sorted(tickers.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
-        detail = f"十板块扫描 {len(items)} 条热帖（{boards_n} 板块有数据）"
+        detail = f"{len(PUBLIC_SITE_NAMES)} 源扫描 {len(trend_items)} 条线索（{trend_sources} 源可用）"
+        aw = [it for it in ((data.get("ApeWisdom") or {}).get("items") or [])
+              if isinstance(it, dict)][:3]
+        aw_top = [str(it.get("community") or "").lstrip("$") for it in aw
+                  if str(it.get("community") or "").startswith("$")]
         if top:
             detail += "，热股 " + "、".join(_esc(t) for t in top)
-        detail += f"，多空词 {bull} 多 / {bear} 空"
+        if aw_top:
+            detail += "，提及榜 " + "、".join(_esc(t) for t in aw_top)
+        detail += f"，多空证据 {bull} 多 / {bear} 空"
         notes["TREND CLUES"] = _judge_note(
             prob, f"{detail} → 预测：散户情绪{label}，关注高热标的与基本面背离（观点非事实）")
 
@@ -3379,8 +3746,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             "AI READ", "AI 盘研判", kit.ai_block(ai_result), kit.ai_badge(), "",
         )
 
-    # ⑤ 每日量化策略趋势跟踪线索：单一来源 Reddit（抓取成功且有条目才渲染）
-    if (data.get("Reddit") or {}).get("status") == "success":
+    # ⑤ 每日量化策略趋势跟踪线索：Reddit / StockTwits / Hacker News / ApeWisdom
+    #    （任一社媒/论坛来源抓取成功且有条目才渲染；缺失来源只在盘点总结点名）
+    if any((data.get(name) or {}).get("status") == "success" for name in PUBLIC_SITE_NAMES):
         digest = _trend_clues_block(data, kit)
         if digest:
             blocks["TREND CLUES"] = ("TREND CLUES", "每日量化策略趋势跟踪线索", digest, "", "")
