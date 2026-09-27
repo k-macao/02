@@ -1,4 +1,5 @@
 """无需网络的日报新鲜度回归测试。"""
+import datetime as dt
 import importlib.util
 import os
 import re
@@ -616,7 +617,7 @@ class GuizangThemeTests(unittest.TestCase):
         # 图片 = 每个栏目标题 1 枚极大图标 + 刊头 128px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
         self.assertEqual(len(images), html.count("<h2 ") + 1 + len(pipeline.KOBOYO_MASTHEAD_ICONS))
         for image in images:
-            self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z]+\.svg"')
+            self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z-]+\.svg"')
             self.assertIn('alt=""', image)
             self.assertIn('aria-hidden="true"', image)
             self.assertRegex(image, r'width="(?:72|96|128)"')
@@ -2883,6 +2884,317 @@ class SectionAiJudgeTests(unittest.TestCase):
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             report = pipeline.generate_report(empty, "2026年9月27日 · 周日", "20260927")
         self.assertNotIn("⌁ AI 研判", report)
+
+
+class EconCalendarTests(unittest.TestCase):
+    """「未来 N 天影响经济时间点」栏目（东方财富财经日历 RPT_CPH_FECALENDAR）。
+
+    全程离线：接口用 mock 响应替换 safe_request。重点守住四件事——
+    ① 筛选口径确定可复现（噪音必须被剔除、重要度分级稳定）；
+    ② 窗口诚实（栏目写「未来 30 天」就不能出现 T+30 之外的行）；
+    ③ 前瞻日程不得单独打开推送闸门（is_today=False + snapshot=True）；
+    ④ 版面裁剪必须如实披露被裁条数，绝不静默丢内容。
+    """
+
+    TODAY = dt.date(2026, 9, 28)
+
+    # ---------- 工具 ----------
+    @staticmethod
+    def _row(day, hm, name, city, ftype="经济数据", std="2"):
+        return {"START_DATE": f"{day} {hm}:00", "END_DATE": None, "FE_CODE": "demo",
+                "FE_NAME": name, "FE_TYPE": ftype, "STD_TYPE_CODE": std, "CITY": city}
+
+    def _day(self, offset):
+        return (self.TODAY + dt.timedelta(days=offset)).isoformat()
+
+    def _rows(self):
+        """一批覆盖三类内容 + 各类噪音的样本行。"""
+        return [
+            # 经济数据：中美核心读数（★★★）、其他主要市场（★★）
+            self._row(self._day(1), "09:30", "中国:制造业PMI(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:环比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI(报告期:2026年09月)", "中国"),
+            self._row(self._day(4), "20:30", "美国:非农就业人数(报告期:2026年09月)", "美国"),
+            self._row(self._day(21), "10:00", "欧元区:PMI(报告期:2026年10月)", "欧元区"),
+            # 事件：主要央行议息（★★★）、中国宏观决策会议（★★★）、小国央行（★★）、展会（★）
+            self._row(self._day(28), "02:00", "美联储议息会议", "华盛顿", "美联储议息会议", "1"),
+            self._row(self._day(20), "10:00", "国民经济运行情况发布会", "北京",
+                      "国民经济运行情况发布会", "1"),
+            self._row(self._day(17), "15:00", "泰国央行公布利率决议", "曼谷", "利率决议", "1"),
+            self._row(self._day(13), "09:00", "2026上海国际汽车工业展览会", "上海", "展览会", "1"),
+            # 动态：会议纪要 / 周报（★★）、一般资讯（★）
+            self._row(self._day(9), "02:00", "美联储公布货币政策会议纪要", "美国", "", "2"),
+            self._row(self._day(15), "16:00", "台积电公布月度营业额", "中国台湾", "", "2"),
+            # 噪音：个股事项 / 非保留地区 / 冗余子序列 / 「:值」结尾 / 超长条目
+            self._row(self._day(6), "09:30", "中国:新股申购:某某科技", "中国", "", "2"),
+            self._row(self._day(8), "16:00", "中国:库存:铁矿石:46港", "中国"),
+            self._row(self._day(8), "09:30", "泰国:CPI:同比(报告期:2026年09月)", "泰国"),
+            self._row(self._day(9), "09:30", "中国:GDP:现价(报告期:2026年09月)", "中国"),
+            self._row(self._day(10), "20:30", "美国:货物出口金额:值", "美国"),
+            self._row(self._day(12), "09:30", "中国:某超长条目" + "很长" * 30, "中国"),
+            # 远期口径：条目保留、误导性报告期标注丢掉
+            self._row(self._day(16), "09:30", "中国:CPI:同比(报告期:2027年07月)", "中国"),
+        ]
+
+    def _fetch(self, rows=None, count=None, pages=1):
+        """用 mock 响应跑一次抓取；pages>1 时验证翻页。"""
+        rows = self._rows() if rows is None else rows
+        total = len(rows) if count is None else count
+        calls = []
+
+        def fake_request(url, headers=None, params=None, timeout=15, is_json=True):
+            calls.append(params)
+            page = int(params["pageNumber"])
+            if page > pages:
+                return {"success": True, "result": {"count": total, "data": []}}
+            per = max(1, len(rows) // pages)
+            chunk = rows[(page - 1) * per:page * per] if page <= pages else []
+            return {"success": True, "result": {"count": total, "data": chunk}}
+
+        with patch.object(pipeline, "safe_request", fake_request), \
+             patch.object(pipeline.time, "sleep", lambda *_: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        return res, calls
+
+    def _data(self, cal=None, with_today_source=True):
+        data = {}
+        if with_today_source:
+            data["实时行情"] = pipeline._source_result(
+                "quote", "success", is_today=True, content_date=self.TODAY.isoformat(),
+                quotes={"上证指数": {"price": 3812.66, "change_pct": 0.31}})
+        if cal is not None:
+            data["财经日历"] = cal
+        return data
+
+    def _report(self, data, theme="guizang"):
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False), \
+             patch.object(pipeline, "HK_QUANT_ENABLED", False):
+            return pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
+                                            theme=theme)
+
+    # ---------- ① 筛选口径 ----------
+    def test_classify_keeps_core_readings_and_drops_noise(self):
+        kept = [it for it in (pipeline._cal_classify(r) for r in self._rows()) if it]
+        names = [it["name"] for it in kept]
+        self.assertIn("制造业PMI", names)
+        self.assertIn("非农就业人数", names)
+        # 噪音必须全部剔除
+        for noise in ("新股申购", "铁矿石", "现价", "货物出口金额", "某超长条目"):
+            self.assertNotIn(noise, "".join(names), f"{noise} 不应进正文")
+        # 非保留地区的读数不进正文（泰国 CPI），但小国央行「事件」仍保留为 ★★
+        self.assertFalse(any(it["city"] == "泰国" and it["kind"] == 0 for it in kept))
+        self.assertTrue(any("泰国央行" in it["name"] for it in kept))
+
+    def test_importance_tiers_are_stable(self):
+        kept = [it for it in (pipeline._cal_classify(r) for r in self._rows()) if it]
+        by_name = {it["name"]: it for it in kept}
+        self.assertEqual(by_name["制造业PMI"]["imp"], 3)          # 中国一级读数
+        self.assertEqual(by_name["非农就业人数"]["imp"], 3)        # 美国一级读数
+        self.assertEqual(by_name["PMI"]["imp"], 2)                # 欧元区一级读数 → ★★
+        self.assertEqual(by_name["美联储议息会议"]["imp"], 3)
+        self.assertEqual(by_name["国民经济运行情况发布会"]["imp"], 3)
+        self.assertEqual(by_name["泰国央行公布利率决议"]["imp"], 2)  # 小国央行
+        self.assertEqual(by_name["2026上海国际汽车工业展览会"]["imp"], 1)  # 展会
+        self.assertEqual(by_name["美联储公布货币政策会议纪要"]["kind"], 2)  # 动态
+        self.assertLessEqual(by_name["美联储公布货币政策会议纪要"]["imp"], 2)
+
+    def test_event_importance_reads_name_not_city_field(self):
+        """事件行的 CITY 常是城市名（华盛顿 / 法兰克福），不能拿它当国家判定。"""
+        fed = pipeline._cal_classify(self._row(self._day(5), "02:00", "美联储议息会议",
+                                               "华盛顿", "美联储议息会议", "1"))
+        self.assertEqual(fed["imp"], 3)
+        minor = pipeline._cal_classify(self._row(self._day(5), "15:00", "某国央行公布利率决议",
+                                                 "未知市", "利率决议", "1"))
+        self.assertEqual(minor["imp"], 2)
+
+    def test_far_future_period_label_dropped_but_item_kept(self):
+        item = pipeline._cal_classify(
+            self._row(self._day(16), "09:30", "中国:CPI:同比(报告期:2027年07月)", "中国"))
+        self.assertIsNotNone(item, "远期口径不应整条丢掉")
+        self.assertEqual(item["period"], "", "误导性报告期标注必须丢掉")
+        normal = pipeline._cal_classify(
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"))
+        self.assertEqual(normal["period"], "2609")
+        self.assertEqual(pipeline._cal_period_label("2609", self.TODAY), "9月")
+        self.assertEqual(pipeline._cal_period_label("2701", self.TODAY), "2027年1月")
+
+    def test_dedupe_merges_same_indicator_variants_into_one_row(self):
+        rows = [
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:环比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:核心CPI:同比(报告期:2026年09月)", "中国"),
+        ]
+        items = pipeline._cal_dedupe([it for it in (pipeline._cal_classify(r) for r in rows) if it])
+        cpi = [it for it in items if pipeline._cal_base_of(it["name"]) == "CPI"]
+        self.assertEqual(len(cpi), 1, "同比 / 环比 / 裸名应合并成一行")
+        self.assertEqual(cpi[0]["kou"], ["同比", "环比"])
+        self.assertIn("CPI:同比/环比", pipeline._cal_item_text(cpi[0], self.TODAY))
+        # 核心CPI 是另一个指标，不能被合并掉
+        self.assertTrue(any("核心CPI" in it["name"] for it in items))
+
+    def test_strip_country_prefix_without_hurting_real_words(self):
+        self.assertEqual(pipeline._cal_strip_country("美国:CPI:同比", "美国"), "CPI:同比")
+        self.assertEqual(pipeline._cal_strip_country("美国EIA原油库存", "美国"), "EIA原油库存")
+        # 「中国银行间同业拆借」里的「中国」是词的一部分，不能剥
+        self.assertEqual(pipeline._cal_strip_country("中国银行间同业拆借", "中国"),
+                         "中国银行间同业拆借")
+
+    # ---------- ② 窗口诚实 ----------
+    def test_rows_outside_window_are_clamped_locally(self):
+        rows = self._rows() + [self._row(self._day(32), "19:00", "欧洲央行公布利率决议",
+                                         "法兰克福", "利率决议", "1")]
+        res, _ = self._fetch(rows=rows)
+        self.assertEqual(res["status"], "success")
+        dates = {it["date"] for it in res["items"]}
+        self.assertNotIn(self._day(32), dates, "T+32 不得出现在「未来30天」栏目里")
+        self.assertNotIn(self._day(32), res["window"])
+        self.assertTrue(all(self.TODAY.isoformat() <= d <= self._day(30) for d in dates))
+
+    def test_paging_follows_server_count(self):
+        rows = self._rows()
+        res, calls = self._fetch(rows=rows, count=len(rows) * 2, pages=2)
+        self.assertEqual(res["status"], "success")
+        self.assertGreaterEqual(len(calls), 2, "count 未取满时必须继续翻页")
+        self.assertEqual(calls[0]["reportName"], "RPT_CPH_FECALENDAR")
+        self.assertIn("START_DATE>='2026-09-28'", calls[0]["filter"])
+        self.assertIn("START_DATE<'2026-10-29'", calls[0]["filter"])
+
+    def test_failure_degrades_to_zanque_with_reason(self):
+        with patch.object(pipeline, "safe_request", lambda *a, **k: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        self.assertEqual(res["status"], "failed")
+        self.assertTrue(res.get("error"), "失败必须给出原因，不能静默")
+        self.assertEqual(res["items"], [])
+        self.assertFalse(res.get("is_today"))
+        self.assertFalse(res.get("snapshot"))
+
+    def test_empty_window_is_reported_as_failure_not_as_empty_calendar(self):
+        with patch.object(pipeline, "safe_request",
+                          lambda *a, **k: {"success": True, "result": {"count": 0, "data": []}}):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        self.assertEqual(res["status"], "failed")
+        self.assertIn("接口未返回窗口内日程", res["error"])
+
+    # ---------- ③ 推送闸门与审计口径 ----------
+    def test_calendar_alone_never_unlocks_push_gate(self):
+        """前瞻日程不是「当天内容」：只有它成功时仍不得推送（防旧内容/空报告）。"""
+        res, _ = self._fetch()
+        can_push, reason = pipeline.check_push_eligibility(self._data(res, with_today_source=False))
+        self.assertFalse(can_push)
+        self.assertIn("当天检验未通过", reason)
+        self.assertFalse(res["is_today"])
+        self.assertTrue(res["snapshot"], "应标为「今日抓取」快照，而不是当天发布")
+
+    def test_calendar_does_not_change_today_source_count(self):
+        res, _ = self._fetch()
+        base = self._report(self._data(with_today_source=True))
+        with_cal = self._report(self._data(res))
+        meta_base = pipeline._report_meta(base)
+        meta_cal = pipeline._report_meta(with_cal)
+        self.assertEqual(meta_cal["today_sources"], meta_base["today_sources"])
+        self.assertEqual(meta_cal["total_sources"], meta_base["total_sources"] + 1)
+
+    def test_absent_calendar_keeps_source_count_unchanged(self):
+        """OCTOPUS_CALENDAR=0 时不采集 → 不进审计，总源数与改动前一致（+1 只在采集时发生）。"""
+        base = pipeline._report_meta(self._report(self._data(with_today_source=True)))
+        res, _ = self._fetch()
+        with_cal = pipeline._report_meta(self._report(self._data(res)))
+        self.assertEqual(base["total_sources"], 9, "基础审计源数量不应被本次改动改变")
+        self.assertEqual(with_cal["total_sources"], base["total_sources"] + 1)
+
+    def test_failed_calendar_is_named_in_coverage_line(self):
+        with patch.object(pipeline, "safe_request", lambda *a, **k: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        html = self._report(self._data(res))
+        self.assertNotIn("未来30天影响经济时间点", html, "抓取失败的栏目不进正文")
+        self.assertRegex(html, r"暂缺：[^<]*财经日历")
+
+    # ---------- ④ 排版与披露 ----------
+    def test_section_renders_right_after_conclusion_in_both_themes(self):
+        res, _ = self._fetch()
+        for theme, markers in (
+            ("guizang", ["今日结论</h2>", "未来30天影响经济时间点</h2>", "行情速览</h2>"]),
+            ("pixel", ["LVL 01 // CONCLUSION", "LVL 02 // ECON CALENDAR",
+                       "LVL 03 // MARKET SNAPSHOT"]),
+        ):
+            html = self._report(self._data(res), theme=theme)
+            positions = [html.find(m) for m in markers]
+            self.assertNotIn(-1, positions, f"{theme} 栏目缺失: {markers}")
+            self.assertEqual(positions, sorted(positions),
+                             f"{theme} 新栏目必须紧跟今日结论、在行情速览之前")
+
+    def test_section_body_carries_window_summary_and_star_levels(self):
+        res, _ = self._fetch()
+        html = self._report(self._data(res))
+        for text in ("窗口摘要", "时间窗口", "时间点合计", "央行议息 / 重要会议",
+                     "中国关键读数", "美国关键读数", "最密集日", "筛选口径",
+                     "逐日时间点（北京时间）", "★★★", "美联储议息会议"):
+            self.assertIn(text, html, f"摘要/正文缺少 {text}")
+        self.assertIn("未来 30 天", html)
+        # 每个列出的时间点都要能看到地区与类型标签（数据 / 事件 / 动态）
+        self.assertIn("数据", html)
+        self.assertIn("事件", html)
+
+    def test_row_cap_discloses_every_dropped_item_by_level(self):
+        rows = []
+        for i in range(70):                      # 造出远超上限的 ★★★ 条目
+            rows.append(self._row(self._day(1 + i % 29), f"{9 + i % 8}:30",
+                                  f"中国:CPI:同比{i}(报告期:2026年09月)", "中国"))
+        res, _ = self._fetch(rows=rows)
+        limit = pipeline.ECON_CALENDAR_MAX_ROWS
+        self.assertEqual(len(res["items"]), limit)
+        self.assertEqual(res["dropped"], len(rows) - limit)
+        self.assertEqual(sum(int(v) for v in res["dropped_imp"].values()), res["dropped"])
+        digest = pipeline._cal_digest(res, self.TODAY)
+        total_line = dict(digest["pairs"])["时间点合计"]
+        self.assertIn(f"版面另有 {res['dropped']} 条未列出", total_line)
+        self.assertIn("★★★", total_line, "被裁条目的重要度分布必须写清楚")
+
+    def test_low_importance_rows_are_cut_before_core_readings(self):
+        rows = self._rows() + [
+            self._row(self._day(2), "09:00", f"某展会{i}届博览会", "上海", "博览会", "1")
+            for i in range(80)
+        ]
+        with patch.object(pipeline, "ECON_CALENDAR_MAX_ROWS", 20):
+            res, _ = self._fetch(rows=rows)
+        names = "".join(it["name"] for it in res["items"])
+        self.assertIn("美联储议息会议", names, "★★★ 事件不能被 ★ 级展会挤掉")
+        self.assertIn("制造业PMI", names)
+        self.assertLessEqual(sum(1 for it in res["items"] if it["imp"] == 1), 20 - 8)
+
+    def test_digest_counts_match_items(self):
+        res, _ = self._fetch()
+        digest = pipeline._cal_digest(res, self.TODAY)
+        pairs = dict(digest["pairs"])
+        counts = pipeline._cal_imp_counts(res["items"])
+        self.assertIn(f"{len(res['items'])} 个", pairs["时间点合计"])
+        self.assertIn(f"★★★ {counts['3']}", pairs["时间点合计"])
+        day_items = sum(len(items) for _d, _l, _t, items in digest["days"])
+        self.assertEqual(day_items, len(res["items"]), "逐日展开必须与条目数一致")
+        # 摘要里点名的时间点必须真的在列表里（不得凭空生成日程）
+        for label in ("央行议息 / 重要会议", "中国关键读数", "美国关键读数"):
+            for chunk in re.split(r"[、,]", pairs[label].split(" 等 ")[0]):
+                name = chunk.split(" ", 1)[-1].strip()
+                if name and name != "窗口内暂无":
+                    self.assertIn(name[:6], "".join(it["name"] for it in res["items"]),
+                                  f"{label} 里的 {name} 不在抓取结果中")
+
+    def test_calendar_block_renders_in_both_kits_and_stays_balanced(self):
+        res, _ = self._fetch()
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            block = kit.calendar_block(res)
+            self.assertIn("窗口摘要", block)
+            self.assertEqual(block.count("<table"), block.count("</table>"),
+                             "表格必须成对闭合（微信端半截标签会整页崩版）")
+
+    def test_calendar_only_cli_mode_prints_without_pushing(self):
+        res, _ = self._fetch()
+        with patch.object(pipeline, "fetch_econ_calendar", lambda days=None: res), \
+             patch.object(pipeline, "push_to_wechat", lambda *a, **k: self.fail("研究模式不得推送")), \
+             patch.object(pipeline, "generate_report", lambda *a, **k: self.fail("研究模式不得生成日报")):
+            self.assertEqual(pipeline.calendar_only_report(), 0)
 
 
 if __name__ == "__main__":

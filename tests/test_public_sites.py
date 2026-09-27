@@ -201,10 +201,11 @@ class SentimentFactorTests(unittest.TestCase):
         self.assertEqual(tuple(results), ("Reddit",))
         self.assertEqual(results["Reddit"]["status"], "unavailable")
 
-    def test_collect_all_data_has_eight_base_plus_reddit(self):
+    def test_collect_all_data_has_base_sources_plus_reddit(self):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
-                  "fetch_eastmoney_news", "fetch_hot_stocks")
+                  "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant",
+                  "fetch_econ_calendar")
         reddit = pipeline._public_site_result(
             "Reddit", [{"title": "Sample", "url": "https://www.reddit.com/r/stocks/comments/1/x/",
                         "is_today": True}])
@@ -219,7 +220,10 @@ class SentimentFactorTests(unittest.TestCase):
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        self.assertEqual(len(data), 9)  # 8 个基础数据源 + Reddit 趋势跟踪线索
+        # 10 个基础数据源（含港股量化引擎与未来30天财经日历）+ Reddit 趋势跟踪线索
+        self.assertEqual(sorted(data), sorted((
+            "实时行情", "A股大盘全景", "国家政策", "港股名家频道", "全球头条",
+            "A股资讯", "东财快讯", "热门榜单", "港股量化", "财经日历", "Reddit")))
         self.assertEqual(data["Reddit"]["status"], "success")
 
     def _reddit_data(self):
@@ -271,8 +275,8 @@ class SentimentFactorTests(unittest.TestCase):
                     # 非法 URL 条目整体剔除，不注入
                     self.assertNotIn('href="javascript:', report)
                     self.assertNotIn("Unsafe", report)
-                    # 审计口径：8 个基础数据源 + Reddit
-                    self.assertEqual(pipeline._report_meta(report)["total_sources"], 9)
+                    # 审计口径：9 个基础数据源（含港股量化引擎）+ Reddit
+                    self.assertEqual(pipeline._report_meta(report)["total_sources"], 10)
         can_push, reason = pipeline.check_push_eligibility(data)
         self.assertTrue(can_push)
         self.assertIn("当天", reason)
@@ -294,7 +298,8 @@ class SentimentFactorTests(unittest.TestCase):
             self.assertIn("暂缺：", report)
             self.assertIn("Reddit", report)
             self.assertNotIn("HTTP 403", report)
-            self.assertEqual(pipeline._report_meta(report)["total_sources"], 9)
+            # 9 个基础数据源 + Reddit（未采集财经日历时不进审计）
+            self.assertEqual(pipeline._report_meta(report)["total_sources"], 10)
         self.assertFalse(pipeline.check_push_eligibility(failed)[0])
 
 
