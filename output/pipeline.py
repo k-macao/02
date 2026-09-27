@@ -80,7 +80,18 @@
       新闻情绪；无热门榜单则栏目缺席。标题存档存 output/news_history.json
       （每次运行合并本次抓取并按 日期+标题 去重）。冷启动/样本不足明确标注。
       渲染位置：各资讯栏目之后。规则合成、非投资建议。
-  11. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
+  11. 「港股量化引擎」（output/octopus_quant/，2026-09-28 起）：把整条流程按量化
+      思维重构成六个可独立测试的层——providers(数据) → features(五因子特征) →
+      probability(分桶+保序+逻辑回归校准 / 推进式回测) → liquidity(资金流动性) →
+      engine(编排) → render(呈现)，外加「预测留痕 → 次日按真实收盘结算」的反馈闭环
+      （output/quant_history.json）。核心栏目三个：**量化预测总览**（概率 + 95% 区间 +
+      波动分位 + 模型可信度 + 预测复盘）、**港股概率走势分析**（恒指/恒科/国企指数 +
+      个股池逐只概率 + 市场宽度 + 五因子拆解）、**资金流动性分析**（南向/北向成交总额
+      与 z 值分位、恒指量能、Amihud 非流动性、CR5 集中度、主力资金流、流动性综合分
+      0~100 与对概率的有界修正）。概率全部由「同一套因子在自身历史上滚动重算 →
+      分桶 + 保序 + 逻辑回归校准」得到，并经推进式回测检验（每步只用过去数据），
+      夹在 5%~95%，非投资建议；数据取不到时对应子块明确显示「暂缺」，绝不编造。
+  12. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
       直接读取中国政府网「最新政策」官方页面，保留发布日期与 gov.cn 原文链接；
       近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度识别
       （货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI / PPI /
@@ -131,6 +142,26 @@ except ImportError:
 # ============================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPORT_DIR = SCRIPT_DIR
+
+# ============================================================
+# 港股量化引擎（output/octopus_quant/）
+# ------------------------------------------------------------
+# 分层：providers(数据) → features(特征) → probability(概率/校准/回测) →
+#       liquidity(资金流动性) → engine(编排) → render(呈现)。
+# pipeline 只做两件事：注入取数函数 ``safe_request``、注入排版套件 ``kit``；
+# 量化包不反向依赖日报，因此可完全离线单测（见 tests/test_quant.py）。
+# 另有反馈闭环：每次预测写入 output/quant_history.json，之后按真实收盘结算
+# 「方向命中 / 区间命中 / Brier」，模型表现自己记账。
+# ============================================================
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+import octopus_quant as _quant  # noqa: E402
+
+QUANT_HISTORY_FILENAME = "quant_history.json"
+# 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
+HK_QUANT_ENABLED = str(os.environ.get("OCTOPUS_QUANT", "1")).strip().lower() not in ("0", "false", "no")
+# 是否逐只跑个股概率（关掉后只出指数与流动性，明显更快）
+HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower() not in ("0", "false", "no")
 
 # 时区
 CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
@@ -1657,6 +1688,44 @@ def fetch_public_sites():
 # ============================================================
 # 数据采集主函数
 # ============================================================
+def fetch_hk_quant():
+    """数据源 8：港股量化引擎（概率预测 + 资金流动性 + 推进式校验）。
+
+    跑通整条量化流水线：Yahoo 港股指數/个股日线 → 五因子 → 历史滚动重算 →
+    分桶+保序+逻辑回归校准 → 推进式回测 → 沪深港通/成交/深度的流动性画像 →
+    预测留痕。任一环节取不到数据就按「暂缺」降级，绝不用历史数字冒充实时。
+    """
+    print("📡 正在运行港股量化引擎（恒指/恒科日线 · 港股蓝筹 · 沪深港通 · 港股成交）...")
+    if not HK_QUANT_ENABLED:
+        print("  ⏭ 量化引擎已关闭（OCTOPUS_QUANT=0 / --no-quant）")
+        return _source_result("港股量化引擎", "unavailable", result=None,
+                              error="本次运行已关闭量化引擎")
+    try:
+        res = _quant.run_quant(
+            safe_request,
+            history_path=os.path.join(REPORT_DIR, QUANT_HISTORY_FILENAME),
+            enable_stocks=HK_QUANT_STOCKS)
+    except Exception as exc:                       # 引擎异常不影响日报其它栏目
+        print(f"  ⚠️ 量化引擎异常：{exc}")
+        return _source_result("港股量化引擎", "unavailable", result=None, error=str(exc))
+
+    if not res.get("available"):
+        print(f"  ⚠️ 量化引擎暂不可用：{res.get('reason')}")
+        return _source_result("港股量化引擎", "unavailable", result=None,
+                              error=str(res.get("reason") or "样本不足"))
+
+    head = res.get("headline") or {}
+    if head.get("available"):
+        print(f"  ✅ 量化预测：{head['text']}")
+    liq = res.get("liquidity") or {}
+    if liq.get("score") is not None:
+        print(f"  ✅ 流动性综合分 {liq['score']:.0f}/100（{liq['label']}）")
+    return _source_result("港股量化引擎", "success",
+                          is_today=(res.get("as_of") == _today_display()),
+                          content_date=res.get("as_of"),
+                          result=res)
+
+
 def collect_all_data():
     """采集所有数据源"""
     print("\n" + "=" * 50)
@@ -1684,6 +1753,9 @@ def collect_all_data():
     time.sleep(0.5)
 
     data["热门榜单"] = fetch_hot_stocks()
+    time.sleep(0.5)
+
+    data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
 
     print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十个板块热门帖）...")
@@ -1834,6 +1906,9 @@ KOBOYO_SECTION_ICONS = {
     "CONCLUSION": "brain",
     "WRAP-UP": "document",
     "TREND CLUES": "brain",
+    "QUANT FORECAST": "chart",
+    "HK PROBABILITY": "chart",
+    "LIQUIDITY FLOW": "chart",
 }
 
 
@@ -1976,6 +2051,9 @@ _SECTION_ICON_META = {
     "CONCLUSION": ("★", "TL;DR", C_LEMON, C_AI_BG),
     "WRAP-UP": ("✓", "RECAP", C_GREEN, C_UP_BG),
     "TREND CLUES": ("◉", "TREND", C_MAGENTA, "#301226"),
+    "QUANT FORECAST": ("◈", "FORECAST", C_CYAN, "#092836"),
+    "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
+    "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
 }
 
 
@@ -1996,6 +2074,33 @@ def _pixel_icon(kicker, size=44):
             f'<div style="font-size:{glyph_size}px;line-height:{glyph_size}px;">{glyph}</div>'
             f'<div style="font-size:8px;line-height:10px;letter-spacing:.5px;">{label}</div>'
             f'</td></tr></table>')
+
+
+def _pixel_table(headers, rows, aligns=None):
+    """pixel 主题的多列数据表（等宽字体 + 霓虹表头；单元格内容由调用方转义）。"""
+    rows = [list(r) for r in (rows or [])]
+    if not rows:
+        return ""
+    n = len(headers) if headers else len(rows[0])
+    if n <= 0:
+        return ""
+    aligns = list(aligns or (["left"] + ["right"] * (n - 1)))
+    aligns = (aligns + ["left"] * n)[:n]
+    head = "".join(
+        f'<td align="{aligns[i]}" style="padding:5px 6px;border-bottom:1px solid {C_ACCENT};'
+        f'font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:.5px;'
+        f'font-family:{FONT_MONO};text-align:{aligns[i]};">{_esc(h)}</td>'
+        for i, h in enumerate(headers or []))
+    body = []
+    for row in rows:
+        body.append("<tr>" + "".join(
+            f'<td align="{aligns[i]}" valign="top" style="padding:5px 6px;'
+            f'border-bottom:1px solid {C_HAIR};font-size:11px;color:{C_INK};'
+            f'line-height:1.6;font-family:{FONT_MONO};text-align:{aligns[i]};">'
+            f'{row[i] if i < len(row) else ""}</td>' for i in range(n)) + "</tr>")
+    return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+            f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
+            f'<tr>{head}</tr>{"".join(body)}</table>')
 
 
 def _pixel_panel(title, body, color=C_CYAN, icon="■"):
@@ -2957,9 +3062,18 @@ def _market_brief(market, labels, kit):
     return " · ".join(bits)
 
 
-def _conclusion_pairs(kit, ai_result, market, pan, policy):
-    """页首「今日结论」：倾向 → 核心判断 → 各市场一句话 → 政策定调。"""
+def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
+    """页首「今日结论」：倾向 → 量化预测 → 核心判断 → 各市场一句话 → 政策定调。"""
     pairs = []
+    # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
+    if quant and quant.get("available"):
+        head = quant.get("headline") or {}
+        if head.get("available"):
+            pairs.append(("量化预测",
+                          f'<b>{_esc(head.get("arrow", "■"))} '
+                          f'{_esc(head.get("label", "中性"))} '
+                          f'{head.get("p_up", 0) * 100:.0f}%</b>'
+                          f' · {_esc(quant.get("target_label") or "下一交易日")}'))
     if ai_result and ai_result.get("available"):
         score = int(ai_result["score"])
         arrow = "▲" if score > 8 else ("▼" if score < -8 else "■")
@@ -3003,9 +3117,28 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy):
     return pairs
 
 
-def _summary_pairs(ai_result, pan, policy, source_items, today_n, total):
-    """末尾「盘点总结」：结论回顾 → 明日关注 → 风险关注 → 数据覆盖（一行）。"""
+def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None):
+    """末尾「盘点总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
     pairs = []
+    if quant and quant.get("available"):
+        v1 = (quant.get("validation") or {}).get(1) or {}
+        if v1:
+            sig = ""
+            if v1.get("z") is not None:
+                sig = ("（显著）" if abs(v1["z"]) >= 1.96 else
+                       "（弱显著）" if abs(v1["z"]) >= 1.28 else "（不显著）")
+            pairs.append(("模型校准",
+                          f'推进式回测 {v1.get("n", 0)} 日 · 命中 '
+                          f'{(v1.get("hit_rate") or 0) * 100:.0f}% · 基准 '
+                          f'{(v1.get("base_rate") or 0) * 100:.0f}%{sig}'))
+        jr = quant.get("journal") or {}
+        if jr.get("n"):
+            bits = [f'已结算 {jr["n"]} 次 · 方向命中 {(jr.get("hit_rate") or 0) * 100:.0f}%']
+            if jr.get("band_hit_rate") is not None:
+                bits.append(f'区间命中 {jr["band_hit_rate"] * 100:.0f}%')
+            if jr.get("brier") is not None:
+                bits.append(f'Brier {jr["brier"]:.3f}')
+            pairs.append(("预测追踪", _esc(" · ".join(bits))))
     recap = []
     if ai_result and ai_result.get("available"):
         recap.append(f'整体{ai_result["sentiment_label"]}')
@@ -3039,6 +3172,7 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total):
 # 阅读顺序：结论 → 数据（行情 / 全景 / 政策 / 研判依据）→ 趋势跟踪线索与资讯 → 新闻情绪 → 盘点。
 REPORT_SECTION_ORDER = (
     "CONCLUSION",
+    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "POLICY SHOCK", "AI READ",
     "TREND CLUES", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
@@ -3333,6 +3467,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("A股资讯", sina),
         ("东财快讯", em),
         ("热门榜单", hot),
+        ("港股量化引擎（概率/流动性）", data.get("港股量化") or {}),
     ]
     # 仅运行过十站采集时加入审计；外部旧调用若无新键仍维持原来的基础数据源数量。
     source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
@@ -3350,6 +3485,27 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         policy = policy_result if policy_result is not None else \
             build_policy_factor(data, date_str, news_corpus)
         ai_result = build_ai_analysis(data)
+
+    # ---- 量化三栏：预测总览 → 港股概率走势 → 资金流动性（结论之后优先展示）----
+    quant = {}
+    quant_src = data.get("港股量化") or {}
+    if isinstance(quant_src, dict):
+        quant = quant_src.get("result") or {}
+    if quant.get("available"):
+        quant_badge = kit.badge("量化模型", "ai")
+        fc_html = _quant.render.render_forecast(quant, kit)
+        if fc_html:
+            blocks["QUANT FORECAST"] = (
+                "QUANT FORECAST", "量化预测总览", fc_html, quant_badge, "")
+        hk_html = _quant.render.render_hk_probability(quant, kit)
+        if hk_html:
+            blocks["HK PROBABILITY"] = (
+                "HK PROBABILITY", "港股概率走势分析", hk_html, quant_badge, "")
+        lq_html = _quant.render.render_liquidity(quant, kit)
+        if lq_html:
+            blocks["LIQUIDITY FLOW"] = (
+                "LIQUIDITY FLOW", "资金流动性分析", lq_html,
+                kit.source_badge(quant_src), _short_source(quant_src))
 
     # ① 行情速览（逐项行情的唯一展示位置；缺失的品种不出行）
     if market.get("status") == "success":
@@ -3422,10 +3578,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             )
 
     # 页首结论 / 末尾盘点
-    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy)
+    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy, quant=quant)
     if conclusion:
         blocks["CONCLUSION"] = ("CONCLUSION", "今日结论", kit.kv(conclusion), "", "")
-    summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total)
+    summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
+                             quant=quant)
     blocks["WRAP-UP"] = ("WRAP-UP", "盘点总结", kit.kv(summary), "", "")
 
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
@@ -5595,6 +5752,12 @@ PIXEL_KIT = _RenderKit(
     senti_empty_badge=lambda: _badge("样本不足", "warn"),
     policy_block=_pixel_policy_block,
     panorama_block=_panorama_block,
+    # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
+    esc=_esc,
+    table=lambda headers, rows, aligns=None: _pixel_table(headers, rows, aligns),
+    sub=_subsection,
+    meter=lambda value, maximum: _signal_meter(value, maximum),
+    badge=_badge,
     section=_section,
     kv=lambda pairs: _data_table([(label, value) for label, value in pairs]),
     trend=_trend_badge,
@@ -5620,6 +5783,12 @@ GUIZANG_KIT = _RenderKit(
     senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
     policy_block=gz_policy_block,
     panorama_block=gz_panorama_block,
+    # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
+    esc=_esc,
+    table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
+    sub=gz_subsection,
+    meter=lambda value, maximum: gz_meter(value, maximum, cells=5),
+    badge=lambda text, kind="ok": gz_badge(text, kind),
     section=gz_section,
     kv=gz_kv_table,
     trend=gz_trend_badge,
@@ -6341,6 +6510,73 @@ def check_push_eligibility(data):
 # ============================================================
 # 主函数
 # ============================================================
+def quant_only_report(*, enable_stocks=True):
+    """只跑港股量化引擎并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    print("🐙 " + "=" * 48)
+    print("   章鱼 AI · 港股量化引擎（研究模式）")
+    print("🐙 " + "=" * 48)
+    res = _quant.run_quant(
+        safe_request,
+        history_path=os.path.join(REPORT_DIR, QUANT_HISTORY_FILENAME),
+        enable_stocks=enable_stocks)
+    if not res.get("available"):
+        print(f"❌ 量化引擎不可用：{res.get('reason')}")
+        return 1
+
+    head = res.get("headline") or {}
+    print(f"\n【预测概括】{head.get('text', '—')}")
+    print(f"【数据基准】{res.get('as_of')} → 目标 {res.get('target_label')}")
+
+    print("\n【指数概率】")
+    print(f"  {'标的':<8}{'现价':>12}{'1日':>8}{'5日':>8}{'20日':>8}{'样本':>7}{'趋势':>10}")
+    for row in res["indices"]:
+        p = row["probs"]
+        fmt = lambda v: f"{v*100:5.1f}%" if v is not None else "    —"
+        print(f"  {row['label']:<8}{row['feat']['close']:>12,.0f}"
+              f"{fmt(p[1]['p_up']):>8}{fmt(p[5]['p_up']):>8}{fmt(p[20]['p_up']):>8}"
+              f"{p[5]['samples']:>7}{row['trend']['label']:>10}")
+
+    for h, row in sorted((res.get("validation") or {}).items()):
+        if not row:
+            continue
+        z = row.get("z")
+        print(f"\n【{h}日推进式回测】样本 {row['n']} · 命中 {row['hit_rate']*100:.1f}%"
+              f" · 基准 {row['base_rate']*100:.1f}%"
+              f" · z={z:+.2f}" if z is not None else "")
+        if row.get("brier") is not None:
+            print(f"  Brier {row['brier']:.3f} · 对数损失 {row.get('log_loss') or 0:.3f}")
+        for c in row.get("reliability") or []:
+            print(f"  预测 {c['lo']*100:5.1f}–{c['hi']*100:5.1f}%  n={c['n']:<4}"
+                  f"  实际 {c['actual']*100:5.1f}%")
+
+    liq = res.get("liquidity") or {}
+    if liq.get("available"):
+        print("\n【资金流动性】")
+        print(f"  综合分 {liq.get('score') or 0:.0f}/100 · {liq.get('label')}")
+        print(f"  {liq.get('summary')}")
+        for key, label in (("south", "南向"), ("north", "北向")):
+            st = liq.get(key) or {}
+            if st.get("available"):
+                print(f"  {label}：最新 {st['latest']:,.0f} 亿 · 环比 "
+                      f"{(st.get('chg_pct') or 0):+.1f}% · 20日均 {st['ma20']:,.0f} 亿"
+                      f" · z={(st.get('z20') or 0):+.2f} · {(st.get('date') or '')}")
+        for name, comp in (liq.get("components") or {}).items():
+            print(f"   · {name:<9} {comp['score']:5.1f} 分（权重 "
+                  f"{comp.get('weight', 0)*100:.0f}%） {comp.get('note') or ''}")
+
+    if res.get("stocks"):
+        print("\n【个股概率（按 5 日排序）】")
+        for row in sorted(res["stocks"], key=lambda r: -((r["probs"][5]["p_up"] or 0))):
+            print(f"  {row['label']:<12}{row['probs'][5]['p_up']*100:6.1f}%"
+                  f"  综合分 {row['score']:+.2f}  样本 {row['probs'][5]['samples']}")
+    jr = res.get("journal") or {}
+    if jr.get("n"):
+        print(f"\n【预测留痕】已结算 {jr['n']} 次 · 方向命中 "
+              f"{(jr.get('hit_rate') or 0)*100:.0f}%")
+    print("\n✅ 量化引擎运行完成（研究模式不推送）")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="🐙 章鱼AI · 每日财经日报流水线（当天检验后推送）",
@@ -6356,6 +6592,8 @@ def main():
   python3 output/pipeline.py --push-only            # 推送实际最后更新的一份日报（再次当天检验）
   python3 output/pipeline.py --push-only path/to/report.html
   python3 output/pipeline.py --list                 # 列出日报
+  python3 output/pipeline.py --no-quant             # 跳过港股量化引擎（运行更快）
+  python3 output/pipeline.py --quant-only           # 只跑量化引擎并打印概率/流动性/回测
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
         """
     )
@@ -6380,12 +6618,24 @@ def main():
                        help="推送主题：guizang（默认 · 电子杂志×电子墨水）/ pixel（旧版复古像素）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
+    parser.add_argument("--no-quant", action="store_true",
+                       help="跳过港股量化引擎（只出常规栏目，运行更快）")
+    parser.add_argument("--quant-only", action="store_true",
+                       help="只跑港股量化引擎并打印结果（研究模式：不生成日报、不推送）")
 
     args = parser.parse_args()
+
+    if args.no_quant:
+        global HK_QUANT_ENABLED
+        HK_QUANT_ENABLED = False
 
     # --list 模式
     if args.list:
         return list_reports()
+
+    # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
+    if args.quant_only:
+        return quant_only_report(enable_stocks=HK_QUANT_STOCKS)
 
     # --push-only 模式：推送已有文件，同样执行「当天检验」
     if args.push_only:

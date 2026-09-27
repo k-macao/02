@@ -145,7 +145,7 @@ class ReportFreshnessTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 8)  # 8 个基础数据源（2026-09-08 新增「A股大盘全景」）；Reddit 趋势跟踪线索另计，本样本未含
+        self.assertEqual(meta["total_sources"], 9)  # 9 个基础数据源（2026-09-28 新增「港股量化引擎」）；Reddit 趋势跟踪线索另计，本样本未含
 
     def test_push_eligibility_requires_today_content(self):
         # 有内容但全部非当天 → 不推送
@@ -405,7 +405,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("当天 5/8 源", html)  # 热门榜单只计入盘点总结的数据覆盖
+        self.assertIn("当天 5/9 源", html)  # 热门榜单只计入盘点总结的数据覆盖
         # 2026-08-06 起不再单独渲染三个成交量榜单栏目，只保留 AI 研判结果
         self.assertNotIn("A股成交量前五", html)
         self.assertNotIn("港股成交量前五", html)
@@ -417,7 +417,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("Gemini", html)
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 8)  # 8 个基础数据源（2026-09-08 新增「A股大盘全景」）；Reddit 趋势跟踪线索另计，本样本未含
+        self.assertEqual(meta["total_sources"], 9)  # 9 个基础数据源（2026-09-28 新增「港股量化引擎」）；Reddit 趋势跟踪线索另计，本样本未含
 
 
 class RetroPixelVisualTests(unittest.TestCase):
@@ -783,7 +783,7 @@ class GuizangThemeTests(unittest.TestCase):
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
         self.assertGreaterEqual(meta["today_sources"], 1)
-        self.assertEqual(meta["total_sources"], 8)  # 8 个数据源（含 A股大盘全景）
+        self.assertEqual(meta["total_sources"], 9)  # 9 个数据源（含 A股大盘全景与港股量化引擎）
 
 
 class PushResultTests(unittest.TestCase):
@@ -1591,14 +1591,14 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("A股大盘全景", html)           # 数据审计栏仍留痕
         self.assertIn("暂缺", html)
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 8)  # 源数与是否有数据无关
+        self.assertEqual(meta["total_sources"], 9)  # 源数与是否有数据无关
 
     def test_panorama_counts_in_audit_and_eligibility(self):
         data = NewLayoutRenderingTests()._rich_data()
         data["A股大盘全景"] = self._panorama_payload()
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
         meta = pipeline._report_meta(html)
-        self.assertEqual(meta["total_sources"], 8)  # 审计源数固定，与实收数据无关
+        self.assertEqual(meta["total_sources"], 9)  # 审计源数固定，与实收数据无关
         ok, reason = pipeline.check_push_eligibility(data)
         self.assertTrue(ok)
         # check_push_eligibility 按实收数据源动态计数（rich fixture 未含流动性源 → 8 项缺 1）
