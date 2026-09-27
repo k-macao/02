@@ -30,8 +30,10 @@ class ReportFreshnessTests(unittest.TestCase):
         }
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
         self.assertIn("6,123", html)
-        self.assertIn("数据暂缺", html)
-        self.assertIn("本次数据可用性", html)
+        # 精简排版：缺失品种不出「数据暂缺」行，来源状态压成盘点总结里的一行
+        self.assertNotIn("数据暂缺", html)
+        self.assertIn("盘点总结", html)
+        self.assertRegex(html, r"暂缺：[^<]*全球头条[^<]*A股资讯")
         self.assertNotIn("51,618 -2.19%", html)
         self.assertNotIn("3,813 +0.40%", html)
 
@@ -135,9 +137,10 @@ class ReportFreshnessTests(unittest.TestCase):
         # 没有数据也没有需登录频道的卡片不渲染主体
         self.assertNotIn("郭思治（郭Sir）", html)
         self.assertNotIn("每个频道列出最新", html)
-        # 页脚状态清单仍留痕（含“数据暂缺”字样）
-        self.assertIn("数据暂缺", html)
-        self.assertIn("本次数据可用性", html)
+        # 盘点总结仍一行留痕缺失来源
+        self.assertIn("数据覆盖", html)
+        self.assertIn("暂缺：", html)
+        self.assertIn("港股名家频道", html)
         # 元信息可供 --push-only 二次当天检验
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["date"], "20260801")
@@ -494,7 +497,7 @@ class NewLayoutRenderingTests(unittest.TestCase):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("东方财富快讯", html)
         self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("热门榜单", html)  # 仍作为数据源出现在数据审计栏
+        self.assertIn("当天 5/8 源", html)  # 热门榜单只计入盘点总结的数据覆盖
         # 2026-08-06 起不再单独渲染三个成交量榜单栏目，只保留 AI 研判结果
         self.assertNotIn("A股成交量前五", html)
         self.assertNotIn("港股成交量前五", html)
@@ -533,8 +536,11 @@ class RetroPixelVisualTests(unittest.TestCase):
 
         self.assertIn("OCTOPUS_OS v3.0", html)
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
-        self.assertIn("LVL 01 // POLICY SHOCK", html)  # 政策因子固定首位
-        self.assertIn("LVL 02 // AI READ", html)
+        self.assertIn("LVL 01 // CONCLUSION", html)  # 结论先行
+        self.assertIn("LVL 02 // MARKET SNAPSHOT", html)
+        self.assertIn("// POLICY SHOCK", html)
+        self.assertIn("// AI READ", html)
+        self.assertIn("LVL 08 // WRAP-UP", html)  # 盘点收尾
         self.assertIn("AI CORE OUTPUT", html)
         self.assertIn("AI 主结论 // CORE THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
@@ -542,8 +548,10 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（行情速览：明细数字唯一出处）
         # 2026-09-09 页内去重：TECH READ 不再逐条复述 compact 徽标，只保留聚合
         self.assertIn("指数动能聚合", html)
-        self.assertIn("明细数值见「行情速览」", html)
-        self.assertNotIn("▼ -2.50%", html)  # 逐指数 compact 徽标已从动能区移除
+        self.assertNotIn("明细数值见「行情速览」", html)  # 说明性脚注已移除
+        # 逐指数 compact 徽标已从动能区移除；只在页首「今日结论」摘要出现一次
+        self.assertEqual(html.count("▼ -2.50%"), 1)
+        self.assertLess(html.find("▼ -2.50%"), html.find("LVL 02 // MARKET SNAPSHOT"))
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
@@ -787,15 +795,16 @@ class GuizangThemeTests(unittest.TestCase):
     def test_guizang_market_table_becomes_vertical_rowline(self):
         data = ReportFreshnessTests()._sample_data()
         html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
-        # 行情速览：三列满宽表（名称 / 最新价 / 涨跌），缺数标注暂缺
+        # 行情速览：三列满宽表（名称 / 最新价 / 涨跌），缺数品种直接不出行
         self.assertIn("6,123", html)                  # 标普500 价格
-        self.assertIn("数据暂缺", html)                # 缺失指数明确标注
+        self.assertNotIn("数据暂缺", html)
+        self.assertNotIn("道琼斯指数", html)
         self.assertIn("名称", html)
         self.assertIn("最新价", html)
         self.assertIn("涨跌", html)
         self.assertIn("全球与美股", html)
         self.assertIn("A股四指数", html)
-        self.assertIn("港股双指数", html)
+        self.assertNotIn("港股双指数", html)        # 整组缺失 → 小节缺席
         self.assertIn("table-layout:fixed", html)
 
     def test_wechat_width_is_in_inline_css_not_only_html_attribute(self):
@@ -1655,7 +1664,7 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("1,350.25 亿元", html)
         self.assertIn("南向成交总额", html)
         self.assertIn("88.50 亿元", html)
-        self.assertIn("2024-08-19", html)          # 披露口径说明
+        self.assertNotIn("2024-08-19", html)       # 披露口径说明已精简
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
         self.assertIn("领跌板块乙", html)
@@ -1753,8 +1762,9 @@ class ReportInnerDedupeTests(unittest.TestCase):
         self.assertEqual(html.count(self.RISK_TITLE), 1)
         self.assertIn("「全球头条」第02条", html)
         self.assertIn('href="#h-gh-02"', html)
-        self.assertIn("指数动能聚合", html)
-        self.assertIn("明细数值见「行情速览」", html)
+        self.assertIn("指数动能", html)
+        self.assertIn("4 个指数", html)
+        self.assertNotIn("明细数值见「行情速览」", html)
 
     def test_tech_aggregate_counts_match_quotes(self):
         """动能聚合的涨跌家数与输入行情一致（3 涨 / 1 跌 / 0 平）。"""
@@ -1782,9 +1792,9 @@ class ReportInnerDedupeTests(unittest.TestCase):
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
-            self.assertIn("数值详见「行情速览」", html)
             self.assertEqual(html.count("12,345.67"), 1, f"theme={theme}")  # 千分位价格仅出现一次
-            self.assertEqual(html.count("-2.50%"), 1, f"theme={theme}")     # 涨跌幅仅出现一次
+            # 涨跌幅：行情速览明细 + 页首「今日结论」摘要各一次
+            self.assertLessEqual(html.count("-2.50%"), 2, f"theme={theme}")
 
     def test_unshown_channel_risk_keeps_full_title(self):
         """正文截断未展示的风险标题（港股频道第 4 条）：风险区保留全文。"""
@@ -2110,27 +2120,21 @@ class NewsSentimentFactorTests(unittest.TestCase):
         self.assertIn("▲ S+1", html)  # 黑白模式用符号区分方向
         self.assertIn("▼ S−1", html)
         self.assertIn("MOM +0.67", html)
-        self.assertIn("总结评论", html)
+        self.assertIn("AI 情绪分", html)
         self.assertIn("原因", html)
         self.assertIn("A股 · 成交量前5", html)
+        self.assertNotIn("暂无评分", html)   # 未被点名的个股不再占位
 
     def test_per_stock_render_without_attribution(self):
-        # 2026-09-09 起：窗口内标题未点名任何榜单个股时，栏目仍按三大市场成交量前五
-        # 逐股展示「暂无评分 + 总结评论 + 原因」，不伪造 DNS 数值。
+        # 2026-09-27 精简排版：窗口内标题未点名任何榜单个股时栏目整体缺席，
+        # 不再逐股输出「暂无评分」占位，也不伪造 DNS 数值。
         data = NewLayoutRenderingTests()._rich_data()  # 标题未提及任何榜单个股
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
-            self.assertIn("AI 新闻情绪因子", html)
-            for market in ("A股", "港股", "美股"):
-                self.assertIn(f"{market} · 成交量前5", html)
-            for name in ("A股股票0", "A股股票4", "港股股票0", "港股股票4",
-                         "美股股票0", "美股股票4"):
-                self.assertIn(name, html)
-            self.assertIn("暂无评分", html)
-            self.assertIn("总结评论", html)
-            self.assertIn("原因", html)
-            self.assertNotIn("DNS +", html)   # 无归因 → 不出因子数值
+            self.assertNotIn("AI 新闻情绪因子", html)
+            self.assertNotIn("暂无评分", html)
+            self.assertNotIn("DNS +", html)
             self.assertNotIn("S+1", html)
 
     def test_absent_without_hot_rankings(self):
@@ -2320,8 +2324,9 @@ class PolicyFactorTests(unittest.TestCase):
     def test_pixel_renders_first_with_summary(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
-        self.assertIn("LVL 01 // POLICY SHOCK", html)
-        self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
+        self.assertIn("LVL 01 // CONCLUSION", html)        # 结论先行，政策定调进入结论
+        self.assertIn("// POLICY SHOCK", html)
+        self.assertLess(html.find("// POLICY SHOCK"), html.find("// AI READ"))
         self.assertIn("政策冲击指数", html)
         self.assertIn("PSI +2", html)
         self.assertIn("政策类新闻 6 条", html)
@@ -2333,10 +2338,12 @@ class PolicyFactorTests(unittest.TestCase):
     def test_guizang_renders_first_with_summary(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
-        self.assertLess(html.find("政策因子 · 冲击指数"), html.find("AI 盘研判"))
+        self.assertLess(html.find("政策因子</h2>"), html.find("AI 盘研判</h2>"))
+        self.assertLess(html.find("今日结论</h2>"), html.find("政策因子</h2>"))
         self.assertIn("PSI +2", html)
-        self.assertIn("政策类新闻 6 条", html)
-        self.assertIn("承压居前", html)
+        self.assertIn("6 条（近 15 日）", html)
+        self.assertIn("行业冲击榜", html)
+        self.assertNotIn("政策因子口径", html)          # 口径说明已移除
         self.assertIn("08-01 ·", html)
 
     def test_absent_without_policy_news(self):
@@ -2452,15 +2459,15 @@ class NationalPolicySourceTests(unittest.TestCase):
             self.assertIn("官方原文", html)
             self.assertIn("中国政府网（官方发布）", html)
             self.assertIn("https://www.gov.cn/zhengce/content/2026/08/content_7070009.htm?a=1&amp;b=2", html)
-            self.assertLess(html.find("政策因子"), html.find("本次数据可用性"))
+            self.assertLess(html.find("政策因子"), html.find("盘点总结"))
 
 
 class SectionReadingOrderTests(unittest.TestCase):
-    """2026-09-09：按阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
+    """2026-09-27：按人类阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
 
-    阅读顺序：政策因子 → AI 盘研判 → 行情速览 → A股大盘全景 → 资讯
-    （全球头条 → 东财快讯 → A股市场 → 港股名家频道）→ AI 新闻情绪因子 →
-    流动性分析 → 本次数据可用性（审计）。无数据栏目缺席但不打乱其余顺序。
+    结论先行 → 分栏展开（行情速览 → A股大盘全景 → 政策因子 → AI 盘研判 →
+    资讯：全球头条 → 东财快讯 → A股资讯 → 港股名家频道 → AI 新闻情绪因子）→
+    盘点总结收尾。无数据栏目缺席但不打乱其余顺序。
     """
 
     def _full_data(self):
@@ -2472,23 +2479,22 @@ class SectionReadingOrderTests(unittest.TestCase):
             "新浪财经", "success", is_today=True, content_date="2026-08-02",
             headlines=["A股市场放量上涨，沪指重返整数关口"])
         data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
-        data["A港美流动性"] = LiquidityReportTests()._liquidity_data()
         return data
 
     # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
     # AI 盘研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
-        "政策因子 · 冲击指数</h2>",
-        "AI 盘研判</h2>",
-        "行情速览（实时）</h2>",
+        "今日结论</h2>",
+        "行情速览</h2>",
         "A股大盘全景复盘</h2>",
+        "政策因子</h2>",
+        "AI 盘研判</h2>",
         "全球头条</h2>",
         "东方财富快讯</h2>",
-        "A股市场（实时行情 + 资讯）</h2>",
+        "A股资讯</h2>",
         "港股名家频道</h2>",
         "AI 新闻情绪因子</h2>",
-        "AI 研判 · 最近 A股、港股、美股成交量与流动性分析</h2>",
-        "本次数据可用性 · 当天检验</h2>",
+        "盘点总结</h2>",
     ]
 
     def test_guizang_section_reading_order(self):
@@ -2504,12 +2510,12 @@ class SectionReadingOrderTests(unittest.TestCase):
         html = pipeline.generate_report(
             self._full_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
         order = [
-            "LVL 01 // POLICY SHOCK", "LVL 02 // AI READ",
-            "LVL 03 // MARKET SNAPSHOT", "LVL 04 // A-SHARE PANORAMA",
-            "LVL 05 // GLOBAL HEADLINES", "LVL 06 // EASTMONEY WIRE",
-            "LVL 07 // A-SHARE DESK", "LVL 08 // HK GURU CHANNELS",
-            "LVL 09 // NEWS SENTIMENT", "LVL 10 // A/H/US LIQUIDITY",
-            "LVL 11 // DATA AUDIT",
+            "LVL 01 // CONCLUSION",
+            "LVL 02 // MARKET SNAPSHOT", "LVL 03 // A-SHARE PANORAMA",
+            "LVL 04 // POLICY SHOCK", "LVL 05 // AI READ",
+            "LVL 06 // GLOBAL HEADLINES", "LVL 07 // EASTMONEY WIRE",
+            "LVL 08 // A-SHARE DESK", "LVL 09 // HK GURU CHANNELS",
+            "LVL 10 // NEWS SENTIMENT", "LVL 11 // WRAP-UP",
         ]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "存在未渲染的 LVL 关卡")
@@ -2518,28 +2524,71 @@ class SectionReadingOrderTests(unittest.TestCase):
                              f"  {s}: {p}" for s, p in zip(order, positions)))
 
     def test_order_skips_missing_sections_without_shifting_rest(self):
-        # 无新闻/无政策/无情绪归因（缺席栏目）时，剩余栏目顺序与编号仍正确：
-        # AI 研判（行情+榜单可单独出信号）→ 行情 → 全景 → 流动性 → 审计
+        # 无新闻/无政策/无情绪归因（缺席栏目）时，剩余栏目顺序与编号仍正确
         data = self._full_data()
         for src in ("全球头条", "东财快讯", "港股名家频道"):
             data[src] = pipeline._source_result(
                 src, "unavailable", headlines=[], channels=[], error="offline")
         data["A股资讯"] = pipeline._source_result(
             "新浪财经", "unavailable", headlines=[], error="offline")
-        # 热门榜单缺席 → 新闻情绪因子无「三大市场前五」可迭代，栏目缺席
         data["热门榜单"] = pipeline._source_result(
             "东方财富热门榜", "unavailable", markets={}, error="offline")
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
-        order = ["LVL 01 // AI READ", "LVL 02 // MARKET SNAPSHOT",
-                 "LVL 03 // A-SHARE PANORAMA", "LVL 04 // A/H/US LIQUIDITY",
-                 "LVL 05 // DATA AUDIT"]
+        order = ["LVL 01 // CONCLUSION", "LVL 02 // MARKET SNAPSHOT",
+                 "LVL 03 // A-SHARE PANORAMA", "LVL 04 // AI READ",
+                 "LVL 05 // WRAP-UP"]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
-        # 已缺席的栏目不得以 LVL 关卡出现
-        self.assertNotRegex(html, r"LVL \d // POLICY SHOCK")
-        self.assertNotRegex(html, r"LVL \d // NEWS SENTIMENT")
+        self.assertNotRegex(html, r"LVL \d+ // POLICY SHOCK")
+        self.assertNotRegex(html, r"LVL \d+ // NEWS SENTIMENT")
+
+
+class ConciseLayoutTests(unittest.TestCase):
+    """2026-09-27 精简排版：结论先行、去说明、去无效 / 缺失内容。"""
+
+    def _data(self):
+        data = SectionReadingOrderTests()._full_data()
+        data["港股名家频道"]["channels"].append({
+            "name": "过期频道", "desc": "频道简介不应出现", "url": "",
+            "is_today": False,
+            "videos": [{"title": "两年前的旧视频", "url": "https://www.youtube.com/watch?v=old",
+                        "published_cst": "2024-07-30 16:52", "is_today": False}],
+        })
+        return data
+
+    def test_conclusion_first_and_summary_last(self):
+        html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
+        self.assertLess(html.find("今日结论</h2>"), html.find("行情速览</h2>"))
+        self.assertIn("市场倾向", html)
+        self.assertIn("核心判断", html)
+        self.assertGreater(html.find("盘点总结</h2>"), html.find("AI 新闻情绪因子</h2>"))
+        self.assertIn("今日盘点", html)
+        self.assertIn("数据覆盖", html)
+        self.assertNotIn("本次数据可用性", html)
+
+    def test_stale_channel_and_explanations_removed(self):
+        for theme in ("guizang", "pixel"):
+            html = pipeline.generate_report(
+                self._data(), "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertNotIn("两年前的旧视频", html)
+            self.assertNotIn("过期频道", html)
+            self.assertNotIn("数据暂缺", html)
+            self.assertNotIn("/*", html)                      # 像素脚注
+            self.assertNotIn("每个频道列出最新", html)
+            self.assertNotIn("非交易时段显示最近收盘", html)
+        guizang = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
+        self.assertNotIn("频道简介不应出现", guizang)
+        self.assertNotIn("香港著名股評人", guizang)
+        self.assertNotIn("AI 盘研判由公开数据经确定性规则合成", guizang)
+
+    def test_concise_detail_drops_disclaimers(self):
+        self.assertEqual(
+            pipeline._concise_detail("发布于 2026-09-27 08:00（北京时间）· 社区观点未经核实"),
+            "发布于 2026-09-27 08:00")
+        self.assertEqual(pipeline._concise_detail("官网公开榜单；数值为抓取快照"), "")
+        self.assertEqual(pipeline._concise_detail("营收 TTM 1.2 万亿 · PE 30"), "营收 TTM 1.2 万亿 · PE 30")
 
 
 if __name__ == "__main__":
