@@ -578,6 +578,30 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
         self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
 
+    def test_font_scale_knob_shrinks_every_guizang_size_and_falls_back_safely(self):
+        # 系数 1.0 精确复刻设计基准，层级比例不被破坏
+        self.assertEqual([pipeline._gz_fs(b, scale=1.0) for b in (56, 44, 36, 10, 9)],
+                         [56, 44, 36, 10, 9])
+        # 默认整体缩小：每一档都比基准小，且仍保持「标题 > 栏目 > 正文 > 元信息」
+        default = [pipeline._gz_fs(b) for b in (56, 44, 36, 10, 9)]
+        self.assertEqual(default, [pipeline.GZ_FS_DISPLAY, pipeline.GZ_FS_SECTION,
+                                   pipeline.GZ_FS_PRICE, pipeline.GZ_FS_BODY, pipeline.GZ_FS_META])
+        self.assertTrue(all(s < b for s, b in zip(default, (56, 44, 36, 10, 9))))
+        self.assertTrue(all(a > b for a, b in zip(default, default[1:])))
+        # 非法 / 越界输入回落到默认值，且不会把正文压到不可读
+        for bad in ("", "  ", "abc", None, "nan", "inf"):
+            self.assertEqual(pipeline._resolve_font_scale(bad), pipeline.DEFAULT_FONT_SCALE)
+            self.assertGreaterEqual(pipeline._gz_fs(9, scale=bad), pipeline.GZ_FS_FLOOR)
+        self.assertEqual(pipeline._resolve_font_scale("0.01"), 0.5)   # 下限夹紧
+        self.assertEqual(pipeline._resolve_font_scale("99"), 1.5)     # 上限夹紧
+        # 环境变量一处调整即可整体缩放
+        with patch.dict(os.environ, {"OCTOPUS_FONT_SCALE": "0.7"}):
+            self.assertEqual(pipeline._resolve_font_scale(), 0.7)
+            self.assertEqual(pipeline._gz_fs(56), 39)
+        # 信号格字号同样走缩放系数
+        self.assertEqual(pipeline.gz_meter(3, 5), pipeline.gz_meter(3, 5, size=pipeline.GZ_FS_METER))
+        self.assertIn(f"font-size:{pipeline.GZ_FS_METER}px", pipeline.gz_meter(3, 5))
+
     def test_guizang_page_style_tokens_and_vertical_layout(self):
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")  # 默认 = guizang
@@ -597,12 +621,18 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("SYS_TIME:", html)
         self.assertEqual(html.count("<h1 "), 1)
         self.assertGreater(html.count("<h2 "), 1)
-        # 字体分工：衬线标题 + 非衬线正文 + 等宽元信息；短字体栈避免
-        # 数百次重复后撑破 PushPlus 10 万字符上限。
-        self.assertIn("Songti SC", html)
+        # 字体：全篇统一圆体（墨水屏适配），短字体栈避免
+        # 数十次重复后撑破 PushPlus 10 万字符上限。
+        self.assertIn("Yuanti SC", html)
         self.assertIn("PingFang SC", html)
-        self.assertIn("font-family:monospace", html)
-        self.assertNotIn("IBM Plex Mono", html)
+        # 标题 / 正文 / 元信息不再各用各的栈，全篇只有这一条圆体栈
+        self.assertEqual(pipeline.GZ_SERIF, pipeline.GZ_SANS)
+        self.assertEqual(pipeline.GZ_SANS, pipeline.GZ_MONO)
+        families = set(re.findall(r"font-family:[^;\"]*", html))
+        self.assertEqual(families, {f"font-family:{pipeline.GZ_FONT}"})
+        for gone in ("font-family:monospace", "IBM Plex Mono",
+                     "Hiragino Mincho ProN", "Songti SC", "STSong", "SimSun"):
+            self.assertNotIn(gone, html)
         # 发丝线与留白
         self.assertIn(pipeline.GZ_HAIR, html)
         # 中文标题，不再重复英文栏目编号。
@@ -612,15 +642,18 @@ class GuizangThemeTests(unittest.TestCase):
         # 涨跌三重编码保留（颜色 + 箭头 + 文字）
         self.assertIn("▲ 涨 +1.25%", html)
         self.assertNotIn("OCTOPUS_OS", html)          # 不再是像素主题
-        # 微信稳排：刊头单列、无 inline-block 胶囊、无 nowrap 挤爆、无 8px 英文 kicker
+        # 微信稳排：刊头单列、无 inline-block 胶囊、无 nowrap 挤爆、无极小英文 kicker
         self.assertNotIn("white-space:nowrap", html)
         self.assertNotIn("display:inline-block", html)
         self.assertNotIn('width="33%"', html)
-        self.assertNotIn("font-size:8px", html)
+        # 最小字号不得低于元信息（等价于旧版「无 8px kicker」，随缩放系数自适应）
+        sizes = [int(s) for s in re.findall(r"font-size:(\d+)px", html)]
+        self.assertTrue(sizes)
+        self.assertGreaterEqual(min(sizes), pipeline.GZ_FS_META)
         self.assertIn("bgcolor=", html.lower())
-        self.assertIn("font-size:10px", html)          # 普通正文极小
-        self.assertIn("font-size:56px", html)          # 刊头主标题极大
-        self.assertIn("font-size:44px", html)          # 栏目标题 / 突出数字极大
+        self.assertIn(f"font-size:{pipeline.GZ_FS_BODY}px", html)      # 普通正文极小
+        self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", html)    # 刊头主标题极大
+        self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", html)    # 栏目标题极大
 
     def test_minimal_news_card_leads_with_title_and_keeps_source(self):
         html = pipeline.gz_headline_row({
@@ -661,20 +694,54 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("onclick", low)
         self.assertNotIn("webgl", low)
 
-    def test_japanese_design_uses_grayscale_and_serif_headings(self):
+    def test_eink_reading_contract_black_on_white_bold_and_thick_rules(self):
+        """墨水屏（电子墨水 / e-reader）适配契约：无灰底、无发丝线、无细笔画。"""
+        html = pipeline.generate_report(NewLayoutRenderingTests()._rich_data(),
+                                       "2026年8月2日 · 周日", "20260802")
+
+        # 1) 纯黑白：墨水屏只有黑/白，7% 灰底会抖成脏点
+        self.assertEqual(pipeline.GZ_PAPER_TINT, pipeline.GZ_PAPER)
+        for color in re.findall(r"(?:bgcolor=|background:|color:)(#[0-9A-Fa-f]{6})", html):
+            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+            self.assertEqual((r, g, b), (r, r, r), color)   # 灰阶可以，黑白必须纯白
+        self.assertNotIn("#F7F7F7", html)                  # 旧版浅灰底已移除
+        self.assertNotIn("rgba(", html)                    # 墨水屏不支持半透明
+
+        # 2) 对比度：正文纯黑，次要文字够深（#6B6B6B 在 16 级灰阶上偏淡）
+        self.assertEqual(pipeline.GZ_INK, "#000000")
+        self.assertEqual(int(pipeline.GZ_META[1:3], 16), 0x3A)
+        self.assertLess(int(pipeline.GZ_META[1:3], 16), 0x60)
+
+        # 3) 分隔线：1px 发丝线在墨水屏上会断裂，改为 2px 中灰
+        self.assertEqual(pipeline.GZ_HAIR_W, 2)
+        self.assertLessEqual(int(pipeline.GZ_HAIR[1:3], 16), 0xA0)
+        self.assertNotIn("1px solid", html)                # 页面内不该再有 1px 线
+
+        # 4) 字重：正文不再是 400 细笔画
+        self.assertNotIn("font-weight:400", html)
+        self.assertIn(f"font-weight:{pipeline.GZ_W_BODY}", html)
+        self.assertIn(f"font-weight:{pipeline.GZ_W_BOLD}", html)
+        self.assertEqual(pipeline.GZ_W_BODY, 500)
+
+        # 5) 圆体：全篇一条栈，标题/正文/元信息不再分家
+        self.assertIn("Yuanti SC", pipeline.GZ_FONT)
+        for old_font in ("Hiragino Mincho ProN", "Songti SC", "STSong", "SimSun", "monospace"):
+            self.assertNotIn(old_font, html)
+
+    def test_rounded_grayscale_design_uses_bold_headings(self):
         html = pipeline.generate_report(NewLayoutRenderingTests()._rich_data(), "测试日期", "20260908")
         for color in re.findall(r"#[0-9A-Fa-f]{6}", html):
             self.assertEqual(color[1:3], color[3:5], color)
             self.assertEqual(color[3:5], color[5:7], color)
         for heading in re.findall(r'<h[12]\b[^>]*>', html):
-            self.assertIn("Hiragino Mincho ProN", heading)
-            self.assertIn("Songti SC", heading)
+            self.assertIn("Yuanti SC", heading)        # 圆体（墨水屏）
+            self.assertIn(pipeline.GZ_FONT, heading)
             self.assertIn("letter-spacing:", heading)
-            self.assertIn("font-weight:700", heading)   # 标题统一加粗宋体
+            self.assertIn("font-weight:700", heading)   # 标题统一粗圆体
         for h1 in re.findall(r'<h1\b[^>]*>', html):
-            self.assertIn("font-size:56px", h1)          # 主标题极大
+            self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", h1)   # 主标题极大
         for h2 in re.findall(r'<h2\b[^>]*>', html):
-            self.assertIn("font-size:44px", h2)          # 栏目标题极大
+            self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", h2)   # 栏目标题极大
         # 刊头多图标显示：全部栏目手绘图标在刊头再排一行
         for slug in pipeline.KOBOYO_MASTHEAD_ICONS:
             self.assertIn(f'icons/svg/{slug}.svg', html)
