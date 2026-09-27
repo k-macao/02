@@ -108,7 +108,11 @@ import re
 import glob
 import json
 import xml.etree.ElementTree as ET
+import csv
+import io
+from concurrent.futures import ThreadPoolExecutor
 from html import unescape as _html_unescape
+from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 
@@ -137,21 +141,18 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
 
-# PushPlus 一对多群组编码（2026-09-09 起默认改为「一对多」推送至群组 oai.1；
-# 可在 PushPlus 后台自定义群组编码，或用环境变量 PUSHPLUS_TOPIC 覆盖；
-# 设为空字符串则回退到一对一直发自己）。
-PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "oai.1")
+# 默认「一对一」直发自己（不携带 topic 字段）；如需一对多群组推送，
+# 显式设置环境变量 PUSHPLUS_TOPIC=群组编码（例如 oai.1）。
+PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 
 # ============================================================
 # 推送主题（2026-08-21 起，一对一 / 一对多推送共用）
 # ============================================================
 # guizang —— 默认主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
 #   （github.com/op7418/guizang-ppt-skill），改造成适合微信阅读的竖版长页面：
-#   浅灰正文 + 深灰 Hero / 章节幕封、衬线标题（荧光绿）、非衬线正文（近黑深灰）、
-#   等宽元信息、发丝线与大留白。微信优先：单列满宽；行情 / 全景 / 情绪总览 /
-#   政策冲击 / 数据审计等结构化数据用键值表或多列表格整合；资讯长文与 AI 研判仍用卡片。
-#   图标极大、个别突出标题/数字极大、普通正文极小，不用三列刊头、inline-block 胶囊或 nowrap。
-#   因子分析以杂志式信号矩阵呈现（保留涨跌颜色、概率与证据）。
+#   白色正文、黑底白字的紧凑标题、圆体字与 2px 实线分隔。微信优先：单列满宽；
+#   行情 / 全景 / 情绪总览 / 政策冲击 / 数据审计等结构化数据用键值表整合。
+#   图标在白底独立显示，正文与次要文字保持纯黑 / 深灰；不依赖颜色区分涨跌。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
 # pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
 PUSH_THEMES = ("guizang", "pixel")
@@ -192,6 +193,23 @@ CHANNEL_TOP_N = 3
 GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
+
+# 六个公开投研站点：只读取可公开访问的 RSS、页面或站点提供的 CSV，
+# 不登录、不绕过付费墙。站点顺序同时用于抓取、栏目和审计展示。
+PUBLIC_SITE_NAMES = (
+    "Seeking Alpha", "Finviz", "Reddit", "CompaniesMarketCap",
+    "AnalysisSite（trackserenity）", "Koyfin",
+)
+PUBLIC_SITE_URLS = {
+    "Seeking Alpha": "https://seekingalpha.com/feed.xml",
+    "Finviz": "https://finviz.com/groups.ashx?g=sector&v=140",
+    "Reddit": "https://www.reddit.com/",
+    "CompaniesMarketCap": "https://companiesmarketcap.com/",
+    "AnalysisSite（trackserenity）": "https://www.trackserenity.com/",
+    "Koyfin": "https://www.koyfin.com/feed/",
+}
+PUBLIC_SITE_WINDOW_HOURS = 72  # 发布日期晚于此窗口的文章/推文不当作今日资讯重发
+PUBLIC_SITE_DISPLAY_N = 4
 
 HK_CHANNELS = [
     # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
@@ -1380,6 +1398,611 @@ def fetch_hk_channels():
 
 
 # ============================================================
+# 六个公开站点：日报短摘录（仅标题/公开指标/原始链接，不复制付费正文）
+# ============================================================
+_PUBLIC_ALLOWED_HOSTS = {
+    "seekingalpha.com", "www.seekingalpha.com", "finviz.com", "www.finviz.com",
+    "reddit.com", "www.reddit.com", "old.reddit.com",
+    "companiesmarketcap.com", "www.companiesmarketcap.com",
+    "trackserenity.com", "www.trackserenity.com",
+    "koyfin.com", "www.koyfin.com", "x.com", "www.x.com",
+    "twitter.com", "www.twitter.com",
+}
+
+
+def _public_url(raw, base=""):
+    """外链仅允许已列出的源站 HTTPS 主机，防止外部标题/链接注入日报。"""
+    if not raw or any(c.isspace() or c in ('<', '>', '\\') for c in str(raw).strip()):
+        return ""
+    try:
+        url = urljoin(base, str(raw).strip())
+        parsed = urlparse(url)
+        if (parsed.scheme != "https" or parsed.hostname not in _PUBLIC_ALLOWED_HOSTS
+                or parsed.username or parsed.password or parsed.port not in (None, 443)):
+            return ""
+    except ValueError:
+        return ""
+    return url
+
+
+def _public_text(value, limit=160):
+    """清理站点文本，限制每条摘录长度；HTML 转义在渲染时统一处理。"""
+    text = re.sub(r"<[^>]*>", " ", _html_unescape(str(value or "")))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit].rstrip() + ("…" if len(text) > limit else "")
+
+
+def _public_recent(dt, now=None, hours=PUBLIC_SITE_WINDOW_HOURS):
+    if not dt or dt.tzinfo is None:
+        return False
+    age = (now or datetime.now(CST)) - dt.astimezone(CST)
+    return -timedelta(minutes=5) <= age <= timedelta(hours=hours)
+
+
+def _public_site_result(name, items, *, latest=None, snapshot=False, note="", error=None):
+    """快照的「当天」是当日采集，不冒充当日发文/实时价格。"""
+    is_today = bool(items) and (snapshot or any(it.get("is_today") for it in items))
+    return _source_result(
+        name, "success" if items else "unavailable", is_today=is_today,
+        content_date=latest, url=PUBLIC_SITE_URLS[name], items=items,
+        snapshot=bool(snapshot and items), note=note,
+        error=error or ("未取得可核实的公开内容" if not items else None),
+    )
+
+
+def _public_rss_items(xml_text, base, *, limit=3, now=None):
+    """只接受带可验证发布时间的 RSS/Atom 条目，最多取近 72 小时短标题。"""
+    parsed = _parse_rss_items(xml_text, limit=40)
+    latest, recent = None, []
+    now = now or datetime.now(CST)
+    for row in parsed:
+        raw_date = str(row.get("published") or "").strip()
+        # 没有显式时区就不能确定自然日，拒绝用运行机器的本地时区猜测。
+        if not re.search(r"(?:Z|[+-]\d{2}:?\d{2}|\bGMT|\bUTC)$", raw_date, re.I):
+            continue
+        pub = row.get("published_cst") or ""
+        try:
+            dt = datetime.strptime(pub, "%Y-%m-%d %H:%M").replace(tzinfo=CST)
+        except ValueError:
+            continue
+        url = _public_url(row.get("url"), base)
+        title = _public_text(row.get("title"), 125)
+        host = urlparse(url).hostname or ""
+        source_host = urlparse(base).hostname or ""
+        if host.removeprefix("www.") != source_host.removeprefix("www.") or not title:
+            continue
+        if not latest or dt > latest:
+            latest = dt
+        if not _public_recent(dt, now):
+            continue
+        recent.append({"title": title, "url": url,
+                       "detail": f"发布于 {pub}（北京时间）",
+                       "published_cst": pub, "is_today": dt.date() == now.date()})
+    recent.sort(key=lambda it: it["published_cst"], reverse=True)
+    unique, seen = [], set()
+    for it in recent:
+        if it["url"] not in seen:
+            unique.append(it)
+            seen.add(it["url"])
+    return unique[:limit], latest.strftime("%Y-%m-%d") if latest else None
+
+
+def fetch_seeking_alpha():
+    """Seeking Alpha 官方公开 RSS：标题、时间、原链接；付费正文/量化评分不抓取。"""
+    name = "Seeking Alpha"
+    feed = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
+    items, latest = _public_rss_items(feed, PUBLIC_SITE_URLS[name], limit=3)
+    note = "只列公开投研标题及原文链接；多空论点请读原文，股息/量化评分未在 RSS 提供时不展示。"
+    error = (f"近72小时无可核实的新文章（最新 {latest}）" if latest else
+             "公开 RSS 不可达或没有可核实发布时间的文章")
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+def fetch_koyfin():
+    """Koyfin 官方公开博客 RSS；登录后行情结构/宏观联动不是公开抓取数据。"""
+    name = "Koyfin"
+    feed = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
+    items, latest = _public_rss_items(feed, PUBLIC_SITE_URLS[name], limit=2)
+    note = "仅公开博客更新；登录后的板块、估值及宏观仪表盘数据未接入，不推断实时结论。"
+    error = (f"近72小时无博客更新（最新 {latest}）" if latest else
+             "公开博客 RSS 不可达或没有可核实发布时间的文章")
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+# CompaniesMarketCap 官网提供的公开 CSV；每份只取前 3 名，不保存大文件。
+_CMC_RANKINGS = (
+    ("市值", "https://companiesmarketcap.com/?download=csv", "marketcap"),
+    ("营收 TTM", "https://companiesmarketcap.com/largest-companies-by-revenue/?download=csv", "revenue_ttm"),
+    ("利润 TTM", "https://companiesmarketcap.com/most-profitable-companies/?download=csv", "earnings_ttm"),
+    ("市盈率（从低到高）", "https://companiesmarketcap.com/top-companies-by-pe-ratio/?download=csv", "pe_ratio_ttm"),
+)
+
+
+def _cmc_value(raw, metric):
+    try:
+        value = float(str(raw).replace(",", ""))
+    except (TypeError, ValueError):
+        return ""
+    if value != value or not 0 < value < 1e18:
+        return ""  # NaN / 无意义或异常数值都不展示
+    if metric == "pe_ratio_ttm":
+        return f"{value:.2f} 倍"
+    if value >= 1e12:
+        return f"{value / 1e12:.2f} 万亿美元"
+    if value >= 1e8:
+        return f"{value / 1e8:.2f} 亿美元"
+    return f"{value:,.0f} 美元"
+
+
+def _parse_cmc_csv(text, metric):
+    """验证 CSV 表头和正数排名，避免把反爬/登录 HTML 误当实时榜单。"""
+    reader = csv.DictReader(io.StringIO(text or ""))
+    if not reader.fieldnames:
+        return []
+    reader.fieldnames = [f.lstrip("\ufeff").strip() for f in reader.fieldnames]
+    if not {"Rank", "Name", "Symbol", metric}.issubset(reader.fieldnames):
+        return []
+    rows = []
+    for i, item in enumerate(reader):
+        if i >= 20 or len(rows) >= 3:
+            break
+        rank = str(item.get("Rank") or "").strip()
+        name = _public_text(item.get("Name"), 42)
+        symbol = str(item.get("Symbol") or "").strip()
+        value = _cmc_value(item.get(metric), metric)
+        if not (rank.isdigit() and 0 < int(rank) <= 20 and name and
+                re.fullmatch(r"[A-Za-z0-9.\-]{1,16}", symbol) and value):
+            continue
+        rows.append(f"{rank}. {name} ({symbol}) {value}")
+    return rows
+
+
+def fetch_companies_marketcap():
+    """每天重新读取市值/营收/利润/PE 四份公开榜单；财报 TTM 不算当日发布。"""
+    name, items, failures = "CompaniesMarketCap", [], []
+    for label, csv_url, metric in _CMC_RANKINGS:
+        text = safe_request(csv_url, is_json=False, timeout=9)
+        leaders = _parse_cmc_csv(text, metric)
+        if leaders:
+            items.append({"title": f"{label}：{' · '.join(leaders)}",
+                          "url": csv_url.split("?", 1)[0],
+                          "detail": "官网公开榜单 · 抓取快照（非当日财报）",
+                          "is_today": False})
+        else:
+            failures.append(label)
+    note = ("四类榜单为抓取时快照，财务金额按站点美元口径；数值可能沿用最近交易日/财报期，"
+            "营收/利润按 TTM。低市盈率并不等于低风险或买入建议。")
+    if failures and items:
+        note += " 暂缺：" + "、".join(failures) + "。"
+    error = "官网 CSV 不可达/格式变化（市值、营收、利润和 PE 榜单均未取得）"
+    return _public_site_result(name, items, latest=_today_display() if items else None,
+                               snapshot=True, note=note, error=error)
+
+
+class _PublicHtmlTables(HTMLParser):
+    """从公开 HTML 中只取真正的表格行/单元格，不从脚本或导航猜数字。"""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables, self.stack, self.skip = [], [], 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "noscript"):
+            self.skip += 1
+            return
+        if self.skip:
+            return
+        if tag == "table":
+            self.stack.append({"rows": [], "row": None, "cell": None})
+        elif self.stack:
+            current = self.stack[-1]
+            if tag == "tr":
+                current["row"] = []
+            elif tag in ("th", "td") and current["row"] is not None:
+                current["cell"] = {"text": [], "url": ""}
+            elif tag == "a" and current["cell"] is not None:
+                href = dict(attrs).get("href", "")
+                if href and not current["cell"]["url"]:
+                    current["cell"]["url"] = href
+
+    def handle_data(self, data):
+        if not self.skip and self.stack and self.stack[-1]["cell"] is not None:
+            self.stack[-1]["cell"]["text"].append(data)
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript"):
+            self.skip = max(0, self.skip - 1)
+            return
+        if self.skip or not self.stack:
+            return
+        current = self.stack[-1]
+        if tag in ("th", "td") and current["cell"] is not None and current["row"] is not None:
+            cell = current["cell"]
+            current["row"].append({"text": _public_text(" ".join(cell["text"]), 140),
+                                   "url": cell["url"]})
+            current["cell"] = None
+        elif tag == "tr" and current["row"] is not None:
+            if current["row"]:
+                current["rows"].append(current["row"])
+            current["row"] = None
+        elif tag == "table":
+            self.tables.append(self.stack.pop()["rows"])
+
+
+def _public_tables(html):
+    if not html or "<table" not in html.lower():
+        return []
+    parser = _PublicHtmlTables()
+    try:
+        parser.feed(html)
+    except (ValueError, TypeError):
+        return []
+    return parser.tables
+
+
+def _finviz_pct(text):
+    m = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)%", str(text or "").strip())
+    return float(m.group(1)) if m else None
+
+
+def _finviz_sector_rows(html):
+    """定位含 Name / Perf Week / Change % 的板块表现表，不读广告表。"""
+    for table in _public_tables(html):
+        for i, row in enumerate(table):
+            headers = [c["text"].lower() for c in row]
+            if not {"name", "perf week", "change %"}.issubset(headers):
+                continue
+            ni, wi, ci = (headers.index(label) for label in ("name", "perf week", "change %"))
+            sectors = []
+            for cells in table[i + 1:]:
+                if len(cells) <= max(ni, wi, ci):
+                    continue
+                href = _public_url(cells[ni]["url"], "https://finviz.com/")
+                change = _finviz_pct(cells[ci]["text"])
+                if not href or "f=sec_" not in href or change is None:
+                    continue
+                sectors.append({"name": _public_text(cells[ni]["text"], 35), "url": href,
+                                "change": change, "week": _finviz_pct(cells[wi]["text"])})
+            if sectors:
+                return sectors
+    return []
+
+
+def _finviz_pattern_rows(html):
+    """可选：筛选器的上升通道股票列表，只列原站已有的标的。"""
+    for table in _public_tables(html):
+        for i, row in enumerate(table):
+            headers = [c["text"].lower() for c in row]
+            if not {"ticker", "company"}.issubset(headers):
+                continue
+            ti = headers.index("ticker")
+            symbols = []
+            for cells in table[i + 1:]:
+                if len(cells) <= ti:
+                    continue
+                ticker = cells[ti]["text"].strip()
+                href = _public_url(cells[ti]["url"], "https://finviz.com/")
+                if href and re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,8}", ticker):
+                    symbols.append(ticker)
+                if len(symbols) >= 3:
+                    return symbols
+            return symbols
+    return []
+
+
+def fetch_finviz():
+    """Finviz 公共板块表现和可用时的技术筛选；热力图仅附入口，不 OCR 猜颜色。"""
+    name, url = "Finviz", PUBLIC_SITE_URLS["Finviz"]
+    html = safe_request(url, is_json=False, timeout=9)
+    sectors = _finviz_sector_rows(html)
+    screener = "https://finviz.com/screener.ashx?v=111&f=ta_pattern_channelup"
+    pattern_html = safe_request(screener, is_json=False, timeout=9)
+    symbols = _finviz_pattern_rows(pattern_html)
+    items = []
+    if sectors:
+        leaders = sorted(sectors, key=lambda row: row["change"], reverse=True)[:3]
+        laggards = sorted(sectors, key=lambda row: row["change"])[:3]
+        for label, group in (("板块相对强势", leaders), ("板块排名靠后", laggards)):
+            text = " / ".join(
+                f'{row["name"]} {row["change"]:+.2f}%'
+                + (f'（周 {row["week"]:+.2f}%）' if row["week"] is not None else "")
+                for row in group)
+            items.append({"title": f"{label}：{text}", "url": url,
+                          "detail": "公开板块表 Change % / Perf Week；非实时快照",
+                          "is_today": False})
+    if symbols:
+        items.append({"title": "技术形态筛选（上升通道）：" + " / ".join(symbols),
+                      "url": screener, "detail": "仅选股器筛选结果，不代表买入信号",
+                      "is_today": False})
+    if items:
+        items.append({"title": "查看 Finviz 板块热力图与选股器", "url": "https://finviz.com/map.ashx?t=sec",
+                      "detail": "热力图链接；不抓取图片，不按色块猜当日涨跌", "is_today": False})
+    note = "仅最近可见板块/技术筛选快照；官网未给出完整报价时戳，休市时可能是上个交易日。"
+    if sectors and not symbols:
+        note += " 上升通道选股器本次无可核实候选或访问受限。"
+    if symbols and not sectors:
+        note += " 板块表现表本次暂缺。"
+    error = "公开板块表和形态筛选器均未返回可解析数据（可能被限流）"
+    return _public_site_result(name, items, latest=_today_display() if items else None,
+                               snapshot=True, note=note, error=error)
+
+
+_REDDIT_COMMUNITIES = ("stocks", "investing", "wallstreetbets", "ValueInvesting")
+_REDDIT_HEADERS = {"User-Agent": "octopus-daily/1.0 (+https://github.com/k-macao/02)"}
+
+
+def _reddit_json_items(payload, *, now=None):
+    """若公开 RSS 不可用，仅读公开帖子 JSON 的标题/发帖时间/永久链接。"""
+    try:
+        children = payload["data"]["children"]
+    except (TypeError, KeyError):
+        return []
+    if not isinstance(children, list):
+        return []
+    now = now or datetime.now(CST)
+    items = []
+    for child in children[:20]:
+        post = child.get("data", {}) if isinstance(child, dict) else {}
+        if not isinstance(post, dict) or post.get("stickied") or post.get("over_18"):
+            continue
+        try:
+            published = datetime.fromtimestamp(float(post["created_utc"]), timezone.utc).astimezone(CST)
+        except (KeyError, ValueError, TypeError, OverflowError, OSError):
+            continue
+        url = _public_url(post.get("permalink"), "https://www.reddit.com/")
+        title = _public_text(post.get("title"), 125)
+        if not (url and urlparse(url).hostname in ("reddit.com", "www.reddit.com", "old.reddit.com")
+                and title and _public_recent(published, now)):
+            continue
+        pub = published.strftime("%Y-%m-%d %H:%M")
+        items.append({"title": title, "url": url,
+                      "detail": f"发布于 {pub}（北京时间）· 社区观点未经核实",
+                      "published_cst": pub, "is_today": published.date() == now.date()})
+    items.sort(key=lambda item: item["published_cst"], reverse=True)
+    return items[:1]
+
+
+def fetch_reddit():
+    """逐社区读取公开 Top（日）RSS；失败时试一次公开 JSON，403 则如实暂缺。"""
+    name, items, unavailable = "Reddit", [], []
+    latest = None
+    for community in _REDDIT_COMMUNITIES:
+        base = f"https://www.reddit.com/r/{community}/"
+        rss = f"{base}top/.rss?t=day&limit=10"
+        xml = safe_request(rss, headers={**_REDDIT_HEADERS, "Accept": "application/atom+xml,application/xml"},
+                           is_json=False, timeout=8)
+        feed_items, feed_latest = _public_rss_items(xml, base, limit=1)
+        feed_items = [it for it in feed_items if urlparse(it["url"]).hostname in
+                      ("reddit.com", "www.reddit.com", "old.reddit.com")]
+        if feed_latest and (not latest or feed_latest > latest):
+            latest = feed_latest
+        if not feed_items:
+            json_url = f"{base}top.json?t=day&limit=10"
+            payload = safe_request(json_url, headers={**_REDDIT_HEADERS, "Accept": "application/json"},
+                                   timeout=8)
+            feed_items = _reddit_json_items(payload)
+        if feed_items:
+            item = feed_items[0]
+            item["title"] = f"r/{community}：{item['title']}"
+            items.append(item)
+            date = item["published_cst"][:10]
+            if not latest or date > latest:
+                latest = date
+        else:
+            unavailable.append(f"r/{community}")
+    note = "仅公开帖子标题，热度不等于事实或投资建议。"
+    if unavailable:
+        note += " 暂缺（RSS/JSON 访问受限或近72小时无新帖）：" + "、".join(unavailable) + "。"
+    error = "四个社区的公开 RSS/JSON 均不可用或近72小时无可验证的新帖"
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+_SERENITY_DATE_RE = re.compile(
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Z][a-z]{2}\s+\d{1,2}\s+"
+    r"\d{2}:\d{2}:\d{2}\s+[+-]\d{4}\s+\d{4}"
+    r"|20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+
+
+class _SerenityFeedParser(HTMLParser):
+    """按页面的「Open on X」链接分组可见文本，不依赖易变的 CSS 类名。"""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.posts, self.chunk, self.skip = [], [], 0
+        self.link, self.link_text = None, []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "noscript"):
+            self.skip += 1
+        elif not self.skip and tag == "a":
+            self.link, self.link_text = dict(attrs).get("href", ""), []
+        elif not self.skip and tag == "br":
+            self.chunk.append(" ")
+
+    def handle_data(self, data):
+        if self.skip:
+            return
+        if self.link is not None:
+            self.link_text.append(data)
+        else:
+            self.chunk.append(data)
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript"):
+            self.skip = max(0, self.skip - 1)
+        elif tag == "a" and self.link is not None and not self.skip:
+            label = "".join(self.link_text)
+            url = _public_url(self.link, "https://www.trackserenity.com/")
+            if (url and re.search(r"/status/\d{18,20}(?:[/?#]|$)", url)
+                    and re.search(r"open on x|view on x|x 原帖", label, re.I)):
+                self.posts.append(("".join(self.chunk), url))
+                self.chunk = []
+            elif url and urlparse(url).hostname in ("trackserenity.com", "www.trackserenity.com") and "/stocks/" in url:
+                self.chunk.append(" [STOCK_CARD] ")  # 剔除卡片行情及旧的 since-mention 数值
+            else:
+                self.chunk.append(label)
+            self.link, self.link_text = None, []
+        elif not self.skip and tag in ("p", "div", "section", "article", "time", "li"):
+            self.chunk.append(" ")
+
+
+def _serenity_page_dt(raw):
+    """该站无时区的 ISO 时间是北京时间；与 X 雪花 ID 推导的时间交叉核对。"""
+    for pattern in ("%a %b %d %H:%M:%S %z %Y", "%Y-%m-%d %H:%M:%S%z",
+                    "%Y-%m-%d %H:%M%z", "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M"):
+        try:
+            date_text = re.sub(r"(?<=\d)T(?=\d)", " ", raw).replace("Z", "+0000")
+            dt = datetime.strptime(date_text, pattern)
+            return dt.astimezone(CST) if dt.tzinfo else dt.replace(tzinfo=CST)
+        except ValueError:
+            continue
+    return None
+
+
+def _serenity_x_dt(url):
+    """X 帖子的公开 snowflake ID 内含 UTC 毫秒；只用于核实页面所列日期。"""
+    match = re.search(r"/status/(\d{18,20})(?:[/?#]|$)", url)
+    if not match:
+        return None
+    try:
+        ms = (int(match.group(1)) >> 22) + 1288834974657
+        return datetime.fromtimestamp(ms / 1000, timezone.utc).astimezone(CST)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _parse_serenity_posts(html, *, now=None):
+    if not html:
+        return [], None
+    parser = _SerenityFeedParser()
+    try:
+        parser.feed(html)
+    except (ValueError, TypeError):
+        return [], None
+    now = now or datetime.now(CST)
+    recent, latest, seen = [], None, set()
+    for block, url in parser.posts:
+        # 页面也展示读者的回复；只把 @aleabitoreddit 的原帖当作站点作者线索。
+        if urlparse(url).path.split("/")[1].casefold() != "aleabitoreddit":
+            continue
+        stamp = _serenity_x_dt(url)
+        if not stamp:
+            continue
+        # X 原帖 ID 与页面显示时间差异 >2 分钟则拒绝，不把卡片的旧日期认作发帖日期。
+        dates = [_serenity_page_dt(m.group()) for m in _SERENITY_DATE_RE.finditer(block)]
+        if not any(dt and abs((stamp - dt).total_seconds()) <= 120 for dt in dates):
+            continue
+        if latest is None or stamp > latest:
+            latest = stamp
+        if not _public_recent(stamp, now) or url in seen:
+            continue
+        start = next(m.end() for m in _SERENITY_DATE_RE.finditer(block)
+                     if (dt := _serenity_page_dt(m.group())) and abs((stamp - dt).total_seconds()) <= 120)
+        body = block[start:].split("[STOCK_CARD]", 1)[0]
+        title = _public_text(body, 185)
+        # 散户闲聊等与金融无关的内容不作为个股线索推送。
+        if not title or not re.search(r"\$[A-Za-z]{1,8}\b|\b(stock|equities|earnings|market|inflation|bond|invest)\b|股票|美股|投资|通胀", title, re.I):
+            continue
+        seen.add(url)
+        pub = stamp.strftime("%Y-%m-%d %H:%M")
+        symbols = list(dict.fromkeys(re.findall(r"\$([A-Z][A-Z0-9]{0,6})\b", body)))[:3]
+        recent.append({"title": "X 线索：" + title, "url": url,
+                       "detail": f"发布于 {pub}（北京时间）· 原帖观点未经核实",
+                       "published_cst": pub, "is_today": stamp.date() == now.date(),
+                       "symbols": symbols})
+    recent.sort(key=lambda it: it["published_cst"], reverse=True)
+    return recent[:3], latest.strftime("%Y-%m-%d") if latest else None
+
+
+class _PublicVisibleText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.skip = [], 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "noscript"):
+            self.skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript"):
+            self.skip = max(0, self.skip - 1)
+        elif not self.skip and tag in ("p", "div", "h1", "h2", "section"):
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+
+def _serenity_thesis(html, symbol):
+    """可选读取相关公开个股论点；无更新日期，永远不标记为今日新分析。"""
+    if not html:
+        return ""
+    parser = _PublicVisibleText()
+    try:
+        parser.feed(html)
+    except (ValueError, TypeError):
+        return ""
+    text = re.sub(r"\s+", " ", " ".join(parser.parts))
+    match = re.search(r"Serenity Thesis for \$" + re.escape(symbol) + r"\b(.*?)\bFinancials\b",
+                      text, re.I)
+    if not match:
+        return ""
+    thesis = re.sub(r"^Serenity \(@[^)]*\) investment thesis and position context from public X posts\.\s*",
+                    "", match.group(1).strip(), flags=re.I)
+    return _public_text(thesis, 165) if 25 <= len(thesis) <= 1000 else ""
+
+
+def fetch_trackserenity():
+    """首页近期投资相关 X 帖；相关个股论点是无日期的参考，不能当作当天更新。"""
+    name = "AnalysisSite（trackserenity）"
+    html = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
+    items, latest = _parse_serenity_posts(html)
+    if items:
+        symbol = next((s for it in items for s in it["symbols"] if re.fullmatch(r"[A-Z]{1,7}", s)), None)
+        if symbol:
+            url = f"https://www.trackserenity.com/stocks/{symbol}"
+            thesis = _serenity_thesis(safe_request(url, is_json=False, timeout=8), symbol)
+            if thesis:
+                items.append({"title": f"{symbol} 公开个股论点：{thesis}", "url": url,
+                              "detail": "站点未标注该论点更新时间，仅供背景核查；非今日 AI 评分",
+                              "is_today": False})
+    note = "仅公开 X 原帖及可获取的静态个股论点；观点和个股涨幅未经独立核实，不视为当日投资建议。"
+    error = (f"近72小时无可验证的投资相关帖子（最新 {latest}）" if latest else
+             "页面不可达，或 X 原帖时间与页面时间无法核对")
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+def fetch_public_sites():
+    """六站独立并行，任一站失败不会拖垮主日报；始终返回六条审计记录。"""
+    fetchers = (
+        ("Seeking Alpha", fetch_seeking_alpha),
+        ("Finviz", fetch_finviz),
+        ("Reddit", fetch_reddit),
+        ("CompaniesMarketCap", fetch_companies_marketcap),
+        ("AnalysisSite（trackserenity）", fetch_trackserenity),
+        ("Koyfin", fetch_koyfin),
+    )
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
+        futures = [(name, executor.submit(fn)) for name, fn in fetchers]
+        for name, future in futures:
+            try:
+                result = future.result()
+                if (not isinstance(result, dict) or result.get("source") != name
+                        or result.get("status") not in ("success", "unavailable")
+                        or not isinstance(result.get("items"), list)):
+                    raise ValueError("采集返回格式异常")
+            except Exception as exc:
+                print(f"  ⚠️ {name} 采集失败（{type(exc).__name__}）")
+                result = _public_site_result(name, [], error="公开数据解析失败或暂时不可用")
+            results[name] = result
+            print(f"  {'✅' if result['status'] == 'success' else '⚠️'} {name}: "
+                  f"{len(result.get('items') or [])} 条公开内容")
+    return results
+
+
+# ============================================================
 # 数据采集主函数
 # ============================================================
 def collect_all_data():
@@ -1411,6 +2034,8 @@ def collect_all_data():
     data["热门榜单"] = fetch_hot_stocks()
     time.sleep(0.5)
 
+    print("\n📰 正在采集六站公开投研内容...")
+    data.update(fetch_public_sites())
 
     print("\n✅ 数据采集完成！")
     return data
@@ -1464,7 +2089,7 @@ FONT_MONO = "'Courier New', Courier, monospace"
 # ============================================================
 GZ_PAPER = "#FFFFFF"        # 页面与正文统一白底（墨水屏只有黑/白，不铺任何灰底）
 GZ_PAPER_TINT = GZ_PAPER    # 旧版 7% 灰底在墨水屏上会抖成脏点，首屏结论改纯白 + 粗分隔线
-GZ_INK = "#000000"          # 正文与标题：墨水屏纯黑最锐利
+GZ_INK = "#000000"          # 正文纯黑；标题背景用黑色，标题文字反白
 GZ_INK_TINT = GZ_PAPER      # 兼容旧调用，不再使用深色幕封
 GZ_HAIR = "#8A8A8A"         # 分隔线：1px 发丝线在墨水屏上会断裂/消失，改为 2px 中灰
 GZ_HAIR_INK = GZ_HAIR
@@ -1497,7 +2122,7 @@ GZ_SANS = GZ_FONT          # 兼容旧调用：正文
 GZ_MONO = GZ_FONT          # 兼容旧调用：元信息（不再用等宽）
 GZ_W_BODY = 500            # 墨水屏不要细笔画：正文用 Medium
 GZ_W_BOLD = 700            # 标题 / 徽标 / 数值：Bold
-# 字号阶梯：图标极大、刊头/栏目/关键数字极大、普通字极小（微信详情页可缩放）。
+# 字号阶梯：图标独立，刊头/栏目标题收紧，关键数字仍醒目（微信详情页可缩放）。
 GZ_ICON_MASTHEAD = 128   # 刊头章鱼
 GZ_ICON_SECTION = 96     # 栏目图标（落在标题上方）
 GZ_ICON_ROW = 72         # 刊头栏目图标横排
@@ -1533,9 +2158,9 @@ def _gz_fs(base, scale=None):
     return max(GZ_FS_FLOOR, int(base * factor + 0.5))
 
 
-GZ_FS_DISPLAY = _gz_fs(56)    # 刊头主标题
-GZ_FS_SECTION = _gz_fs(44)    # 栏目标题 / 市场倾向
-GZ_FS_PRICE = _gz_fs(36)      # 行情价格、成交额等关键数字
+GZ_FS_DISPLAY = _gz_fs(40)    # 刊头主标题：默认 34px（原 48px）
+GZ_FS_SECTION = _gz_fs(30)    # 栏目标题：默认 26px（原 37px）
+GZ_FS_PRICE = _gz_fs(36)      # 行情价格、成交额、市场倾向等关键数字
 GZ_FS_BODY = _gz_fs(10)       # 普通正文
 GZ_FS_META = _gz_fs(9)        # 次要说明与元信息
 GZ_FS_METER = _gz_fs(14)      # 信号格 ●○ 字号
@@ -1770,6 +2395,8 @@ def _subsection(text):
 def _source_badge(item):
     if item.get("status") != "success":
         return _badge("OFFLINE", "bad")
+    if item.get("snapshot"):
+        return _badge("TODAY'S SNAPSHOT", "ok")
     if item.get("is_today"):
         return _badge("LIVE", "ok")
     return _badge(f"LAG {item.get('content_date') or '-'}", "warn")
@@ -1979,6 +2606,8 @@ def gz_badge(text, kind="ok", on_ink=False):
 def gz_source_badge(item, on_ink=False):
     if item.get("status") != "success":
         return gz_badge("暂缺", "bad", on_ink)
+    if item.get("snapshot"):
+        return gz_badge("今日抓取", "ok", on_ink)
     if item.get("is_today"):
         return gz_badge("当天", "ok", on_ink)
     return gz_badge(f"非当天 {item.get('content_date') or '-'}", "warn", on_ink)
@@ -2341,7 +2970,7 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """编辑栏目：大号 Koboyo 手绘图标、加粗圆体大标题、留白与实线（墨水屏）。"""
+    """编辑栏目：图标留在白底，缩小的栏目标题以黑底白字显示（墨水屏）。"""
     content = content or ""
     if content.lstrip().startswith("<tr"):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
@@ -2349,10 +2978,17 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
     cap = (f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};padding-top:10px;line-height:1.8;">{caption}</div>'
            if caption else "")
     badge = (f'<div style="font-size:{GZ_FS_META}px;padding-top:8px;">{badge_html}</div>' if badge_html else "")
+    # bgcolor + 内联 background 双写：微信即使移除部分 CSS，白字仍有黑底；
+    # 黑色 SVG 图标放在黑底之外，避免装饰图标消失。
+    title_bar = gz_shell(
+        f'<h2 style="margin:0;background:{GZ_INK};font-size:{GZ_FS_SECTION}px;'
+        f'font-weight:{GZ_W_BOLD};color:{GZ_PAPER};font-family:{GZ_SERIF};'
+        f'letter-spacing:1px;line-height:1.4;">{_esc(title)}</h2>',
+        bg=GZ_INK, pad="12px 16px")
     head = gz_shell(
-        f'<h2 style="margin:0;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:28px;'
-        f'font-size:{GZ_FS_SECTION}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1px;line-height:1.7;">'
-        f'{gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"))}{title}</h2>{cap}{badge}', bg=GZ_PAPER, pad="40px 0 16px")
+        f'<div style="border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:28px;">'
+        f'{gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"))}</div>'
+        f'{title_bar}{cap}{badge}', bg=GZ_PAPER, pad="40px 0 16px")
     body = gz_shell(content, bg=GZ_PAPER, pad="0 0 12px")
     return head + body
 
@@ -2368,7 +3004,7 @@ def gz_ai_analysis_block(res):
     prob = 50 + min(30, abs(score) * 30 // 100)
     verdict = gz_shell(
         f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};">市场倾向</div>'
-        f'<div style="font-size:{GZ_FS_SECTION}px;font-weight:700;color:{bias_color};font-family:{GZ_SANS};'
+        f'<div style="font-size:{GZ_FS_PRICE}px;font-weight:700;color:{bias_color};font-family:{GZ_SANS};'
         f'padding-top:6px;line-height:1.3;">{_esc(res["sentiment_label"])} {arrow}</div>'
         f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};padding-top:8px;line-height:1.6;">'
         f'信号 {score:+d} · 置信度 {_esc(res["confidence"])} · '
@@ -2616,6 +3252,43 @@ def _panorama_block(pan):
     return "".join(parts)
 
 
+def _public_digest_block(data, kit):
+    """两主题共用：六站逐站来源/日期/短摘录与失败说明，所有外链重新校验。"""
+    color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
+    rows = []
+    for index, name in enumerate(PUBLIC_SITE_NAMES, 1):
+        if name not in data:
+            continue
+        source = data.get(name) or {}
+        homepage = _public_url(PUBLIC_SITE_URLS[name])
+        heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
+                   f'<b>{_esc(name)}</b></a> {kit.source_badge(source)}')
+        fetched = _public_text(source.get("fetched_at") or "—", 32)
+        if source.get("status") != "success":
+            detail = _public_text(source.get("error") or "公开数据暂缺", 150)
+            rows.append(kit.item_row(f"{index:02d}", heading,
+                                     _esc(f"抓取于 {fetched} · 数据暂缺：{detail}")))
+            continue
+        snapshot_label = "今日抓取快照（不代表当日发布或实时更新）" if source.get("snapshot") else "文章/原帖按发布时间核对"
+        latest = _public_text(source.get("content_date") or "—", 30)
+        note = _public_text(source.get("note"), 260)
+        rows.append(kit.item_row(f"{index:02d}", heading,
+                                 _esc(f"抓取于 {fetched} · 最新可见日期 {latest} · {snapshot_label}。{note}")))
+        for item in (source.get("items") or [])[:PUBLIC_SITE_DISPLAY_N]:
+            if not isinstance(item, dict):
+                continue
+            url = _public_url(item.get("url"), PUBLIC_SITE_URLS[name])
+            title = _public_text(item.get("title"), 235)
+            if not url or not title:
+                continue
+            link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+                    f'{_esc(title)}</a>')
+            rows.append(kit.item_row("›", link, _esc(_public_text(item.get("detail"), 125))))
+    return kit.rows("".join(rows)) + kit.note(_esc(
+        "仅公开可核实内容；文章/帖子限近72小时并列原发布时间。榜单/板块是今日抓取快照，"
+        "不等同于今日发布或实时行情；受限来源会标明暂缺，所有观点非投资建议。"))
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -2652,16 +3325,17 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("东财快讯", em),
         ("热门榜单", hot),
     ]
+    # 仅运行过六站采集时加入审计；外部旧调用若无新键仍维持原来的 8 个数据源。
+    source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
 
     total = len(source_items)
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
+    snapshot_n = sum(1 for _, s in source_items if s.get("snapshot"))
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
 
     # ---- 栏目拼版：固定阅读顺序（有内容才渲染，无数据栏目缺席，审计栏永远收尾）----
-    # 阅读逻辑：① 政策/宏观先定调 → ② AI 综合研判导读 → ③ 行情数据底座 →
-    # ④ A股大盘全景 → ⑤ 全球 / 国内 / A股 / 港股 资讯 → ⑥ 新闻情绪量化
-    #（AI 新闻情绪因子，评分对象为近 72h 窗口标题，含跨运行存档）→ ⑦ 资金与交投收尾
-    #（成交量与流动性分析已移除）→ ⑧ 本次数据可用性（数据审计）。
+    # 阅读逻辑：政策/宏观 → 六站公开投研速览 → AI 盘研判 → 行情/全景 →
+    # 全球/国内/A股/港股资讯 → 新闻情绪量化 → 数据可用性审计。
     blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
 
     # ① 政策因子（推送页首位；宏观/政策先定调——main 已单独构建，此处仅兜底）
@@ -2676,7 +3350,16 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "章鱼AI · 政策关键词矩阵 + 行业冲击评分（近 15 日窗口，非投资建议）",
             )
 
-    # ② AI 盘研判（跨市场综合研判导读，紧随政策因子）
+    # 六站日报：紧跟页首政策因子，避免长报告在微信截断时丢失。
+    # 即使部分站点失败也逐站显示原因；六站全部失败时仅在末尾审计留痕。
+    if any((data.get(name) or {}).get("status") == "success" for name in PUBLIC_SITE_NAMES):
+        blocks["PUBLIC RESEARCH"] = (
+            "PUBLIC RESEARCH", "六站公开投研 · 每日速览",
+            _public_digest_block(data, kit), "",
+            "Seeking Alpha · Finviz · Reddit · CompaniesMarketCap · trackserenity · Koyfin｜公开摘要，非投资建议",
+        )
+
+    # ② AI 盘研判（跨市场综合研判导读）
     if AI_ANALYSIS_ENABLED:
         ai_result = build_ai_analysis(data)
         if ai_result.get("available"):
@@ -2766,14 +3449,18 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
 
     # 按固定阅读顺序输出（未命中 / 无数据的栏目自然缺席）
     sections = [blocks[k] for k in (
-        "POLICY SHOCK", "AI READ", "MARKET SNAPSHOT", "A-SHARE PANORAMA",
+        "POLICY SHOCK", "PUBLIC RESEARCH", "AI READ", "MARKET SNAPSHOT", "A-SHARE PANORAMA",
         "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK", "HK GURU CHANNELS",
         "NEWS SENTIMENT",
     ) if k in blocks]
 
     # 数据审计栏
     if today_n > 0:
-        push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
+        if snapshot_n:
+            push_hint = (f"有 {today_n}/{total} 个数据源具备当天发布内容或今日抓取快照"
+                         f"（{snapshot_n} 个快照不代表原站今日更新）→ 本次会自动推送（除非 --no-push）。")
+        else:
+            push_hint = f"有 {today_n}/{total} 个数据源为当天内容 → 本次会自动推送（除非 --no-push）。"
         hint_color = kit.ok_color
     else:
         push_hint = ("无当天内容 → 本次默认不会推送；确认内容后可用 --force-push 手动强制推送。"
@@ -2781,8 +3468,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                      "无任何抓取内容 → 本次不会推送。")
         hint_color = kit.warn_color if content_n > 0 else kit.bad_color
 
+    freshness_summary = (f"其中 {today_n} 个含当天发布内容或今日抓取快照"
+                         f"（{snapshot_n} 个仅为今日抓取快照，非当日发布）"
+                         if snapshot_n else f"其中 {today_n} 个为当天内容")
     audit_content = (
-        kit.alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，其中 {today_n} 个为当天内容；"
+        kit.alert(f"本次运行 {content_n}/{total} 个数据源抓到内容，{freshness_summary}；"
                   f"所有暂缺项均已明确标注，不会复用旧日报内容。",
                   kit.ok_color if today_n > 0 else hint_color)
         + kit.status_footer(source_items)
@@ -5009,9 +5699,9 @@ GUIZANG_KIT = _RenderKit(
     note=gz_note,
     alert=gz_alert,
     status_footer=gz_status_footer,
-    # 章节幕封上的徽标落在墨黑底 → 用墨黑底配色；审计栏（纸底）仍用纸底配色
-    source_badge=lambda item: gz_source_badge(item, on_ink=True),
-    ai_badge=lambda: gz_badge("AI 合成", "ai", on_ink=True),
+    # 徽标置于标题黑条下方的白底区域，保留状态与来源信息。
+    source_badge=lambda item: gz_source_badge(item),
+    ai_badge=lambda: gz_badge("AI 合成", "ai"),
     ai_block=gz_ai_analysis_block,
     sentiment_block=gz_sentiment_block,
     sentiment_empty_block=gz_sentiment_empty_block,
@@ -5078,7 +5768,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
 
 def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
                                 policy_result=None, news_corpus=None):
-    """黑白研报（墨水屏优先）：加粗圆体大标题、Koboyo 直链大图标、结构化数据表格与单列留白；不依赖脚本。"""
+    """黑白研报（墨水屏优先）：紧凑的黑底白字标题、白底图标、结构化表格与单列留白。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
@@ -5091,6 +5781,11 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
         GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
     generated_at = _now()
+    masthead_title_bar = gz_shell(
+        f'<h1 style="margin:0;background:{GZ_INK};font-size:{GZ_FS_DISPLAY}px;'
+        f'font-weight:{GZ_W_BOLD};color:{GZ_PAPER};font-family:{GZ_SERIF};'
+        f'letter-spacing:1px;line-height:1.4;">{_esc(REPORT_TITLE)}</h1>',
+        bg=GZ_INK, pad="14px 18px")
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -5114,7 +5809,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <tr><td align="left" valign="top" style="padding:64px 0 24px;">
 {gz_icon("octopus", masthead=True)}
 <div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;">{_esc(date_display)}</div>
-<h1 style="margin:18px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SERIF};letter-spacing:1.5px;line-height:1.8;">{REPORT_TITLE}</h1>
+<div style="padding-top:18px;">{masthead_title_bar}</div>
 <div style="font-size:{GZ_FS_META}px;color:{GZ_META};padding-top:16px;line-height:1.8;">更新于 {_esc(generated_at)} · 当天源 {today_n}/{total}</div>
 {gz_masthead_icon_row()}
 </td></tr>
@@ -5377,8 +6072,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
                    topic=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
-    - 默认按「一对多」推送至群组编码 PUSHPLUS_TOPIC（默认 oai.1）；
-      传入 topic 可临时覆盖，传空字符串则回退一对一；
+    - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
+      或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
@@ -5724,7 +6419,9 @@ def check_push_eligibility(data):
         return False, f"全部数据源均未抓到内容（0/{total}）"
     if today_n == 0:
         return False, f"抓到 {content_n}/{total} 个来源，但没有一个属于当天内容（当天检验未通过）"
-    return True, f"当天检验通过：{today_n}/{total} 个数据源含当天内容"
+    snapshots = sum(1 for v in items if v.get("snapshot"))
+    suffix = f"（其中 {snapshots} 个仅为今日抓取快照，非当日发布）" if snapshots else ""
+    return True, f"当天检验通过：{today_n}/{total} 个来源含当天内容或今日抓取快照{suffix}"
 
 
 # ============================================================

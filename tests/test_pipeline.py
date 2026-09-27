@@ -579,15 +579,15 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
 
     def test_font_scale_knob_shrinks_every_guizang_size_and_falls_back_safely(self):
-        # 系数 1.0 精确复刻设计基准，层级比例不被破坏
-        self.assertEqual([pipeline._gz_fs(b, scale=1.0) for b in (56, 44, 36, 10, 9)],
-                         [56, 44, 36, 10, 9])
-        # 默认整体缩小：每一档都比基准小，且仍保持「标题 > 栏目 > 正文 > 元信息」
-        default = [pipeline._gz_fs(b) for b in (56, 44, 36, 10, 9)]
+        # 系数 1.0 使用新版设计基准：刊头/栏目变小，关键数字维持醒目
+        bases = (40, 30, 36, 10, 9)
+        self.assertEqual([pipeline._gz_fs(b, scale=1.0) for b in bases], list(bases))
+        default = [pipeline._gz_fs(b) for b in bases]
         self.assertEqual(default, [pipeline.GZ_FS_DISPLAY, pipeline.GZ_FS_SECTION,
                                    pipeline.GZ_FS_PRICE, pipeline.GZ_FS_BODY, pipeline.GZ_FS_META])
-        self.assertTrue(all(s < b for s, b in zip(default, (56, 44, 36, 10, 9))))
-        self.assertTrue(all(a > b for a, b in zip(default, default[1:])))
+        self.assertEqual(default, [34, 26, 31, 9, 8])
+        self.assertTrue(all(s < b for s, b in zip(default, bases)))
+        self.assertTrue(default[0] > default[2] > default[1] > default[3] > default[4])
         # 非法 / 越界输入回落到默认值，且不会把正文压到不可读
         for bad in ("", "  ", "abc", None, "nan", "inf"):
             self.assertEqual(pipeline._resolve_font_scale(bad), pipeline.DEFAULT_FONT_SCALE)
@@ -607,7 +607,7 @@ class GuizangThemeTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")  # 默认 = guizang
         self.assertIn(f"<title>{pipeline.REPORT_TITLE}</title>", html)
         self.assertIn(pipeline.GZ_PAPER, html)
-        self.assertIn(pipeline.GZ_PAPER_TINT, html)   # 仅结论使用浅色背景
+        self.assertIn(pipeline.GZ_PAPER_TINT, html)   # 白底正文仍保留
         self.assertIn(pipeline.GZ_INK, html)
         for old_color in ("#30342F", "#D5D7D3", "#B7FF3C"):
             self.assertNotIn(old_color, html)
@@ -652,8 +652,8 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertGreaterEqual(min(sizes), pipeline.GZ_FS_META)
         self.assertIn("bgcolor=", html.lower())
         self.assertIn(f"font-size:{pipeline.GZ_FS_BODY}px", html)      # 普通正文极小
-        self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", html)    # 刊头主标题极大
-        self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", html)    # 栏目标题极大
+        self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", html)    # 缩小后的刊头标题
+        self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", html)    # 缩小后的栏目标题
 
     def test_minimal_news_card_leads_with_title_and_keeps_source(self):
         html = pipeline.gz_headline_row({
@@ -664,13 +664,31 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn(">01", html)
         self.assertIn("padding:20px 0", html)
 
-    def test_minimal_section_retains_freshness_without_dark_panels(self):
+    def test_minimal_section_retains_freshness_with_black_title_bar(self):
         html = pipeline.gz_section("01", "MARKET SNAPSHOT", "行情速览", "原始内容",
                                    pipeline.gz_badge("非当天 2026-09-07", "warn"), "数据来源")
         for text in ("行情速览", "原始内容", "非当天 2026-09-07", "数据来源"):
             self.assertIn(text, html)
         self.assertNotIn("MARKET SNAPSHOT", html)
         self.assertNotIn("#30342F", html)
+        self.assertLess(html.index("icons/svg/chart.svg"), html.index('bgcolor="#000000"'))
+        self.assertRegex(html, r'<td bgcolor="#000000"[^>]*><h2\b')
+        self.assertIn('bgcolor="#FFFFFF"', html)  # 图标和内容仍在白底上
+
+    def test_compact_headings_use_white_text_on_black_background(self):
+        html = pipeline.generate_report(NewLayoutRenderingTests()._rich_data(),
+                                        "2026年8月2日 · 周日", "20260802")
+        for level, size in (("h1", pipeline.GZ_FS_DISPLAY), ("h2", pipeline.GZ_FS_SECTION)):
+            headings = re.findall(rf'<{level}\b[^>]*>', html)
+            self.assertTrue(headings)
+            for heading in headings:
+                self.assertIn(f'font-size:{size}px', heading)
+                self.assertIn(f'background:{pipeline.GZ_INK}', heading)
+                self.assertIn(f'color:{pipeline.GZ_PAPER}', heading)
+                self.assertIn('font-weight:700', heading)
+            # 邮件客户端 CSS 失效时，td 的 bgcolor 仍保留标题底色
+            self.assertRegex(html, rf'<td bgcolor="{pipeline.GZ_INK}"[^>]*><{level}\b')
+        self.assertEqual(html.count("<h1 "), 1)
 
     def test_guizang_inline_only_with_remote_koboyo_icons(self):
         data = NewLayoutRenderingTests()._rich_data()
@@ -703,7 +721,7 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline.GZ_PAPER_TINT, pipeline.GZ_PAPER)
         for color in re.findall(r"(?:bgcolor=|background:|color:)(#[0-9A-Fa-f]{6})", html):
             r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-            self.assertEqual((r, g, b), (r, r, r), color)   # 灰阶可以，黑白必须纯白
+            self.assertEqual((r, g, b), (r, r, r), color)   # 灰阶可用；标题用纯黑白对比
         self.assertNotIn("#F7F7F7", html)                  # 旧版浅灰底已移除
         self.assertNotIn("rgba(", html)                    # 墨水屏不支持半透明
 
@@ -739,9 +757,9 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertIn("letter-spacing:", heading)
             self.assertIn("font-weight:700", heading)   # 标题统一粗圆体
         for h1 in re.findall(r'<h1\b[^>]*>', html):
-            self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", h1)   # 主标题极大
+            self.assertIn(f"font-size:{pipeline.GZ_FS_DISPLAY}px", h1)   # 刊头更紧凑
         for h2 in re.findall(r'<h2\b[^>]*>', html):
-            self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", h2)   # 栏目标题极大
+            self.assertIn(f"font-size:{pipeline.GZ_FS_SECTION}px", h2)   # 栏目更紧凑
         # 刊头多图标显示：全部栏目手绘图标在刊头再排一行
         for slug in pipeline.KOBOYO_MASTHEAD_ICONS:
             self.assertIn(f'icons/svg/{slug}.svg', html)
@@ -890,10 +908,16 @@ class PushResultTests(unittest.TestCase):
         self.assertEqual(calls["json"]["template"], "txt")
         self.assertEqual(calls["json"]["token"], "abc")
         self.assertEqual(calls["json"]["title"], "标题")
-        self.assertEqual(calls["json"]["topic"], "oai.1")   # 默认一对多群组
+        self.assertEqual(pipeline.PUSHPLUS_TOPIC, "")  # 默认一对一
+        self.assertNotIn("topic", calls["json"])     # 纯文本告警不携带 topic
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            self.assertTrue(pipeline.push_to_wechat("日报", "<p>内容</p>", token="abc"))
+        self.assertEqual(calls["json"]["template"], "html")
+        self.assertNotIn("topic", calls["json"])     # 日报也不携带 topic
 
     def test_push_to_wechat_group_topic_can_be_overridden_or_disabled(self):
-        """PUSHPLUS_TOPIC 可覆盖群组；传空串可回退一对一（不发送 topic 字段）。"""
+        """仅显式设置 PUSHPLUS_TOPIC 才发送群组，topic='' 可覆盖为一对一。"""
         calls = []
 
         def fake_post(url, json=None, timeout=None):
@@ -909,6 +933,11 @@ class PushResultTests(unittest.TestCase):
              patch.object(pipeline, "PUSHPLUS_TOPIC", ""):
             self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc"))
         self.assertNotIn("topic", calls[-1])                 # 一对一不携带 topic
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", "custom-group"):
+            self.assertTrue(pipeline.push_to_wechat("标题", "正文", token="abc", topic=""))
+        self.assertNotIn("topic", calls[-1])                 # 显式空值优先于环境群组配置
 
     def test_push_to_wechat_returns_false_on_error_code(self):
         with patch.object(pipeline, "requests",
@@ -1127,6 +1156,7 @@ class PushFailureAlertTests(unittest.TestCase):
             ok = pipeline.push_failure_alert("测试原因", report_path="/tmp/x.html", token="abc")
         self.assertTrue(ok)
         self.assertEqual(calls["template"], "txt")
+        self.assertNotIn("topic", calls)
         self.assertRegex(calls["title"], r"日报推送失败提醒 \d{2}/\d{2} \d{2}:\d{2}")
         self.assertIn("测试原因", calls["content"])
 
@@ -1148,6 +1178,18 @@ class NoPushAlertTests(unittest.TestCase):
         self.assertIn("全球头条：⚠️ 无数据", text)
         self.assertIn("force_push", text)                      # 给出人工处理入口
         self.assertIn("daily_report_20260801.html", text)      # 报告文件可追溯
+
+    def test_no_push_alert_is_one_to_one_by_default(self):
+        calls = {}
+
+        def fake_post(url, json=None, timeout=None):
+            calls.update(json or {})
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            self.assertTrue(pipeline.push_no_push_alert("无当天数据", {}, token="abc"))
+        self.assertEqual(calls["template"], "txt")
+        self.assertNotIn("topic", calls)
 
 
 class MainExitCodeTests(unittest.TestCase):
