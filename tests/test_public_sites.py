@@ -1,4 +1,4 @@
-"""六站日报的离线解析、降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
+"""十站投研栏目的离线解析、降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
 import html
 import importlib.util
 import sys
@@ -16,10 +16,10 @@ pipeline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline)
 
 
-def rss_item(title, url, dt):
+def rss_item(title, url, dt, summary=""):
     date = dt.astimezone(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
     return (f"<item><title>{html.escape(title)}</title><link>{html.escape(url)}</link>"
-            f"<pubDate>{date}</pubDate></item>")
+            f"<pubDate>{date}</pubDate><description>{html.escape(summary)}</description></item>")
 
 
 def rss(*items):
@@ -77,6 +77,97 @@ class PublicSitesTests(unittest.TestCase):
         self.assertIn("72小时", koyfin["error"])
         self.assertFalse(koyfin["items"])
 
+    def test_ten_site_registry_and_global_three_item_limit(self):
+        self.assertEqual(len(pipeline.PUBLIC_SITE_NAMES), 10)
+        self.assertEqual(pipeline.PUBLIC_SITE_DISPLAY_N, 3)
+        self.assertEqual(pipeline.PUBLIC_SITE_ITEM_LIMIT, 3)
+        self.assertEqual(set(pipeline.PUBLIC_SITE_NAMES), set(pipeline.PUBLIC_SITE_DESCRIPTIONS))
+        items = [{"title": str(i), "url": "https://fred.stlouisfed.org/", "is_today": False}
+                 for i in range(5)]
+        self.assertEqual(len(pipeline._public_site_result("FRED", items)["items"]), 3)
+
+    def test_etf_database_rss_keeps_three_recent_articles_and_summaries(self):
+        now = datetime.now(pipeline.CST)
+        feed = rss(*(rss_item(f"ETF research {i}", f"https://etfdb.com/articles/{i}/",
+                              now - timedelta(hours=i), "Holdings, expense ratio and dividend details")
+                     for i in range(4)))
+        with patch.object(pipeline, "safe_request", return_value=feed):
+            result = pipeline.fetch_etf_database()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["items"]), 3)
+        self.assertIn("ETF research 0", result["items"][0]["title"])
+        self.assertIn("Holdings, expense ratio", result["items"][0]["detail"])
+        self.assertTrue(all("发布于" in item["detail"] for item in result["items"]))
+
+    def test_macromicro_uses_visible_latest_stats_and_marks_partial_data(self):
+        chart = ("<html><h2>Latest Stats</h2><table><tr><td>2026-08-31</td>"
+                 "<td>3.63%</td></tr></table><p>High &amp; Low</p><p>hidden navigation</p></html>")
+        stats, data_date = pipeline._macromicro_latest_stats(chart)
+        self.assertIn("3.63%", stats)
+        self.assertEqual(data_date, "2026-08-31")
+        self.assertNotIn("hidden navigation", stats)
+        self.assertEqual(pipeline._macromicro_latest_stats(
+            "<h2>Latest Stats</h2><p>1980-01-01</p><p>0.0000%</p>"), ("", None))
+        with patch.object(pipeline, "safe_request", side_effect=[chart, None, chart]):
+            result = pipeline.fetch_macro_micro()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["items"]), 2)
+        self.assertIn("利率 / 流动性", result["items"][0]["title"])
+        self.assertIn("暂缺图表：通胀趋势", result["note"])
+        self.assertFalse(result["is_today"])
+
+    def test_fred_csv_parsing_yoy_and_three_macro_cards(self):
+        cpi_csv = ("observation_date,CPIAUCSL\n2025-08-01,100\n"
+                   "2026-08-01,103\n2026-09-01,.\n")
+        observations = pipeline._parse_fred_csv(cpi_csv, "CPIAUCSL")
+        self.assertEqual(observations, [("2025-08-01", 100.0), ("2026-08-01", 103.0)])
+        self.assertEqual(pipeline._parse_fred_csv(
+            cpi_csv, "CPIAUCSL", start_date="2026-01-01"), [("2026-08-01", 103.0)])
+        self.assertAlmostEqual(pipeline._fred_yoy(observations), 3.0)
+
+        def fake_request(url, **kwargs):
+            series_id = url.split("id=", 1)[1].split("&", 1)[0]
+            if series_id in ("DFF", "DGS10"):
+                rows = "2026-09-24,4.1\n2026-09-25,4.2"
+            else:
+                rows = "2025-08-01,100\n2026-08-01,103"
+            return f"observation_date,{series_id}\n{rows}\n"
+
+        with patch.object(pipeline, "safe_request", side_effect=fake_request):
+            result = pipeline.fetch_fred()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["items"]), 3)
+        self.assertIn("联邦基金有效利率 4.20%", result["items"][0]["detail"])
+        self.assertIn("M2货币供应量", result["items"][0]["detail"])
+        self.assertIn("同比 +3.00%", result["items"][1]["detail"])
+        self.assertTrue(all("（2026-08-01）" in item["detail"] for item in result["items"][1:]))
+        self.assertIn("观测日期", result["note"])
+
+    STOCKANALYSIS_HTML = """<table><tr><th>No.</th><th>Symbol</th><th>Company Name</th>
+    <th>Views</th><th>Market Cap</th><th>% Change</th></tr>
+    <tr><td>1</td><td><a href="/stocks/aapl/">AAPL</a></td><td>Apple Inc.</td>
+    <td>1.2M</td><td>$3.0T</td><td>0.5%</td></tr>
+    <tr><td>2</td><td><a href="/stocks/msft/">MSFT</a></td><td>Microsoft Corp.</td>
+    <td>900K</td><td>$2.8T</td><td>0.2%</td></tr>
+    <tr><td>3</td><td><a href="/stocks/nvda/">NVDA</a></td><td>NVIDIA Corp.</td>
+    <td>800K</td><td>$2.5T</td><td>-1.0%</td></tr>
+    <tr><td>4</td><td><a href="https://evil.example/stocks/evil/">EVIL</a></td><td>Injected</td>
+    <td>700K</td><td>$1T</td><td>2.0%</td></tr></table>
+    <p>Updated: Sep 27, 2026, 7:30 AM EDT.</p>"""
+
+    def test_stockanalysis_selects_three_valid_in_site_trending_links(self):
+        rows = pipeline._stockanalysis_trending_rows(self.STOCKANALYSIS_HTML)
+        self.assertEqual([row["symbol"] for row in rows], ["AAPL", "MSFT", "NVDA"])
+        with patch.object(pipeline, "safe_request", return_value=self.STOCKANALYSIS_HTML):
+            result = pipeline.fetch_stockanalysis()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["items"]), 3)
+        self.assertTrue(result["snapshot"])
+        self.assertEqual(pipeline._stockanalysis_updated_date(self.STOCKANALYSIS_HTML), "2026-09-27")
+        self.assertIn("浏览量排名 #1", result["items"][0]["detail"])
+        self.assertIn("榜单原站更新时间：2026-09-27", result["note"])
+        self.assertIn("不代表买入推荐", result["note"])
+
     FINVIZ_HTML = """<html><script><table><tr><td>fake</td></tr></table></script>
     <table><tr><th>No.</th><th>Name</th><th>Perf Week</th><th>Change %</th></tr>
     <tr><td>1</td><td><a href="screener?f=sec_technology&amp;v=141">Technology</a></td>
@@ -97,10 +188,11 @@ class PublicSitesTests(unittest.TestCase):
             result = pipeline.fetch_finviz()
         self.assertEqual(result["status"], "success")
         self.assertTrue(result["snapshot"])
+        self.assertEqual(len(result["items"]), 3)
         self.assertIn("Technology +0.85%", result["items"][0]["title"])
-        self.assertIn("Energy -0.96%", result["items"][1]["title"])
-        self.assertIn("NVDA / AMD", result["items"][2]["title"])
-        self.assertIn("热力图", result["items"][3]["title"])
+        self.assertIn("Energy -0.96%", result["items"][0]["title"])
+        self.assertIn("NVDA / AMD", result["items"][1]["title"])
+        self.assertIn("热力图", result["items"][2]["title"])
         self.assertTrue(all(not it["is_today"] for it in result["items"]))
         self.assertEqual(pipeline._finviz_sector_rows("<html>Cloudflare</html>"), [])
         with patch.object(pipeline, "safe_request", return_value=None):
@@ -113,7 +205,8 @@ class PublicSitesTests(unittest.TestCase):
                 return "<html>access denied</html>"
             return (f"Rank,Name,Symbol,{metric}\n"
                     f"1,Alpha Inc,ALPH,{42.5 if metric == 'pe_ratio_ttm' else 2300000000000}\n"
-                    f"2,Beta Holdings,BETA,{9.23 if metric == 'pe_ratio_ttm' else 1200000000000}\n")
+                    f"2,Beta Holdings,BETA,{9.23 if metric == 'pe_ratio_ttm' else 1200000000000}\n"
+                    f"3,Gamma Corp,GAMM,{13.1 if metric == 'pe_ratio_ttm' else 700000000000}\n")
 
         with patch.object(pipeline, "safe_request", side_effect=fake_request):
             result = pipeline.fetch_companies_marketcap()
@@ -121,10 +214,12 @@ class PublicSitesTests(unittest.TestCase):
         self.assertTrue(result["snapshot"])
         self.assertEqual(len(result["items"]), 3)
         self.assertIn("2.30 万亿美元", result["items"][0]["title"])
+        self.assertIn("市值", result["items"][0]["detail"])
+        self.assertIn("营收 TTM", result["items"][0]["detail"])
+        self.assertIn("市盈率（从低到高）", result["items"][0]["detail"])
+        self.assertIn("42.50 倍", result["items"][0]["detail"])
         self.assertIn("利润 TTM", result["note"])
-        self.assertIn("市盈率（从低到高）", result["items"][-1]["title"])
-        self.assertIn("42.50 倍", result["items"][-1]["title"])
-        self.assertIn("低市盈率并不等于", result["note"])
+        self.assertIn("不代表买入建议", result["note"])
         self.assertEqual(pipeline._parse_cmc_csv("Not a CSV", "marketcap"), [])
         self.assertEqual(pipeline._parse_cmc_csv("Rank,Name,Symbol,marketcap\n1,Bad,BAD,nan", "marketcap"), [])
         with patch.object(pipeline, "safe_request", return_value=None):
@@ -225,8 +320,9 @@ class PublicSitesTests(unittest.TestCase):
             self.assertEqual(pipeline.fetch_trackserenity()["status"], "unavailable")
 
     def test_parallel_results_collect_and_error_isolation(self):
-        funcs = ("fetch_seeking_alpha", "fetch_finviz", "fetch_reddit",
-                 "fetch_companies_marketcap", "fetch_trackserenity", "fetch_koyfin")
+        funcs = ("fetch_macro_micro", "fetch_seeking_alpha", "fetch_finviz", "fetch_reddit",
+                 "fetch_companies_marketcap", "fetch_trackserenity", "fetch_koyfin",
+                 "fetch_etf_database", "fetch_stockanalysis", "fetch_fred")
         patches = []
         for name, attr in zip(pipeline.PUBLIC_SITE_NAMES, funcs):
             if name == "Reddit":
@@ -244,8 +340,8 @@ class PublicSitesTests(unittest.TestCase):
                 p.stop()
         self.assertEqual(tuple(results), pipeline.PUBLIC_SITE_NAMES)
         self.assertEqual(results["Reddit"]["status"], "unavailable")
-        self.assertEqual(len(results), 6)
-        # 每天原有的八站收集仍执行，新来源并入同一份数据而非额外发送消息。
+        self.assertEqual(len(results), 10)
+        # 每天原有的基础数据源仍执行，十站投研并入同一份数据而非额外发送消息。
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
                   "fetch_eastmoney_news", "fetch_hot_stocks")
@@ -259,7 +355,7 @@ class PublicSitesTests(unittest.TestCase):
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        self.assertEqual(len(data), 14)
+        self.assertEqual(len(data), 18)
         self.assertEqual(data["Seeking Alpha"]["status"], "success")
 
     def test_public_digest_precedes_market_in_both_themes(self):
@@ -272,7 +368,7 @@ class PublicSitesTests(unittest.TestCase):
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
-                self.assertLess(titles.index("六站公开投研 · 每日速览"),
+                self.assertLess(titles.index("每日量化策略投研"),
                                 titles.index("行情速览（实时）"))
                 self.assertEqual(titles[-1], "本次数据可用性 · 当天检验")
 
@@ -294,10 +390,14 @@ class PublicSitesTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             with self.subTest(theme=theme):
                 report = pipeline.generate_report(results, "2026年9月27日 · 周日", "20260927", theme=theme)
-                self.assertIn("六站公开投研 · 每日速览", report)
+                self.assertIn("每日量化策略投研", report)
                 self.assertIn("Seeking Alpha", report)
                 self.assertIn("CompaniesMarketCap", report)
-                self.assertIn("Koyfin", report)
+                self.assertIn("MacroMicro", report)
+                self.assertIn("ETF Database", report)
+                self.assertIn("StockAnalysis", report)
+                self.assertIn("FRED", report)
+                self.assertIn(pipeline.PUBLIC_SITE_DESCRIPTIONS["MacroMicro"], report)
                 self.assertIn("受限或没有新文章", report)
                 self.assertIn("今日抓取", report)
                 self.assertIn("仅为今日抓取快照，非当日发布", report)
@@ -305,7 +405,7 @@ class PublicSitesTests(unittest.TestCase):
                 self.assertNotIn("onerror", report)
                 self.assertNotIn('href="javascript:', report)
                 self.assertNotIn("Unsafe", report)
-                self.assertEqual(pipeline._report_meta(report)["total_sources"], 14)
+                self.assertEqual(pipeline._report_meta(report)["total_sources"], 18)
                 self.assertGreaterEqual(pipeline._report_meta(report)["today_sources"], 2)
         can_push, reason = pipeline.check_push_eligibility(results)
         self.assertTrue(can_push)
@@ -319,9 +419,9 @@ class PublicSitesTests(unittest.TestCase):
         self.assertFalse(pipeline.check_push_eligibility(failed)[0])
         for theme in ("guizang", "pixel"):
             report = pipeline.generate_report(failed, "2026年9月27日 · 周日", "20260927", theme=theme)
-            self.assertNotIn("六站公开投研 · 每日速览", report)  # 失败仅在审计中列出
+            self.assertNotIn("每日量化策略投研", report)  # 失败仅在审计中列出
             self.assertIn("HTTP 403", report)
-            self.assertEqual(pipeline._report_meta(report)["total_sources"], 14)
+            self.assertEqual(pipeline._report_meta(report)["total_sources"], 18)
 
 
 if __name__ == "__main__":
