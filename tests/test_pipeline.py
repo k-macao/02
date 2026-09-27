@@ -2477,5 +2477,89 @@ class ConciseLayoutTests(unittest.TestCase):
         self.assertEqual(pipeline._concise_detail("营收 TTM 1.2 万亿 · PE 30"), "营收 TTM 1.2 万亿 · PE 30")
 
 
+class SectionAiJudgeTests(unittest.TestCase):
+    """逐栏目 AI 研判（规则合成）：概率化多空判断确定性、且只附在有数据的栏目。"""
+
+    def test_prob_mapping_and_labels(self):
+        p = pipeline._ai_judge_prob
+        self.assertEqual(p(0, 0), 50)
+        self.assertEqual(p(1, 1), 50)
+        self.assertEqual(p(3, 1), 72)   # 50+45*0.5=72.5 → 72（银行家舍入）
+        self.assertEqual(p(1, 3), 28)
+        self.assertEqual(p(100, 0), 95)   # 全偏一侧也绝不绝对化
+        self.assertEqual(p(0, 100), 5)
+        self.assertEqual(pipeline._ai_judge_label(60), ("▲", "偏多"))
+        self.assertEqual(pipeline._ai_judge_label(40), ("▼", "偏空"))
+        self.assertEqual(pipeline._ai_judge_label(50), ("■", "中性"))
+
+    def _sample_data(self):
+        return {
+            "实时行情": pipeline._source_result("quote", "success", quotes={
+                "标普500": {"price": 6100, "change_pct": 1.2},
+                "纳斯达克": {"price": 19000, "change_pct": 2.1},
+                "WTI 原油": {"price": 70, "change_pct": -0.8},
+            }),
+            "Reddit": pipeline._public_site_result("Reddit", [
+                {"title": "$TSLA rally to the moon, YOLO and record high",
+                 "url": "https://www.reddit.com/r/wallstreetbets/comments/1/a/",
+                 "detail": "发布于 2026-09-27 10:00（北京时间）",
+                 "published_cst": "2026-09-27 10:00", "community": "r/wallstreetbets",
+                 "is_today": True},
+                {"title": "$NVDA dump risk",
+                 "url": "https://www.reddit.com/r/stocks/comments/2/b/",
+                 "detail": "发布于 2026-09-27 11:00（北京时间）",
+                 "published_cst": "2026-09-27 11:00", "community": "r/stocks",
+                 "is_today": True},
+            ], latest="2026-09-27"),
+            "全球头条": pipeline._source_result("google", "success", is_today=True,
+                                                content_date="2026-09-27",
+                                                headlines=[{"title": "美联储释放降息信号，AI 算力需求走强",
+                                                            "source": "新华网", "url": "",
+                                                            "published_cst": "2026-09-27 09:00",
+                                                            "is_today": True}]),
+        }
+
+    def test_notes_only_for_sections_with_data_and_valid_probs(self):
+        notes = pipeline.build_section_ai_notes(self._sample_data())
+        self.assertEqual(set(notes), {"MARKET SNAPSHOT", "TREND CLUES", "GLOBAL HEADLINES"})
+        for note in notes.values():
+            self.assertEqual(note["bull_pct"] + note["bear_pct"], 100)
+            self.assertTrue(5 <= note["bull_pct"] <= 95)
+            self.assertIn("→ 预测：", note["text"])
+
+    def test_reddit_note_tickers_and_direction(self):
+        notes = pipeline.build_section_ai_notes(self._sample_data())
+        n = notes["TREND CLUES"]
+        self.assertIn("TSLA×1", n["text"])
+        self.assertIn("NVDA×1", n["text"])
+        # 多词 rally/moon/yolo/record high=4 > 空词 dump=1 → 偏多
+        self.assertEqual(n["label"], "偏多")
+        self.assertGreater(n["bull_pct"], 50)
+
+    def test_market_note_and_render_in_both_themes(self):
+        data = self._sample_data()
+        notes = pipeline.build_section_ai_notes(data)
+        # 2 涨 1 跌且涨幅合计 > 跌幅 → 偏多
+        self.assertEqual(notes["MARKET SNAPSHOT"]["label"], "偏多")
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
+            for theme in ("guizang", "pixel"):
+                with self.subTest(theme=theme):
+                    report = pipeline.generate_report(
+                        data, "2026年9月27日 · 周日", "20260927", theme=theme)
+                    # 有数据的 3 个栏目各一条研判行
+                    self.assertEqual(report.count("⌁ AI 研判"), 3)
+                    self.assertIn("多头", report)
+                    self.assertIn("空头", report)
+                    self.assertRegex(report, r"多头 \d{2}%")
+                    # 研判行位于所属栏目内：首条研判在趋势跟踪线索栏目之前
+                    self.assertLess(report.find("⌁ AI 研判"),
+                                    report.find("每日量化策略趋势跟踪线索"))
+        # 无任何数据 → 不出现研判行
+        empty = {"实时行情": pipeline._source_result("quote", "unavailable", error="offline")}
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
+            report = pipeline.generate_report(empty, "2026年9月27日 · 周日", "20260927")
+        self.assertNotIn("⌁ AI 研判", report)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,13 @@
       展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
       净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
+  6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / A股大盘全景复盘 /
+      政策因子 / 全球头条 / 东方财富快讯 / A股资讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
+      AI 新闻情绪因子）正文末尾追加一行概率化多空判断：
+      「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
+      概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
+      ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
+      （今日结论 / AI 盘研判 / 盘点总结）不附加，栏目无数据自然缺席。规则合成，非投资建议。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -3039,6 +3046,254 @@ REPORT_SECTION_ORDER = (
 )
 
 
+# ============================================================
+# 逐栏目 AI 研判（规则合成）：概率化多空判断 + 分析预测总结
+# —— 每个有实际数据的栏目末尾追加一行「⌁ AI 研判」：
+#    多头 xx% / 空头 xx%（概率夹在 5%~95%，绝不绝对化）+ 一句判断/预测。
+#    证据全部来自该栏目自身数据（涨跌方向 / 热度 / 关键词命中 / 归因结果），
+#    确定性计算、可复现、不调外部大模型、不伪造内容；定位参考，非投资建议。
+# ============================================================
+_REDDIT_BULL_RE = re.compile(
+    r"\b(rall(?:y|ied)|surge\w*|soar\w*|pump\w*|moon\w*|yolo|bullish|breakout|rebound|"
+    r"recover\w*|upgrade\w*|record high|all-?time high|beat\w*|boom\w*)\b", re.I)
+_REDDIT_BEAR_RE = re.compile(
+    r"\b(crash\w*|dump\w*|tank\w*|plunge\w*|selloff|bearish|short\w*|fud|scam|"
+    r"bankrupt\w*|layoff\w*|warn\w*|loss\w*|correction|decline\w*|tumble\w*|"
+    r"slump\w*|sank|sink\w*)\b", re.I)
+_REDDIT_TICKER_RE = re.compile(r"\$([A-Za-z]{1,5})\b")
+
+
+def _ai_judge_prob(bull, bear):
+    """多空证据量 → 多头概率（5%~95%）；证据持平 50%，全偏一侧最高 95%（绝不绝对化）。"""
+    total = bull + bear
+    if total <= 0:
+        return 50
+    return int(max(5, min(95, round(50 + 45 * (bull - bear) / total))))
+
+
+def _ai_judge_label(prob):
+    """概率 → 方向标记与多空定调（60% 以上偏多 / 40% 以下偏空 / 其间中性）。"""
+    if prob >= 60:
+        return "▲", "偏多"
+    if prob <= 40:
+        return "▼", "偏空"
+    return "■", "中性"
+
+
+def _judge_note(prob, text):
+    mark, label = _ai_judge_label(prob)
+    return {"bull_pct": prob, "bear_pct": 100 - prob, "mark": mark,
+            "label": label, "text": text}
+
+
+def _zh_title_bull_bear(titles):
+    """中文标题词表命中计数（复用 AI 盘研判多/空词表）。"""
+    bull = bear = 0
+    for t in titles:
+        txt = str(t or "")
+        bull += sum(txt.count(w) for w in _AI_BULL_WORDS)
+        bear += sum(txt.count(w) for w in _AI_BEAR_WORDS)
+    return bull, bear
+
+
+def _top_themes(titles, top_n=2):
+    """按板块关键词命中量取主题；无任何命中时返回空（不猜）。"""
+    counts = {}
+    for name, words in AI_SECTOR_KEYWORDS.items():
+        for t in titles:
+            txt = str(t or "")
+            hits = sum(txt.count(w) for w in words)
+            if hits:
+                counts[name] = counts.get(name, 0) + hits
+    if not counts:
+        return []
+    return [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_n]]
+
+
+def build_section_ai_notes(data, *, policy=None, senti=None):
+    """为有内容的数据栏目生成逐栏 AI 研判（概率多空 + 预测）。
+
+    返回 {kicker: note}；仅真实有数据的栏目出研判。结论型栏目
+    （今日结论 / AI 盘研判 / 盘点总结）本身即总结判断，不重复追加。
+    注意：text 内数据片段必须已 _esc（渲染端不再二次转义）。
+    """
+    notes = {}
+
+    # ① 行情速览：涨跌家数 + 最强/最弱 → 方向定调
+    market = data.get("实时行情") or {}
+    if market.get("status") == "success":
+        rows = []
+        for label, q in (market.get("quotes") or {}).items():
+            pct = _percent_number((q or {}).get("change_pct"))
+            if pct is not None:
+                rows.append((str(label), pct))
+        if rows:
+            bull = round(sum(max(p, 0) for _, p in rows), 4)
+            bear = round(sum(max(-p, 0) for _, p in rows), 4)
+            prob = _ai_judge_prob(bull, bear)
+            up_n = sum(1 for _, p in rows if p > 0)
+            down_n = sum(1 for _, p in rows if p < 0)
+            strongest, weakest = max(rows, key=lambda r: r[1]), min(rows, key=lambda r: r[1])
+            if down_n == 0 and up_n > 0:
+                verdict = "普涨格局，关注量能延续性"
+            elif up_n == 0 and down_n > 0:
+                verdict = "普跌格局，防御为主"
+            else:
+                verdict = "结构分化，跟随强势方向"
+            notes["MARKET SNAPSHOT"] = _judge_note(
+                prob, f"{len(rows)} 项报价 涨{up_n} / 跌{down_n}（最强 {_esc(strongest[0])}、"
+                      f"最弱 {_esc(weakest[0])}）→ 预测：{verdict}")
+
+    # ② A股大盘全景：市场宽度 + 成交额环比 + 领涨板块 → 三票合成
+    pan = data.get("A股大盘全景") or {}
+    if pan.get("status") == "success":
+        b = pan.get("breadth") or {}
+        t = pan.get("turnover") or {}
+        lead = ((pan.get("sectors") or {}).get("leading") or [{}])[0]
+        bull = bear = 0
+        up, down = b.get("up") or 0, b.get("down") or 0
+        if up > down:
+            bull += 2 if (b.get("ratio") or 0) >= 1.2 else 1
+        elif down > up:
+            bear += 2 if (b.get("ratio") or 0) <= 0.8 else 1
+        chg = _percent_number(t.get("chg_pct"))
+        if chg is not None:
+            if chg > 1:
+                bull += 1
+            elif chg < -1:
+                bear += 1
+        lead_pct = _percent_number(lead.get("chg_pct"))
+        if lead_pct is not None:
+            if lead_pct >= 2:
+                bull += 1
+            elif lead_pct < 0:
+                bear += 1
+        prob = _ai_judge_prob(bull, bear)
+        _mark, label = _ai_judge_label(prob)
+        if label == "偏多":
+            verdict = "宽度与情绪偏多，进攻略优"
+        elif label == "偏空":
+            verdict = "宽度与情绪偏空，防御优先"
+        else:
+            verdict = "震荡结构，等量能定方向"
+        bits = [f"宽度 {_esc(str(b.get('mood') or '—'))}",
+                f"成交{'放量' if (chg or 0) > 0 else '缩量'}"]
+        if lead.get("name"):
+            bits.append(f"领涨 {_esc(str(lead['name']))}")
+        notes["A-SHARE PANORAMA"] = _judge_note(prob, "，".join(bits) + f" → 预测：{verdict}")
+
+    # ③ 政策因子：PSI 方向 + 受益/承压行业 → 实施节奏预测
+    if isinstance(policy, dict) and policy.get("available"):
+        score = int(policy.get("broad_score") or 0)
+        prob = _ai_judge_prob(max(score, 0), max(-score, 0))
+        _mark, label = _ai_judge_label(prob)
+        if label == "偏多":
+            verdict = "政策顺风，关注未来 15 日落地节奏"
+        elif label == "偏空":
+            verdict = "政策压力，关注受影响行业回撤"
+        else:
+            verdict = "政策中性，关注边际变化"
+        detail = f"方向 {_esc(str(policy.get('broad_label') or '中性'))}"
+        winners = policy.get("winners") or []
+        losers = policy.get("losers") or []
+        if winners:
+            detail += "，受益 " + "、".join(_esc(str(w.get('name'))) for w in winners[:2])
+        if losers:
+            detail += "，承压 " + "、".join(_esc(str(l.get('name'))) for l in losers[:2])
+        notes["POLICY SHOCK"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
+
+    # ④ 趋势跟踪线索（Reddit）：多空词命中 + 热股提取 → 散户情绪判断
+    reddit = data.get("Reddit") or {}
+    if reddit.get("status") == "success" and reddit.get("items"):
+        items = [it for it in reddit["items"] if isinstance(it, dict)]
+        bull = bear = 0
+        tickers = {}
+        for it in items:
+            title = str(it.get("title") or "")
+            bull += len(_REDDIT_BULL_RE.findall(title))
+            bear += len(_REDDIT_BEAR_RE.findall(title))
+            for sym in _REDDIT_TICKER_RE.findall(title):
+                key = sym.upper()
+                tickers[key] = tickers.get(key, 0) + 1
+        prob = _ai_judge_prob(bull, bear)
+        _mark, label = _ai_judge_label(prob)
+        boards_n = len({it.get("community") for it in items if it.get("community")})
+        top = [f"{s}×{c}" for s, c in sorted(tickers.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
+        detail = f"十板块扫描 {len(items)} 条热帖（{boards_n} 板块有数据）"
+        if top:
+            detail += "，热股 " + "、".join(_esc(t) for t in top)
+        detail += f"，多空词 {bull} 多 / {bear} 空"
+        notes["TREND CLUES"] = _judge_note(
+            prob, f"{detail} → 预测：散户情绪{label}，关注高热标的与基本面背离（观点非事实）")
+
+    # ⑤ 资讯类栏目：全球头条 / 东财快讯 / A股资讯（多空词 + 热门主题）
+    for kick, source_key, noun in (("GLOBAL HEADLINES", "全球头条", "条头条"),
+                                   ("EASTMONEY WIRE", "东财快讯", "条快讯"),
+                                   ("A-SHARE DESK", "A股资讯", "条资讯")):
+        src = data.get(source_key) or {}
+        titles = []
+        for h in (src.get("headlines") or []):
+            t = h if isinstance(h, str) else str((h or {}).get("title") or "")
+            if t:
+                titles.append(t)
+        if not titles:
+            continue
+        bull, bear = _zh_title_bull_bear(titles)
+        prob = _ai_judge_prob(bull, bear)
+        _mark, label = _ai_judge_label(prob)
+        themes = _top_themes(titles)
+        detail = f"{len(titles)} {noun}：多空词 {bull} 多 / {bear} 空"
+        if themes:
+            detail += "，热门主题 " + "、".join(_esc(t) for t in themes)
+        watch = _esc(themes[0]) if themes else "后续进展"
+        notes[kick] = _judge_note(prob, f"{detail} → 预测：头条情绪{label}，关注 {watch}")
+
+    # ⑥ 港股名家频道：更新频道数 + 观点词命中 → 名家观点定调
+    yt = data.get("港股名家频道") or {}
+    yt_live = yt.get("channels") or []
+    if yt_live:
+        titles = [str(v.get("title") or "")
+                  for ch in yt_live for v in (ch.get("videos") or [])]
+        titles = [t for t in titles if t]
+        bull, bear = _zh_title_bull_bear(titles)
+        active_n = sum(1 for ch in yt_live if ch.get("is_today"))
+        prob = _ai_judge_prob(bull, bear)
+        _mark, label = _ai_judge_label(prob)
+        themes = _top_themes(titles, top_n=1)
+        focus = _esc(themes[0]) if themes else "大盘技术面"
+        notes["HK GURU CHANNELS"] = _judge_note(
+            prob, f"今日 {active_n} 频道有新内容，观点 {bull} 多 / {bear} 空"
+                  f" → 预测：名家观点整体{label}，关注：{focus}")
+
+    # ⑦ AI 新闻情绪因子：已归因个股的正负命中合计 → 整体新闻情绪
+    if isinstance(senti, dict) and senti.get("total_matched"):
+        stocks = [s for s in (senti.get("stocks") or []) if isinstance(s, dict)]
+        if stocks:
+            bull = sum(int(s.get("pos") or 0) for s in stocks)
+            bear = sum(int(s.get("neg") or 0) for s in stocks)
+            prob = _ai_judge_prob(bull, bear)
+            _mark, label = _ai_judge_label(prob)
+            best = max(stocks, key=lambda s: float(s.get("score") or 0))
+            worst = min(stocks, key=lambda s: float(s.get("score") or 0))
+            notes["NEWS SENTIMENT"] = _judge_note(
+                prob, f"归因 {senti.get('total_matched')} 只（前 {len(stocks)} 只评分），"
+                      f"最强 {_esc(str(best.get('name')))}、最弱 {_esc(str(worst.get('name')))}"
+                      f" → 预测：新闻情绪{label}，关注情绪与价格背离")
+
+    return notes
+
+
+def _ai_judge_row(note, kit):
+    """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。"""
+    bull_c, bear_c, flat_c = kit.ok_color, kit.bad_color, kit.warn_color
+    lc = (bull_c if note["label"] == "偏多"
+          else bear_c if note["label"] == "偏空" else flat_c)
+    head = (f'<span style="color:{lc};font-weight:900;">⌁ AI 研判 {note["mark"]} {note["label"]}</span>'
+            f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
+            f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
+    return kit.item_row("⌁", f"{head} — {note['text']}")
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -3155,6 +3410,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         )
 
     # ⑦ AI 新闻情绪因子：只有真正归因到个股时才出现（样本不足不再占位）
+    senti_result = {}
     if AI_ANALYSIS_ENABLED:
         senti_result = build_news_sentiment(data, date_str or _today_str(),
                                             sentiment_history,
@@ -3173,6 +3429,20 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     blocks["WRAP-UP"] = ("WRAP-UP", "盘点总结", kit.kv(summary), "", "")
 
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
+
+    # ⑧ 逐栏目 AI 研判：有实际数据的数据栏目末尾追加「⌁ AI 研判」行
+    #    （概率化多空判断 + 一句分析预测；规则合成，结论型栏目不重复）。
+    judge_notes = build_section_ai_notes(
+        data, policy=policy if (isinstance(policy, dict) and policy.get("available")) else None,
+        senti=senti_result if (isinstance(senti_result, dict) and senti_result.get("available")) else None)
+    if judge_notes:
+        new_sections = []
+        for kick, title, content, badge, caption in sections:
+            note = judge_notes.get(kick)
+            if note:
+                content = content + _ai_judge_row(note, kit)
+            new_sections.append((kick, title, content, badge, caption))
+        sections = new_sections
 
     return {
         "sections": sections,
