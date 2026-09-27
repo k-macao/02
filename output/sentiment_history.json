@@ -124,6 +124,13 @@
      "neg": 1,
      "total": 4,
      "score": 0.0
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -313,6 +320,13 @@
      "neg": 1,
      "total": 1,
      "score": -1.0
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -390,6 +404,13 @@
      "neg": 0,
      "total": 3,
      "score": 0.3333
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -453,6 +474,13 @@
      "neg": 0,
      "total": 3,
      "score": 0.3333
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -551,6 +579,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -635,6 +670,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -707,6 +749,13 @@
      "score": null
     },
     "20260924": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260928": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -796,6 +845,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -866,6 +922,13 @@
      "neg": 0,
      "total": 3,
      "score": 0.3333
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -910,6 +973,13 @@
      "score": -0.5
     },
     "20260921": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    },
+    "20260928": {
      "pos": 0,
      "neu": 0,
      "neg": 0,
@@ -1006,6 +1076,13 @@
      "neg": 0,
      "total": 2,
      "score": 0.0
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1258,6 +1335,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1384,6 +1468,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1440,6 +1531,13 @@
      "neg": 0,
      "total": 0,
      "score": null
+    },
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
     }
    }
   },
@@ -1456,7 +1554,21 @@
      "score": null
     }
    }
+  },
+  "美股:MSFT": {
+   "market": "美股",
+   "code": "MSFT",
+   "name": "微软",
+   "days": {
+    "20260928": {
+     "pos": 0,
+     "neu": 0,
+     "neg": 0,
+     "total": 0,
+     "score": null
+    }
+   }
   }
  },
- "updated_cst": "2026-09-28 00:37:19"
+ "updated_cst": "2026-09-28 02:35:15"
 }
