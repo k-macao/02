@@ -194,22 +194,44 @@ GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
 
-# 六个公开投研站点：只读取可公开访问的 RSS、页面或站点提供的 CSV，
-# 不登录、不绕过付费墙。站点顺序同时用于抓取、栏目和审计展示。
+# 每日量化策略投研：只读取可公开访问的 RSS、页面、CSV 或官方宏观数据，
+# 不登录、不绕过付费墙。顺序同时用于抓取、栏目和审计展示；每站最多精选 3 条。
 PUBLIC_SITE_NAMES = (
-    "Seeking Alpha", "Finviz", "Reddit", "CompaniesMarketCap",
-    "AnalysisSite（trackserenity）", "Koyfin",
+    "MacroMicro", "Seeking Alpha", "Finviz", "Reddit", "CompaniesMarketCap",
+    "AnalysisSite（trackserenity）", "Koyfin", "ETF Database", "StockAnalysis", "FRED",
 )
 PUBLIC_SITE_URLS = {
-    "Seeking Alpha": "https://seekingalpha.com/feed.xml",
-    "Finviz": "https://finviz.com/groups.ashx?g=sector&v=140",
+    "MacroMicro": "https://en.macromicro.me/trader-insights",
+    "Seeking Alpha": "https://seekingalpha.com/",
+    "Finviz": "https://finviz.com/",
     "Reddit": "https://www.reddit.com/",
     "CompaniesMarketCap": "https://companiesmarketcap.com/",
     "AnalysisSite（trackserenity）": "https://www.trackserenity.com/",
-    "Koyfin": "https://www.koyfin.com/feed/",
+    "Koyfin": "https://www.koyfin.com/",
+    "ETF Database": "https://etfdb.com/",
+    "StockAnalysis": "https://stockanalysis.com/trending/",
+    "FRED": "https://fred.stlouisfed.org/",
 }
-PUBLIC_SITE_WINDOW_HOURS = 72  # 发布日期晚于此窗口的文章/推文不当作今日资讯重发
-PUBLIC_SITE_DISPLAY_N = 4
+PUBLIC_SITE_FEEDS = {
+    "Seeking Alpha": "https://seekingalpha.com/feed.xml",
+    "Koyfin": "https://www.koyfin.com/feed/",
+    "ETF Database": "https://etfdb.com/feed/",
+}
+PUBLIC_SITE_DESCRIPTIONS = {
+    "MacroMicro": "宏观指标：利率、通胀、就业、流动性与经济周期",
+    "Seeking Alpha": "个股深度、财报、多空观点；股息与量化评分仅在公开内容可核实后展示",
+    "Finviz": "热力图、选股器、技术形态与板块强弱",
+    "Reddit": "散户情绪与热门标的：r/stocks、r/investing、r/wallstreetbets、r/ValueInvesting",
+    "CompaniesMarketCap": "全球企业市值、营收、利润与 PE 排行",
+    "AnalysisSite（trackserenity）": "Serenity/X 推文、个股线索及可公开获取的站点分析",
+    "Koyfin": "市场结构、板块涨跌、估值与宏观联动（限公开内容）",
+    "ETF Database": "ETF 持仓、费率、规模、分红与行业主题筛选入口",
+    "StockAnalysis": "个股财报、估值、分析师预期等基本面筛选入口",
+    "FRED": "美国官方宏观数据：利率、通胀、就业、信贷与货币",
+}
+PUBLIC_SITE_WINDOW_HOURS = 72  # 文章/帖子按发布时间过滤；宏观数据保留原始观测日期
+PUBLIC_SITE_DISPLAY_N = 3
+PUBLIC_SITE_ITEM_LIMIT = 3
 
 HK_CHANNELS = [
     # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
@@ -1241,7 +1263,7 @@ def _channel_item(title, url, pub_raw):
 
 
 def _parse_rss_items(xml_text, limit=8):
-    """解析通用 RSS 2.0 / Atom 源，返回 [{title,url,published_cst,is_today}, ...]。"""
+    """解析通用 RSS 2.0 / Atom 源，保留标题、摘要、链接与发布时间。"""
     items = []
     try:
         root = ET.fromstring(xml_text or "")
@@ -1257,8 +1279,14 @@ def _parse_rss_items(xml_text, limit=8):
                 pub = (item.findtext("pubDate")
                        or item.findtext("dc:date", namespaces={"dc": "http://purl.org/dc/elements/1.1/"})
                        or "")
+                summary = (item.findtext("description")
+                           or item.findtext("content:encoded", namespaces={
+                               "content": "http://purl.org/rss/1.0/modules/content/"})
+                           or "")
                 if title:
-                    items.append(_channel_item(title, link, pub))
+                    parsed = _channel_item(title, link, pub)
+                    parsed["summary"] = summary
+                    items.append(parsed)
                 if len(items) >= limit:
                     break
     # Atom
@@ -1272,8 +1300,12 @@ def _parse_rss_items(xml_text, limit=8):
                     break
             pub = (entry.findtext("a:published", "", YT_NS)
                    or entry.findtext("a:updated", "", YT_NS) or "")
+            summary = (entry.findtext("a:summary", "", YT_NS)
+                       or entry.findtext("a:content", "", YT_NS) or "")
             if title:
-                items.append(_channel_item(title, link, pub))
+                parsed = _channel_item(title, link, pub)
+                parsed["summary"] = summary
+                items.append(parsed)
             if len(items) >= limit:
                 break
     return items
@@ -1398,15 +1430,17 @@ def fetch_hk_channels():
 
 
 # ============================================================
-# 六个公开站点：日报短摘录（仅标题/公开指标/原始链接，不复制付费正文）
+# 每日量化策略投研：十个公开来源（仅标题/公开指标/原始链接，不复制付费正文）
 # ============================================================
 _PUBLIC_ALLOWED_HOSTS = {
+    "macromicro.me", "www.macromicro.me", "en.macromicro.me",
     "seekingalpha.com", "www.seekingalpha.com", "finviz.com", "www.finviz.com",
     "reddit.com", "www.reddit.com", "old.reddit.com",
     "companiesmarketcap.com", "www.companiesmarketcap.com",
     "trackserenity.com", "www.trackserenity.com",
-    "koyfin.com", "www.koyfin.com", "x.com", "www.x.com",
-    "twitter.com", "www.twitter.com",
+    "koyfin.com", "www.koyfin.com", "etfdb.com", "www.etfdb.com",
+    "stockanalysis.com", "www.stockanalysis.com", "fred.stlouisfed.org",
+    "x.com", "www.x.com", "twitter.com", "www.twitter.com",
 }
 
 
@@ -1440,7 +1474,8 @@ def _public_recent(dt, now=None, hours=PUBLIC_SITE_WINDOW_HOURS):
 
 
 def _public_site_result(name, items, *, latest=None, snapshot=False, note="", error=None):
-    """快照的「当天」是当日采集，不冒充当日发文/实时价格。"""
+    """单站最多保留三条；快照的「当天」是当日采集，不冒充当日发文/实时价格。"""
+    items = [item for item in (items or []) if isinstance(item, dict)][:PUBLIC_SITE_ITEM_LIMIT]
     is_today = bool(items) and (snapshot or any(it.get("is_today") for it in items))
     return _source_result(
         name, "success" if items else "unavailable", is_today=is_today,
@@ -1475,8 +1510,11 @@ def _public_rss_items(xml_text, base, *, limit=3, now=None):
             latest = dt
         if not _public_recent(dt, now):
             continue
-        recent.append({"title": title, "url": url,
-                       "detail": f"发布于 {pub}（北京时间）",
+        summary = _public_text(row.get("summary"), 105)
+        detail = f"发布于 {pub}（北京时间）"
+        if summary:
+            detail += f" · {summary}"
+        recent.append({"title": title, "url": url, "detail": detail,
                        "published_cst": pub, "is_today": dt.date() == now.date()})
     recent.sort(key=lambda it: it["published_cst"], reverse=True)
     unique, seen = [], set()
@@ -1488,24 +1526,40 @@ def _public_rss_items(xml_text, base, *, limit=3, now=None):
 
 
 def fetch_seeking_alpha():
-    """Seeking Alpha 官方公开 RSS：标题、时间、原链接；付费正文/量化评分不抓取。"""
+    """Seeking Alpha 官方公开 RSS：最多三条标题/时间/原链接；付费正文不抓取。"""
     name = "Seeking Alpha"
-    feed = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
-    items, latest = _public_rss_items(feed, PUBLIC_SITE_URLS[name], limit=3)
-    note = "只列公开投研标题及原文链接；多空论点请读原文，股息/量化评分未在 RSS 提供时不展示。"
+    feed_url = PUBLIC_SITE_FEEDS[name]
+    feed = safe_request(feed_url, is_json=False, timeout=9)
+    items, latest = _public_rss_items(feed, feed_url, limit=PUBLIC_SITE_ITEM_LIMIT)
+    note = ("只列公开投研标题及原文链接；多空论点请读原文，股息/量化评分未在公开 RSS 提供时不展示。"
+            "不足三条时不以旧文补足。")
     error = (f"近72小时无可核实的新文章（最新 {latest}）" if latest else
              "公开 RSS 不可达或没有可核实发布时间的文章")
     return _public_site_result(name, items, latest=latest, note=note, error=error)
 
 
 def fetch_koyfin():
-    """Koyfin 官方公开博客 RSS；登录后行情结构/宏观联动不是公开抓取数据。"""
+    """Koyfin 官方公开博客 RSS；最多三篇，登录后仪表盘数据不推断。"""
     name = "Koyfin"
-    feed = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
-    items, latest = _public_rss_items(feed, PUBLIC_SITE_URLS[name], limit=2)
+    feed_url = PUBLIC_SITE_FEEDS[name]
+    feed = safe_request(feed_url, is_json=False, timeout=9)
+    items, latest = _public_rss_items(feed, feed_url, limit=PUBLIC_SITE_ITEM_LIMIT)
     note = "仅公开博客更新；登录后的板块、估值及宏观仪表盘数据未接入，不推断实时结论。"
     error = (f"近72小时无博客更新（最新 {latest}）" if latest else
              "公开博客 RSS 不可达或没有可核实发布时间的文章")
+    return _public_site_result(name, items, latest=latest, note=note, error=error)
+
+
+def fetch_etf_database():
+    """ETF Database 官方公开 RSS：取近 72 小时最多三篇，链接回原文/ETF档案。"""
+    name = "ETF Database"
+    feed_url = PUBLIC_SITE_FEEDS[name]
+    feed = safe_request(feed_url, is_json=False, timeout=9)
+    items, latest = _public_rss_items(feed, feed_url, limit=PUBLIC_SITE_ITEM_LIMIT)
+    note = ("按发布时间选取最新公开稿件；ETF 档案可继续核对持仓、费率、规模和分红。"
+            "登录/付费区域不抓取，文章观点不当作买入信号。")
+    error = (f"近72小时无可核实的新稿件（最新 {latest}）" if latest else
+             "公开 RSS 不可达或没有可核实发布时间的稿件")
     return _public_site_result(name, items, latest=latest, note=note, error=error)
 
 
@@ -1534,8 +1588,8 @@ def _cmc_value(raw, metric):
     return f"{value:,.0f} 美元"
 
 
-def _parse_cmc_csv(text, metric):
-    """验证 CSV 表头和正数排名，避免把反爬/登录 HTML 误当实时榜单。"""
+def _parse_cmc_records(text, metric):
+    """验证 CSV 表头和正数排名，返回可交叉对照的结构化记录。"""
     reader = csv.DictReader(io.StringIO(text or ""))
     if not reader.fieldnames:
         return []
@@ -1544,36 +1598,65 @@ def _parse_cmc_csv(text, metric):
         return []
     rows = []
     for i, item in enumerate(reader):
-        if i >= 20 or len(rows) >= 3:
+        if i >= 20:
             break
         rank = str(item.get("Rank") or "").strip()
         name = _public_text(item.get("Name"), 42)
         symbol = str(item.get("Symbol") or "").strip()
-        value = _cmc_value(item.get(metric), metric)
+        try:
+            raw_value = float(str(item.get(metric) or "").replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        value = _cmc_value(raw_value, metric)
         if not (rank.isdigit() and 0 < int(rank) <= 20 and name and
                 re.fullmatch(r"[A-Za-z0-9.\-]{1,16}", symbol) and value):
             continue
-        rows.append(f"{rank}. {name} ({symbol}) {value}")
+        rows.append({"rank": int(rank), "name": name, "symbol": symbol,
+                     "raw_value": raw_value, "value": value})
     return rows
 
 
+def _parse_cmc_csv(text, metric):
+    """兼容的简短显示解析器：返回该公开榜单前 3 项。"""
+    return [f'{row["rank"]}. {row["name"]} ({row["symbol"]}) {row["value"]}'
+            for row in _parse_cmc_records(text, metric)[:PUBLIC_SITE_ITEM_LIMIT]]
+
+
 def fetch_companies_marketcap():
-    """每天重新读取市值/营收/利润/PE 四份公开榜单；财报 TTM 不算当日发布。"""
-    name, items, failures = "CompaniesMarketCap", [], []
+    """抓取市值/营收/利润/PE 四份榜单，推荐三家并列出可核实的横向指标。"""
+    name, datasets, failures = "CompaniesMarketCap", {}, []
     for label, csv_url, metric in _CMC_RANKINGS:
         text = safe_request(csv_url, is_json=False, timeout=9)
-        leaders = _parse_cmc_csv(text, metric)
-        if leaders:
-            items.append({"title": f"{label}：{' · '.join(leaders)}",
-                          "url": csv_url.split("?", 1)[0],
-                          "detail": "官网公开榜单 · 抓取快照（非当日财报）",
-                          "is_today": False})
+        records = _parse_cmc_records(text, metric)
+        if records:
+            datasets[metric] = {row["symbol"]: row for row in records}
         else:
             failures.append(label)
-    note = ("四类榜单为抓取时快照，财务金额按站点美元口径；数值可能沿用最近交易日/财报期，"
-            "营收/利润按 TTM。低市盈率并不等于低风险或买入建议。")
+
+    metric_labels = {metric: label for label, _, metric in _CMC_RANKINGS}
+    primary_metric = next((metric for _, _, metric in _CMC_RANKINGS if datasets.get(metric)), None)
+    items = []
+    primary_url = next((url.split("?", 1)[0] for _, url, metric in _CMC_RANKINGS
+                        if metric == primary_metric), PUBLIC_SITE_URLS[name])
+    if primary_metric:
+        leaders = list(datasets[primary_metric].values())[:PUBLIC_SITE_ITEM_LIMIT]
+        for row in leaders:
+            symbol = row["symbol"]
+            comparisons = []
+            for _, _, metric in _CMC_RANKINGS:
+                match = datasets.get(metric, {}).get(symbol)
+                if match:
+                    comparisons.append(f'{metric_labels[metric]} {match["value"]}')
+            title = (f'{row["rank"]}. {row["name"]} ({symbol}) · '
+                     f'{metric_labels[primary_metric]} {row["value"]}')
+            detail = " · ".join(comparisons) or "官网公开榜单；数值为抓取快照"
+            items.append({"title": title, "url": primary_url,
+                          "detail": detail, "is_today": False})
+
+    note = ("按可取得的官网排行挑选最多三家，并按 Symbol 交叉对照市值、营收 TTM、利润 TTM、PE；"
+            "金额为美元口径，财务数值可能沿用最近交易日/财报期。榜单是快照，不代表买入建议。")
     if failures and items:
-        note += " 暂缺：" + "、".join(failures) + "。"
+        note += " 暂缺排行：" + "、".join(failures) + "。"
     error = "官网 CSV 不可达/格式变化（市值、营收、利润和 PE 榜单均未取得）"
     return _public_site_result(name, items, latest=_today_display() if items else None,
                                snapshot=True, note=note, error=error)
@@ -1639,6 +1722,79 @@ def _public_tables(html):
     return parser.tables
 
 
+def _stockanalysis_trending_rows(html):
+    """解析 StockAnalysis「Most Viewed」公开榜，只返回带站内个股页链接的前三名。"""
+    for table in _public_tables(html):
+        for i, row in enumerate(table):
+            headers = [c["text"].strip().casefold() for c in row]
+            if not {"symbol", "company name", "market cap"}.issubset(headers):
+                continue
+            si, ci, mi = (headers.index(key) for key in ("symbol", "company name", "market cap"))
+            vi = headers.index("views") if "views" in headers else None
+            pi = headers.index("% change") if "% change" in headers else None
+            ri = headers.index("no.") if "no." in headers else None
+            max_i = max(x for x in (si, ci, mi, vi, pi, ri) if x is not None)
+            result = []
+            for cells in table[i + 1:]:
+                if len(cells) <= max_i:
+                    continue
+                symbol = cells[si]["text"].strip().upper()
+                company = _public_text(cells[ci]["text"], 75)
+                url = _public_url(cells[si]["url"], PUBLIC_SITE_URLS["StockAnalysis"])
+                if not (url and re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,8}", symbol)
+                        and company and re.search(r"/stocks/[a-z0-9.\-]+/?$", urlparse(url).path)):
+                    continue
+                result.append({
+                    "rank": cells[ri]["text"].strip() if ri is not None else str(len(result) + 1),
+                    "symbol": symbol, "company": company, "url": url,
+                    "market_cap": _public_text(cells[mi]["text"], 24),
+                    "views": _public_text(cells[vi]["text"], 16) if vi is not None else "",
+                    "change": _public_text(cells[pi]["text"], 16) if pi is not None else "",
+                })
+                if len(result) >= PUBLIC_SITE_ITEM_LIMIT:
+                    return result
+            return result
+    return []
+
+
+def _stockanalysis_updated_date(html):
+    """读取榜单页可见的 Updated 日期；无标注时返回 None，不猜测行情日期。"""
+    text = _public_visible_text(html)
+    match = re.search(r"\bUpdated:\s*([A-Z][a-z]{2,8})\s+(\d{1,2}),\s+(20\d{2})\b",
+                      text, re.I)
+    if not match:
+        return None
+    try:
+        month = match.group(1)[:3].title()
+        return datetime.strptime(f"{month} {match.group(2)} {match.group(3)}",
+                                 "%b %d %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def fetch_stockanalysis():
+    """读取 StockAnalysis 热门关注榜前三个个股资料页入口，供财报/估值/预期二次筛选。"""
+    name = "StockAnalysis"
+    html = safe_request(PUBLIC_SITE_URLS[name], is_json=False, timeout=9)
+    rows = _stockanalysis_trending_rows(html)
+    updated = _stockanalysis_updated_date(html)
+    items = []
+    for row in rows[:PUBLIC_SITE_ITEM_LIMIT]:
+        detail_parts = [f'浏览量排名 #{row["rank"]}', f'市值 {row["market_cap"]}']
+        if row["change"]:
+            detail_parts.append(f'页面涨跌 {row["change"]}')
+        detail_parts.append("个股页含财报、估值与分析师预期")
+        items.append({"title": f'{row["symbol"]}｜{row["company"]}',
+                      "url": row["url"], "detail": " · ".join(detail_parts),
+                      "is_today": False})
+    note = ("按站点浏览量排序的三个个股资料入口，只作为待研究候选；请复核财报、估值与分析师预期，"
+            "不代表买入推荐。")
+    note += (f" 榜单原站更新时间：{updated}。" if updated else " 原站未标注可解析的榜单更新时间。")
+    error = "热门关注榜未返回可解析的站内个股资料链接"
+    return _public_site_result(name, items, latest=_today_display() if items else None,
+                               snapshot=True, note=note, error=error)
+
+
 def _finviz_pct(text):
     m = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)%", str(text or "").strip())
     return float(m.group(1)) if m else None
@@ -1667,6 +1823,11 @@ def _finviz_sector_rows(html):
     return []
 
 
+def _finviz_pattern_table_available(html):
+    return any({"ticker", "company"}.issubset({c["text"].lower() for c in row})
+               for table in _public_tables(html) for row in table)
+
+
 def _finviz_pattern_rows(html):
     """可选：筛选器的上升通道股票列表，只列原站已有的标的。"""
     for table in _public_tables(html):
@@ -1690,35 +1851,36 @@ def _finviz_pattern_rows(html):
 
 
 def fetch_finviz():
-    """Finviz 公共板块表现和可用时的技术筛选；热力图仅附入口，不 OCR 猜颜色。"""
-    name, url = "Finviz", PUBLIC_SITE_URLS["Finviz"]
-    html = safe_request(url, is_json=False, timeout=9)
+    """Finviz 板块强弱、技术筛选与热力图入口；不 OCR 色块或冒充买入信号。"""
+    name = "Finviz"
+    sector_url = "https://finviz.com/groups.ashx?g=sector&v=140"
+    html = safe_request(sector_url, is_json=False, timeout=9)
     sectors = _finviz_sector_rows(html)
     screener = "https://finviz.com/screener.ashx?v=111&f=ta_pattern_channelup"
     pattern_html = safe_request(screener, is_json=False, timeout=9)
+    pattern_available = _finviz_pattern_table_available(pattern_html)
     symbols = _finviz_pattern_rows(pattern_html)
     items = []
     if sectors:
         leaders = sorted(sectors, key=lambda row: row["change"], reverse=True)[:3]
         laggards = sorted(sectors, key=lambda row: row["change"])[:3]
-        for label, group in (("板块相对强势", leaders), ("板块排名靠后", laggards)):
-            text = " / ".join(
-                f'{row["name"]} {row["change"]:+.2f}%'
-                + (f'（周 {row["week"]:+.2f}%）' if row["week"] is not None else "")
-                for row in group)
-            items.append({"title": f"{label}：{text}", "url": url,
-                          "detail": "公开板块表 Change % / Perf Week；非实时快照",
-                          "is_today": False})
-    if symbols:
-        items.append({"title": "技术形态筛选（上升通道）：" + " / ".join(symbols),
-                      "url": screener, "detail": "仅选股器筛选结果，不代表买入信号",
+        strong = " / ".join(f'{row["name"]} {row["change"]:+.2f}%' for row in leaders)
+        weak = " / ".join(f'{row["name"]} {row["change"]:+.2f}%' for row in laggards)
+        items.append({"title": f"板块强弱｜领涨 {strong}；偏弱 {weak}", "url": sector_url,
+                      "detail": "公开板块表现快照（涨跌幅 / 周表现），休市时可能沿用上一交易日",
                       "is_today": False})
-    if items:
-        items.append({"title": "查看 Finviz 板块热力图与选股器", "url": "https://finviz.com/map.ashx?t=sec",
-                      "detail": "热力图链接；不抓取图片，不按色块猜当日涨跌", "is_today": False})
-    note = "仅最近可见板块/技术筛选快照；官网未给出完整报价时戳，休市时可能是上个交易日。"
+    if pattern_available:
+        candidate_text = " / ".join(symbols) if symbols else "本次无可核实匹配标的"
+        items.append({"title": f"技术形态筛选｜上升通道：{candidate_text}", "url": screener,
+                      "detail": "站点选股器筛选结果/入口；仅供复核，不是交易信号",
+                      "is_today": False})
+    if sectors or pattern_available:
+        items.append({"title": "开盘扫描｜查看 Finviz 板块热力图", "url": "https://finviz.com/map.ashx?t=sec",
+                      "detail": "热力图原站入口；不抓取图片，不按色块猜测数据",
+                      "is_today": False})
+    note = "最多三条盘面研究入口；数据为原站公开快照，报价时间可能落后或沿用上一交易日。"
     if sectors and not symbols:
-        note += " 上升通道选股器本次无可核实候选或访问受限。"
+        note += " 上升通道筛选器本次没有可核实候选。"
     if symbols and not sectors:
         note += " 板块表现表本次暂缺。"
     error = "公开板块表和形态筛选器均未返回可解析数据（可能被限流）"
@@ -1792,8 +1954,11 @@ def fetch_reddit():
     note = "仅公开帖子标题，热度不等于事实或投资建议。"
     if unavailable:
         note += " 暂缺（RSS/JSON 访问受限或近72小时无新帖）：" + "、".join(unavailable) + "。"
+    # 四个指定社区都已扫描；日报只保留其中发布时间最新的三条，避免偏向单一板块。
+    items.sort(key=lambda item: item.get("published_cst", ""), reverse=True)
     error = "四个社区的公开 RSS/JSON 均不可用或近72小时无可验证的新帖"
-    return _public_site_result(name, items, latest=latest, note=note, error=error)
+    return _public_site_result(name, items[:PUBLIC_SITE_ITEM_LIMIT], latest=latest,
+                               note=note, error=error)
 
 
 _SERENITY_DATE_RE = re.compile(
@@ -1922,16 +2087,209 @@ class _PublicVisibleText(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style", "noscript"):
             self.skip += 1
+        elif not self.skip and tag in ("br", "hr"):
+            self.parts.append(" ")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "noscript"):
             self.skip = max(0, self.skip - 1)
-        elif not self.skip and tag in ("p", "div", "h1", "h2", "section"):
+        elif not self.skip and tag in (
+                "p", "div", "h1", "h2", "h3", "section", "article", "li", "tr", "td", "th"):
             self.parts.append(" ")
 
     def handle_data(self, data):
         if not self.skip:
             self.parts.append(data)
+
+
+def _public_visible_text(html):
+    if not html:
+        return ""
+    parser = _PublicVisibleText()
+    try:
+        parser.feed(html)
+    except (ValueError, TypeError):
+        return ""
+    return re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
+
+
+_MACROMICRO_CHARTS = (
+    ("利率 / 流动性", "有效联邦基金利率", "https://en.macromicro.me/collections/9/us-market-relative/71170/effective-federal-funds-volume"),
+    ("通胀趋势", "美国 CPI", "https://en.macromicro.me/collections/5/us-price-relative"),
+    ("就业 / 经济周期", "非农就业与失业率", "https://en.macromicro.me/collections/4/us-employ-relative"),
+)
+
+
+def _macromicro_latest_stats(html):
+    """只从页面可见的 Latest Stats 段提取日期与观测摘要，不解析图表图片。"""
+    text = _public_visible_text(html)
+    match = re.search(r"\bLatest Stats\b(.*)$", text, re.I)
+    if not match:
+        return "", None
+    stats = match.group(1)
+    stop = re.search(r"\b(?:High & Low|Related Collections|Source|AI Recommended Charts|Feedback)\b",
+                     stats, re.I)
+    if stop:
+        stats = stats[:stop.start()]
+    stats = re.sub(r"\s*Next update:\s*\d{1,2}\s+[A-Z][a-z]{2}\s+20\d{2}", "", stats)
+    stats = _public_text(stats, 180)
+    dates = re.findall(r"\b20\d{2}[-/]\d{2}(?:[-/]\d{2})?\b", stats)
+    # MacroMicro 在部分图表数据缺失时会输出 1980-01-01 / 0.0000 占位值，不能当成真实读数。
+    dates = [date for date in dates if not date.startswith(("1980-01-01", "1970-01-01"))]
+    if not dates:
+        return "", None
+    return stats, max(dates).replace("/", "-")
+
+
+def fetch_macro_micro():
+    """直读 MacroMicro 三类公开宏观图表的 Latest Stats：利率、通胀、就业/周期。"""
+    name, items, dates, failures = "MacroMicro", [], [], []
+    with ThreadPoolExecutor(max_workers=len(_MACROMICRO_CHARTS)) as executor:
+        futures = [(theme, title, url, executor.submit(
+            safe_request, url, is_json=False, timeout=10))
+            for theme, title, url in _MACROMICRO_CHARTS]
+        for theme, title, url, future in futures:
+            html = future.result()
+            stats, data_date = _macromicro_latest_stats(html)
+            if not stats:
+                failures.append(theme)
+                continue
+            if data_date:
+                dates.append(data_date)
+            today = datetime.now(CST).strftime("%Y-%m-%d")
+            items.append({"title": f"{theme}｜{title}", "url": url,
+                          "detail": f"MacroMicro 最新公开统计：{stats}",
+                          "is_today": data_date == today})
+    note = ("宏观观测值按原站日期呈现，月度/季度数据不因每日抓取而视为当日发布；"
+            "研究入口覆盖利率、通胀、就业、流动性及经济周期。")
+    if failures and items:
+        note += " 暂缺图表：" + "、".join(failures) + "。"
+    error = "三类公开宏观图表均不可达或页面未提供可解析的 Latest Stats"
+    return _public_site_result(name, items, latest=max(dates) if dates else None,
+                               note=note, error=error)
+
+
+_FRED_GROUPS = (
+    ("利率 / 流动性", "政策利率、国债收益率与货币供应", (
+        ("DFF", "联邦基金有效利率", "percent", 120),
+        ("DGS10", "10年期美债收益率", "percent", 120),
+        ("M2SL", "M2货币供应量", "trillion", 550),
+    )),
+    ("通胀", "CPI / 核心 CPI / PCE", (
+        ("CPIAUCSL", "CPI", "index", 550),
+        ("CPILFESL", "核心 CPI", "index", 550),
+        ("PCEPI", "PCE 价格指数", "index", 550),
+    )),
+    ("就业 / 信贷", "失业率、非农就业与消费信贷", (
+        ("UNRATE", "失业率", "percent", 550),
+        ("PAYEMS", "非农就业", "thousands", 550),
+        ("TOTALSL", "消费信贷余额", "trillion", 550),
+    )),
+)
+
+
+def _fred_series_url(series_id, lookback_days):
+    start = (datetime.now(CST).date() - timedelta(days=lookback_days)).isoformat()
+    return ("https://fred.stlouisfed.org/graph/fredgraph.csv"
+            f"?id={series_id}&cosd={start}")
+
+
+def _parse_fred_csv(text, series_id, *, start_date=None):
+    """读取官方免密 fredgraph.csv 单序列的有效观测，忽略缺失值「.」并限制回看窗口。"""
+    reader = csv.DictReader(io.StringIO(text or ""))
+    if not reader.fieldnames:
+        return []
+    fields = {str(name).strip().casefold(): name for name in reader.fieldnames}
+    date_field = fields.get("observation_date") or fields.get("date")
+    value_field = fields.get(series_id.casefold())
+    if not date_field or not value_field:
+        return []
+    observations = []
+    for row in reader:
+        date = str(row.get(date_field) or "").strip()
+        raw = str(row.get(value_field) or "").strip()
+        if (not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", date) or raw in ("", ".")
+                or (start_date and date < start_date)):
+            continue
+        try:
+            value = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if value == value and abs(value) < 1e18:
+            observations.append((date, value))
+    observations.sort(key=lambda row: row[0])
+    return observations
+
+
+def _fred_yoy(observations):
+    if not observations:
+        return None
+    current_date, current_value = observations[-1]
+    year, month = int(current_date[:4]) - 1, current_date[5:7]
+    prior = next((value for date, value in reversed(observations[:-1])
+                  if date[:7] == f"{year:04d}-{month}"), None)
+    if prior is None or prior == 0:
+        return None
+    return (current_value / prior - 1) * 100
+
+
+def _fred_format_value(value, kind, observations):
+    if kind == "percent":
+        return f"{value:.2f}%"
+    if kind == "trillion":  # FRED M2SL / TOTALSL units are billions of dollars.
+        return f"{value / 1000:.2f} 万亿美元"
+    if kind == "thousands":  # PAYEMS units are thousands of persons.
+        return f"{value / 1000:.2f} 百万人"
+    yoy = _fred_yoy(observations)
+    return f"{value:,.3f}" + (f"（同比 {yoy:+.2f}%）" if yoy is not None else "")
+
+
+def fetch_fred():
+    """抓取 FRED 免密公开图表 CSV，汇总三条利率/通胀/就业与信贷研究卡片。"""
+    name, items, all_dates, unavailable = "FRED", [], [], []
+    series_specs = [(group_index, label, series_id, kind, days)
+                    for group_index, (_, _, series) in enumerate(_FRED_GROUPS)
+                    for series_id, label, kind, days in series]
+    with ThreadPoolExecutor(max_workers=len(series_specs)) as executor:
+        futures = {
+            series_id: executor.submit(
+                safe_request, _fred_series_url(series_id, days), is_json=False, timeout=10)
+            for _, _, series_id, _, days in series_specs
+        }
+        parsed = {}
+        for _, _, series_id, _, lookback_days in series_specs:
+            cutoff = (datetime.now(CST).date() - timedelta(days=lookback_days)).isoformat()
+            rows = _parse_fred_csv(futures[series_id].result(), series_id, start_date=cutoff)
+            if rows:
+                parsed[series_id] = rows
+                all_dates.append(rows[-1][0])
+            else:
+                unavailable.append(series_id)
+
+    today = datetime.now(CST).strftime("%Y-%m-%d")
+    for group_index, (theme, title, series) in enumerate(_FRED_GROUPS):
+        metrics, valid_dates = [], []
+        primary_id = series[0][0]
+        for series_id, label, kind, _ in series:
+            observations = parsed.get(series_id) or []
+            if not observations:
+                continue
+            observation_date, value = observations[-1]
+            valid_dates.append(observation_date)
+            rendered = _fred_format_value(value, kind, observations)
+            metrics.append(f"{label} {rendered}（{observation_date}）")
+        if metrics:
+            items.append({"title": f"{theme}｜{title}",
+                          "url": f"https://fred.stlouisfed.org/series/{primary_id}",
+                          "detail": " · ".join(metrics),
+                          "is_today": today in valid_dates})
+    note = ("美国官方 FRED 数据；每条列出原始观测日期，月度/季度指标不是实时行情。"
+            "本页按利率/货币、通胀、就业/信贷分组，完整系列目录见原站。")
+    if unavailable and items:
+        note += " 暂缺系列：" + "、".join(unavailable) + "。"
+    error = "FRED 三类宏观数据均未取得可验证的 CSV 观测"
+    return _public_site_result(name, items, latest=max(all_dates) if all_dates else None,
+                               note=note, error=error)
 
 
 def _serenity_thesis(html, symbol):
@@ -1974,14 +2332,18 @@ def fetch_trackserenity():
 
 
 def fetch_public_sites():
-    """六站独立并行，任一站失败不会拖垮主日报；始终返回六条审计记录。"""
+    """十站独立并行，任一站失败不会拖垮主日报；始终返回十条审计记录。"""
     fetchers = (
+        ("MacroMicro", fetch_macro_micro),
         ("Seeking Alpha", fetch_seeking_alpha),
         ("Finviz", fetch_finviz),
         ("Reddit", fetch_reddit),
         ("CompaniesMarketCap", fetch_companies_marketcap),
         ("AnalysisSite（trackserenity）", fetch_trackserenity),
         ("Koyfin", fetch_koyfin),
+        ("ETF Database", fetch_etf_database),
+        ("StockAnalysis", fetch_stockanalysis),
+        ("FRED", fetch_fred),
     )
     results = {}
     with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
@@ -2034,7 +2396,7 @@ def collect_all_data():
     data["热门榜单"] = fetch_hot_stocks()
     time.sleep(0.5)
 
-    print("\n📰 正在采集六站公开投研内容...")
+    print("\n📰 正在采集十站每日量化策略投研内容...")
     data.update(fetch_public_sites())
 
     print("\n✅ 数据采集完成！")
@@ -3253,7 +3615,7 @@ def _panorama_block(pan):
 
 
 def _public_digest_block(data, kit):
-    """两主题共用：六站逐站来源/日期/短摘录与失败说明，所有外链重新校验。"""
+    """两主题共用：十站逐站来源/日期/最多三条精选与失败说明，所有外链重新校验。"""
     color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
     rows = []
     for index, name in enumerate(PUBLIC_SITE_NAMES, 1):
@@ -3264,17 +3626,19 @@ def _public_digest_block(data, kit):
         heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
                    f'<b>{_esc(name)}</b></a> {kit.source_badge(source)}')
         fetched = _public_text(source.get("fetched_at") or "—", 32)
+        description = PUBLIC_SITE_DESCRIPTIONS.get(name, "公开投研来源")
         if source.get("status") != "success":
             detail = _public_text(source.get("error") or "公开数据暂缺", 150)
             rows.append(kit.item_row(f"{index:02d}", heading,
-                                     _esc(f"抓取于 {fetched} · 数据暂缺：{detail}")))
+                                     _esc(f"{description} · 抓取于 {fetched} · 数据暂缺：{detail}")))
             continue
-        snapshot_label = "今日抓取快照（不代表当日发布或实时更新）" if source.get("snapshot") else "文章/原帖按发布时间核对"
+        snapshot_label = "今日抓取快照（不代表当日发布或实时更新）" if source.get("snapshot") else "按原站发布时间/观测日期核对"
         latest = _public_text(source.get("content_date") or "—", 30)
-        note = _public_text(source.get("note"), 260)
-        rows.append(kit.item_row(f"{index:02d}", heading,
-                                 _esc(f"抓取于 {fetched} · 最新可见日期 {latest} · {snapshot_label}。{note}")))
-        for item in (source.get("items") or [])[:PUBLIC_SITE_DISPLAY_N]:
+        date_label = "抓取快照日期" if source.get("snapshot") else "最新可见日期"
+        note = _public_text(source.get("note"), 250)
+        metadata = f"{description} · 抓取于 {fetched} · {date_label} {latest} · {snapshot_label}。{note}"
+        rows.append(kit.item_row(f"{index:02d}", heading, _esc(_public_text(metadata, 360))))
+        for pick_no, item in enumerate((source.get("items") or [])[:PUBLIC_SITE_DISPLAY_N], 1):
             if not isinstance(item, dict):
                 continue
             url = _public_url(item.get("url"), PUBLIC_SITE_URLS[name])
@@ -3283,10 +3647,11 @@ def _public_digest_block(data, kit):
                 continue
             link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
                     f'{_esc(title)}</a>')
-            rows.append(kit.item_row("›", link, _esc(_public_text(item.get("detail"), 125))))
+            rows.append(kit.item_row(f"{pick_no:02d}", link,
+                                     _esc(_public_text(item.get("detail"), 210))))
     return kit.rows("".join(rows)) + kit.note(_esc(
-        "仅公开可核实内容；文章/帖子限近72小时并列原发布时间。榜单/板块是今日抓取快照，"
-        "不等同于今日发布或实时行情；受限来源会标明暂缺，所有观点非投资建议。"))
+        "每站最多精选三条公开内容；文章/帖子仅取近72小时且保留原发布时间，宏观序列保留观测日期。"
+        "榜单/盘面数据为抓取快照，不代表实时更新；不足三条不补编，所有内容仅作研究阅读入口，非投资建议。"))
 
 
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
@@ -3325,7 +3690,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("东财快讯", em),
         ("热门榜单", hot),
     ]
-    # 仅运行过六站采集时加入审计；外部旧调用若无新键仍维持原来的 8 个数据源。
+    # 仅运行过十站采集时加入审计；外部旧调用若无新键仍维持原来的基础数据源数量。
     source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
 
     total = len(source_items)
@@ -3334,7 +3699,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
 
     # ---- 栏目拼版：固定阅读顺序（有内容才渲染，无数据栏目缺席，审计栏永远收尾）----
-    # 阅读逻辑：政策/宏观 → 六站公开投研速览 → AI 盘研判 → 行情/全景 →
+    # 阅读逻辑：政策/宏观 → 每日量化策略投研 → AI 盘研判 → 行情/全景 →
     # 全球/国内/A股/港股资讯 → 新闻情绪量化 → 数据可用性审计。
     blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
 
@@ -3350,13 +3715,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "章鱼AI · 政策关键词矩阵 + 行业冲击评分（近 15 日窗口，非投资建议）",
             )
 
-    # 六站日报：紧跟页首政策因子，避免长报告在微信截断时丢失。
-    # 即使部分站点失败也逐站显示原因；六站全部失败时仅在末尾审计留痕。
+    # 每日量化策略投研：紧跟页首政策因子，避免长报告在微信截断时丢失。
+    # 每站最多列三条可核实内容；部分站点失败时显示原因，十站均失败时仅在审计中留痕。
     if any((data.get(name) or {}).get("status") == "success" for name in PUBLIC_SITE_NAMES):
         blocks["PUBLIC RESEARCH"] = (
-            "PUBLIC RESEARCH", "六站公开投研 · 每日速览",
+            "PUBLIC RESEARCH", "每日量化策略投研",
             _public_digest_block(data, kit), "",
-            "Seeking Alpha · Finviz · Reddit · CompaniesMarketCap · trackserenity · Koyfin｜公开摘要，非投资建议",
+            "十个公开站点 · 每站最多精选 3 条 · 研究阅读入口，非投资建议",
         )
 
     # ② AI 盘研判（跨市场综合研判导读）
