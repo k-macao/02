@@ -191,7 +191,7 @@ GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
 
-# 每日量化情绪因子：源头数据只保留 Reddit 一个来源（2026-09-27 起由十站投研精简）。
+# 每日量化策略趋势跟踪线索：源头数据只保留 Reddit 一个来源（2026-09-27 起由十站投研精简）。
 # 只读取公开热帖 feed，不登录、不绕过付费墙、不复制帖子正文；
 # 扫描 10 个财经 / 投资 / 金融 / 经济类板块，每个板块取热门帖子 5 条作为样本数据，
 # 捕捉散户讨论风向与热门标的。板块顺序同时用于抓取、栏目和审计展示。
@@ -1402,7 +1402,7 @@ def fetch_hk_channels():
 
 
 # ============================================================
-# 每日量化情绪因子：单一来源 Reddit（仅标题/热度/原始链接，不复制帖子正文）
+# 每日量化策略趋势跟踪线索：单一来源 Reddit（仅标题/热度/原始链接，不复制帖子正文）
 # ============================================================
 _PUBLIC_ALLOWED_HOSTS = {
     "reddit.com", "www.reddit.com", "old.reddit.com",
@@ -1615,7 +1615,7 @@ def fetch_reddit():
             items.extend(board_items)
         else:
             unavailable.append(f"r/{community}")
-    note = ("只收录公开热帖的标题与热度作为情绪样本，供判断散户讨论风向与热门标的；"
+    note = ("只收录公开热帖的标题与热度作为趋势跟踪线索，供判断散户讨论风向与热门标的；"
             "社区观点未经核实，热度不等于事实或投资建议。")
     if unavailable:
         note += " 暂缺（访问受限或近72小时无新帖）：" + "、".join(unavailable) + "。"
@@ -1679,7 +1679,7 @@ def collect_all_data():
     data["热门榜单"] = fetch_hot_stocks()
     time.sleep(0.5)
 
-    print("\n📰 正在采集每日量化情绪因子（Reddit 十个板块热门帖）...")
+    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十个板块热门帖）...")
     data.update(fetch_public_sites())
 
     print("\n✅ 数据采集完成！")
@@ -1826,7 +1826,7 @@ KOBOYO_SECTION_ICONS = {
     "DATA AUDIT": "document",
     "CONCLUSION": "brain",
     "WRAP-UP": "document",
-    "SENTIMENT FACTOR": "brain",
+    "TREND CLUES": "brain",
 }
 
 
@@ -1968,7 +1968,7 @@ _SECTION_ICON_META = {
     "DATA AUDIT": ("✓", "LOG", C_GREEN, C_UP_BG),
     "CONCLUSION": ("★", "TL;DR", C_LEMON, C_AI_BG),
     "WRAP-UP": ("✓", "RECAP", C_GREEN, C_UP_BG),
-    "SENTIMENT FACTOR": ("◉", "SENTI", C_MAGENTA, "#301226"),
+    "TREND CLUES": ("◉", "TREND", C_MAGENTA, "#301226"),
 }
 
 
@@ -2902,8 +2902,8 @@ def _short_source(item):
     return _esc(str((item or {}).get("source") or ""))
 
 
-def _sentiment_digest_block(data, kit):
-    """两主题共用：Reddit 情绪因子 —— 10 个板块的热门帖样本（每板块至多 5 条）。
+def _trend_clues_block(data, kit):
+    """两主题共用：Reddit 趋势跟踪线索 —— 10 个板块的热门帖样本（每板块至多 5 条）。
 
     无数据的板块不进正文；缺失板块只在盘点总结的「数据覆盖」里点名。
     """
@@ -3029,11 +3029,11 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total):
     return pairs
 
 
-# 阅读顺序：结论 → 数据（行情 / 全景 / 政策 / 研判依据）→ 情绪因子与资讯 → 新闻情绪 → 盘点。
+# 阅读顺序：结论 → 数据（行情 / 全景 / 政策 / 研判依据）→ 趋势跟踪线索与资讯 → 新闻情绪 → 盘点。
 REPORT_SECTION_ORDER = (
     "CONCLUSION",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "POLICY SHOCK", "AI READ",
-    "SENTIMENT FACTOR", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
+    "TREND CLUES", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
 )
@@ -3124,11 +3124,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             "AI READ", "AI 盘研判", kit.ai_block(ai_result), kit.ai_badge(), "",
         )
 
-    # ⑤ 每日量化情绪因子：单一来源 Reddit（抓取成功且有条目才渲染）
+    # ⑤ 每日量化策略趋势跟踪线索：单一来源 Reddit（抓取成功且有条目才渲染）
     if (data.get("Reddit") or {}).get("status") == "success":
-        digest = _sentiment_digest_block(data, kit)
+        digest = _trend_clues_block(data, kit)
         if digest:
-            blocks["SENTIMENT FACTOR"] = ("SENTIMENT FACTOR", "每日量化情绪因子", digest, "", "")
+            blocks["TREND CLUES"] = ("TREND CLUES", "每日量化策略趋势跟踪线索", digest, "", "")
 
     # ⑥ 资讯：全球头条 / 东财快讯 / A股资讯 / 港股名家频道
     if gh_headlines:

@@ -1,4 +1,4 @@
-"""每日量化情绪因子（Reddit 单一来源）的离线解析、降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
+"""每日量化策略趋势跟踪线索（Reddit 单一来源）的离线解析、降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
 import importlib.util
 import sys
 import types
@@ -219,7 +219,7 @@ class SentimentFactorTests(unittest.TestCase):
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        self.assertEqual(len(data), 9)  # 8 个基础数据源 + Reddit 情绪因子
+        self.assertEqual(len(data), 9)  # 8 个基础数据源 + Reddit 趋势跟踪线索
         self.assertEqual(data["Reddit"]["status"], "success")
 
     def _reddit_data(self):
@@ -251,7 +251,8 @@ class SentimentFactorTests(unittest.TestCase):
             for theme in ("guizang", "pixel"):
                 with self.subTest(theme=theme):
                     report = pipeline.generate_report(data, "2026年9月27日 · 周日", "20260927", theme=theme)
-                    self.assertIn("每日量化情绪因子", report)
+                    self.assertIn("每日量化策略趋势跟踪线索", report)
+                    self.assertNotIn("每日量化情绪因子", report)  # 旧栏目名不得回潮
                     self.assertNotIn("每日量化策略投研", report)
                     # 板块子标题（有数据的板块）
                     self.assertIn("r/stocks", report)
@@ -281,15 +282,15 @@ class SentimentFactorTests(unittest.TestCase):
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
-                # 结论先行 → 行情数据 → 情绪因子 → 资讯 → 盘点收尾
-                self.assertLess(titles.index("行情速览"), titles.index("每日量化情绪因子"))
+                # 结论先行 → 行情数据 → 趋势跟踪线索 → 资讯 → 盘点收尾
+                self.assertLess(titles.index("行情速览"), titles.index("每日量化策略趋势跟踪线索"))
                 self.assertEqual(titles[-1], "盘点总结")
 
     def test_section_absent_and_failures_named_when_reddit_down(self):
         failed = {"Reddit": pipeline._public_site_result("Reddit", [], error="HTTP 403")}
         for theme in ("guizang", "pixel"):
             report = pipeline.generate_report(failed, "2026年9月27日 · 周日", "20260927", theme=theme)
-            self.assertNotIn("每日量化情绪因子", report)  # 整栏缺席，失败仅在盘点总结里点名
+            self.assertNotIn("每日量化策略趋势跟踪线索", report)  # 整栏缺席，失败仅在盘点总结里点名
             self.assertIn("暂缺：", report)
             self.assertIn("Reddit", report)
             self.assertNotIn("HTTP 403", report)
