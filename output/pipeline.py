@@ -32,7 +32,7 @@
       净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
   6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / A股大盘全景复盘 /
-      每日量化策略（政策因子趋势预判） / 全球头条 / 东方财富快讯 / A股资讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
+      每日量化策略（政策因子趋势预判） / 东方财富快讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
       AI 新闻情绪因子）正文末尾追加一行概率化多空判断：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
@@ -3921,7 +3921,11 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
             pairs.append(("风险关注", _esc(kws)))
     elif ai_result and ai_result.get("available"):
         pairs.append(("风险关注", "未检出显著风险舆情"))
-    missing = [name for name, s in source_items if s.get("status") != "success"]
+    # 全球头条 / A股资讯已从日报栏目中移除：底层数据仍供量化策略使用，
+    # 但不再作为正文的缺失项提示，避免版面继续点名已删除栏目。
+    hidden_report_sources = {"全球头条", "A股资讯"}
+    missing = [name for name, s in source_items
+               if name not in hidden_report_sources and s.get("status") != "success"]
     cover = f"当天 {today_n}/{total} 源"
     if missing:
         cover += " · 暂缺：" + "、".join(missing)
@@ -3936,8 +3940,7 @@ REPORT_SECTION_ORDER = (
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY",
-    "TREND CLUES", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
-    "HK GURU CHANNELS", "NEWS SENTIMENT",
+    "TREND CLUES", "EASTMONEY WIRE", "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
 )
 
@@ -4321,23 +4324,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         if digest:
             blocks["TREND CLUES"] = ("TREND CLUES", "每日量化策略趋势跟踪线索", digest, "", "")
 
-    # ⑥ 资讯：全球头条 / 东财快讯 / A股资讯 / 港股名家频道
-    if gh_headlines:
-        gh_items = kit.rows("".join(kit.headline_row(it, i)
-                                    for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
-        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", "全球头条", gh_items,
-                                      kit.source_badge(google), _short_source(google))
+    # ⑥ 资讯：仅保留东财快讯 / 港股名家频道；全球头条与A股资讯不再单独成栏，
+    # 其数据仍可作为量化研判和情绪分析的输入。
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
                                     for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
         blocks["EASTMONEY WIRE"] = ("EASTMONEY WIRE", "东方财富快讯", em_items,
                                     kit.source_badge(em), _short_source(em))
-    if sina_headlines:
-        sina_items = kit.rows("".join(kit.item_row(f"{i:02d}", _esc(h[:120]),
-                                                   anchor=f"h-cn-{i:02d}")
-                                      for i, h in enumerate(sina_headlines[:SINA_DISPLAY_N], 1)))
-        blocks["A-SHARE DESK"] = ("A-SHARE DESK", "A股资讯", sina_items,
-                                  kit.source_badge(sina), _short_source(sina))
     if yt_live:
         channel_blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
         blocks["HK GURU CHANNELS"] = (
@@ -4540,15 +4533,16 @@ def build_daily_quant_strategy(data):
     # 每个条目：title / source / section（正文栏目名）/ index（栏目内序号，1-based，
     # 与渲染侧展示顺序一致）/ anchor（正文锚点 id）/ shown（该标题是否已在正文
     # 栏目展示）/ time（发布时间，供无序号栏目定位）/ channel（港股频道名）。
-    # 全球头条 / 东财快讯 / A股资讯的存储条数 == 展示条数（8/5/5），shown 恒为 True；
-    # 港股频道每频道存储最多 8 条、正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
+    # 全球头条与A股资讯不再作为正文栏目展示，因此只作为风险提示的原始证据、shown=False；
+    # 东财快讯正文展示前 EM_DISPLAY_N 条；港股频道每频道存储最多 8 条、正文只展示前
+    # CHANNEL_TOP_N 条，其余 shown=False。
     headlines_struct = []
     for i, it in enumerate(google_headlines, 1):
         if isinstance(it, dict):
             headlines_struct.append({
                 "title": it.get("title", ""), "source": it.get("source", ""),
                 "section": "全球头条", "index": i, "anchor": f"h-gh-{i:02d}",
-                "shown": i <= GH_DISPLAY_N,
+                "shown": False,
                 "time": it.get("published_cst") or "", "channel": "",
             })
     for i, it in enumerate(em_headlines, 1):
@@ -4564,7 +4558,7 @@ def build_daily_quant_strategy(data):
             headlines_struct.append({
                 "title": h, "source": "新浪财经",
                 "section": "A股市场", "index": i, "anchor": f"h-cn-{i:02d}",
-                "shown": i <= SINA_DISPLAY_N,
+                "shown": False,
                 "time": "", "channel": "",
             })
     for c, ch in enumerate(yt_channels, 1):
