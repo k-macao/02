@@ -46,8 +46,12 @@ class SectorRotationTests(unittest.TestCase):
             self.assertNotEqual(sr.monthly_holdings(reversed_scores, "2026-10-01", path)["holdings"], first["holdings"])
 
     def test_incomplete_universe_and_missing_data_hide_section(self):
-        with patch.object(sr, "fetch_universe", return_value=[]):
-            self.assertFalse(sr.run(lambda *a, **kw: None)["available"])
+        # 用临时存档：run() 会把诊断写进存档，不能污染仓库里的 output/news_history.json
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(sr, "fetch_universe", return_value=[]):
+                res = sr.run(lambda *a, **kw: None,
+                             state_path=os.path.join(tmp, "news_history.json"))
+            self.assertFalse(res["available"])
         html = pipeline.generate_report({"行业轮动": pipeline._source_result(
             "fake", "unavailable", result={"available": False})}, "2026年9月28日", "20260928")
         self.assertNotIn("SECTOR ROTATION", html)
