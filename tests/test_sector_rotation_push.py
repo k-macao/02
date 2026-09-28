@@ -252,8 +252,13 @@ class PushRenderTests(unittest.TestCase):
     def test_fetch_logs_reason_on_failure(self):
         api = FakeAPI(pages=[{"data": None}])
         buf = io.StringIO()
-        with patch.object(pipeline, "safe_request", api), redirect_stdout(buf):
-            src = pipeline.fetch_sector_rotation()
+        with tempfile.TemporaryDirectory() as tmp:
+            # 存档路径指向临时目录：诊断落盘不得碰仓库里的 output/news_history.json
+            # （pipeline 侧按 REPORT_DIR 定位存档，模块侧按 STATE_FILE，两处都要隔离）
+            with patch.object(sr, "STATE_FILE", os.path.join(tmp, "news_history.json")), \
+                    patch.object(pipeline, "REPORT_DIR", tmp), \
+                    patch.object(pipeline, "safe_request", api), redirect_stdout(buf):
+                src = pipeline.fetch_sector_rotation()
         self.assertEqual(src["status"], "unavailable")
         self.assertIn("行业轮动栏目缺席", buf.getvalue())
         self.assertIn("行业列表不完整", buf.getvalue())

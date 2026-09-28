@@ -208,8 +208,9 @@ def save_diag(path, diag):
         pass                   # 诊断写不进去不影响本次日报
 
 
-def monthly_holdings(scores, asof, path=STATE_FILE):
+def monthly_holdings(scores, asof, path=None):
     """同一月保留原持仓；先原子写入新月快照再返回。失败则不冒充调仓成功。"""
+    path = path or STATE_FILE
     month = asof[:7]
     previous = _load_state(path)
     saved = previous.get("sector_rotation") or {}
@@ -227,13 +228,16 @@ def monthly_holdings(scores, asof, path=STATE_FILE):
     return state
 
 
-def run(fetch_json, *, state_path=STATE_FILE, now=None):
+def run(fetch_json, *, state_path=None, now=None):
     """只有足够且同步的完整收盘数据才产出栏目；单行业失败只剔除该行业。
 
     返回值：成功 {"available": True, ...}；失败 {"available": False,
     "reason": "...", "diag": {...}}。诊断同时落盘到存档的
     ``sector_rotation_diag``，供日报日志与隔日核查使用。
+
+    state_path 缺省用 STATE_FILE（运行时可整体替换，便于离线测试隔离）。
     """
+    state_path = state_path or STATE_FILE
     now = now or datetime.now(CST)
     if now.tzinfo is None:
         now = now.replace(tzinfo=CST)

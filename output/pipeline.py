@@ -2275,7 +2275,9 @@ def fetch_sector_rotation():
     """
     print("📡 正在计算中国行业指数周度评分与月度轮动...")
     try:
-        result = _rotation.run(safe_request)
+        # 存档跟随日报目录（REPORT_DIR），便于离线测试隔离，不写死模块默认路径
+        result = _rotation.run(
+            safe_request, state_path=os.path.join(REPORT_DIR, NEWS_HISTORY_FILENAME))
     except Exception as exc:
         result = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
     if not result.get("available"):
@@ -8806,10 +8808,17 @@ def main():
     fresh_items = _collect_headline_items(data, _today_display())
     news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
 
-    # 行业轮动栏目缺席时留一次在线诊断（落进标题存档一起提交，供隔日核查；
-    # 健康运行时零额外请求；OCTOPUS_ROTATION_PROBE=0 可关闭）
-    if (data.get("行业轮动") or {}).get("status") != "success" and \
-            str(os.environ.get("OCTOPUS_ROTATION_PROBE", "1")).strip().lower() not in ("0", "false", "no"):
+    # 行业轮动栏目缺席时留一次在线诊断（落进标题存档一起提交，供隔日核查）。
+    # 触发条件：本次确实跑过该源且未取到内容、日报目录未被重定向（离线测试不触发）；
+    # 健康运行时零额外请求；OCTOPUS_ROTATION_PROBE=0 可显式关闭。
+    rotation_src = data.get("行业轮动")
+    probe_enabled = (
+        isinstance(rotation_src, dict)
+        and rotation_src.get("status") != "success"
+        and os.path.abspath(REPORT_DIR) == os.path.abspath(SCRIPT_DIR)
+        and str(os.environ.get("OCTOPUS_ROTATION_PROBE", "1")).strip().lower()
+        not in ("0", "false", "no"))
+    if probe_enabled:
         try:
             import probe_sector_rotation as _probe
             news_corpus["sector_rotation_probe"] = _probe.build_report(
@@ -8817,6 +8826,9 @@ def main():
             print("  🔎 行业轮动缺席：在线诊断已写入标题存档（键 sector_rotation_probe）")
         except Exception as _probe_exc:
             print(f"  ⚠️ 行业轮动在线诊断失败：{_probe_exc}")
+    elif "sector_rotation_probe" in news_corpus:
+        # 栏目恢复正常后清掉上一次的缺席诊断，避免旧快照留在存档里误导核查
+        news_corpus.pop("sector_rotation_probe")
 
     # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
