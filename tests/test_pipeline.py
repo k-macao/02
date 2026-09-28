@@ -529,8 +529,9 @@ class GuizangThemeTests(unittest.TestCase):
         for old_color in ("#30342F", "#D5D7D3", "#B7FF3C"):
             self.assertNotIn(old_color, html)
         self.assertIn("max-width:760px;margin:0 auto", html)
-        self.assertIn("padding:0 24px", html)
-        self.assertIn("padding:40px 0 16px", html)
+        self.assertIn("padding:0 4%", html)               # 流式外边距随视口宽度适配
+        self.assertIn('content="width=device-width,initial-scale=1,viewport-fit=cover"', html)
+        self.assertIn("padding:24px 0 12px", html)       # 栏目纵向留白收紧
         self.assertIn("line-height:1.85", html)
         self.assertNotIn("user-scalable=no", html)
         self.assertNotIn("●", html)
@@ -614,14 +615,14 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertNotIn("<style", low)
         self.assertNotIn("<script", low)
         images = re.findall(r'<img\b[^>]*>', html)
-        # 图片 = 每个栏目标题 1 枚极大图标 + 刊头 128px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
+        # 图片 = 每栏图标 + 刊头图标与横排装饰；全部统一压到最小 16px。
         self.assertEqual(len(images), html.count("<h2 ") + 1 + len(pipeline.KOBOYO_MASTHEAD_ICONS))
         for image in images:
             self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z-]+\.svg"')
             self.assertIn('alt=""', image)
             self.assertIn('aria-hidden="true"', image)
-            self.assertRegex(image, r'width="(?:72|96|128)"')
-            self.assertRegex(image, r'height="(?:72|96|128)"')
+            self.assertIn('width="16"', image)
+            self.assertIn('height="16"', image)
         self.assertNotIn("<svg", low)                 # 只用链接，不内嵌或保存图标
         self.assertNotIn("data:image", low)
         self.assertNotIn("link rel", low)             # 无外部 CSS
