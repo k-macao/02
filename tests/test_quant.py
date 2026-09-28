@@ -672,7 +672,7 @@ class RenderIntegrationTests(unittest.TestCase):
                                                 quotes={}, error="offline")}
         html = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928")
         self.assertNotIn("量化预测总览", html)
-        self.assertIn("盘点总结", html)
+        self.assertIn("总结</h2>", html)  # 栏目名 2026-09-28 由「盘点总结」改为「总结」
 
 
 if __name__ == "__main__":

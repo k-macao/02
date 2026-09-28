@@ -21,23 +21,26 @@
   5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
   6. 新增「热门榜单」数据源：最近交易日收盘后 A股/港股/美股 成交量前五
      （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
-     原始榜单数据仅作为 每日量化策略（板块趋势跟踪）与数据审计的信号源；
-     页面只保留 每日量化策略（板块趋势跟踪）结果。
-  6.1 新增「A股大盘全景复盘」栏目（数据源：东方财富 push2/push2his 免费接口）：
-      ① 指数表现——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
+     原始榜单数据仅作为策略研判与数据审计的信号源；
+     页面只保留策略研判结果。
+  6.1 新增「全球大盘全景复盘」栏目（数据源：东方财富 push2/push2his 免费接口，
+      全球指数概览子块复用「行情速览」的 Yahoo 报价快照）：
+      ① 全球指数概览——美股（道琼斯 / 标普500 / 纳斯达克）与港股（恒生指数 /
+      恒生科技）最新价与涨跌幅，直接复用「行情速览」同一次抓取的报价，缺失品种不出行；
+      ② 指数表现（A股）——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
       最新价、涨跌幅与成交额；② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、
       涨跌比与情绪定调）；③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
-      ④ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
-      展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力
-      净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
+      ⑤ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
+      展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑥ 板块热力——行业板块领涨/领跌 TOP5（附主力
+      净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，A股指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
-  6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / A股大盘全景复盘 /
-      每日量化策略（政策因子趋势预判） / 东方财富快讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
-      AI 新闻情绪因子）正文末尾追加一行概率化多空判断：
+  6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / 全球大盘全景复盘 /
+      政策因子 / 全球头条 / 东方财富快讯 / 趋势跟踪 / 港股名家频道 /
+      新闻情绪）正文末尾追加一行概率化多空判断：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
-      （今日结论 / 每日量化策略（板块趋势跟踪） / 盘点总结）与前瞻日程类栏目（未来30天影响经济时间点：
+      （今日预判 / 策略研判 / 总结）与前瞻日程类栏目（未来30天影响经济时间点：
       日程不含方向信息，只给「最密集日 + 事件密度提示」）不附加，栏目无数据自然缺席。
       规则合成，非投资建议。
   6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，日报开头第一个数据栏目）：
@@ -51,7 +54,7 @@
       抓取后本地再夹一次窗口，栏目写「未来 N 天」就绝不出现窗口外的行。
       正文行数上限（默认 60）只作版面保护，被裁条数按重要度如实写进摘要。
       前瞻性日程属于「今日抓取快照」而非当天发布内容：is_today=False + snapshot=True，
-      因此它永远不会单独把日报推过当天检验闸门；抓取失败则整栏缺席并在盘点总结点名。
+      因此它永远不会单独把日报推过当天检验闸门；抓取失败则整栏缺席并在总结点名。
       OCTOPUS_CALENDAR=0 关闭、OCTOPUS_CALENDAR_DAYS 调窗口、OCTOPUS_CALENDAR_ROWS 调行数。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
@@ -69,20 +72,20 @@
      暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
      等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
      章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
-     编码，并覆盖行情等板块。每日量化策略首屏使用 QUANT CORE 主控卡、方向 / 信号分 /
+     编码，并覆盖行情等板块。策略研判首屏使用 QUANT CORE 主控卡、方向 / 信号分 /
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
-     升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 每日量化策略（板块趋势跟踪）结果。
+     升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 策略研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
   8. 超长日报按栏目边界全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
      完整栏目拆为多条独立 HTML 消息依次发送，全部明细不丢；磁盘 / GitHub 始终保留一份完整日报。
-  9. 「每日量化策略（板块趋势跟踪）」栏目：基于当日多源信号（实时行情、A股板块热力、热门榜单、全球/东财/A股头条与
+  9. 「策略研判」栏目：基于当日多源信号（实时行情、A股板块热力、热门榜单、全球/东财头条与
      港股名家频道观点）做确定性量化合成，输出板块趋势跟踪策略（量化信号 +
      趋势分 + 置信度、板块趋势强度榜、技术速读、风险控制、量化配置）。无需大模型 API、
      可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
      2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
-  10. 「AI 新闻情绪因子」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
+  10. 「新闻情绪」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
       逐股输出 AI 新闻情绪分与总结评论（含原因）。标题窗口为近
       SENTI_WINDOW_HOURS=72 小时（含历史存档），对窗口内标题逐条词表评分（S，
       附命中词）并按热门榜单个股名归因；每只上榜股输出 DNS 情绪=
@@ -105,7 +108,7 @@
       0~100 与对概率的有界修正）。概率全部由「同一套因子在自身历史上滚动重算 →
       分桶 + 保序 + 逻辑回归校准」得到，并经推进式回测检验（每步只用过去数据），
       夹在 5%~95%，非投资建议；数据取不到时对应子块明确显示「暂缺」，绝不编造。
-  12. 「每日量化策略（政策因子趋势预判）」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
+  12. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
       直接读取中国政府网「最新政策」官方页面，保留发布日期与 gov.cn 原文链接；
       近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度识别
       （货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI / PPI /
@@ -114,20 +117,41 @@
       PSI 归一 50% + 政策新闻量 30% + 维度覆盖 20% 复合分，输出趋势分、政策冲击强度榜、
       趋势预判信号与风险预算。官方条例、规划、办法等没有方向性触发词时按中性「政策发布」纳入；
       触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
-  13. 「每日量化策略趋势跟踪线索」升级（2026-09-28）：栏目由单一 Reddit 板块热帖扩展为
-      「全网 20 个新闻源头 · 港股信息挖掘 + 分析」与「Reddit 十板块热帖」两段。
-      20 个源头按 香港 7 / 内地 7 / 国际 6 配置（RTHK、HKET、SCMP、HKEX、Now、TVB、HKFP、
-      财联社、格隆汇、智通、证券时报、同花顺、东财策略研报、Google 新闻中/英文聚合、
-      Bloomberg、MarketWatch、Investing.com、FT、BBC），只读公开 RSS/Atom 订阅：
-      只保留 72 小时窗口内、带可验证时区发布时间的标题 + 原文链接（北京时间），
-      链接按每源域名白名单校验（https + 主机名精确匹配）；按港股关键词命中挖掘相关
-      信息（未命中只计扫描数），每源至多 3 条、正文合计至多 24 条。
-      分析为确定性规则合成：覆盖度（N/20 源有更新、扫描条数、港股相关条数）+
-      中英多空词概率（50±45，夹 5%~95%）+ 主题词表热点 TOP3 + 逐源命中明细，
-      并入栏目末尾「⌁ AI 研判」行；单源失败只标注暂缺与原因、不影响其余源，
-      全部失败整源缺席。OCTOPUS_HK_NEWS=0 关闭、OCTOPUS_RSSHUB_BASE 换 RSSHub 实例、
-      OCTOPUS_HK_NEWS_PER_SOURCE / OCTOPUS_HK_NEWS_MAX 调条数；规则合成，非投资建议。
-  14. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起）：未来一周
+  13. 「A股资讯」（新浪财经滚动新闻）栏目已移除（2026-09-28 按用户要求）：不再抓取、
+      不再渲染、不再进入审计与新闻语料；A股内容由「全球大盘全景复盘」（指数/宽度/成交额/
+      南北向/板块）与「东方财富快讯」承担，避免来源重复与同质化。
+  14. 「趋势跟踪」升级（2026-09-28）：栏目为两段结构——「全网 20 个新闻源头 · 港股信息挖掘 + 分析」
+      与「多平台信息员」社区样本。20 个源头按 香港 7 / 内地 7 / 国际 6 配置（RTHK、HKET、
+      SCMP、HKEX、Now、TVB、HKFP、财联社、格隆汇、智通、证券时报、同花顺、东财策略研报、
+      Google 新闻中/英文聚合、Bloomberg、MarketWatch、Investing.com、FT、BBC），只读公开
+      RSS/Atom 订阅：只保留 72 小时窗口内、带可验证时区发布时间的标题 + 原文链接（北京时间），
+      链接按每源域名白名单校验（https + 主机名精确匹配）；按港股关键词命中挖掘相关信息
+      （未命中只计扫描数），每源至多 3 条、正文合计至多 24 条。多平台信息员 = Reddit（散户
+      论坛：10 个财经/投资/金融/经济类板块各取热门帖 5 条）+ StockTwits（美股/加密散户情绪
+      平台）+ TradingView（交易员公开 Ideas 观点）+ Bogleheads（长期投资者论坛最新主题）
+      四个公开平台。各源 / 各平台独立采集、独立降级：单个失败只影响该来源，缺失来源在总结
+      「数据覆盖」定点名；只读公开 feed / 公开 JSON，不登录、不绕过付费墙、不复制帖子正文；
+      社区观点未经核实，热度不等于事实或投资建议。分析为确定性规则合成：覆盖度 + 中英多空词
+      概率（50±45，夹 5%~95%）+ 主题词表热点 TOP3 + 热股提取，并入栏目末尾「⌁ AI 研判」行。
+      OCTOPUS_HK_NEWS=0 关闭新闻源段、OCTOPUS_TREND_PLATFORMS 关闭社区段、
+      OCTOPUS_RSSHUB_BASE 换 RSSHub 实例、OCTOPUS_HK_NEWS_PER_SOURCE / OCTOPUS_HK_NEWS_MAX
+      调条数；规则合成，非投资建议。
+  15. 栏目更名（2026-09-28 按用户要求，功能不变）：今日预判→今日预判、全球大盘全景复盘→
+      全球大盘全景复盘（同时新增「全球指数概览」子块）、AI 盘研判→策略研判、每日量化策略
+      趋势跟踪线索→趋势跟踪、新闻情绪→新闻情绪、总结→总结；行情速览 / 政策因子 /
+      全球头条 / 东方财富快讯 / 港股名家频道 名称不变。像素主题英文关卡名同步更名
+      （CONCLUSION→FORECAST、A-SHARE PANORAMA→GLOBAL PANORAMA、AI READ→STRATEGY READ、
+      TREND CLUES→TREND TRACKING、WRAP-UP→SUMMARY），图标砖短标签同步为 STRAT / GLOBAL / SENTI。
+  16. 新增「AI趋势分析（美联储）」与「AI趋势分析（地缘政治）」两栏目（2026-09-28
+      按用户要求）：阅读位置在政策因子之后、策略研判之前。各有**专门抓取**——Google News
+      RSS 搜索查询（美联储：`美联储 OR FOMC OR 鲍威尔`；地缘政治：`地缘政治 OR 制裁 OR
+      冲突 OR 关税`），抓取失败整栏缺席并在总结「数据覆盖」点名，绝不以旧闻兜底。
+      栏目内容 = 方向定调（美联储：偏鹰 / 偏鸽 / 观望；地缘政治：升温 / 平稳 / 缓和，
+      由标题词表命中计数确定性判定）+ 命中证据逐条引用（标题 + 来源 + 发布时间 + 命中词，
+      与正文其他栏目重复的标题不重复展示、只计入分析）+ 美联储板附财经日程里的相关
+      时间点（FOMC / 议息 / 非农 / CPI 等，日程缺失只隐藏该子块）+ 末尾「⌁ AI 研判」
+      概率行（宽松 / 缓和记多头，紧缩 / 升温记空头）。规则合成、非投资建议。
+  17. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起）：未来一周
       （5 个交易日）恒生指数升跌方向 + P(周涨) 概率，方法来自 GitHub 无未来函数
       （look-ahead）量化工程实践调研：特征只用 ≤t 数据且扩张因果归一（akfamily/akquant）、
       相似样本标签必须已结算 s+5≤t（haeganm/walkforward 的 purged/embargo 依据）、
@@ -168,7 +192,7 @@ import json
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html import unescape as _html_unescape
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -287,12 +311,11 @@ CHANNEL_TOP_N = 3
 # 风险引用去重依赖此口径：超出展示条数的风险标题正文不可见，风险提示保留全文。
 GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
-SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
 
 # ------------------------------------------------------------
 # 未来 N 天影响经济时间点（东方财富财经日历 RPT_CPH_FECALENDAR）
 # 放在日报开头：先看清「未来 30 天哪些时点会动市场」，再读今天的盘。
-# 接口是东财数据中心公开报表（与「A股大盘全景复盘」的南北向资金同一台主机），无需密钥；
+# 接口是东财数据中心公开报表（与「全球大盘全景复盘」的南北向资金同一台主机），无需密钥；
 # START_DATE 为北京时间（形如 2026-10-28 20:30:00）。服务端只支持按日期过滤
 # （按 CITY / FE_TYPE 过滤返回空），所以一次拉全窗口（翻页）再在本地按重要度筛选。
 # 筛选口径全部写死在下面的常量里：确定性计算、可复现、不调大模型、不伪造内容；
@@ -383,24 +406,35 @@ CALENDAR_CANON_DROP = ("季调", "非季调", "初值", "终值", "修正值", "
                        "折年率", "年化", "当月", "总计", "总值", "数据", "报告")
 CALENDAR_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
-# 每日量化策略趋势跟踪线索 · 板块热帖部分：Reddit 一个来源（2026-09-27 起由十站投研精简）。
-# 只读取公开热帖 feed，不登录、不绕过付费墙、不复制帖子正文；
-# 扫描 10 个财经 / 投资 / 金融 / 经济类板块，每个板块取热门帖子 5 条作为样本数据，
-# 捕捉散户讨论风向与热门标的。板块顺序同时用于抓取、栏目和审计展示。
-PUBLIC_SITE_NAMES = ("Reddit",)
+# 趋势跟踪：多平台信息员（2026-09-28 起由单一 Reddit 扩为四平台）。
+# 只读取公开热帖 feed / 公开 JSON，不登录、不绕过付费墙、不复制帖子正文；每个平台独立
+# 采集、独立降级：单个平台访问失败只影响该平台，缺失平台在总结「数据覆盖」里点名。
+# 平台顺序同时用于抓取、栏目渲染与审计展示，可用 OCTOPUS_TREND_PLATFORMS 单独关闭。
+PUBLIC_SITE_NAMES = ("Reddit", "StockTwits", "TradingView", "Bogleheads")
 PUBLIC_SITE_URLS = {
     "Reddit": "https://www.reddit.com/",
+    "StockTwits": "https://stocktwits.com/",
+    "TradingView": "https://www.tradingview.com/ideas/",
+    "Bogleheads": "https://www.bogleheads.org/forum/",
 }
 PUBLIC_SITE_DESCRIPTIONS = {
-    "Reddit": "散户讨论风向与热门标的：10 个财经/投资/金融/经济类板块各取热门帖子 5 条为样本",
+    "Reddit": "散户论坛风向与热门标的：10 个财经/投资/金融/经济类板块各取热门帖子 5 条为样本",
+    "StockTwits": "美股/加密散户情绪平台：趋势榜标的 + 平台多空讨论摘要 + 关注人数 + 消息情绪标签统计",
+    "TradingView": "交易员公开观点平台：Ideas 最新观点标题（自带标的与技术面方向词）",
+    "Bogleheads": "长期投资者论坛：Bogleheads 最新讨论主题（长期资金与配置视角）",
 }
-PUBLIC_SITE_WINDOW_HOURS = 72  # 帖子按发布时间过滤
+PUBLIC_SITE_WINDOW_HOURS = 72  # 各平台样本按发布时间过滤的窗口（小时）
 REDDIT_POSTS_PER_BOARD = 5     # 每个板块的热门帖样本条数
+STOCKTWITS_TRENDING_N = 8      # StockTwits 平台趋势榜取前 N 个标的
+STOCKTWITS_STREAM_N = 3        # 取趋势榜前 N 个标的的最新消息做平台情绪标签统计
+STOCKTWITS_MESSAGES_PER_STREAM = 30   # 每个标的最多读多少条公开消息（只统计标签，不复制正文）
+TRADINGVIEW_IDEAS_N = 10       # TradingView 最新公开观点条数
+BOGLEHEADS_TOPICS_N = 10       # Bogleheads 论坛最新主题条数
 
-# ── 每日量化策略趋势跟踪线索 · 全网 20 个新闻源头（2026-09-28 新增）────────────
+# ── 趋势跟踪 · 全网 20 个新闻源头（2026-09-28 新增）────────────
 # 在 Reddit 板块热帖之外，固定跟踪全网 20 个新闻源头的公开 RSS/Atom 订阅，
 # 按港股关键词挖掘与港股市场相关的信息，并用确定性规则合成分析（多空词概率 +
-# 热点主题），随「每日量化策略趋势跟踪线索」栏目一起渲染。
+# 热点主题），随「趋势跟踪」栏目一起渲染。
 # 设计约束（与 Reddit 源同一口径）：
 #   · 只读公开订阅，不登录、不绕过付费墙；只保留标题、发布时间与原文链接，不复制正文；
 #   · 每条链接按该源头自己的域名白名单校验（https + 主机名精确匹配），防止标题/链接注入；
@@ -851,6 +885,84 @@ def fetch_google_news():
                           is_today=is_today, content_date=content_date,
                           headlines=items[:8])
 
+
+# 数据源 1.x：AI趋势分析专题查询（Google News RSS 搜索）
+# ============================================================
+# 「AI趋势分析（美联储）」「AI趋势分析（地缘政治）」各自的专门抓取：
+# 用 Google News RSS 搜索接口按主题查询，与「全球头条」（BUSINESS 头条流）互补。
+# 词条口径写死、可复现；接口不可用时整栏缺席，绝不以旧闻或推算内容兜底。
+GOOGLE_NEWS_SEARCH_RSS = ("https://news.google.com/rss/search?q={query}"
+                          "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans")
+FED_TREND_QUERY = "美联储 OR FOMC OR 鲍威尔"
+GEO_TREND_QUERY = "地缘政治 OR 制裁 OR 冲突 OR 关税"
+FED_TREND_KEY = "美联储趋势"
+GEO_TREND_KEY = "地缘政治趋势"
+FED_TREND_SOURCE = "Google News·美联储查询"
+GEO_TREND_SOURCE = "Google News·地缘查询"
+
+
+def _google_news_items(xml_text, limit=8):
+    """Google News RSS（头条流 / 搜索流共用）条目解析：标题拆「原标题 - 来源」。"""
+    items = []
+    if not xml_text:
+        return items
+    try:
+        root = ET.fromstring(xml_text)
+        for item in root.findall("channel/item")[:limit]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub = (item.findtext("pubDate") or "").strip()
+            if not title:
+                continue
+            src = ""
+            m = re.search(r"\s+-\s+([^-]+)$", title)
+            if m:
+                src = m.group(1).strip()
+                title = title[: m.start()].strip()
+            pub_dt = _rfc2822_cst(pub)
+            items.append({
+                "title": title,
+                "source": src,
+                "url": link,
+                "published": pub,
+                "published_cst": pub_dt.strftime("%Y-%m-%d %H:%M") if pub_dt else "—",
+                "is_today": _date_is_today(pub_dt),
+            })
+    except Exception as exc:
+        print(f"  ⚠️ Google News RSS 解析失败: {exc}")
+    return items
+
+
+def _fetch_news_search(query, source_name, limit=8):
+    """Google News RSS 搜索查询抓取；失败如实标注 unavailable，不兜底旧内容。"""
+    url = GOOGLE_NEWS_SEARCH_RSS.format(query=quote(query))
+    xml_text = safe_request(url, is_json=False, timeout=15)
+    items = _google_news_items(xml_text, limit=limit)
+    if not items:
+        print(f"  ⚠️ {source_name}暂不可用，不显示历史兜底")
+        return _source_result(source_name, "unavailable", headlines=[],
+                              error="未取得有效新闻", query=query)
+    content_date = max((it["published_cst"][:10] for it in items
+                        if it["published_cst"] != "—"), default=None)
+    is_today = any(it["is_today"] for it in items)
+    print(f"  ✅ 成功抓取 {len(items)} 条{source_name}（最新 {content_date}）")
+    return _source_result(source_name, "success",
+                          is_today=is_today, content_date=content_date,
+                          headlines=items, query=query)
+
+
+def fetch_fed_trend():
+    """「AI趋势分析（美联储）」专门抓取：Google News RSS 主题查询。"""
+    print("📡 正在抓取美联储趋势专题（Google News 查询）...")
+    return _fetch_news_search(FED_TREND_QUERY, FED_TREND_SOURCE)
+
+
+def fetch_geo_trend():
+    """「AI趋势分析（地缘政治）」专门抓取：Google News RSS 主题查询。"""
+    print("📡 正在抓取地缘政治趋势专题（Google News 查询）...")
+    return _fetch_news_search(GEO_TREND_QUERY, GEO_TREND_SOURCE)
+
+
 # 数据源 2：国家政策官方网站（中国政府网「最新政策」）
 # ============================================================
 # 中国政府网是国务院办公厅主办的中央人民政府门户网站。这里直接读取其「最新政策」
@@ -1134,7 +1246,7 @@ def fetch_hot_stocks():
 
 
 # ============================================================
-# 数据源 5：A股大盘全景复盘
+# 数据源 5：全球大盘全景复盘
 # （指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
 # ------------------------------------------------------------
 # 使用东方财富 push2 / push2his 免费公开接口（与「热门榜单」同源）：
@@ -1161,6 +1273,12 @@ PANORAMA_INDEX_SPECS = [
 ]
 # 各交易所「全市场涨跌家数」的载体指数（f104/f105/f106 为该交易所股票统计）
 PANORAMA_BREADTH_SOURCES = [("1.000001", "沪"), ("0.399001", "深"), ("0.899050", "京")]
+# 「全球大盘全景复盘」首个子块：美股 / 港股指数概览。只复用「行情速览」同一次抓取的
+# Yahoo Finance Chart 报价（不重复请求、不引入新数字），缺失品种不出行。
+PANORAMA_GLOBAL_INDEX_SPECS = [
+    ("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+    ("恒生指数", 2), ("恒生科技", 2),
+]
 PANORAMA_SECTOR_TOP_N = int(os.environ.get("OCTOPUS_PANORAMA_SECTOR_TOP_N", "5"))
 PANORAMA_NORTH_POLICY_NOTE = (
     "港交所自 2024-08-19 起停止披露南北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
@@ -1377,8 +1495,8 @@ def _panorama_breadth_mood(ratio):
 
 
 def fetch_market_panorama():
-    """抓取 A股大盘全景复盘：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
-    print("📡 正在抓取 A股大盘全景复盘（指数/涨跌家数/成交额/北向/板块）...")
+    """抓取 全球大盘全景复盘：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
+    print("📡 正在抓取 全球大盘全景复盘（指数/涨跌家数/成交额/北向/板块）...")
     errors = []
 
     indices, by_code, quote_time = _fetch_panorama_indices()
@@ -1477,52 +1595,7 @@ def fetch_market_panorama():
 
 
 # ============================================================
-# 数据源 6：A股资讯（新浪财经）
-# ============================================================
-def fetch_sina_headlines():
-    """抓取新浪财经 A 股资讯"""
-    print("📡 正在抓取 A 股资讯...")
-
-    headlines = []
-
-    # 新浪滚动新闻 API
-    url = "https://feed.mix.sina.com.cn/api/roll/get"
-    params = {
-        "pageid": "153",
-        "lid": "2509",
-        "num": "20",
-        "page": "1",
-    }
-
-    data = safe_request(url, params=params)
-
-    if data and "result" in data and "data" in data["result"]:
-        for item in data["result"]["data"][:10]:
-            title = item.get("title", "") or item.get("intro", "")
-            if title:
-                headlines.append(title.strip())
-
-    # 首页兜底
-    if not headlines:
-        sina_url = "https://finance.sina.com.cn/"
-        html = safe_request(sina_url, is_json=False)
-        if html:
-            titles = re.findall(r'target="_blank"[^>]*>([^<]{10,100})</a>', html)
-            for t in titles[:10]:
-                clean = t.strip()
-                if clean and not clean.startswith("http"):
-                    headlines.append(clean)
-
-    if not headlines:
-        print("  ⚠️ 新浪财经暂不可用，不显示历史兜底资讯")
-        return _source_result("新浪财经", "unavailable", headlines=[], error="未取得有效资讯")
-    print(f"  ✅ 成功抓取到 {len(headlines)} 条 A 股资讯（本次抓取 = 当天内容）")
-    return _source_result("新浪财经", "success",
-                          is_today=True, content_date=_today_display(),
-                          headlines=headlines[:5])
-
-
-# 数据源 7：港股名家频道（YouTube / 通用 RSS / 需登录平台）
+# 数据源 6：港股名家频道（YouTube / 通用 RSS / 需登录平台）
 # ============================================================
 def resolve_channel_id(channel):
     """解析频道的 channel_id：优先使用配置的 channel_id，否则通过 handle 页面解析。"""
@@ -1728,12 +1801,33 @@ def fetch_hk_channels():
 
 
 # ============================================================
-# 每日量化策略趋势跟踪线索 · Reddit 板块热帖部分（仅标题/热度/原始链接，不复制帖子正文）
-# 港股新闻源头部分在下方「全网 20 个新闻源头」小节单独实现。
+# 趋势跟踪：多平台信息员（仅标题/热度/原始链接，不复制帖子正文）
+# ------------------------------------------------------------
+# 2026-09-28 起由「单一 Reddit 来源」升级为四个公开平台，各自独立采集、独立降级：
+#   Reddit      —— 散户论坛：10 个财经/投资/金融/经济类板块各取热门帖 5 条样本；
+#   StockTwits  —— 美股/加密散户情绪平台：公开趋势榜标的（含平台生成的多空讨论摘要、
+#                  关注人数）+ 趋势榜前排标的最新消息里的平台 Bullish/Bearish 标签统计；
+#   TradingView —— 交易员观点平台：公开 Ideas RSS 最新观点（标题自带标的与技术面方向）；
+#   Bogleheads  —— 长期投资者论坛：公开 RSS 最新讨论主题（长期资金与配置视角）。
+# 只读公开 feed / 公开 JSON，不登录、不绕过付费墙、不复制帖子正文；抓不到就整平台暂缺，
+# 绝不伪造内容。OCTOPUS_TREND_PLATFORMS 可用逗号分隔平台名单独关闭（如 "Reddit,StockTwits"）。
 # ============================================================
 _PUBLIC_ALLOWED_HOSTS = {
     "reddit.com", "www.reddit.com", "old.reddit.com",
+    "stocktwits.com", "www.stocktwits.com",
+    "tradingview.com", "www.tradingview.com",
+    "bogleheads.org", "www.bogleheads.org",
 }
+
+
+def _active_public_site_names():
+    """启用的趋势跟踪平台：OCTOPUS_TREND_PLATFORMS 过滤后为空则回落全部平台。"""
+    raw = str(os.environ.get("OCTOPUS_TREND_PLATFORMS", "")).strip()
+    if not raw:
+        return PUBLIC_SITE_NAMES
+    wanted = {p.strip().lower() for p in raw.split(",") if p.strip()}
+    picked = tuple(n for n in PUBLIC_SITE_NAMES if n.lower() in wanted)
+    return picked or PUBLIC_SITE_NAMES
 
 
 def _public_url(raw, base=""):
@@ -1817,6 +1911,7 @@ def _reddit_item(community, title, url, published, *, heat="", now=None):
         "detail": f"发布于 {pub}（北京时间）{heat}",
         "published_cst": pub,
         "community": community,
+        "platform": "Reddit",
         "is_today": published.date() == now.date(),
     }
 
@@ -1942,7 +2037,7 @@ def fetch_reddit():
             items.extend(board_items)
         else:
             unavailable.append(f"r/{community}")
-    note = ("只收录公开热帖的标题与热度作为趋势跟踪线索，供判断散户讨论风向与热门标的；"
+    note = ("只收录公开热帖的标题与热度作为趋势跟踪样本，供判断散户讨论风向与热门标的；"
             "社区观点未经核实，热度不等于事实或投资建议。")
     if unavailable:
         note += " 暂缺（访问受限或近72小时无新帖）：" + "、".join(unavailable) + "。"
@@ -1950,14 +2045,231 @@ def fetch_reddit():
     return _public_site_result(name, items, latest=latest, note=note, error=error)
 
 
+STOCKTWITS_TRENDING_URL = "https://api.stocktwits.com/api/2/trending/symbols.json"
+STOCKTWITS_STREAM_URL = "https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
+TRADINGVIEW_FEED_URL = "https://www.tradingview.com/feed/"
+BOGLEHEADS_FEED_URL = "https://www.bogleheads.org/forum/feed"
+_PLATFORM_HEADERS = {"User-Agent": "octopus-daily/1.0 (+https://github.com/k-macao/02)"}
+
+
+def _platform_item(platform, community, title, url, published, *, detail="", symbol="",
+                   now=None):
+    """组装单条平台样本：community 供栏目分组（板块/榜单名），时间统一北京时间。"""
+    now = now or datetime.now(CST)
+    dt = published.astimezone(CST) if published else None
+    pub = dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+    return {
+        "title": title,
+        "url": url,
+        "detail": detail or (f"发布于 {pub}（北京时间）" if pub else ""),
+        "published_cst": pub,
+        "community": community,
+        "platform": platform,
+        "symbol": symbol,
+        "is_today": bool(dt and dt.date() == now.date()),
+    }
+
+
+def _platform_rss_items(xml_text, platform, base, *, limit, now, community="", title_cleaner=None):
+    """通用 RSS → 平台样本：只保留可核实链接 + 窗口内发布时间的条目。
+
+    title_cleaner(raw_title, summary) 返回 (community, title)，缺省原样保留。
+    返回 (items, 最新日期)。
+    """
+    items, latest = [], None
+    for row in _parse_rss_items(xml_text, limit=limit * 3):
+        if len(items) >= limit:
+            break
+        url = _public_url(row.get("url"), base)
+        raw_title = _public_text(row.get("title"), 160)
+        summary = row.get("summary") or ""
+        pub = row.get("published_cst") or ""
+        dt = None
+        if pub and pub != "—":
+            try:
+                dt = datetime.strptime(pub, "%Y-%m-%d %H:%M").replace(tzinfo=CST)
+            except ValueError:
+                dt = None
+        if not (url and raw_title and dt and _public_recent(dt, now)):
+            continue
+        group, title = community, raw_title
+        if title_cleaner:
+            group, title = title_cleaner(raw_title, summary)
+        group, title = (group or community or platform), _public_text(title, 140)
+        if not title:
+            continue
+        if not latest or dt > latest:
+            latest = dt
+        items.append(_platform_item(platform, group, title, url, dt,
+                                    symbol="", now=now))
+    return items, (latest.strftime("%Y-%m-%d") if latest else None)
+
+
+def _stocktwits_sentiment_counts(symbol, *, now=None):
+    """读某标的最新公开消息里的平台情绪标签（Bullish / Bearish），只计数不复制正文。"""
+    payload = safe_request(STOCKTWITS_STREAM_URL.format(symbol=symbol),
+                           headers=_PLATFORM_HEADERS, params={"limit": STOCKTWITS_MESSAGES_PER_STREAM},
+                           timeout=8)
+    messages = payload.get("messages") if isinstance(payload, dict) else None
+    if not isinstance(messages, list):
+        return None
+    bull = bear = checked = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        checked += 1
+        sentiment = (message.get("entities") or {}).get("sentiment") or {}
+        basic = str(sentiment.get("basic") or "").strip().lower()
+        if basic == "bullish":
+            bull += 1
+        elif basic == "bearish":
+            bear += 1
+    return {"checked": checked, "bull": bull, "bear": bear}
+
+
+def fetch_stocktwits():
+    """StockTwits 公开趋势榜：平台标的榜 + 平台多空摘要 + 消息情绪标签统计。
+
+    只读公开 JSON：趋势榜给出 rank / trending_score / 关注人数与平台生成的多空讨论摘要
+    （Bullish posts… / bears question…）；再对榜单前排标的取最新公开消息，统计平台自带的
+    Bullish / Bearish 标签条数（只计数，不复制消息正文）。社区观点未经核实，非投资建议。
+    """
+    name = "StockTwits"
+    now = datetime.now(CST)
+    payload = safe_request(STOCKTWITS_TRENDING_URL, headers=_PLATFORM_HEADERS, timeout=10)
+    symbols = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(symbols, list):
+        return _public_site_result(name, [], error="公开趋势榜接口未返回有效数据")
+
+    ranked = []
+    for row in symbols:
+        if not isinstance(row, dict) or not row.get("symbol"):
+            continue
+        try:
+            rank = int(row.get("rank") or 10 ** 6)
+        except (TypeError, ValueError):
+            rank = 10 ** 6
+        ranked.append((rank, row))
+    ranked.sort(key=lambda pair: pair[0])
+
+    # 榜单前排标的的情绪标签统计（并行，失败只影响该标的的附加信息）
+    counts = {}
+    stream_targets = [row.get("symbol") for _rank, row in ranked[:STOCKTWITS_STREAM_N]]
+    if stream_targets:
+        with ThreadPoolExecutor(max_workers=len(stream_targets)) as executor:
+            futures = {executor.submit(_stocktwits_sentiment_counts, sym): sym
+                       for sym in stream_targets}
+            for future in futures:
+                sym = futures[future]
+                try:
+                    counts[sym] = future.result()
+                except Exception:
+                    counts[sym] = None
+
+    items, latest = [], None
+    for rank, row in ranked:
+        if len(items) >= STOCKTWITS_TRENDING_N:
+            break
+        symbol = str(row.get("symbol") or "").strip()
+        title = _public_text(row.get("title") or symbol, 120)
+        url = _public_url(f"/symbol/{symbol}", PUBLIC_SITE_URLS[name])
+        if not (symbol and title and url):
+            continue
+        try:
+            watchers = int(row.get("watchlist_count") or 0)
+        except (TypeError, ValueError):
+            watchers = 0
+        trends = row.get("trends") or {}
+        published = _cst_from_iso(trends.get("summary_at"))
+        if published is None:
+            published = now
+        if not latest or published > latest:
+            latest = published
+        bits = [f"平台趋势榜 #{rank}"]
+        if watchers:
+            bits.append(f"关注 {watchers:,} 人")
+        summary = _public_text(trends.get("summary"), 150)
+        if summary:
+            bits.append(f"平台多空摘要（{published.strftime('%m-%d %H:%M')} 北京时间）：{summary}")
+        label = counts.get(symbol)
+        if label and label.get("checked"):
+            bits.append(f"近 {label['checked']} 条消息平台标签：看多 {label['bull']} / 看空 {label['bear']}")
+        items.append(_platform_item(name, "平台趋势榜", f"{symbol} · {title}", url,
+                                    published, detail=" · ".join(bits),
+                                    symbol=symbol, now=now))
+    note = ("StockTwits 为公开趋势榜与平台自带情绪标签，只计数不复制消息正文；"
+            "散户情绪热度不等于事实或投资建议。")
+    return _public_site_result(name, items,
+                               latest=latest.strftime("%Y-%m-%d") if latest else None,
+                               note=note,
+                               error="公开趋势榜不可用或窗口内无可核实标的")
+
+
+def fetch_tradingview():
+    """TradingView 公开 Ideas RSS：交易员最新观点（标题自带标的与方向词）。"""
+    name = "TradingView"
+    now = datetime.now(CST)
+    xml = safe_request(TRADINGVIEW_FEED_URL, headers={**_PLATFORM_HEADERS,
+                                                      "Accept": "application/rss+xml,application/xml"},
+                       is_json=False, timeout=10)
+    items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
+                                        limit=TRADINGVIEW_IDEAS_N, now=now,
+                                        community="交易员观点")
+    note = ("TradingView 公开 Ideas 观点标题与链接；交易员观点未经核实，"
+            "方向词仅供参考，非投资建议。")
+    return _public_site_result(name, items, latest=latest, note=note,
+                               error="公开 Ideas RSS 不可用或近72小时无新观点")
+
+
+_BOGLEHEADS_BOARDS = {
+    "Investing - Theory, News & General": "投资理论 · 新闻 · 综合",
+    "Personal Investments": "个人投资组合",
+    "Personal Finance (Not Investing)": "个人理财（非投资）",
+    "Personal Consumer Issues": "个人消费",
+    "Non-US Investing": "非美市场投资",
+    "Local Chapters and Bogleheads Community": "本地分会与社区",
+}
+
+
+def _bogleheads_title(raw_title, _summary):
+    """Bogleheads 标题形如「板块 • Re: 主题」，拆成中文板块名 + 主题。"""
+    board, sep, topic = str(raw_title or "").partition("•")
+    if not sep:
+        return "论坛最新主题", raw_title
+    board = board.strip()
+    topic = re.sub(r"^Re:\s*", "", topic.strip())
+    return _BOGLEHEADS_BOARDS.get(board, board or "论坛最新主题"), topic or board
+
+
+def fetch_bogleheads():
+    """Bogleheads.org 公开 RSS：长期投资者论坛最新讨论主题。"""
+    name = "Bogleheads"
+    now = datetime.now(CST)
+    xml = safe_request(BOGLEHEADS_FEED_URL, headers={**_PLATFORM_HEADERS,
+                                                     "Accept": "application/rss+xml,application/xml"},
+                       is_json=False, timeout=10)
+    items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
+                                        limit=BOGLEHEADS_TOPICS_N, now=now,
+                                        community="论坛最新主题",
+                                        title_cleaner=_bogleheads_title)
+    note = ("Bogleheads 公开论坛新帖标题；长期投资者讨论偏配置与纪律，"
+            "未经核实，非投资建议。")
+    return _public_site_result(name, items, latest=latest, note=note,
+                               error="公开论坛 RSS 不可用或近72小时无新主题")
+
+
 def fetch_public_sites():
-    """单一来源 Reddit 独立运行，失败不会拖垮主日报；始终返回审计记录。"""
-    fetchers = (
-        ("Reddit", fetch_reddit),
-    )
+    """多平台信息员并行采集：单个平台失败不会拖垮其他平台或主日报；始终返回审计记录。"""
+    fetchers = {
+        "Reddit": fetch_reddit,
+        "StockTwits": fetch_stocktwits,
+        "TradingView": fetch_tradingview,
+        "Bogleheads": fetch_bogleheads,
+    }
+    names = [n for n in _active_public_site_names() if n in fetchers]
     results = {}
-    with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
-        futures = [(name, executor.submit(fn)) for name, fn in fetchers]
+    with ThreadPoolExecutor(max_workers=max(1, len(names))) as executor:
+        futures = [(name, executor.submit(fetchers[name])) for name in names]
         for name, future in futures:
             try:
                 result = future.result()
@@ -1970,12 +2282,12 @@ def fetch_public_sites():
                 result = _public_site_result(name, [], error="公开数据解析失败或暂时不可用")
             results[name] = result
             print(f"  {'✅' if result['status'] == 'success' else '⚠️'} {name}: "
-                  f"{len(result.get('items') or [])} 条热帖样本")
+                  f"{len(result.get('items') or [])} 条公开样本")
     return results
 
 
 # ============================================================
-# 每日量化策略趋势跟踪线索 · 全网 20 个新闻源头（港股挖掘 + 规则分析）
+# 趋势跟踪 · 全网 20 个新闻源头（港股挖掘 + 规则分析）
 # ============================================================
 # 港股相关判定：标题命中下列任一关键词（子串匹配，英文不区分大小写）。
 # 覆盖指数/市场（港股、恒生、恒指、H股、南向…）、香港本地（香港、本港、港府、
@@ -2114,7 +2426,7 @@ def fetch_hk_news_sources():
         return _source_result(HK_NEWS_SOURCE_NAME, "unavailable", sources=[], analysis=None,
                               note="", error="本次运行已关闭新闻源头采集（OCTOPUS_HK_NEWS=0）")
 
-    print(f"📡 正在采集每日量化策略趋势跟踪线索 · 全网 {len(HK_NEWS_SOURCES)} 个新闻源头（港股挖掘）...")
+    print(f"📡 正在采集趋势跟踪 · 全网 {len(HK_NEWS_SOURCES)} 个新闻源头（港股挖掘）...")
     now = datetime.now(CST)
 
     def _fetch_one(cfg):
@@ -2218,7 +2530,7 @@ def fetch_hk_news_sources():
 # 数据采集主函数
 # ============================================================
 def fetch_hk_quant():
-    """数据源 8：港股量化引擎（概率预测 + 资金流动性 + 推进式校验）。
+    """数据源 7：港股量化引擎（概率预测 + 资金流动性 + 推进式校验）。
 
     跑通整条量化流水线：Yahoo 港股指數/个股日线 → 五因子 → 历史滚动重算 →
     分桶+保序+逻辑回归校准 → 推进式回测 → 沪深港通/成交/深度的流动性画像 →
@@ -2823,7 +3135,10 @@ def collect_all_data():
     data["全球头条"] = fetch_google_news()
     time.sleep(0.5)
 
-    data["A股资讯"] = fetch_sina_headlines()
+    # AI趋势分析两个专题：各自独立的 Google News 查询，独立降级
+    data[FED_TREND_KEY] = fetch_fed_trend()
+    time.sleep(0.5)
+    data[GEO_TREND_KEY] = fetch_geo_trend()
     time.sleep(0.5)
 
     data["东财快讯"] = fetch_eastmoney_news()
@@ -2844,8 +3159,8 @@ def collect_all_data():
         data["财经日历"] = fetch_econ_calendar()
         time.sleep(0.5)
 
-    # 每日量化策略趋势跟踪线索：Reddit 十板块热帖 + 全网 20 个新闻源头（港股挖掘）
-    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十板块热帖 + 全网 20 个新闻源头）...")
+    print("\n📰 正在采集趋势跟踪（多平台信息员：" + " + ".join(_active_public_site_names())
+          + "；另有全网 20 个新闻源头港股挖掘）...")
     data.update(fetch_public_sites())
     if HK_NEWS_ENABLED:
         data[HK_NEWS_SOURCE_NAME] = fetch_hk_news_sources()
@@ -2984,23 +3299,27 @@ GZ_FS_METER = _gz_fs(14)      # 信号格 ●○ 字号
 KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
 KOBOYO_SECTION_ICONS = {
     "ECON CALENDAR": "card-calendar",
+    "STRATEGY READ": "brain",
+    "POLICY SHOCK": "document",
+    "FED TREND": "chart",
+    "GEO TREND": "globe",
     "QUANT STRATEGY": "chart",
     "AI READ": "brain",
     "QUANT POLICY": "document",
     "MARKET SNAPSHOT": "chart",
-    "A-SHARE PANORAMA": "chart",
+    "GLOBAL PANORAMA": "chart",
     "HK GURU CHANNELS": "camera",
     "GLOBAL HEADLINES": "globe",
     "EASTMONEY WIRE": "newspaper",
-    "A-SHARE DESK": "newspaper",
     "DATA AUDIT": "document",
-    "CONCLUSION": "brain",
-    "WRAP-UP": "document",
-    "TREND CLUES": "brain",
+    "FORECAST": "brain",
+    "SUMMARY": "document",
+    "TREND TRACKING": "brain",
     "QUANT FORECAST": "chart",
     "HK PROBABILITY": "chart",
     "LIQUIDITY FLOW": "chart",
     "WEEKLY FORECAST": "chart",
+    "SECTOR ROTATION": "chart",
 }
 
 
@@ -3133,22 +3452,28 @@ def _badge(text, kind="ok"):
 
 _SECTION_ICON_META = {
     "ECON CALENDAR": ("▦", "30-DAY", C_LEMON, C_FLAT_BG),
+    "STRATEGY READ": ("◆", "STRAT", C_LEMON, C_AI_BG),
+    "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
+    "FED TREND": ("$", "FED", C_LEMON, C_AI_BG),
+    "GEO TREND": ("◎", "GEO", C_MAGENTA, "#301226"),
     "QUANT STRATEGY": ("◆", "QUANT", C_LEMON, C_AI_BG),
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
     "QUANT POLICY": ("◉", "QUANT", C_AMBER, C_FLAT_BG),
     "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
+    "GLOBAL PANORAMA": ("◍", "GLOBAL", C_CYAN, "#092836"),
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
     "EASTMONEY WIRE": ("!", "WIRE", C_AMBER, C_FLAT_BG),
-    "A-SHARE DESK": ("¥", "CN", C_RED, C_DOWN_BG),
+    "NEWS SENTIMENT": ("◆", "SENTI", C_MAGENTA, "#301226"),
     "DATA AUDIT": ("✓", "LOG", C_GREEN, C_UP_BG),
-    "CONCLUSION": ("★", "TL;DR", C_LEMON, C_AI_BG),
-    "WRAP-UP": ("✓", "RECAP", C_GREEN, C_UP_BG),
-    "TREND CLUES": ("◉", "TREND", C_MAGENTA, "#301226"),
+    "FORECAST": ("★", "TL;DR", C_LEMON, C_AI_BG),
+    "SUMMARY": ("✓", "RECAP", C_GREEN, C_UP_BG),
+    "TREND TRACKING": ("◉", "TREND", C_MAGENTA, "#301226"),
     "QUANT FORECAST": ("◈", "FORECAST", C_CYAN, "#092836"),
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
+    "SECTOR ROTATION": ("◧", "SECTOR", C_AMBER, C_FLAT_BG),
 }
 
 
@@ -3647,9 +3972,23 @@ def gz_market_section(market):
     )
 
 
-def gz_panorama_block(pan):
-    """guizang 版「A股大盘全景复盘」：指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力，均用表格。"""
-    parts = []
+def _gz_panorama_global(market):
+    """guizang 版全球指数概览（美股 / 港股）：复用「行情速览」报价，缺失品种不出行。"""
+    rows = []
+    for label, precision in PANORAMA_GLOBAL_INDEX_SPECS:
+        price_str, pct = _quote_parts(market or {}, label, precision)
+        if price_str is None:
+            continue
+        rows.append(_gz_quote_row(label, price_str, pct))
+    if not rows:
+        return ""
+    return gz_subsection("全球指数概览（Yahoo 报价）") + gz_data_table(
+        ["名称", "最新价", "涨跌"], rows)
+
+
+def gz_panorama_block(pan, market=None):
+    """guizang 版「全球大盘全景复盘」：全球指数概览 / A股指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力，均用表格。"""
+    parts = [_gz_panorama_global(market)]
 
     indices = pan.get("indices") or []
     if indices:
@@ -3899,7 +4238,7 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
 
 
 def gz_ai_analysis_block(res):
-    """每日量化策略（板块趋势跟踪）· 量化依据展开：市场倾向已置顶到「今日结论」，配置收在「盘点总结」。"""
+    """策略研判 · 依据展开：倾向与核心判断已置顶到「今日预判」，关注主题收在「总结」。"""
     out = []
     # 策略总览：量化信号与 regime
     regime = res.get("regime") or res.get("sentiment_label") or "中性"
@@ -3994,7 +4333,7 @@ def gz_ai_analysis_block(res):
 
 
 def gz_quant_strategy_block(res):
-    """兼容别名：每日量化策略（板块趋势跟踪）渲染（guizang）。"""
+    """兼容别名：策略研判渲染（guizang）。"""
     return gz_ai_analysis_block(res)
 
 
@@ -4052,11 +4391,25 @@ def _pixel_market_section(market):
             + _block("港股双指数", [("恒生指数", 2), ("恒生科技", 2)]))
 
 
-def _panorama_block(pan):
-    """pixel 版「A股大盘全景复盘」：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
-    parts = []
+def _panorama_global(market):
+    """全球指数概览（美股 / 港股）：复用「行情速览」报价，缺失品种不出行、不编造。"""
+    rows = []
+    for label, precision in PANORAMA_GLOBAL_INDEX_SPECS:
+        price_str, pct = _quote_parts(market or {}, label, precision)
+        if price_str is None:
+            continue
+        color = C_GREEN if (pct or 0) > 0 else (C_RED if (pct or 0) < 0 else C_AMBER)
+        rows.append((_esc(label), f'{price_str} {_trend_badge(pct)}', color))
+    if not rows:
+        return ""
+    return _subsection("全球指数概览（Yahoo 报价）") + _mini_table(rows)
 
-    # 1) 指数表现
+
+def _panorama_block(pan, market=None):
+    """pixel 版「全球大盘全景复盘」：全球指数概览 / A股指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力。"""
+    parts = [_panorama_global(market)]
+
+    # 1) 指数表现（A股宽基）
     indices = pan.get("indices") or []
     if indices:
         rows = []
@@ -4186,7 +4539,7 @@ def _calendar_block(res):
 # ============================================================
 # 精简排版（2026-09-27）：结论先行 → 分栏展开 → 盘点收尾
 # ——正文不再出现口径说明 / 免责声明脚注、「数据暂缺」占位行、抓取失败的来源
-#   与过期内容；来源状态只在末尾「盘点总结」里压成一行。
+#   与过期内容；来源状态只在末尾「总结」里压成一行。
 # ============================================================
 REPORT_STALE_DAYS = 7          # 频道视频 / 全球头条超过 N 天视为过期，不进正文
 
@@ -4225,7 +4578,7 @@ def _prune_report_data(data, date_str=None):
 
     - 港股名家频道：只留近 ``REPORT_STALE_DAYS`` 天的视频，全部过期的频道整体移除；
     - 全球头条：去掉发布超过 ``REPORT_STALE_DAYS`` 天的标题。
-    每日量化策略（板块趋势跟踪） / 情绪因子与正文使用同一份裁剪数据，锚点序号保持一致。
+    策略研判 / 情绪因子与正文使用同一份裁剪数据，锚点序号保持一致。
     """
     anchor = _report_date_obj(date_str or _today_str())
     out = dict(data or {})
@@ -4243,6 +4596,13 @@ def _prune_report_data(data, date_str=None):
         heads = [h for h in google.get("headlines") or []
                  if not (isinstance(h, dict) and _is_stale(h.get("published_cst"), anchor))]
         out["全球头条"] = {**google, "headlines": heads}
+    # AI趋势分析两个专题源与全球头条同口径裁剪过期标题
+    for _tk in (FED_TREND_KEY, GEO_TREND_KEY):
+        src = out.get(_tk)
+        if isinstance(src, dict) and src.get("headlines"):
+            heads = [h for h in src.get("headlines") or []
+                     if not (isinstance(h, dict) and _is_stale(h.get("published_cst"), anchor))]
+            out[_tk] = {**src, "headlines": heads}
     return out
 
 
@@ -4251,12 +4611,24 @@ def _short_source(item):
     return _esc(str((item or {}).get("source") or ""))
 
 
-def _trend_clues_block(data, kit):
-    """两主题共用：每日量化策略趋势跟踪线索。
+def _trend_clue_item_row(item, pick_no, base, color, kit, title_limit=235):
+    """单条平台样本行（链接 + 元信息），非法链接 / 空标题整体剔除。"""
+    url = _public_url(item.get("url"), base)
+    title = _public_text(item.get("title"), title_limit)
+    if not (url and title):
+        return ""
+    link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+            f'{_esc(title)}</a>')
+    return kit.item_row(f"{pick_no:02d}", link,
+                        _esc(_concise_detail(_public_text(item.get("detail"), 210))))
 
-    ① 全网 20 个新闻源头 · 港股信息挖掘（头部行给覆盖度与相关条数，逐源列命中条目）；
-    ② Reddit 十板块热帖样本（每板块至多 5 条，原口径不变）。
-    无数据的源头 / 板块不进正文；缺失来源只在盘点总结的「数据覆盖」里点名。
+
+def _trend_clues_block(data, kit):
+    """两主题共用：趋势跟踪——① 全网 20 个新闻源头 · 港股信息挖掘 + 分析；
+    ② 多平台信息员（Reddit / StockTwits / TradingView / Bogleheads）社区样本。
+
+    无数据的源头 / 平台不进正文；缺失来源只在总结的「数据覆盖」里点名。Reddit 按 10 个
+    板块分组（每板块至多 5 条），其余平台按各自榜单 / 板块分组。
     """
     color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
     rows = []
@@ -4301,34 +4673,55 @@ def _trend_clues_block(data, kit):
                     _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
                 shown += 1
 
-    # ② Reddit 十板块热帖样本（原口径：无数据的板块不进正文，每板块至多 5 条）
-    source = data.get("Reddit") or {}
-    if source.get("status") == "success":
-        by_board = {}
-        for item in source.get("items") or []:
-            if isinstance(item, dict):
-                by_board.setdefault(str(item.get("community") or ""), []).append(item)
-        homepage = _public_url(PUBLIC_SITE_URLS["Reddit"])
-        latest = _public_text(source.get("content_date") or "", 30)
-        heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
-                   f'<b>Reddit</b></a> {kit.source_badge(source)}')
-        rows.append(kit.item_row("", heading, _esc(latest)))
-        for community, label in _REDDIT_BOARDS:
-            board_items = [it for it in by_board.get(f"r/{community}", [])
-                           if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
-            if not board_items:
-                continue
-            rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
-                                     f"热门帖样本 {len(board_items)} 条"))
-            for pick_no, item in enumerate(board_items, 1):
-                url = _public_url(item.get("url"), PUBLIC_SITE_URLS["Reddit"])
-                title = _public_text(item.get("title"), 235)
-                if not (url and title):
+    # ② 多平台信息员（Reddit / StockTwits / TradingView / Bogleheads）
+    live = []
+    for name in _active_public_site_names():
+        source = data.get(name) or {}
+        if source.get("status") == "success" and source.get("items"):
+            live.append((name, source))
+    if live:
+        rows.append(kit.item_row("", f'<b>多平台信息员</b> · {_esc(" · ".join(n for n, _ in live))}',
+                                 _esc(f"{len(live)} 个平台公开样本，各自独立采集；缺失平台见总结")))
+    for name, source in live:
+        homepage = _public_url(PUBLIC_SITE_URLS.get(name) or "")
+        anchor_name = f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;"><b>{_esc(name)}</b></a>' if homepage else f"<b>{_esc(name)}</b>"
+        rows.append(kit.item_row("", f'{anchor_name} {kit.source_badge(source)}',
+                                 _esc(_public_text(source.get("content_date") or "", 30))))
+        if name == "Reddit":
+            by_board = {}
+            for item in source.get("items") or []:
+                if isinstance(item, dict):
+                    by_board.setdefault(str(item.get("community") or ""), []).append(item)
+            for community, label in _REDDIT_BOARDS:
+                board_items = [it for it in by_board.get(f"r/{community}", [])
+                               if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
+                if not board_items:
                     continue
-                link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
-                        f'{_esc(title)}</a>')
-                rows.append(kit.item_row(f"{pick_no:02d}", link,
-                                         _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
+                rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
+                                         f"热门帖样本 {len(board_items)} 条"))
+                for pick_no, item in enumerate(board_items, 1):
+                    rows.append(_trend_clue_item_row(item, pick_no, PUBLIC_SITE_URLS[name],
+                                                     color, kit))
+            continue
+        grouped, order = {}, []
+        for item in source.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            community = str(item.get("community") or name)
+            if community not in grouped:
+                grouped[community] = []
+                order.append(community)
+            grouped[community].append(item)
+        for community in order:
+            picks = grouped[community][:REDDIT_POSTS_PER_BOARD]
+            if not picks:
+                continue
+            rows.append(kit.item_row("▤", f'<b>{_esc(community)}</b>',
+                                     f"公开样本 {len(picks)} 条"))
+            for pick_no, item in enumerate(picks, 1):
+                rows.append(_trend_clue_item_row(item, pick_no, PUBLIC_SITE_URLS[name],
+                                                 color, kit))
+    rows = [row for row in rows if row]
     return kit.rows("".join(rows)) if rows else ""
 
 
@@ -4343,7 +4736,7 @@ def _market_brief(market, labels, kit):
 
 
 def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
-    """页首「今日结论」：倾向 → 量化预测 → 周度预测 → 核心判断 → 各市场一句话 → 政策定调。"""
+    """页首「今日预判」：倾向 → 量化预测 → 周度预测 → 核心判断 → 各市场一句话 → 政策定调。"""
     pairs = []
     # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
     if quant and quant.get("available"):
@@ -4407,7 +4800,7 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
 
 
 def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None):
-    """末尾「盘点总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
+    """末尾「总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
     pairs = []
     if quant and quant.get("available"):
         v1 = (quant.get("validation") or {}).get(1) or {}
@@ -4450,9 +4843,9 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
             pairs.append(("风险关注", _esc(kws)))
     elif ai_result and ai_result.get("available"):
         pairs.append(("风险关注", "未检出显著风险舆情"))
-    # 全球头条 / A股资讯已从日报栏目中移除：底层数据仍供量化策略使用，
-    # 但不再作为正文的缺失项提示，避免版面继续点名已删除栏目。
-    hidden_report_sources = {"全球头条", "A股资讯"}
+    # A股资讯已从日报栏目中移除：底层数据仍供量化策略使用，不再作为正文的
+    # 缺失项提示，避免版面继续点名已删除栏目。
+    hidden_report_sources = {"A股资讯"}
     missing = [name for name, s in source_items
                if name not in hidden_report_sources and s.get("status") != "success"]
     cover = f"当天 {today_n}/{total} 源"
@@ -4462,15 +4855,17 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     return pairs
 
 
-# 阅读顺序：结论 → 前瞻日程（未来30天影响经济时间点）→ 数据（行情 / 全景 / 政策 / 每日量化策略）
-#           → 趋势跟踪线索与资讯 → 新闻情绪 → 盘点。
+# 阅读顺序：结论 → 前瞻日程（未来30天影响经济时间点）→ 数据（行情 / 全景 / 政策 / 研判依据）
+#           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
 REPORT_SECTION_ORDER = (
-    "CONCLUSION",
+    "FORECAST",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY", "SECTOR ROTATION",
-    "TREND CLUES", "EASTMONEY WIRE", "HK GURU CHANNELS", "NEWS SENTIMENT",
-    "WRAP-UP",
+    "MARKET SNAPSHOT", "GLOBAL PANORAMA", "POLICY SHOCK",
+    "FED TREND", "GEO TREND", "STRATEGY READ", "SECTOR ROTATION",
+    "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
+    "HK GURU CHANNELS", "NEWS SENTIMENT",
+    "SUMMARY",
 )
 
 
@@ -4481,14 +4876,19 @@ REPORT_SECTION_ORDER = (
 #    证据全部来自该栏目自身数据（涨跌方向 / 热度 / 关键词命中 / 归因结果），
 #    确定性计算、可复现、不调外部大模型、不伪造内容；定位参考，非投资建议。
 # ============================================================
-_REDDIT_BULL_RE = re.compile(
+# 趋势跟踪（多平台）的英文多空词与 $TICKER 提取：
+# 覆盖 Reddit 热帖标题、StockTwits 平台摘要 / 情绪标签文案、TradingView 观点标题。
+_TREND_BULL_RE = re.compile(
     r"\b(rall(?:y|ied)|surge\w*|soar\w*|pump\w*|moon\w*|yolo|bullish|breakout|rebound|"
     r"recover\w*|upgrade\w*|record high|all-?time high|beat\w*|boom\w*)\b", re.I)
-_REDDIT_BEAR_RE = re.compile(
+_TREND_BEAR_RE = re.compile(
     r"\b(crash\w*|dump\w*|tank\w*|plunge\w*|selloff|bearish|short\w*|fud|scam|"
     r"bankrupt\w*|layoff\w*|warn\w*|loss\w*|correction|decline\w*|tumble\w*|"
     r"slump\w*|sank|sink\w*)\b", re.I)
-_REDDIT_TICKER_RE = re.compile(r"\$([A-Za-z]{1,5})\b")
+_TREND_TICKER_RE = re.compile(r"\$([A-Za-z]{1,5})\b")
+# 兼容并行分支旧名（全网新闻源头多空词表复用社区多空词）
+_REDDIT_BULL_RE = _TREND_BULL_RE
+_REDDIT_BEAR_RE = _TREND_BEAR_RE
 
 
 def _ai_judge_prob(bull, bear):
@@ -4515,7 +4915,7 @@ def _judge_note(prob, text):
 
 
 def _zh_title_bull_bear(titles):
-    """中文标题词表命中计数（复用 每日量化策略多/空词表）。"""
+    """中文标题词表命中计数（复用策略研判多/空词表）。"""
     bull = bear = 0
     for t in titles:
         txt = str(t or "")
@@ -4538,11 +4938,145 @@ def _top_themes(titles, top_n=2):
     return [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_n]]
 
 
-def build_section_ai_notes(data, *, policy=None, senti=None):
+# ============================================================
+# AI趋势分析（美联储 / 地缘政治）—— 两个专题的确定性规则研判
+# ------------------------------------------------------------
+# 各自由「专门抓取」（Google News RSS 主题查询）供给标题，规则词表判定方向定调，
+# 逐条引用命中证据；美联储板附财经日程中的相关时间点。无大模型、可复现、不伪造；
+# 抓取失败整栏缺席，绝不以旧闻兜底。宽松 / 缓和记多头，紧缩 / 升温记空头。
+# ============================================================
+# 美联储：鹰派（紧缩倾向）/ 鸽派（宽松倾向）触发词（子串命中、叠加计数）
+_FED_HAWK_WORDS = ["加息", "升息", "缩表", "鹰派", "紧缩", "通胀高企", "利率上调",
+                   "上调利率", "加息预期", "限制性"]
+_FED_DOVE_WORDS = ["降息", "减息", "鸽派", "宽松", "扩表", "购债", "暂停加息",
+                   "放缓加息", "降息预期", "下调利率"]
+# 地缘政治：升温（对抗倾向）/ 缓和（降温倾向）触发词
+_GEO_HEAT_WORDS = ["制裁", "冲突", "战争", "紧张", "摩擦", "争端", "封锁", "断交",
+                   "威胁", "对抗", "袭击", "军事", "报复", "升级"]
+_GEO_CALM_WORDS = ["缓和", "停火", "谈判", "对话", "协议", "会晤", "互访", "降温",
+                   "合作", "达成", "解除制裁", "降级", "共识", "休战"]
+# 美联储板「未来相关时间点」筛选（财经日程条目名命中即展示）
+_FED_EVENT_RE = re.compile(r"美联储|FOMC|议息|利率决议|非农|CPI|PPI|PCE|联储")
+
+
+def _trend_topic_scan(headlines, positive_words, negative_words, exclude_titles=()):
+    """扫描标题并按词表计数：返回 (正面命中, 负面命中, 证据列表, 重复数)。
+
+    证据列表只收命中方向词的标题（含命中词明细）；与正文其他栏目重复的标题
+    不重复展示、仍计入分析；每条都保留来源与发布时间可溯源。
+    """
+    pos = neg = dup_n = 0
+    evidence = []
+    exclude = {t for t in (exclude_titles or []) if t}
+    for it in headlines or []:
+        if not isinstance(it, dict):
+            continue
+        title = str(it.get("title") or "")
+        if not title:
+            continue
+        pos_hits = [w for w in positive_words if w in title]
+        neg_hits = [w for w in negative_words if w in title]
+        pos += len(pos_hits)
+        neg += len(neg_hits)
+        if not pos_hits and not neg_hits:
+            continue
+        if title in exclude:
+            dup_n += 1
+            continue
+        evidence.append({
+            "title": title,
+            "source": it.get("source") or "",
+            "time": it.get("published_cst") or "",
+            "url": it.get("url") or "",
+            "pos_hits": pos_hits,
+            "neg_hits": neg_hits,
+        })
+    return pos, neg, evidence, dup_n
+
+
+def _trend_topic_verdict(pos, neg, positive_label, negative_label, middle_label):
+    """方向定调：正面词多→正面定调，负面词多→负面定调，持平/全零→中性定调。"""
+    if pos > neg:
+        return positive_label
+    if neg > pos:
+        return negative_label
+    return middle_label
+
+
+def build_fed_trend_analysis(data, exclude_titles=()):
+    """「AI趋势分析（美联储）」：鹰鸽词表定调 + 命中证据 + 财经日程相关时间点。
+
+    available=False 时不渲染整栏（抓取失败 / 无标题）。确定性规则，非投资建议。
+    """
+    src = data.get(FED_TREND_KEY) or {}
+    headlines = src.get("headlines") or []
+    if src.get("status") != "success" or not headlines:
+        return {"available": False}
+    dove, hawk, evidence, dup_n = _trend_topic_scan(
+        headlines, _FED_DOVE_WORDS, _FED_HAWK_WORDS, exclude_titles)
+    verdict = _trend_topic_verdict(dove, hawk, "偏鸽（宽松倾向）", "偏鹰（紧缩倾向）", "观望")
+    # 财经日程里的相关时间点（仅展示子集；日程缺失只隐藏该子块）
+    events = []
+    cal = data.get("财经日历") or {}
+    for it in (cal.get("items") or []):
+        name = str((isinstance(it, dict) and it.get("name")) or "")
+        if name and _FED_EVENT_RE.search(name):
+            events.append({
+                "date": it.get("date") or "",
+                "time": it.get("time") or "",
+                "name": name,
+                "imp": it.get("imp") or 0,
+            })
+    events = events[:5]
+    return {
+        "available": True,
+        "topic": "美联储",
+        "verdict": verdict,
+        "positive_label": "鸽派（宽松）",
+        "negative_label": "鹰派（紧缩）",
+        "positive_n": dove,
+        "negative_n": hawk,
+        "total": len([h for h in headlines if isinstance(h, dict)]),
+        "evidence": evidence,
+        "dup_n": dup_n,
+        "events": events,
+        "source": src,
+    }
+
+
+def build_geo_trend_analysis(data, exclude_titles=()):
+    """「AI趋势分析（地缘政治）」：升温/缓和词表定调 + 命中证据逐条引用。
+
+    available=False 时不渲染整栏。确定性规则，非投资建议。
+    """
+    src = data.get(GEO_TREND_KEY) or {}
+    headlines = src.get("headlines") or []
+    if src.get("status") != "success" or not headlines:
+        return {"available": False}
+    calm, heat, evidence, dup_n = _trend_topic_scan(
+        headlines, _GEO_CALM_WORDS, _GEO_HEAT_WORDS, exclude_titles)
+    verdict = _trend_topic_verdict(calm, heat, "缓和（降温）", "升温（对抗）", "平稳")
+    return {
+        "available": True,
+        "topic": "地缘政治",
+        "verdict": verdict,
+        "positive_label": "缓和（降温）",
+        "negative_label": "升温（对抗）",
+        "positive_n": calm,
+        "negative_n": heat,
+        "total": len([h for h in headlines if isinstance(h, dict)]),
+        "evidence": evidence,
+        "dup_n": dup_n,
+        "events": [],
+        "source": src,
+    }
+
+
+def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo_trend=None):
     """为有内容的数据栏目生成逐栏 AI 研判（概率多空 + 预测）。
 
     返回 {kicker: note}；仅真实有数据的栏目出研判。结论型栏目
-    （今日结论 / 每日量化策略（板块趋势跟踪） / 盘点总结）本身即总结判断，不重复追加。
+    （今日预判 / 策略研判 / 总结）本身即结论，不重复追加。
     注意：text 内数据片段必须已 _esc（渲染端不再二次转义）。
     """
     notes = {}
@@ -4608,9 +5142,9 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
                 f"成交{'放量' if (chg or 0) > 0 else '缩量'}"]
         if lead.get("name"):
             bits.append(f"领涨 {_esc(str(lead['name']))}")
-        notes["A-SHARE PANORAMA"] = _judge_note(prob, "，".join(bits) + f" → 预测：{verdict}")
+        notes["GLOBAL PANORAMA"] = _judge_note(prob, "，".join(bits) + f" → 预测：{verdict}")
 
-    # ③ 每日量化策略（政策因子趋势预判）：PSI 方向 + 受益/承压行业 + 量化趋势分 → 实施节奏预测
+    # ③ 政策因子：PSI 方向 + 受益/承压行业 + 量化趋势分 → 实施节奏预测
     if isinstance(policy, dict) and policy.get("available"):
         score = int(policy.get("broad_score") or 0)
         prob = _ai_judge_prob(max(score, 0), max(-score, 0))
@@ -4628,66 +5162,79 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             detail += "，受益 " + "、".join(_esc(str(w.get('name'))) for w in winners[:2])
         if losers:
             detail += "，承压 " + "、".join(_esc(str(l.get('name'))) for l in losers[:2])
-        notes["QUANT POLICY"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
+        notes["POLICY SHOCK"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
 
-    # ④ 趋势跟踪线索：全网 20 个新闻源头的港股挖掘（优先）+ Reddit 热帖（合并证据）
-    #    多空词命中（中词表 + 英词表）+ 主题词命中 → 港股消息面概率定调（规则合成）。
+    # ③b AI趋势分析（美联储 / 地缘政治）：宽松·缓和记多头，紧缩·升温记空头
+    for kick, res in (("FED TREND", fed_trend), ("GEO TREND", geo_trend)):
+        if not (isinstance(res, dict) and res.get("available")):
+            continue
+        prob = _ai_judge_prob(res.get("positive_n") or 0, res.get("negative_n") or 0)
+        _mark, label = _ai_judge_label(prob)
+        topic = res.get("topic") or ""
+        detail = (f'{_esc(topic)}定调 {_esc(str(res.get("verdict") or "—"))}，'
+                  f'{_esc(str(res.get("positive_label") or ""))} {int(res.get("positive_n") or 0)} / '
+                  f'{_esc(str(res.get("negative_label") or ""))} {int(res.get("negative_n") or 0)}'
+                  f'（扫描 {int(res.get("total") or 0)} 条）')
+        if topic == "美联储":
+            outlook = {"偏鸽（宽松倾向）": "流动性预期转松，风险资产相对占优",
+                       "偏鹰（紧缩倾向）": "利率预期承压，估值敏感资产相对受抑",
+                       "观望": "信号混杂，等待议息与数据确认"}.get(str(res.get("verdict")), "等待更多信号")
+        else:
+            outlook = {"缓和（降温）": "风险偏好修复，避险资产边际回落",
+                       "升温（对抗）": "避险情绪升温，黄金与能源相对占优",
+                       "平稳": "地缘溢价平稳，市场按自身节奏定价"}.get(str(res.get("verdict")), "等待更多信号")
+        notes[kick] = _judge_note(prob, f"{detail} → 预测：{outlook}")
+
+    # ④ 趋势跟踪（多平台信息员）：多空词命中 + 热股提取 → 散户与交易员情绪判断
+    live_platforms = []
+    for name in _active_public_site_names():
+        src = data.get(name) or {}
+        if src.get("status") == "success" and src.get("items"):
+            live_platforms.append((name, src))
     news_src = data.get(HK_NEWS_SOURCE_NAME) or {}
     news_an = news_src.get("analysis") if news_src.get("status") == "success" else None
-    reddit = data.get("Reddit") or {}
-    reddit_items = ([it for it in reddit.get("items") or [] if isinstance(it, dict)]
-                    if reddit.get("status") == "success" else [])
-    if isinstance(news_an, dict) and (news_an.get("scanned") or reddit_items):
-        detail = (f"20 源扫描 {int(news_an.get('scanned') or 0)} 条 · 港股相关 "
-                  f"{int(news_an.get('hk_n') or 0)} 条（{int(news_an.get('ok_n') or 0)} 源有更新），"
-                  f"多空词 {int(news_an.get('bull') or 0)} 多 / {int(news_an.get('bear') or 0)} 空")
-        themes = news_an.get("themes") or []
-        if themes:
-            detail += "，热点 " + "、".join(_esc(t) for t in themes)
-        bull = int(news_an.get("bull") or 0)
-        bear = int(news_an.get("bear") or 0)
-        if reddit_items:
-            r_bull = r_bear = 0
-            for it in reddit_items:
-                title = str(it.get("title") or "")
-                r_bull += len(_REDDIT_BULL_RE.findall(title))
-                r_bear += len(_REDDIT_BEAR_RE.findall(title))
-            bull += r_bull
-            bear += r_bear
-            detail += f"；Reddit 热帖 {len(reddit_items)} 条（多 {r_bull} / 空 {r_bear}）"
-        prob = _ai_judge_prob(bull, bear)
-        _mark, label = _ai_judge_label(prob)
-        verdict = {"偏多": "港股消息面偏多，关注热点主题的持续性与量能配合",
-                   "偏空": "港股消息面偏空，防御优先，警惕高位回撤",
-                   "中性": "港股消息面多空拉锯，趋势信号待确认，控制仓位"}[label]
-        notes["TREND CLUES"] = _judge_note(
-            prob, f"{detail} → 预测：{verdict}（规则合成，非投资建议）")
-    elif reddit_items:
-        items = reddit_items
+    if live_platforms or (isinstance(news_an, dict) and news_an.get("scanned")):
+        items = [it for _n, src in live_platforms for it in src["items"] if isinstance(it, dict)]
         bull = bear = 0
         tickers = {}
         for it in items:
-            title = str(it.get("title") or "")
-            bull += len(_REDDIT_BULL_RE.findall(title))
-            bear += len(_REDDIT_BEAR_RE.findall(title))
-            for sym in _REDDIT_TICKER_RE.findall(title):
+            text = " ".join(str(it.get(key) or "") for key in ("title", "detail"))
+            bull += len(_TREND_BULL_RE.findall(text))
+            bear += len(_TREND_BEAR_RE.findall(text))
+            symbol = str(it.get("symbol") or "").strip().upper()
+            if symbol:
+                tickers[symbol] = tickers.get(symbol, 0) + 1
+            for sym in _TREND_TICKER_RE.findall(str(it.get("title") or "")):
                 key = sym.upper()
-                tickers[key] = tickers.get(key, 0) + 1
+                if key != symbol:
+                    tickers[key] = tickers.get(key, 0) + 1
+        if isinstance(news_an, dict):
+            bull += int(news_an.get("bull") or 0)
+            bear += int(news_an.get("bear") or 0)
         prob = _ai_judge_prob(bull, bear)
         _mark, label = _ai_judge_label(prob)
-        boards_n = len({it.get("community") for it in items if it.get("community")})
+        groups_n = len({it.get("community") for it in items if it.get("community")})
         top = [f"{s}×{c}" for s, c in sorted(tickers.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
-        detail = f"十板块扫描 {len(items)} 条热帖（{boards_n} 板块有数据）"
+        names = "、".join(name for name, _src in live_platforms)
+        if live_platforms:
+            detail = f"多平台 {len(live_platforms)} 个信息员（{names}）扫描 {len(items)} 条样本（{groups_n} 组有数据）"
+        else:
+            detail = "社区样本缺席"
         if top:
             detail += "，热股 " + "、".join(_esc(t) for t in top)
+        if isinstance(news_an, dict):
+            detail += (f"；20 源扫描 {int(news_an.get('scanned') or 0)} 条 · 港股相关 "
+                       f"{int(news_an.get('hk_n') or 0)} 条")
+            themes = news_an.get("themes") or []
+            if themes:
+                detail += "，热点 " + "、".join(_esc(s) for s in themes)
         detail += f"，多空词 {bull} 多 / {bear} 空"
-        notes["TREND CLUES"] = _judge_note(
-            prob, f"{detail} → 预测：散户情绪{label}，关注高热标的与基本面背离（观点非事实）")
+        notes["TREND TRACKING"] = _judge_note(
+            prob, f"{detail} → 预测：散户与交易员情绪{label}，关注高热标的与基本面背离（观点非事实，非投资建议）")
 
-    # ⑤ 资讯类栏目：全球头条 / 东财快讯 / A股资讯（多空词 + 热门主题）
+    # ⑤ 资讯类栏目：全球头条 / 东财快讯（多空词 + 热门主题）
     for kick, source_key, noun in (("GLOBAL HEADLINES", "全球头条", "条头条"),
-                                   ("EASTMONEY WIRE", "东财快讯", "条快讯"),
-                                   ("A-SHARE DESK", "A股资讯", "条资讯")):
+                                   ("EASTMONEY WIRE", "东财快讯", "条快讯")):
         src = data.get(source_key) or {}
         titles = []
         for h in (src.get("headlines") or []):
@@ -4723,7 +5270,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             prob, f"今日 {active_n} 频道有新内容，观点 {bull} 多 / {bear} 空"
                   f" → 预测：名家观点整体{label}，关注：{focus}")
 
-    # ⑦ AI 新闻情绪因子：已归因个股的正负命中合计 → 整体新闻情绪
+    # ⑦ 新闻情绪：已归因个股的正负命中合计 → 整体新闻情绪
     if isinstance(senti, dict) and senti.get("total_matched"):
         stocks = [s for s in (senti.get("stocks") or []) if isinstance(s, dict)]
         if stocks:
@@ -4871,7 +5418,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
 
-    sentiment_history: 跨日情绪基线（AI 新闻情绪因子动量/新闻量窗口用）；
+    sentiment_history: 跨日情绪基线（新闻情绪动量/新闻量窗口用）；
     date_str: 报告日期 YYYYMMDD（划分今日与历史的界线），缺省取当天；
     policy_result: main 1.6 阶段单独构建的政策因子结果，缺省时兜底构建；
     news_corpus: 跨运行标题存档（output/news_history.json），缺省时因子只用
@@ -4891,8 +5438,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     yt_live = yt.get("channels", [])        # 近期有内容的频道
     google = data.get("全球头条", {})
     gh_headlines = google.get("headlines", [])
-    sina = data.get("A股资讯", {})
-    sina_headlines = sina.get("headlines", [])
     em = data.get("东财快讯", {})
     em_headlines = em.get("headlines", [])
     hot = data.get("热门榜单", {}) or {}
@@ -4903,7 +5448,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("国家政策（中国政府网）", gov_policy),
         ("港股名家频道", raw_yt),
         ("全球头条", raw_google),
-        ("A股资讯", sina),
         ("东财快讯", em),
         ("热门榜单", hot),
         ("港股量化引擎（概率/流动性）", data.get("港股量化") or {}),
@@ -4912,17 +5456,22 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
         source_items.append((f"财经日历（未来{ECON_CALENDAR_DAYS}天时间点）", data["财经日历"]))
-    # 每周量化走势预测（恒指 · 未来一周）：独立周度栏目，存在即按需进审计。
+    # AI趋势分析两个专题源：只在实际采集过（键存在）时进审计，缺失时在数据覆盖点名。
+    for _tk in (FED_TREND_KEY, GEO_TREND_KEY):
+        if isinstance(data.get(_tk), dict):
+            source_items.append((_tk, data[_tk]))
+    # 每周量化走势预测 / 行业轮动：独立栏目，存在即按需进审计。
     if isinstance(data.get("每周走势预测"), dict):
         source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
     if isinstance(data.get("行业轮动"), dict):
         source_items.append(("每日量化策略（行业轮动）", data["行业轮动"]))
-    # 全网 20 个新闻源头（港股挖掘）：与 Reddit 同为趋势跟踪线索，按需加入审计；
+    # 全网 20 个新闻源头（港股挖掘）：与社区平台同为趋势跟踪，按需加入审计；
     # 外部旧调用若无该键仍维持原来的基础数据源数量。
     if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
         source_items.append(("全网新闻源头（20家）", data[HK_NEWS_SOURCE_NAME]))
-    # 仅运行过十站采集时加入审计；外部旧调用若无新键仍维持原来的基础数据源数量。
-    source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
+    # 趋势跟踪：每个平台单独计入审计（缺失平台在「数据覆盖」里点名）；
+    # 未运行过多平台采集的旧调用自然不进审计，维持基础数据源数量。
+    source_items.extend((name, data[name]) for name in _active_public_site_names() if name in data)
 
     total = len(source_items)
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
@@ -5000,38 +5549,64 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 kit.source_badge(market), _short_source(market),
             )
 
-    # ② A股大盘全景复盘
+    # ② 全球大盘全景复盘
     if pan.get("status") == "success":
-        blocks["A-SHARE PANORAMA"] = (
-            "A-SHARE PANORAMA", "A股大盘全景复盘", kit.panorama_block(pan),
+        blocks["GLOBAL PANORAMA"] = (
+            "GLOBAL PANORAMA", "全球大盘全景复盘", kit.panorama_block(pan, market),
             kit.source_badge(pan), _short_source(pan),
         )
 
-    # ③ 每日量化策略（政策因子趋势预判）
+    # ③ 政策因子（PSI 量化趋势预判）
     if policy.get("available"):
-        blocks["QUANT POLICY"] = (
-            "QUANT POLICY", "每日量化策略（政策因子趋势预判）", kit.policy_block(policy), kit.badge("量化策略", "ai"), "",
+        blocks["POLICY SHOCK"] = (
+            "POLICY SHOCK", "政策因子", kit.policy_block(policy), kit.badge("量化策略", "ai"), "",
         )
-        blocks["POLICY SHOCK"] = blocks["QUANT POLICY"]
+        blocks["QUANT POLICY"] = blocks["POLICY SHOCK"]
 
-    # ④ 每日量化策略（板块趋势跟踪）——量化趋势分 + 板块轮动信号
+    # ③b AI趋势分析（美联储 / 地缘政治）：专门抓取 + 词表定调 + 证据引用
+    fed_res = geo_res = {}
+    if AI_ANALYSIS_ENABLED:
+        shown_titles = [str((h or {}).get("title") or "")
+                        for h in (gh_headlines or [])[:GH_DISPLAY_N] if isinstance(h, dict)]
+        shown_titles += [str((h or {}).get("title") or "")
+                         for h in (em_headlines or [])[:EM_DISPLAY_N] if isinstance(h, dict)]
+        fed_res = build_fed_trend_analysis(data, exclude_titles=shown_titles)
+        geo_shown = shown_titles + [str((e or {}).get("title") or "")
+                                    for e in (fed_res.get("evidence") or [])]
+        geo_res = build_geo_trend_analysis(data, exclude_titles=geo_shown)
+        if fed_res.get("available"):
+            blocks["FED TREND"] = (
+                "FED TREND", "AI趋势分析（美联储）", kit.trend_topic_block(fed_res),
+                kit.ai_badge(), "")
+        if geo_res.get("available"):
+            blocks["GEO TREND"] = (
+                "GEO TREND", "AI趋势分析（地缘政治）", kit.trend_topic_block(geo_res),
+                kit.ai_badge(), "")
+
+    # ④ 策略研判（倾向 / 结论已置顶，此处只展开依据）
     if ai_result.get("available"):
-        blocks["QUANT STRATEGY"] = (
-            "QUANT STRATEGY", "每日量化策略（板块趋势跟踪）", kit.ai_block(ai_result), kit.badge("量化策略", "ai"), "",
+        blocks["STRATEGY READ"] = (
+            "STRATEGY READ", "策略研判", kit.ai_block(ai_result), kit.badge("量化策略", "ai"), "",
         )
         # 兼容旧 kicker 的锚点引用（如风险提示中的 AI READ 引用）
-        blocks["AI READ"] = blocks["QUANT STRATEGY"]
+        blocks["AI READ"] = blocks["STRATEGY READ"]
 
-    # ⑤ 每日量化策略趋势跟踪线索：全网 20 个新闻源头（港股挖掘）与 Reddit 热帖，
-    #    任一来源抓取成功且有内容才渲染；两者都缺席则整栏不进正文。
+    # ⑤ 趋势跟踪：全网 20 个新闻源头（港股挖掘）+ 多平台信息员（Reddit / StockTwits /
+    #    TradingView / Bogleheads），任一来源抓取成功且有内容才渲染；全部缺席则整栏不进正文。
     if ((data.get("Reddit") or {}).get("status") == "success"
-            or (data.get(HK_NEWS_SOURCE_NAME) or {}).get("status") == "success"):
+            or (data.get(HK_NEWS_SOURCE_NAME) or {}).get("status") == "success"
+            or any((data.get(n) or {}).get("status") == "success"
+                   for n in _active_public_site_names())):
         digest = _trend_clues_block(data, kit)
         if digest:
-            blocks["TREND CLUES"] = ("TREND CLUES", "每日量化策略趋势跟踪线索", digest, "", "")
+            blocks["TREND TRACKING"] = ("TREND TRACKING", "趋势跟踪", digest, "", "")
 
-    # ⑥ 资讯：仅保留东财快讯 / 港股名家频道；全球头条与A股资讯不再单独成栏，
-    # 其数据仍可作为量化研判和情绪分析的输入。
+    # ⑥ 资讯：全球头条 / 东财快讯 / 港股名家频道（A股资讯已按用户要求移除，其数据不再采集）
+    if gh_headlines:
+        gh_items = kit.rows("".join(kit.headline_row(it, i)
+                                    for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
+        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", "全球头条", gh_items,
+                                      kit.source_badge(google), _short_source(google))
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
                                     for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
@@ -5044,7 +5619,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             kit.source_badge(yt), f"{len(yt_live)} 个频道有近期更新",
         )
 
-    # ⑦ AI 新闻情绪因子：只有真正归因到个股时才出现（样本不足不再占位）
+    # ⑦ 新闻情绪：只有真正归因到个股时才出现（样本不足不再占位）
     senti_result = {}
     if AI_ANALYSIS_ENABLED:
         senti_result = build_news_sentiment(data, date_str or _today_str(),
@@ -5052,7 +5627,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                                             news_corpus=news_corpus)
         if senti_result.get("by_market") and senti_result.get("total_matched"):
             blocks["NEWS SENTIMENT"] = (
-                "NEWS SENTIMENT", "AI 新闻情绪因子",
+                "NEWS SENTIMENT", "新闻情绪",
                 kit.sentiment_block(senti_result), kit.ai_badge(), "",
             )
 
@@ -5060,10 +5635,10 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy,
                                    quant=quant, weekly=weekly_res)
     if conclusion:
-        blocks["CONCLUSION"] = ("CONCLUSION", "今日结论", kit.kv(conclusion), "", "")
+        blocks["FORECAST"] = ("FORECAST", "今日预判", kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
                              quant=quant)
-    blocks["WRAP-UP"] = ("WRAP-UP", "盘点总结", kit.kv(summary), "", "")
+    blocks["SUMMARY"] = ("SUMMARY", "总结", kit.kv(summary), "", "")
 
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
 
@@ -5071,7 +5646,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     #    （概率化多空判断 + 一句分析预测；规则合成，结论型栏目不重复）。
     judge_notes = build_section_ai_notes(
         data, policy=policy if (isinstance(policy, dict) and policy.get("available")) else None,
-        senti=senti_result if (isinstance(senti_result, dict) and senti_result.get("available")) else None)
+        senti=senti_result if (isinstance(senti_result, dict) and senti_result.get("available")) else None,
+        fed_trend=fed_res if (isinstance(fed_res, dict) and fed_res.get("available")) else None,
+        geo_trend=geo_res if (isinstance(geo_res, dict) and geo_res.get("available")) else None)
     if judge_notes:
         new_sections = []
         for kick, title, content, badge, caption in sections:
@@ -5095,7 +5672,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
 # ——只渲染有内容的区块；每个区块带来源、抓取时间与「当天/非当天/无数据」徽标
 # ============================================================
 # ============================================================
-# 每日量化策略（板块趋势跟踪）· 规则 / 量化合成，无需大模型 API
+    # 策略研判 · 规则 / 量化合成，无需大模型 API
 # ------------------------------------------------------------
 # 基于当日已抓取的多源信号（实时行情、A股行业板块热力、热门榜单、
 # 全球/东财/A股头条、港股名家频道观点）做确定性量化合成，输出板块趋势跟踪策略：
@@ -5106,7 +5683,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
 # 经 z-score 标准化后加权合成趋势分（价格动量60% + 资金流30% + 舆情10%），
 # 结合市场宽度与成交额做 regime 过滤，输出可执行的趋势跟踪信号与风险预算。
 # 2026-08-06 起 QUANT ALLOC // 量化配置 · 趋势跟踪 不再列出榜单个股，只保留主题行；
-# 2026-09-28 起原「AI 盘研判」正式升级为「每日量化策略（板块趋势跟踪）」，
+# 2026-09-28 起原「AI 盘研判」正式升级为「策略研判」，
 # 保留原情绪定调与风险提示，新增量化趋势分与板块轮动信号。
 # 如需接大模型，可在 build_ai_analysis 内增加 LLM 分支（保留本规则作兜底）。
 # ============================================================
@@ -5213,12 +5790,10 @@ def build_daily_quant_strategy(data):
     hot_markets = hot.get("markets", {}) or {}
     google = data.get("全球头条", {}) or {}
     em = data.get("东财快讯", {}) or {}
-    sina = data.get("A股资讯", {}) or {}
     yt = data.get("港股名家频道", {}) or {}
 
     google_headlines = google.get("headlines", []) or []
     em_headlines = em.get("headlines", []) or []
-    sina_headlines = sina.get("headlines", []) or []
     yt_channels = yt.get("channels", []) or []
 
     # —— 1. 文本与结构化信号汇总 ——
@@ -5230,7 +5805,6 @@ def build_daily_quant_strategy(data):
         if isinstance(it, dict):
             texts.append(it.get("title", ""))
             texts.append(it.get("summary", ""))
-    texts += [h for h in sina_headlines if isinstance(h, str)]
     for ch in yt_channels:
         for v in ch.get("videos", []) or []:
             texts.append(v.get("title", ""))
@@ -5240,16 +5814,15 @@ def build_daily_quant_strategy(data):
     # 每个条目：title / source / section（正文栏目名）/ index（栏目内序号，1-based，
     # 与渲染侧展示顺序一致）/ anchor（正文锚点 id）/ shown（该标题是否已在正文
     # 栏目展示）/ time（发布时间，供无序号栏目定位）/ channel（港股频道名）。
-    # 全球头条与A股资讯不再作为正文栏目展示，因此只作为风险提示的原始证据、shown=False；
-    # 东财快讯正文展示前 EM_DISPLAY_N 条；港股频道每频道存储最多 8 条、正文只展示前
-    # CHANNEL_TOP_N 条，其余 shown=False。
+    # 全球头条 / 东财快讯的存储条数 == 展示条数（8/5），shown 恒为 True；
+    # 港股频道每频道存储最多 8 条、正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
     headlines_struct = []
     for i, it in enumerate(google_headlines, 1):
         if isinstance(it, dict):
             headlines_struct.append({
                 "title": it.get("title", ""), "source": it.get("source", ""),
                 "section": "全球头条", "index": i, "anchor": f"h-gh-{i:02d}",
-                "shown": False,
+                "shown": i <= GH_DISPLAY_N,
                 "time": it.get("published_cst") or "", "channel": "",
             })
     for i, it in enumerate(em_headlines, 1):
@@ -5259,14 +5832,6 @@ def build_daily_quant_strategy(data):
                 "section": "东财快讯", "index": i, "anchor": f"h-em-{i:02d}",
                 "shown": i <= EM_DISPLAY_N,
                 "time": it.get("time") or "", "channel": "",
-            })
-    for i, h in enumerate(sina_headlines, 1):
-        if isinstance(h, str):
-            headlines_struct.append({
-                "title": h, "source": "新浪财经",
-                "section": "A股市场", "index": i, "anchor": f"h-cn-{i:02d}",
-                "shown": False,
-                "time": "", "channel": "",
             })
     for c, ch in enumerate(yt_channels, 1):
         for v, video in enumerate(ch.get("videos", []) or [], 1):
@@ -5279,7 +5844,7 @@ def build_daily_quant_strategy(data):
             })
 
     # 热门榜单个股不再单独列入关注清单（2026-08-06 起 WATCH LIST 只保留主题行）；
-    # 个股仍作为 每日量化策略（板块趋势跟踪）输入：板块趋势识别与活跃标的提及。
+    # 个股仍作为 策略研判输入：板块趋势识别与活跃标的提及。
 
     # —— 2. 情绪打分 ——
     changes = []
@@ -5530,12 +6095,11 @@ def build_daily_quant_strategy(data):
     }
 
 def build_ai_analysis(data):
-    """兼容别名：原 AI 盘研判入口，现为每日量化策略（板块趋势跟踪）。"""
+    """兼容别名：原 AI 盘研判入口，现为策略研判。"""
     return build_daily_quant_strategy(data)
 
-
-def _quant_strategy_block(res):
-    """渲染「每日量化策略（板块趋势跟踪）」：量化信号优先、板块趋势榜分层、内容使用独立像素面板。"""
+def _ai_analysis_block(res):
+    """渲染「策略研判」：量化信号优先、板块趋势榜分层、内容使用独立像素面板。"""
     color = res["sentiment_color"]
     score = int(res["score"])
 
@@ -5555,7 +6119,7 @@ def _quant_strategy_block(res):
         f'font-size:10px;font-weight:900;font-family:{FONT_MONO};letter-spacing:1px;">'
         f'◆ QUANT CORE // 每日量化策略 · 板块趋势跟踪</td></tr>'
         f'<tr><td width="68" valign="middle" style="padding:12px 4px 10px 12px;">'
-        f'{_pixel_icon("QUANT STRATEGY", 54)}</td>'
+        f'{_pixel_icon("STRATEGY READ", 54)}</td>'
         f'<td valign="middle" style="padding:12px 12px 10px 8px;">'
         f'<div style="font-size:9px;color:{C_LEMON};font-family:{FONT_MONO};font-weight:900;'
         f'letter-spacing:2px;">QUANT SIGNAL // 量化信号</div>'
@@ -5717,17 +6281,16 @@ def _quant_strategy_block(res):
                       f'font-family:{FONT_MONO};">■ NO WATCH THEME</div>')
     watch_html = _pixel_panel("QUANT ALLOC // 量化配置 · 趋势跟踪", watch_body, C_LEMON, "⌖")
 
-    note_html = _note("每日量化策略（板块趋势跟踪）由公开数据经确定性规则合成 // RULESET v3 // 趋势分=价格60%+资金30%+舆情10% + 风险控制 // 非投资建议，决策需独立判断")
+    note_html = _note("策略研判由公开数据经确定性规则合成 // RULESET v3 // 趋势分=价格60%+资金30%+舆情10% + 风险控制 // 非投资建议，决策需独立判断")
     return hero + conclusion_html + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
-def _ai_analysis_block(res):
-    """兼容别名：原 AI 盘研判入口，现指向每日量化策略（板块趋势跟踪）。"""
-    return _quant_strategy_block(res)
+# 兼容并行分支旧名入口（每日量化策略渲染入口）
+_quant_strategy_block = _ai_analysis_block
 
 
 # ============================================================
-# AI 新闻情绪因子（NEWS SENTIMENT FACTORS · 确定性词表规则）
+# 新闻情绪（NEWS SENTIMENT FACTORS · 确定性词表规则）
 # ------------------------------------------------------------
 # 2026-09-09 起按用户要求改为「逐股」：对最近成交日 A股 / 港股 / 美股
 # 成交量前五（热门榜单 HOT_STOCK_TOP_N），逐只输出 AI 新闻情绪分、总结评论
@@ -5772,7 +6335,7 @@ POLICY_WINDOW_DAYS = 15          # 政策标题窗口（自然日，含锚定日
 NEWS_HISTORY_KEEP_DAYS = POLICY_WINDOW_DAYS + 3   # 存档保留天数（含窗口余量）
 NEWS_HISTORY_FILENAME = "news_history.json"
 
-# 情绪词表：以 每日量化策略 bull/bear 词为底，增加财报/资金/事件类词汇与
+# 情绪词表：以策略研判 bull/bear 词为底，增加财报/资金/事件类词汇与
 # 繁体变体（港股标题多为繁体）。命中按非重叠最长优先计数。
 _SENTI_POS_WORDS = sorted(set(_AI_BULL_WORDS + [
     "大涨", "暴涨", "飙升", "飙涨", "涨停", "一字涨停", "历史新高",
@@ -6048,7 +6611,7 @@ def _collect_headline_items(data, default_date):
 
     不再按「是否当天」过滤——是否进入窗口由 _filter_headlines_window 决定。
     ts = 标题级时间（有真实发布时间才给，如 Google News / 东财 / 港股频道），
-    无发布时间的标题（如新浪滚动字符串）ts=""、date=default_date（采集日）；
+    无发布时间的标题 ts=""、date=default_date（采集日）；
     中国政府网条目还保留 url/official 字段供政策因子溯源。
     """
     items = []
@@ -6080,10 +6643,6 @@ def _collect_headline_items(data, default_date):
     for h in em.get("headlines", []) or []:
         if isinstance(h, dict):
             _add(h.get("title"), "东方财富", "东财快讯", h.get("time"))
-    sina = data.get("A股资讯", {}) or {}
-    for h in sina.get("headlines", []) or []:
-        _add(h if isinstance(h, str) else (h.get("title") if isinstance(h, dict) else ""),
-             "新浪财经", "A股市场", "")
     yt = data.get("港股名家频道", {}) or {}
     for ch in yt.get("channels", []) or []:
         ch_name = ch.get("name", "港股频道")
@@ -6355,7 +6914,7 @@ def _sentiment_volume(today_total, prior_totals):
 
 def build_news_sentiment(data, date_str, history=None, display_n=SENTI_DISPLAY_N,
                          news_corpus=None):
-    """构建 AI 新闻情绪因子结果（渲染与历史落盘共用同一口径）。
+    """构建新闻情绪结果（渲染与历史落盘共用同一口径）。
 
     - 标题窗口：近 SENTI_WINDOW_HOURS=72 小时（news_corpus 缺省时退化为只用
       本次抓取标题，仍按 72h 过滤）；
@@ -6700,7 +7259,7 @@ def _senti_headline_sub(h):
 
 
 def _pixel_sentiment_block(res):
-    """像素主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
+    """像素主题：新闻情绪——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
     by_market = res.get("by_market") or []
     total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
     ms = res.get("market_summary") or {}
@@ -6832,7 +7391,7 @@ def _senti_empty_counts(res):
 
 
 def _pixel_sentiment_empty_block(res):
-    """像素主题：AI 新闻情绪因子「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
+    """像素主题：新闻情绪「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
     n_today, universe_n = _senti_empty_counts(res)
     if universe_n:
         cover = f"0 / {universe_n} 只榜单个股被窗口内标题点名"
@@ -6853,7 +7412,7 @@ def _pixel_sentiment_empty_block(res):
 
 
 def gz_sentiment_block(res):
-    """谷藏主题：AI 新闻情绪因子——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
+    """谷藏主题：新闻情绪——按「A股/港股/美股 成交量前五」逐股评分 + 总结评论 + 原因（2026-09-09 丰富版）。"""
     by_market = res.get("by_market") or []
     total_stocks = sum(len(mb.get("stocks") or []) for mb in by_market)
     ms = res.get("market_summary") or {}
@@ -6946,7 +7505,7 @@ def gz_sentiment_block(res):
 
 
 def gz_sentiment_empty_block(res):
-    """谷藏主题：AI 新闻情绪因子「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
+    """谷藏主题：新闻情绪「样本不足」占位（72h 窗口有标题但无归因时代替整栏消失）。"""
     n_today, universe_n = _senti_empty_counts(res)
     if universe_n:
         cover = f"0 / {universe_n} 只榜单个股被窗口内标题点名"
@@ -7138,7 +7697,7 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
 
 
 def build_policy_factor(data, date_str=None, news_corpus=None):
-    """构建每日量化策略（政策因子趋势预判）（抓取后、推送前单独构建；推送页首位栏目）。
+    """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
 
     标题窗口：近 POLICY_WINDOW_DAYS=15 日（自然日，含锚定日；news_corpus 为
     跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。中国政府网
@@ -7308,7 +7867,7 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
     }
 
 def build_daily_quant_policy(data, date_str=None, news_corpus=None):
-    """兼容别名：每日量化策略（政策因子趋势预判）入口。"""
+    """兼容别名：政策因子入口。"""
     return build_policy_factor(data, date_str, news_corpus)
 
 
@@ -7338,7 +7897,7 @@ def _policy_source_text(headline):
 
 
 def _pixel_policy_block(res):
-    """像素主题：每日量化策略（政策因子趋势预判）（量化预判 + PSI 行业榜 + 政策新闻逐条）。"""
+    """像素主题：政策因子（量化预判 + PSI 行业榜 + 政策新闻逐条）。"""
     if res["broad_score"] > 0:
         color, icon = C_GREEN, "▲"
     elif res["broad_score"] < 0:
@@ -7413,13 +7972,13 @@ def _pixel_policy_block(res):
             f'line-height:1.7;font-family:{FONT_MONO};">'
             f'＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）</div>')
     body = head + (_mini_table(board) if board else "") + "".join(rows)
-    note = _note(f"每日量化策略（政策因子趋势预判）口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
+    note = _note(f"政策因子口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
                  "关键词矩阵映射行业权重 → 汇总PSI + 量化复合分(PSI50%+新闻量30%+维度20%)；触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
     return summary_html + _pixel_panel("QUANT POLICY // 政策因子趋势预判·量化强度", body, color, icon) + note
 
 
 def gz_policy_block(res):
-    """每日量化策略（政策因子趋势预判）（黑白模式：方向只用 ▲▼■ 符号区分）。定调已置顶到「今日结论」。"""
+    """政策因子（黑白模式：方向只用 ▲▼■ 符号区分）。定调已置顶到「今日预判」。"""
     dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
         res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
     window = res.get("window_days") or POLICY_WINDOW_DAYS
@@ -7467,6 +8026,69 @@ def gz_policy_block(res):
     return "".join(out)
 
 
+def _scan_line(res):
+    """标题扫描一行：命中条数 + 与正文重复不重列的条数（精简排版不输出脚注）。"""
+    line = f'{int(res.get("total") or 0)} 条 · 命中 {len(res.get("evidence") or [])} 条'
+    if res.get("dup_n"):
+        line += f' · 另 {int(res["dup_n"])} 条重复不重列（已计入定调）'
+    return line
+
+
+def _pixel_trend_topic_block(res):
+    """像素主题：AI趋势分析（美联储 / 地缘政治）——定调 + 命中证据 +（美联储）日程时间点。"""
+    pos_n, neg_n = int(res.get("positive_n") or 0), int(res.get("negative_n") or 0)
+    if pos_n > neg_n:
+        color, icon = C_GREEN, "▲"
+    elif neg_n > pos_n:
+        color, icon = C_RED, "▼"
+    else:
+        color, icon = C_AMBER, "■"
+    topic = _esc(str(res.get("topic") or ""))
+    head = _mini_table([
+        ("方向定调", f'<b style="color:{color};font-size:13px;">{icon} {_esc(str(res.get("verdict") or "—"))}</b>'),
+        ("词表计数", f'{_esc(str(res.get("positive_label") or ""))} {pos_n} · '
+                    f'{_esc(str(res.get("negative_label") or ""))} {neg_n}'),
+        ("标题扫描", _scan_line(res)),
+    ])
+    rows = []
+    for ev in res.get("evidence") or []:
+        hits = "、".join((ev.get("pos_hits") or []) + (ev.get("neg_hits") or []))
+        tag = "▲" if ev.get("pos_hits") and not ev.get("neg_hits") else (
+            "▼" if ev.get("neg_hits") and not ev.get("pos_hits") else "■")
+        tcolor = C_GREEN if tag == "▲" else (C_RED if tag == "▼" else C_AMBER)
+        sub = " · ".join(x for x in (_esc(str(ev.get("source") or "")),
+                                     _esc(str(ev.get("time") or "")),
+                                     f"命中：{_esc(hits)}" if hits else "") if x)
+        rows.append(_item_row("◆", f'<b style="color:{tcolor};">{tag}</b> '
+                                   f'{_esc(str(ev.get("title") or ""))}', sub))
+    body = head + "".join(rows)
+    events = res.get("events") or []
+    if events:
+        erows = []
+        for ev in events:
+            imp = int(ev.get("imp") or 0)
+            stars = "★" * imp if imp else "—"
+            erows.append((f'{_esc(str(ev.get("date") or ""))} {_esc(str(ev.get("time") or ""))}',
+                          f'{_esc(str(ev.get("name") or ""))} <b style="color:{C_LEMON};">{stars}</b>'))
+        body += _subsection("未来相关时间点（财经日程）") + _mini_table(erows)
+    return _pixel_trend_summary(topic, icon, color, res) + _pixel_panel(
+        f"AI TREND // {topic}趋势研判", body, color, icon)
+
+
+def _pixel_trend_summary(topic, icon, color, res):
+    return (
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
+        f'margin-bottom:10px;border:1px solid {color};background:#0C1020;box-shadow:4px 4px 0 #000;">'
+        f'<tr><td style="padding:10px 12px;">'
+        f'<div style="font-size:9px;color:{color};font-weight:900;font-family:{FONT_MONO};'
+        f'letter-spacing:1px;">AI TREND READ // {topic}趋势定调</div>'
+        f'<div style="font-size:12px;color:{C_INK};font-weight:700;line-height:1.8;'
+        f'font-family:{FONT_MONO};padding-top:4px;">{icon} {_esc(str(res.get("verdict") or "—"))}'
+        f' · {_esc(str(res.get("positive_label") or ""))} {int(res.get("positive_n") or 0)}'
+        f' / {_esc(str(res.get("negative_label") or ""))} {int(res.get("negative_n") or 0)}</div>'
+        f'</td></tr></table>')
+
+
 PIXEL_KIT = _RenderKit(
     market_section=_pixel_market_section,
     channel_block=_channel_block,
@@ -7487,6 +8109,7 @@ PIXEL_KIT = _RenderKit(
     policy_block=_pixel_policy_block,
     panorama_block=_panorama_block,
     calendar_block=_calendar_block,
+    trend_topic_block=_pixel_trend_topic_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
     table=lambda headers, rows, aligns=None: _pixel_table(headers, rows, aligns),
@@ -7498,6 +8121,42 @@ PIXEL_KIT = _RenderKit(
     trend=_trend_badge,
     ok_color=C_GREEN, warn_color=C_AMBER, bad_color=C_RED,
 )
+
+def gz_trend_topic_block(res):
+    """AI趋势分析（美联储 / 地缘政治）（黑白模式：方向只用 ▲▼■ 符号区分）。"""
+    pos_n, neg_n = int(res.get("positive_n") or 0), int(res.get("negative_n") or 0)
+    topic = _esc(str(res.get("topic") or ""))
+    pairs = [
+        ("方向定调", f'{_esc(str(res.get("verdict") or "—"))}'),
+        ("词表计数", f'{_esc(str(res.get("positive_label") or ""))} {pos_n} · '
+                    f'{_esc(str(res.get("negative_label") or ""))} {neg_n}'),
+        ("标题扫描", _scan_line(res)),
+    ]
+    out = [gz_kv_table(pairs)]
+    evid = res.get("evidence") or []
+    if evid:
+        out.append(gz_subsection("命中证据"))
+    for ev in evid:
+        hits = "、".join((ev.get("pos_hits") or []) + (ev.get("neg_hits") or []))
+        tag = "▲" if ev.get("pos_hits") and not ev.get("neg_hits") else (
+            "▼" if ev.get("neg_hits") and not ev.get("pos_hits") else "■")
+        sub = " · ".join(x for x in (_esc(str(ev.get("source") or "")),
+                                     _esc(str(ev.get("time") or "")),
+                                     f"命中：{_esc(hits)}" if hits else "") if x)
+        out.append(gz_item_row("◆", f'<b style="color:{GZ_INK};">{tag}</b> '
+                                    f'{_esc(str(ev.get("title") or ""))}', sub))
+    events = res.get("events") or []
+    if events:
+        out.append(gz_subsection("未来相关时间点（财经日程）"))
+        rows = []
+        for ev in events:
+            imp = int(ev.get("imp") or 0)
+            stars = "★" * imp if imp else "—"
+            rows.append([_esc(str(ev.get("date") or "")), _esc(str(ev.get("time") or "")),
+                         _esc(str(ev.get("name") or "")), stars])
+        out.append(gz_data_table(["日期", "时间", "事件", "重要度"], rows))
+    return "".join(out)
+
 
 GUIZANG_KIT = _RenderKit(
     market_section=gz_market_section,
@@ -7519,6 +8178,7 @@ GUIZANG_KIT = _RenderKit(
     policy_block=gz_policy_block,
     panorama_block=gz_panorama_block,
     calendar_block=gz_calendar_block,
+    trend_topic_block=gz_trend_topic_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
     table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
@@ -7567,7 +8227,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
     theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
-    sentiment_history: 跨日情绪基线（AI 新闻情绪因子用），缺省冷启动。
+    sentiment_history: 跨日情绪基线（新闻情绪用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
     """
@@ -7765,7 +8425,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 > TREND KEY: [▲ 涨 / UP] [▼ 跌 / DOWN] [■ 平 / FLAT] [◆ AI CORE]
 </div>
 <div style="font-size:9px;color:{C_FAINT};letter-spacing:.5px;line-height:1.6;padding-top:6px;font-family:{FONT_MONO};">
-DATA_SRC: China Gov Policy · HK GURU (YT/RSS) · Google News · EastMoney · Sina · AI_RULE<br>
+DATA_SRC: China Gov Policy · HK GURU (YT/RSS) · Google News · EastMoney · Yahoo · AI_RULE<br>
 SYS_TIME: {_esc(generated_at)} · LOG_DATE: {date_str} · BUILD: OCTO-PIXEL-QUEST v3<br>
 <span style="color:{C_ACCENT};">█</span><span style="color:{C_CYAN};">▓</span><span style="color:{C_ACCENT_MAGENTA};">▒</span> PRESS START TO CONTINUE
 </div>
@@ -8778,7 +9438,7 @@ def main():
     # 1. 采集数据
     data = collect_all_data()
 
-    # 1.5 情绪历史：加载跨日基线供 AI 新闻情绪因子用（只读；落盘在报告保存后，
+    # 1.5 情绪历史：加载跨日基线供新闻情绪用（只读；落盘在报告保存后，
     #     --dry-run 只读不写；缺失/损坏按冷启动处理，不中断日报）
     senti_history_path = os.path.join(REPORT_DIR, SENTIMENT_HISTORY_FILENAME)
     senti_history = _load_sentiment_history(senti_history_path)
@@ -8795,9 +9455,9 @@ def main():
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
     policy_result = build_policy_factor(data, date_str, news_corpus)
     if policy_result.get("available"):
-        print(f"  📊 每日量化策略（政策因子趋势预判）：{policy_result['summary']}")
+        print(f"  📊 政策因子：{policy_result['summary']}")
     else:
-        print(f"  📊 每日量化策略（政策因子趋势预判）：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
+        print(f"  📊 政策因子：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
 
     # 2. 生成报告
     print("\n📝 正在生成日报...")
@@ -8813,7 +9473,6 @@ def main():
         print("\n🔍 预览模式（不推送、不保存）")
         print(f"   数据源: 港股名家频道({len(data.get('港股名家频道', {}).get('channels', []))}频道可抓取) | "
               f"全球头条({len(data.get('全球头条', {}).get('headlines', []))}条) | "
-              f"A股({len(data.get('A股资讯', {}).get('headlines', []))}条) | "
               f"东财快讯({len(data.get('东财快讯', {}).get('headlines', []))}条) | "
               f"热门榜({sum(len(m.get('stocks', [])) for m in data.get('热门榜单', {}).get('markets', {}).values())}只)")
         return 0

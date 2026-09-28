@@ -301,7 +301,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         self.assertIn("WEEKLY FORECAST", order)
         self.assertLess(order.index("LIQUIDITY FLOW"), order.index("WEEKLY FORECAST"))
         self.assertLess(order.index("WEEKLY FORECAST"), order.index("MARKET SNAPSHOT"))
-        self.assertLess(order.index("WEEKLY FORECAST"), order.index("WRAP-UP"))
+        self.assertLess(order.index("WEEKLY FORECAST"), order.index("SUMMARY"))
 
     def test_render_section_in_both_themes(self):
         source = self._source()
@@ -314,7 +314,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
             self.assertIn("截断不变性自检通过", html, theme)
             self.assertIn("先存档后结算", html, theme)
             # 审计口径：元数据总源数含每周预测（9 个基础源 + 每周走势预测 = 10）
-            self.assertIn('octopus-total-sources" content="10"', html, theme)
+            self.assertIn('octopus-total-sources" content="9"', html, theme)
             # 栏目副标题 = 来源名（_short_source）
             self.assertGreaterEqual(html.count("每周量化走势预测"), 2, theme)
             # 今日结论携带周度预测（页首优先级）
@@ -345,8 +345,8 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
     def test_collect_report_parts_counts_weekly_source(self):
         parts = pipeline._collect_report_parts({"每周走势预测": self._source()},
                                                pipeline.GUIZANG_KIT, date_str="20260410")
-        # 9 个基础数据源 + 每周走势预测 = 10（财经日历 / Reddit / 新闻源头本次缺席）
-        self.assertEqual(parts["total"], 10)
+        # 8 个基础数据源 + 每周走势预测 = 9（财经日历 / Reddit / 新闻源头本次缺席）
+        self.assertEqual(parts["total"], 9)
         self.assertEqual(parts["today_n"], 1)
         kickers = [s[0] for s in parts["sections"]]
         self.assertIn("WEEKLY FORECAST", kickers)
