@@ -2754,19 +2754,61 @@
    "section": "全球头条",
    "ts": "2026-09-28 21:44",
    "date": "2026-09-28"
+  },
+  {
+   "title": "规划落地后，电池产业谁获得新机会：从二供扩围到企业梯队重排",
+   "source": "news.10jqka.com.cn",
+   "section": "全球头条",
+   "ts": "2026-09-29 00:31",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【纳斯达克中国金龙指数收涨1.09%】MAAS涨16.69%，天演药业涨8.87%，虎虎科技涨5.84%，宝尊电商涨5.44%，网易涨4.88%。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 04:00",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "市场消息：几分钟前格什姆岛传来爆炸声。声响来自海上，岛上暂未发现受损情况。当地消息源尚未就该事件作出回应。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 03:57",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "沙特：奈季兰省发布潜在危险预警。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 03:56",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "市场消息：伊朗外交部长会见联合国秘书长古特雷斯。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 03:55",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "SpaceXAI在公开测试中推出Team Bots。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 03:53",
+   "date": "2026-09-29"
   }
  ],
- "updated_cst": "2026-09-29 02:56:36",
+ "updated_cst": "2026-09-29 04:01:30",
  "sector_rotation_diag": {
-  "ran_at": "2026-09-29 02:56:06",
+  "ran_at": "2026-09-29 04:01:01",
   "cutoff": "2026-09-28",
   "universe": 0,
   "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
  },
  "sector_rotation_probe": {
-  "probe_at_utc": "2026-09-28T18:56:21Z",
-  "probe_at_cst": "2026-09-29 02:56:21",
-  "runner": "36468571770",
+  "probe_at_utc": "2026-09-28T20:01:17Z",
+  "probe_at_cst": "2026-09-29 04:01:17",
+  "runner": "36476063323",
   "universe": [
    {
     "label": "现行参数 pz=500",
@@ -2784,7 +2826,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 2018,
+    "elapsed_ms": 1250,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2807,7 +2849,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1059,
+    "elapsed_ms": 1215,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2832,7 +2874,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1035,
+    "elapsed_ms": 1273,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2857,7 +2899,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 962,
+    "elapsed_ms": 1180,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2882,7 +2924,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m%3A90%2Bt%3A2&fields=f12%2Cf13%2Cf14%2Cf3",
-    "elapsed_ms": 981,
+    "elapsed_ms": 1120,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2907,79 +2949,28 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 693,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "http_status": 200,
+    "elapsed_ms": 919,
+    "bytes": 10636,
+    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617934,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0447\",\"market\":90,\"name\":\"互联网服务\",\"decimal\":2,\"dktotal\":6478,\"preKPrice\":30972.41,\"klines\":[\"2025-12-31,31006.35,31507.15,31624.34,30949.56,51141147\",\"2026-01-05,31585.14,32396.42,32442.32,31541.29,67017668\",\"2026",
+    "json_ok": true,
     "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "0.BK0447 现行参数（前缀 0.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK0447"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0447",
-    "elapsed_ms": 465,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK0447 fqt=0",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "0",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0447"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 463,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK0447 fqt=2",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "2",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0447"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 542,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
+     "name": "互联网服务",
+     "code": "BK0447",
+     "klines_type": "list",
+     "klines_len": 180,
+     "first": "2025-12-31,31006.35,31507.15,31624.34,30949.56,51141147",
+     "last": "2026-09-28,28609.03,27976.68,28642.23,27783.06,27955886",
+     "keys": [
+      "code",
+      "decimal",
+      "dktotal",
+      "klines",
+      "market",
+      "name",
+      "preKPrice"
+     ]
+    }
    },
    {
     "label": "90.BK1044 现行参数（前缀 90.）",
@@ -2995,79 +2986,28 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 463,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "http_status": 200,
+    "elapsed_ms": 632,
+    "bytes": 9477,
+    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617936,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK1044\",\"market\":90,\"name\":\"生物制品\",\"decimal\":2,\"dktotal\":1173,\"preKPrice\":1025.53,\"klines\":[\"2025-12-31,1027.28,1024.97,1029.32,1021.14,3680144\",\"2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388\",\"2026-01-06,1064.",
+    "json_ok": true,
     "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "0.BK1044 现行参数（前缀 0.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK1044"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1044",
-    "elapsed_ms": 530,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK1044 fqt=0",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "0",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1044"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 461,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK1044 fqt=2",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "2",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1044"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 459,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
+     "name": "生物制品",
+     "code": "BK1044",
+     "klines_type": "list",
+     "klines_len": 180,
+     "first": "2025-12-31,1027.28,1024.97,1029.32,1021.14,3680144",
+     "last": "2026-09-28,1054.71,1047.84,1061.78,1040.62,5668597",
+     "keys": [
+      "code",
+      "decimal",
+      "dktotal",
+      "klines",
+      "market",
+      "name",
+      "preKPrice"
+     ]
+    }
    },
    {
     "label": "90.BK0475 现行参数（前缀 90.）",
@@ -3083,79 +3023,28 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 462,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "http_status": 200,
+    "elapsed_ms": 572,
+    "bytes": 9904,
+    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617933,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0475\",\"market\":90,\"name\":\"银行Ⅱ\",\"decimal\":2,\"dktotal\":6478,\"preKPrice\":4149.26,\"klines\":[\"2025-12-31,4145.69,4153.32,4170.08,4140.98,27302229\",\"2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342\",\"2026-01-06,4147",
+    "json_ok": true,
     "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "0.BK0475 现行参数（前缀 0.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK0475"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0475",
-    "elapsed_ms": 542,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK0475 fqt=0",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "0",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0475"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 522,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
-   },
-   {
-    "label": "90.BK0475 fqt=2",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "2",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0475"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 458,
-    "error": "RemoteDisconnected: Remote end closed connection without response",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    },
-    "body_head": ""
+     "name": "银行Ⅱ",
+     "code": "BK0475",
+     "klines_type": "list",
+     "klines_len": 180,
+     "first": "2025-12-31,4145.69,4153.32,4170.08,4140.98,27302229",
+     "last": "2026-09-28,4315.72,4304.38,4346.35,4286.35,34737067",
+     "keys": [
+      "code",
+      "decimal",
+      "dktotal",
+      "klines",
+      "market",
+      "name",
+      "preKPrice"
+     ]
+    }
    }
   ],
   "module": {
@@ -3165,14 +3054,14 @@
     "available": false,
     "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）",
     "diag": {
-     "ran_at": "2026-09-29 02:56:35",
+     "ran_at": "2026-09-29 04:01:28",
      "cutoff": "2026-09-28",
      "universe": 0,
      "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
     },
     "scores_top5": []
    },
-   "elapsed_ms": 2353
+   "elapsed_ms": 4877
   }
  }
 }
