@@ -8791,6 +8791,17 @@ def main():
     fresh_items = _collect_headline_items(data, _today_display())
     news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
 
+    # TEMP-PROBE-BEGIN（临时诊断：把在线探测结果随存档提交，定位完即删）
+    try:
+        import probe_sector_rotation as _probe
+        news_corpus["sector_rotation_probe"] = _probe.build_report(verbose=True)
+        print("  🔎 行业轮动在线探测已写入标题存档（临时诊断键）")
+    except Exception as _probe_exc:
+        news_corpus["sector_rotation_probe"] = {
+            "probe_error": f"{type(_probe_exc).__name__}: {_probe_exc}"}
+        print(f"  ⚠️ 行业轮动在线探测失败：{_probe_exc}")
+    # TEMP-PROBE-END
+
     # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
     policy_result = build_policy_factor(data, date_str, news_corpus)
