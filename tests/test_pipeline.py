@@ -409,7 +409,9 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("A股成交量前五", html)
         self.assertNotIn("港股成交量前五", html)
         self.assertNotIn("美股成交量前五", html)
-        self.assertIn("美联储释放降息信号", html)
+        self.assertIn("全球头条</h2>", html)
+        self.assertNotIn("A股资讯</h2>", html)
+        # 全球头条为正文栏目（已恢复）；A股资讯已删除，不再出现其栏目标题。
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)
         self.assertNotIn("栏目 AI 研判表", html)
@@ -448,8 +450,8 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("// POLICY SHOCK", html)
         self.assertIn("// STRATEGY READ", html)
         self.assertIn("LVL 08 // SUMMARY", html)  # 盘点收尾
-        self.assertIn("AI CORE OUTPUT", html)
-        self.assertIn("AI 主结论 // CORE THESIS", html)
+        self.assertIn("QUANT CORE", html)
+        self.assertIn("量化主结论 // QUANT THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（行情速览：明细数字唯一出处）
@@ -476,8 +478,8 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertNotIn("watch", res)          # 不再产出个股清单
         self.assertIn("AI/算力", res["themes"])  # 主题行保留
         html = pipeline._ai_analysis_block(res)
-        self.assertIn("WATCH LIST // 明日关注", html)
-        self.assertIn("★ THEME UNLOCKED // AI/算力、半导体/芯片", html)
+        self.assertIn("QUANT ALLOC // 量化配置", html)
+        self.assertIn("★ THEME UNLOCKED // AI/算力", html)
         # 个股不再以「关注清单」形式渲染（榜单股名为 A股股票0 等）
         self.assertNotIn("<b>A股股票", html)
 
@@ -731,14 +733,15 @@ class GuizangThemeTests(unittest.TestCase):
     def test_guizang_news_lists_wrap_rows_in_table_not_bare_tr(self):
         """全球头条 / 东财快讯 的 <tr> 必须包在 <table> 里。
 
-        旧版把 gz_headline_row / gz_em_news_row / gz_item_row 产出的裸 <tr>
-        直接塞进章节 <div>，微信 / PushPlus 会丢掉行或把序号与标题挤成一团。
+        旧版将原始行直接塞进章节 <div>，微信 / PushPlus 会丢掉行或把序号与标题挤在一起。
         """
         data = NewLayoutRenderingTests()._rich_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertNotRegex(html, r"<div[^>]*>\s*<tr\b")
-        self.assertIn("美联储释放降息信号", html)
+        self.assertIn("全球头条</h2>", html)
+        self.assertNotIn("A股资讯</h2>", html)
         self.assertIn("A股三大指数集体收涨", html)
+        self.assertNotIn("国务院部署进一步释放消费潜力", html)
         # 刊头三列禁止 break-all，避免日期被微信逐字拆开
         self.assertNotIn("word-break:break-all", html)
         # pixel 主题每行本就是独立 table，同样不能裸 tr
@@ -2408,7 +2411,7 @@ class NewsSentimentFactorTests(unittest.TestCase):
 
 
 class PolicyFactorTests(unittest.TestCase):
-    """政策因子：关键词矩阵 / 行业 PSI / 总结 / 首位渲染。
+    """政策因子：关键词矩阵 / 行业 PSI / 量化趋势分 / 总结 / 首位渲染。
 
     2026-09-09 起标题窗口放宽为近 15 个自然日（含报告日）：
     单日无政策但近 15 日有政策/宏观新闻时栏目照常出现；更早（窗口外）
@@ -2574,6 +2577,7 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertIn("// POLICY SHOCK", html)
         self.assertLess(html.find("// POLICY SHOCK"), html.find("// STRATEGY READ"))
         self.assertIn("政策冲击指数", html)
+        self.assertIn("量化强度", html)
         self.assertIn("PSI +2", html)
         self.assertIn("政策类新闻 6 条", html)
         self.assertIn("地产链", html)
@@ -2588,7 +2592,7 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertLess(html.find("今日预判</h2>"), html.find("政策因子</h2>"))
         self.assertIn("PSI +2", html)
         self.assertIn("6 条（近 15 日）", html)
-        self.assertIn("行业冲击榜", html)
+        self.assertIn("政策冲击强度榜", html)
         self.assertNotIn("政策因子口径", html)          # 口径说明已移除
         self.assertIn("08-01 ·", html)
 
@@ -2597,18 +2601,19 @@ class PolicyFactorTests(unittest.TestCase):
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
-            self.assertNotIn("政策因子", html)
+            self.assertNotIn("政策因子</h2>", html)
+            self.assertNotIn("政策因子<span", html)
 
     def test_main_stage_result_honored(self):
         data = self._policy_data()
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel",
             policy_result={"available": False})  # main 阶段结果优先
-        self.assertNotIn("政策因子", html)
+        self.assertNotIn("政策因子<span", html)
         html2 = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel",
             policy_result=None)  # 缺省时渲染侧兜底构建
-        self.assertIn("政策因子", html2)
+        self.assertIn("政策因子<span", html2)
 
 
 
@@ -2781,7 +2786,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
-        self.assertNotRegex(html, r"LVL \d+ // POLICY SHOCK")
+        self.assertNotRegex(html, r"LVL \d+ // QUANT POLICY")
         self.assertNotRegex(html, r"LVL \d+ // NEWS SENTIMENT")
 
 
@@ -3168,7 +3173,7 @@ class SectionAiJudgeTests(unittest.TestCase):
                 with self.subTest(theme=theme):
                     report = pipeline.generate_report(
                         data, "2026年9月27日 · 周日", "20260927", theme=theme)
-                    # 有数据的 3 个栏目各一条研判行
+                    # 有数据的 3 个栏目（行情 / 全球头条 / 趋势跟踪）各一条研判行
                     self.assertEqual(report.count("⌁ AI 研判"), 3)
                     self.assertIn("多头", report)
                     self.assertIn("空头", report)
