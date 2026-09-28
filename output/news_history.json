@@ -2705,19 +2705,61 @@
    "section": "港股名家频道",
    "ts": "2026-09-28 20:46",
    "date": "2026-09-28"
+  },
+  {
+   "title": "粤芯半导体：中签号码共有358,848个",
+   "source": "金融界",
+   "section": "全球头条",
+   "ts": "2026-09-28 20:34",
+   "date": "2026-09-28"
+  },
+  {
+   "title": "欧洲主要股指收盘涨跌不一",
+   "source": "东方财富",
+   "section": "全球头条",
+   "ts": "2026-09-28 23:42",
+   "date": "2026-09-28"
+  },
+  {
+   "title": "华安证券恒赢20号集合资产管理计划合同条款变更的公告",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "关于申港证券梓金5号集合资产管理计划调整业绩报酬计提基准及合同变更的公告",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "20260930江海证券会宁悦享集合资产管理计划第二十九次开放的提示公告",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "摩根90天持有期债券型证券投资基金暂停大额申购、转换转入及定期定额投资业务的公告",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "",
+   "date": "2026-09-29"
   }
  ],
- "updated_cst": "2026-09-29 01:54:30",
+ "updated_cst": "2026-09-29 02:39:35",
  "sector_rotation_diag": {
-  "ran_at": "2026-09-29 01:54:03",
+  "ran_at": "2026-09-29 02:39:00",
   "cutoff": "2026-09-28",
   "universe": 0,
   "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
  },
  "sector_rotation_probe": {
-  "probe_at_utc": "2026-09-28T17:54:15Z",
-  "probe_at_cst": "2026-09-29 01:54:15",
-  "runner": "36461278761",
+  "probe_at_utc": "2026-09-28T18:39:15Z",
+  "probe_at_cst": "2026-09-29 02:39:15",
+  "runner": "36466578300",
   "universe": [
    {
     "label": "现行参数 pz=500",
@@ -2735,26 +2777,117 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "http_status": 200,
-    "elapsed_ms": 2409,
-    "bytes": 3925,
-    "body_head": "{\"rc\":0,\"rt\":6,\"svr\":177622157,\"lt\":2,\"full\":1,\"dlmkts\":\"8,10,128\",\"dsc\":\"0\",\"data\":{\"total\":496,\"diff\":[{\"f12\":\"BK1627\",\"f14\":\"综合Ⅲ\"},{\"f12\":\"BK1626\",\"f14\":\"稀土\"},{\"f12\":\"BK1625\",\"f14\":\"钨\"},{\"f12\":\"BK1624\",\"f14\":\"其他小金属\"},{\"f12\":\"BK1623\",\"f14\":\"钼\"},{\"f12\":\"BK1622\",\"f14\":\"镍\"},{\"f12\":\"BK1621\",\"f14\":\"锂\"}",
-    "json_ok": true,
+    "elapsed_ms": 1123,
+    "http_status": 502,
+    "error": "HTTPError 502",
+    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
     "summary": {
-     "total": 496,
-     "diff_type": "list",
-     "diff_len": 100,
-     "sample": "{'f12': 'BK1627', 'f14': '综合Ⅲ'}",
-     "keys": [
-      "diff",
-      "total"
-     ]
+     "note": "data 缺失或不是对象",
+     "rc": null
+    }
+   },
+   {
+    "label": "pz=100 不带 fltt/invt",
+    "url": "https://push2.eastmoney.com/api/qt/clist/get",
+    "params": {
+     "pn": "1",
+     "pz": "100",
+     "po": "1",
+     "np": "1",
+     "fid": "f12",
+     "fs": "m:90+t:2",
+     "fields": "f12,f14"
+    },
+    "timeout": 15,
+    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
+    "elapsed_ms": 1221,
+    "http_status": 502,
+    "error": "HTTPError 502",
+    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    }
+   },
+   {
+    "label": "pz=100",
+    "url": "https://push2.eastmoney.com/api/qt/clist/get",
+    "params": {
+     "pn": "1",
+     "pz": "100",
+     "po": "1",
+     "np": "1",
+     "fltt": "2",
+     "invt": "2",
+     "fid": "f12",
+     "fs": "m:90+t:2",
+     "fields": "f12,f14"
+    },
+    "timeout": 15,
+    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
+    "elapsed_ms": 1214,
+    "http_status": 502,
+    "error": "HTTPError 502",
+    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    }
+   },
+   {
+    "label": "加 Referer",
+    "url": "https://push2.eastmoney.com/api/qt/clist/get",
+    "params": {
+     "pn": "1",
+     "pz": "500",
+     "po": "1",
+     "np": "1",
+     "fltt": "2",
+     "invt": "2",
+     "fid": "f12",
+     "fs": "m:90+t:2",
+     "fields": "f12,f14"
+    },
+    "timeout": 15,
+    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
+    "elapsed_ms": 1127,
+    "http_status": 502,
+    "error": "HTTPError 502",
+    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    }
+   },
+   {
+    "label": "fid=f3 全字段",
+    "url": "https://push2.eastmoney.com/api/qt/clist/get",
+    "params": {
+     "pn": "1",
+     "pz": "500",
+     "po": "1",
+     "np": "1",
+     "fltt": "2",
+     "invt": "2",
+     "fid": "f3",
+     "fs": "m:90+t:2",
+     "fields": "f12,f13,f14,f3"
+    },
+    "timeout": 15,
+    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m%3A90%2Bt%3A2&fields=f12%2Cf13%2Cf14%2Cf3",
+    "elapsed_ms": 1212,
+    "http_status": 502,
+    "error": "HTTPError 502",
+    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
     }
    }
   ],
   "klines": [
    {
-    "label": "90.BK1627 现行参数（前缀 90.）",
+    "label": "90.BK0447 现行参数（前缀 90.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2763,11 +2896,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1627"
+     "secid": "90.BK0447"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1627",
-    "elapsed_ms": 1060,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
+    "elapsed_ms": 2210,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2776,7 +2909,7 @@
     "body_head": ""
    },
    {
-    "label": "0.BK1627 现行参数（前缀 0.）",
+    "label": "0.BK0447 现行参数（前缀 0.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2785,11 +2918,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK1627"
+     "secid": "0.BK0447"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1627",
-    "elapsed_ms": 739,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0447",
+    "elapsed_ms": 805,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2798,7 +2931,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1627 fqt=0",
+    "label": "90.BK0447 fqt=0",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2807,11 +2940,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1627"
+     "secid": "90.BK0447"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1627",
-    "elapsed_ms": 750,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
+    "elapsed_ms": 779,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2820,7 +2953,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1627 fqt=2",
+    "label": "90.BK0447 fqt=2",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2829,11 +2962,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1627"
+     "secid": "90.BK0447"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1627",
-    "elapsed_ms": 777,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
+    "elapsed_ms": 810,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2842,7 +2975,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1626 现行参数（前缀 90.）",
+    "label": "90.BK1044 现行参数（前缀 90.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2851,11 +2984,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1626"
+     "secid": "90.BK1044"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1626",
-    "elapsed_ms": 763,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
+    "elapsed_ms": 1647,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2864,7 +2997,7 @@
     "body_head": ""
    },
    {
-    "label": "0.BK1626 现行参数（前缀 0.）",
+    "label": "0.BK1044 现行参数（前缀 0.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2873,11 +3006,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK1626"
+     "secid": "0.BK1044"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1626",
-    "elapsed_ms": 769,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1044",
+    "elapsed_ms": 841,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2886,7 +3019,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1626 fqt=0",
+    "label": "90.BK1044 fqt=0",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2895,11 +3028,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1626"
+     "secid": "90.BK1044"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1626",
-    "elapsed_ms": 707,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
+    "elapsed_ms": 759,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2908,7 +3041,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1626 fqt=2",
+    "label": "90.BK1044 fqt=2",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2917,11 +3050,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1626"
+     "secid": "90.BK1044"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1626",
-    "elapsed_ms": 705,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
+    "elapsed_ms": 818,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2930,7 +3063,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1625 现行参数（前缀 90.）",
+    "label": "90.BK0475 现行参数（前缀 90.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2939,11 +3072,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1625"
+     "secid": "90.BK0475"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1625",
-    "elapsed_ms": 706,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
+    "elapsed_ms": 794,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2952,7 +3085,7 @@
     "body_head": ""
    },
    {
-    "label": "0.BK1625 现行参数（前缀 0.）",
+    "label": "0.BK0475 现行参数（前缀 0.）",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2961,11 +3094,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "0.BK1625"
+     "secid": "0.BK0475"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1625",
-    "elapsed_ms": 783,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0475",
+    "elapsed_ms": 803,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2974,7 +3107,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1625 fqt=0",
+    "label": "90.BK0475 fqt=0",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -2983,11 +3116,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1625"
+     "secid": "90.BK0475"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1625",
-    "elapsed_ms": 751,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
+    "elapsed_ms": 779,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2996,7 +3129,7 @@
     "body_head": ""
    },
    {
-    "label": "90.BK1625 fqt=2",
+    "label": "90.BK0475 fqt=2",
     "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
     "params": {
      "klt": "101",
@@ -3005,11 +3138,11 @@
      "end": "20500101",
      "fields1": "f1,f2,f3,f4,f5,f6",
      "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1625"
+     "secid": "90.BK0475"
     },
     "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1625",
-    "elapsed_ms": 740,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
+    "elapsed_ms": 797,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3025,14 +3158,14 @@
     "available": false,
     "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）",
     "diag": {
-     "ran_at": "2026-09-29 01:54:28",
+     "ran_at": "2026-09-29 02:39:34",
      "cutoff": "2026-09-28",
      "universe": 0,
      "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
     },
     "scores_top5": []
    },
-   "elapsed_ms": 3209
+   "elapsed_ms": 2257
   }
  }
 }
