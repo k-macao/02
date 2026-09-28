@@ -197,6 +197,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
+import sector_rotation as _rotation  # noqa: E402
 
 QUANT_HISTORY_FILENAME = "quant_history.json"
 # 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
@@ -2266,6 +2267,21 @@ def fetch_hk_quant():
 #   · 零写死叙事：不落任何具体日期/点位，规则合成，非投资建议。
 # 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
 # ============================================================
+def fetch_sector_rotation():
+    """独立中国行业指数轮动数据源；失败不影响其它栏目。"""
+    print("📡 正在计算中国行业指数周度评分与月度轮动...")
+    try:
+        result = _rotation.run(safe_request)
+    except Exception as exc:
+        result = {"available": False, "reason": str(exc)}
+    if not result.get("available"):
+        return _source_result("东方财富 · 中国行业板块指数日线", "unavailable",
+                              error=result.get("reason"), result=result)
+    return _source_result("东方财富 · 中国行业板块指数日线", "success",
+                          is_today=result["asof"] == datetime.now(CST).strftime("%Y-%m-%d"),
+                          content_date=result["asof"], result=result)
+
+
 def fetch_weekly_forecast():
     """运行每周量化走势预测（恒指日线 · 无未来函数），失败时如实降级。"""
     print("📡 正在计算每周量化走势预测（恒生指数 · 未来一周 · 无未来函数）...")
@@ -2820,6 +2836,7 @@ def collect_all_data():
     time.sleep(0.5)
 
     data["每周走势预测"] = fetch_weekly_forecast()
+    data["行业轮动"] = fetch_sector_rotation()
     time.sleep(0.5)
 
     if ECON_CALENDAR_ENABLED:
@@ -4451,7 +4468,7 @@ REPORT_SECTION_ORDER = (
     "CONCLUSION",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY",
+    "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY", "SECTOR ROTATION",
     "TREND CLUES", "EASTMONEY WIRE", "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
 )
@@ -4821,6 +4838,35 @@ def _weekly_forecast_block(res, kit):
     return kit.rows("".join(rows))
 
 
+def _sector_rotation_block(res, kit):
+    """展示全行业评分与五行业纯多头月度持仓，两主题共用。"""
+    if not res.get("available"):
+        return ""
+    state = res.get("state") or {}
+    holdings = state.get("holdings") or []
+    if len(holdings) != 5:
+        return ""
+    esc = kit.esc
+    rows = [kit.item_row("▤", f'截至 {esc(res["asof"])} 收盘 · '
+                         f'有效 {res["scored_count"]}/{res["universe_count"]} 个行业指数',
+                         '近一周=最近5个交易日；历史12个不重叠5日窗口（不含当前周）')]
+    for rank, sec in enumerate(res["scores"], 1):
+        rows.append(kit.item_row(str(rank),
+            f'{esc(sec["name"])} ({esc(sec["code"])}) · 综合 {sec["score"]:.2f}分',
+            f'近5日 {sec["week_return"]:+.2%} · 胜率 {sec["win_rate"]:.1%} · 赔率 {sec["odds"]:.2f}'))
+    rows.append(kit.item_row("↺", f'纯多头组合 · {esc(state["month"])} 月度持仓',
+                             f'建仓/调仓锚点 {esc(state["rebalance_date"])} 收盘；当月不随每日评分换仓'))
+    for h in holdings:
+        rows.append(kit.item_row("+", f'{esc(h["name"])} ({esc(h["code"])})',
+                                 f'目标权重 {h["weight"]:.2%} · 建仓时得分 {h["score"]:.2f}'))
+    rows.append(kit.item_row("⚖", '规则：综合分=胜率×80% + [赔率/(1+赔率)]×20%（乘100）；'
+                             '胜率=正收益周占比，赔率=平均正收益/平均负收益绝对值。'
+                             '得分前五，权重=各自得分/前五总分。',
+                             '每月首次成功采集后按收盘信号确定目标权重，下一交易日执行；'
+                             '不含滑点/费用，非投资建议；历史胜率不是未来成功概率。'))
+    return kit.rows("".join(rows))
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -4869,6 +4915,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 每周量化走势预测（恒指 · 未来一周）：独立周度栏目，存在即按需进审计。
     if isinstance(data.get("每周走势预测"), dict):
         source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
+    if isinstance(data.get("行业轮动"), dict):
+        source_items.append(("每日量化策略（行业轮动）", data["行业轮动"]))
     # 全网 20 个新闻源头（港股挖掘）：与 Reddit 同为趋势跟踪线索，按需加入审计；
     # 外部旧调用若无该键仍维持原来的基础数据源数量。
     if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
@@ -4922,6 +4970,15 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["WEEKLY FORECAST"] = (
                 "WEEKLY FORECAST", "每周量化走势预测", wk_html,
                 kit.badge("周度预测", "ai"), _short_source(weekly_src))
+
+    rotation_src = data.get("行业轮动") or {}
+    rotation_res = rotation_src.get("result") or {}
+    if rotation_res.get("available"):
+        rotation_html = _sector_rotation_block(rotation_res, kit)
+        if rotation_html:
+            blocks["SECTOR ROTATION"] = (
+                "SECTOR ROTATION", "每日量化策略（行业轮动）", rotation_html,
+                kit.badge("月度轮动", "ai"), _short_source(rotation_src))
 
     # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
     cal = data.get("财经日历") or {}
