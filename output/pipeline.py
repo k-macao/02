@@ -127,6 +127,18 @@
       并入栏目末尾「⌁ AI 研判」行；单源失败只标注暂缺与原因、不影响其余源，
       全部失败整源缺席。OCTOPUS_HK_NEWS=0 关闭、OCTOPUS_RSSHUB_BASE 换 RSSHub 实例、
       OCTOPUS_HK_NEWS_PER_SOURCE / OCTOPUS_HK_NEWS_MAX 调条数；规则合成，非投资建议。
+  14. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起）：未来一周
+      （5 个交易日）恒生指数升跌方向 + P(周涨) 概率，方法来自 GitHub 无未来函数
+      （look-ahead）量化工程实践调研：特征只用 ≤t 数据且扩张因果归一（akfamily/akquant）、
+      相似样本标签必须已结算 s+5≤t（haeganm/walkforward 的 purged/embargo 依据）、
+      运行时「截断不变性」自检（arielb57/peekahead：输出 ≤t 只依赖输入 ≤t，不过则整栏
+      降级）、预测先存档 settled=False 满 5 个交易日再按真实收盘结算（k-macao/03
+      PR #54 四条硬约束，留痕 output/weekly_forecast.json，样本 <10 只报样本量）、
+      回测体检清单（paidaxing1234/quant-backtest-guard）。预测器 = 扩张基准率 +
+      20 日特征最近邻（K=8）50/50 合成、夹 5%~95%，附滚动样本外命中率与 Brier；
+      纯标准库 + providers.fetch_bars 单一联网口。OCTOPUS_WEEKLY=0 / --no-weekly 关闭、
+      --weekly-only 研究模式；数据取不到、样本不足或自检不过 → 整栏缺席。规则合成，
+      非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -184,12 +196,16 @@ REPORT_DIR = SCRIPT_DIR
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
+import octopus_weekly as _weekly  # noqa: E402
 
 QUANT_HISTORY_FILENAME = "quant_history.json"
 # 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
 HK_QUANT_ENABLED = str(os.environ.get("OCTOPUS_QUANT", "1")).strip().lower() not in ("0", "false", "no")
 # 是否逐只跑个股概率（关掉后只出指数与流动性，明显更快）
 HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower() not in ("0", "false", "no")
+# 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
+WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
+WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
 
 # 时区
 CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
@@ -2239,6 +2255,55 @@ def fetch_hk_quant():
 
 
 # ============================================================
+# 每周量化走势预测：未来一周（5 个交易日）港股升跌方向与概率
+# ------------------------------------------------------------
+# 方法来自 GitHub 无未来函数（look-ahead）量化工程实践调研：
+#   · 输入闭合：只读本次抓取的日线快照（^HSI 2y 日线）；
+#   · 目标日在严格之后：特征只用 ≤t 数据、相似样本标签必须已结算（s+5 ≤ t）、
+#     运行时截断不变性自检（peekahead 式）不过则整栏降级；
+#   · 先存档后结算：预测先落盘 output/weekly_forecast.json（settled=False），
+#     满 5 个交易日再按真实收盘回填 hit / 实际涨跌（当次运行不可能结算当次预测）；
+#   · 零写死叙事：不落任何具体日期/点位，规则合成，非投资建议。
+# 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
+# ============================================================
+def fetch_weekly_forecast():
+    """运行每周量化走势预测（恒指日线 · 无未来函数），失败时如实降级。"""
+    print("📡 正在计算每周量化走势预测（恒生指数 · 未来一周 · 无未来函数）...")
+    if not WEEKLY_ENABLED:
+        print("  ⏭ 每周预测已关闭（OCTOPUS_WEEKLY=0 / --no-weekly）")
+        return _source_result("每周量化走势预测", "unavailable", result=None,
+                              error="本次运行已关闭每周预测")
+    try:
+        res = _weekly.run_weekly(
+            safe_request,
+            history_path=os.path.join(REPORT_DIR, WEEKLY_HISTORY_FILENAME))
+    except Exception as exc:                       # 预测异常不影响日报其它栏目
+        print(f"  ⚠️ 每周预测异常：{exc}")
+        return _source_result("每周量化走势预测", "unavailable", result=None, error=str(exc))
+
+    if not res.get("available"):
+        print(f"  ⚠️ 每周预测暂不可用：{res.get('reason')}")
+        return _source_result("每周量化走势预测", "unavailable", result=None,
+                              error=str(res.get("reason") or "样本不足"))
+
+    entry = res.get("entry") or {}
+    print(f"  ✅ 周度预测：{entry.get('label')}（锚定 {entry.get('base_date')} 收盘"
+          f" → 未来 {entry.get('target_sessions')} 个交易日）")
+    bt = res.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        print(f"  ✅ 滚动样本外：{bt['n']} 期 · 命中 {bt['hit_rate'] * 100:.0f}%"
+              f"（基准 {bt['base_rate'] * 100:.0f}%）· Brier {bt['brier']:.3f}")
+    jr = res.get("journal") or {}
+    if jr.get("n"):
+        print(f"  ✅ 预测留痕：已结算 {jr['n']} 次"
+              + (f" · 命中 {jr['hits']}" if jr.get("hit_rate") is not None else "（样本 <10，只报样本量）"))
+    return _source_result("每周量化走势预测", "success",
+                          is_today=res.get("is_today", False),
+                          content_date=res.get("as_of"),
+                          result=res)
+
+
+# ============================================================
 # 未来 N 天影响经济时间点：抓取 + 筛选（东方财富财经日历）
 # ------------------------------------------------------------
 # 三类内容（缺一不可）：
@@ -2754,6 +2819,9 @@ def collect_all_data():
     data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
 
+    data["每周走势预测"] = fetch_weekly_forecast()
+    time.sleep(0.5)
+
     if ECON_CALENDAR_ENABLED:
         print(f"\n📅 正在抓取未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
         data["财经日历"] = fetch_econ_calendar()
@@ -2915,6 +2983,7 @@ KOBOYO_SECTION_ICONS = {
     "QUANT FORECAST": "chart",
     "HK PROBABILITY": "chart",
     "LIQUIDITY FLOW": "chart",
+    "WEEKLY FORECAST": "chart",
 }
 
 
@@ -3062,6 +3131,7 @@ _SECTION_ICON_META = {
     "QUANT FORECAST": ("◈", "FORECAST", C_CYAN, "#092836"),
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
+    "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
 }
 
 
@@ -4255,8 +4325,8 @@ def _market_brief(market, labels, kit):
     return " · ".join(bits)
 
 
-def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
-    """页首「今日结论」：倾向 → 量化预测 → 核心判断 → 各市场一句话 → 政策定调。"""
+def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
+    """页首「今日结论」：倾向 → 量化预测 → 周度预测 → 核心判断 → 各市场一句话 → 政策定调。"""
     pairs = []
     # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
     if quant and quant.get("available"):
@@ -4267,6 +4337,14 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
                           f'{_esc(head.get("label", "中性"))} '
                           f'{head.get("p_up", 0) * 100:.0f}%</b>'
                           f' · {_esc(quant.get("target_label") or "下一交易日")}'))
+    # 周度预测：未来一周（5 个交易日）港股方向与概率（独立周度视角）
+    if weekly and weekly.get("available"):
+        wk_entry = weekly.get("entry") or {}
+        if wk_entry.get("label"):
+            pairs.append(("周度预测",
+                          f'<b>{_esc(str(wk_entry.get("label") or ""))}</b>'
+                          f' · 锚定 {_esc(str(wk_entry.get("base_date") or ""))} 收盘'
+                          f' · 未来 {_esc(str(wk_entry.get("target_sessions") or _weekly.HORIZON))} 个交易日'))
     if ai_result and ai_result.get("available"):
         score = int(ai_result["score"])
         arrow = "▲" if score > 8 else ("▼" if score < -8 else "■")
@@ -4372,7 +4450,7 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 REPORT_SECTION_ORDER = (
     "CONCLUSION",
     "ECON CALENDAR",
-    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
+    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY",
     "TREND CLUES", "EASTMONEY WIRE", "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
@@ -4657,6 +4735,92 @@ def _ai_judge_row(note, kit):
     return kit.item_row("⌁", f"{head} — {note['text']}")
 
 
+def _weekly_forecast_block(res, kit):
+    """每周量化走势预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
+
+    结论型栏目：全部数字来自本次计算与留痕文件，零写死叙事；
+    无未来函数口径（截断不变性自检 / s+5≤t 类比 / 先存档后结算）在栏内如实披露。
+    """
+    entry = res.get("entry") or {}
+    if not entry or entry.get("p_up") is None:
+        return ""
+    esc = kit.esc
+    p_up = float(entry["p_up"])
+    icon = {"up": "▲", "down": "▼"}.get(entry.get("direction"), "■")
+    rows = [kit.item_row(
+        icon, f'<b>{esc(str(entry.get("label") or ""))}</b>',
+        f'锚定 {esc(str(entry.get("base_date") or ""))} 收盘'
+        f'（{esc(str(entry.get("symbol_label") or entry.get("symbol") or ""))}）'
+        f' · 未来 {int(entry.get("target_sessions") or _weekly.HORIZON)} 个交易日'
+        f' · {esc(str(entry.get("target_note") or ""))}')]
+
+    # 概率拆解：基准率 + 相似样本 + 合成规则（不足 4 个类比则如实退化）
+    if entry.get("blended") and entry.get("p_sim") is not None:
+        prob_sub = (f'历史基准 {float(entry.get("p_base") or 0.5) * 100:.0f}%'
+                    f' · 相似样本 {float(entry["p_sim"]) * 100:.0f}%'
+                    f'（{int(entry.get("n_analog") or 0)} 个已结算近邻）'
+                    f' · 已结算 {int(entry.get("n_resolved") or 0)} 周为底 · 50/50 合成夹 5%~95%')
+    else:
+        prob_sub = (f'相似样本不足 {_weekly.MIN_ANALOGS} 个，退化为历史基准'
+                    f' {float(entry.get("p_base") or 0.5) * 100:.0f}%'
+                    f'（已结算 {int(entry.get("n_resolved") or 0)} 周）· 概率夹 5%~95%')
+    rows.append(kit.item_row("P", f'P(周涨) {p_up * 100:.0f}%', prob_sub))
+
+    # 关键因子（20 日窗口；全部 ≤t 数据，窗口内/扩张因果归一）
+    f = entry.get("factors") or {}
+    bits = [f'{label} {float(f[key]) * 100:+.1f}%'
+            for key, label in (("ret5", "5日"), ("ret10", "10日"), ("ret20", "20日"))
+            if f.get(key) is not None]
+    sub_bits = []
+    if f.get("vol20") is not None:
+        vol_txt = f'20日波动 {float(f["vol20"]) * 100:.2f}%'
+        if res.get("vol_pct") is not None:
+            vol_txt += f'（扩张分位 {res["vol_pct"] * 100:.0f}%）'
+        sub_bits.append(vol_txt)
+    if f.get("dd20") is not None:
+        sub_bits.append(f'距20日高点 {float(f["dd20"]) * 100:+.1f}%')
+    if bits:
+        rows.append(kit.item_row("▤", " · ".join(bits), " · ".join(sub_bits)))
+
+    # 滚动样本外体检（walk-forward；样本 <10 只报样本量）
+    bt = res.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        rows.append(kit.item_row(
+            "↺", f'{int(bt.get("n") or 0)} 期 · 命中 {bt["hit_rate"] * 100:.0f}%'
+                 f'（恒定基准 {bt["base_rate"] * 100:.0f}%）· Brier {bt["brier"]:.3f}',
+            '滚动样本外（walk-forward）：每步只用 ≤t 数据打分 · 相邻窗口重叠 5 个交易日'))
+    else:
+        rows.append(kit.item_row(
+            "↺", esc(str(bt.get("note") or "回测样本不足")),
+            '滚动样本外（walk-forward）体检暂无结论'))
+
+    # 预测留痕：先存档后结算；样本 <10 不下命中率结论
+    jr = res.get("journal") or {}
+    if jr.get("hit_rate") is not None:
+        j_txt = (f'已结算 {int(jr.get("n") or 0)} 次 · 命中 {int(jr.get("hits") or 0)}'
+                 f'（{jr["hit_rate"] * 100:.0f}%）')
+    elif jr.get("n"):
+        j_txt = f'已结算 {int(jr["n"])} 次（样本 <10，只报样本量）'
+    else:
+        j_txt = "预测已存档（settled=False），待满 5 个交易日按真实收盘结算"
+    recent = jr.get("recent") or []
+    recent_txt = " · ".join(
+        f'{esc(str(r.get("date") or ""))} '
+        f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
+        f'{"✓" if r.get("hit") else "✗"}'
+        for r in recent)
+    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+
+    note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
+            f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
+            f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
+            f' · 先存档后结算（weekly_forecast.json · settled 字段）'
+            f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
+    # 口径行按 item_row 走（pixel 精简排版会丢弃 note 脚注，两主题都必须能看到口径披露）
+    rows.append(kit.item_row("⚖", note))
+    return kit.rows("".join(rows))
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -4702,6 +4866,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
         source_items.append((f"财经日历（未来{ECON_CALENDAR_DAYS}天时间点）", data["财经日历"]))
+    # 每周量化走势预测（恒指 · 未来一周）：独立周度栏目，存在即按需进审计。
+    if isinstance(data.get("每周走势预测"), dict):
+        source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
     # 全网 20 个新闻源头（港股挖掘）：与 Reddit 同为趋势跟踪线索，按需加入审计；
     # 外部旧调用若无该键仍维持原来的基础数据源数量。
     if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
@@ -4743,6 +4910,18 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["LIQUIDITY FLOW"] = (
                 "LIQUIDITY FLOW", "资金流动性分析", lq_html,
                 kit.source_badge(quant_src), _short_source(quant_src))
+
+    # ---- 每周量化走势预测：未来一周港股方向与概率（无未来函数 · 独立周度视角）----
+    weekly_res = {}
+    weekly_src = data.get("每周走势预测") or {}
+    if isinstance(weekly_src, dict):
+        weekly_res = weekly_src.get("result") or {}
+    if weekly_res.get("available") and isinstance(weekly_res.get("entry"), dict):
+        wk_html = _weekly_forecast_block(weekly_res, kit)
+        if wk_html:
+            blocks["WEEKLY FORECAST"] = (
+                "WEEKLY FORECAST", "每周量化走势预测", wk_html,
+                kit.badge("周度预测", "ai"), _short_source(weekly_src))
 
     # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
     cal = data.get("财经日历") or {}
@@ -4821,7 +5000,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             )
 
     # 页首结论 / 末尾盘点
-    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy, quant=quant)
+    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy,
+                                   quant=quant, weekly=weekly_res)
     if conclusion:
         blocks["CONCLUSION"] = ("CONCLUSION", "今日结论", kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
@@ -8336,6 +8516,45 @@ def quant_only_report(*, enable_stocks=True):
     return 0
 
 
+def weekly_only_report():
+    """只跑每周量化走势预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    print("🐙 " + "=" * 48)
+    print("   章鱼 AI · 每周量化走势预测（研究模式）")
+    print("🐙 " + "=" * 48)
+    res = fetch_weekly_forecast()
+    if res.get("status") != "success":
+        print(f"❌ 每周预测不可用：{res.get('error')}")
+        return 1
+    r = res.get("result") or {}
+    entry = r.get("entry") or {}
+    print(f"\n【周度预测】{entry.get('label')}")
+    print(f"  锚定 {entry.get('base_date')} 收盘（{entry.get('symbol_label')}）"
+          f" → 未来 {entry.get('target_sessions')} 个交易日")
+    print(f"  概率拆解：P(周涨)={entry.get('p_up'):.3f}"
+          f" · 基准 {entry.get('p_base'):.3f}"
+          f" · 相似样本 {entry.get('p_sim') if entry.get('p_sim') is not None else '—'}"
+          f"（{entry.get('n_analog')} 近邻 / 已结算 {entry.get('n_resolved')} 周）")
+    bt = r.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        print(f"\n【滚动样本外】{bt['n']} 期 · 命中 {bt['hit_rate']*100:.1f}%"
+              f" · 恒定基准 {bt['base_rate']*100:.1f}% · Brier {bt['brier']:.3f}")
+    else:
+        print(f"\n【滚动样本外】{bt.get('note')}")
+    jr = r.get("journal") or {}
+    if jr.get("n"):
+        rate = (f"命中 {jr['hits']}（{jr['hit_rate']*100:.0f}%）"
+                if jr.get("hit_rate") is not None else "样本 <10，只报样本量")
+        print(f"【预测留痕】已结算 {jr['n']} 次 · {rate}")
+        for item in jr.get("recent") or []:
+            print(f"  {item.get('date')} {item.get('ret')*100:+.1f}%"
+                  f" {'✓' if item.get('hit') else '✗'}")
+    else:
+        print("【预测留痕】暂无已结算样本")
+    print(f"\n【未来函数自检】{r.get('self_check')}")
+    print("✅ 每周预测运行完成（研究模式不推送）")
+    return 0
+
+
 def calendar_only_report(days=None):
     """只抓「未来 N 天影响经济时间点」并打印（研究 / 排障用：不生成日报、不推送）。
 
@@ -8382,6 +8601,8 @@ def main():
   python3 output/pipeline.py --list                 # 列出日报
   python3 output/pipeline.py --no-quant             # 跳过港股量化引擎（运行更快）
   python3 output/pipeline.py --quant-only           # 只跑量化引擎并打印概率/流动性/回测
+  python3 output/pipeline.py --no-weekly            # 跳过每周量化走势预测
+  python3 output/pipeline.py --weekly-only          # 只跑每周预测并打印方向/概率/回测/留痕
   python3 output/pipeline.py --calendar-only        # 只抓未来30天影响经济时间点并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
@@ -8412,6 +8633,10 @@ def main():
                        help="跳过港股量化引擎（只出常规栏目，运行更快）")
     parser.add_argument("--quant-only", action="store_true",
                        help="只跑港股量化引擎并打印结果（研究模式：不生成日报、不推送）")
+    parser.add_argument("--no-weekly", action="store_true",
+                       help="跳过每周量化走势预测（只出常规栏目，运行更快）")
+    parser.add_argument("--weekly-only", action="store_true",
+                       help="只跑每周量化走势预测并打印结果（研究模式：不生成日报、不推送）")
     parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
                        help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
@@ -8422,6 +8647,10 @@ def main():
         global HK_QUANT_ENABLED
         HK_QUANT_ENABLED = False
 
+    if args.no_weekly:
+        global WEEKLY_ENABLED
+        WEEKLY_ENABLED = False
+
     # --list 模式
     if args.list:
         return list_reports()
@@ -8429,6 +8658,10 @@ def main():
     # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
     if args.quant_only:
         return quant_only_report(enable_stocks=HK_QUANT_STOCKS)
+
+    # --weekly-only 模式：只跑每周量化走势预测，把方向 / 概率 / 回测 / 留痕打到控制台
+    if args.weekly_only:
+        return weekly_only_report()
 
     # --calendar-only 模式：只抓未来 N 天影响经济时间点，验证接口与筛选口径
     if args.calendar_only is not None:

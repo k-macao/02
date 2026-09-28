@@ -206,7 +206,7 @@ class SentimentFactorTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
                   "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant",
-                  "fetch_econ_calendar")
+                  "fetch_weekly_forecast", "fetch_econ_calendar")
         reddit = pipeline._public_site_result(
             "Reddit", [{"title": "Sample", "url": "https://www.reddit.com/r/stocks/comments/1/x/",
                         "is_today": True}])
@@ -224,11 +224,11 @@ class SentimentFactorTests(unittest.TestCase):
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        # 10 个基础数据源（含港股量化引擎与未来30天财经日历）+ Reddit 热帖 + 全网新闻源头
+        # 11 个基础数据源（含港股量化引擎、每周走势预测与未来30天财经日历）+ Reddit + 全网新闻源头
         self.assertEqual(sorted(data), sorted((
             "实时行情", "A股大盘全景", "国家政策", "港股名家频道", "全球头条",
-            "A股资讯", "东财快讯", "热门榜单", "港股量化", "财经日历", "Reddit",
-            pipeline.HK_NEWS_SOURCE_NAME)))
+            "A股资讯", "东财快讯", "热门榜单", "港股量化", "每周走势预测",
+            "财经日历", "Reddit", pipeline.HK_NEWS_SOURCE_NAME)))
         self.assertEqual(data["Reddit"]["status"], "success")
         self.assertEqual(data[pipeline.HK_NEWS_SOURCE_NAME]["status"], "unavailable")
 
@@ -236,7 +236,7 @@ class SentimentFactorTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
                   "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant",
-                  "fetch_econ_calendar")
+                  "fetch_weekly_forecast", "fetch_econ_calendar")
         with patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
             mocks = [patch.object(pipeline, fn, return_value={"status": "unavailable"})
                      for fn in legacy]

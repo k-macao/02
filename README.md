@@ -173,6 +173,34 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
   - **反馈闭环**：每次预测写入 `output/quant_history.json`，之后每次运行自动按真实收盘结算
     「方向命中 / 95% 区间命中 / Brier」，页内「预测复盘」列出最近 8 次预测与结果——模型自己记账。
   - **降级原则不变**：任一子块取不到数据就整块缺席或显示「■ 暂缺」，绝不拿历史数字冒充实时值。
+- **📅 每周量化走势预测 · 未来一周港股升跌方向与概率**（`output/octopus_weekly.py`，2026-09-28 新增；
+  独立周度视角，位于**资金流动性分析之后、行情速览之前**，页首「今日结论」同步给一条**周度预测**）：
+  以 **GitHub 公开量化工程实践的无未来函数（look-ahead）方法**为口径，对**恒生指数未来一周（5 个交易日）**
+  给出方向与 **P(周涨)** 概率；全部为确定性规则、纯标准库实现（CI 只装 `requests`），
+  数据只经 `providers.fetch_bars` 一个联网口（`OCTOPUS_WEEKLY_SYMBOL` 可换指数）。
+  - **预测器三条腿（无随机数、不调大模型）**：① **历史基准 P0**——过去已结算周度涨跌的拉普拉斯平滑频率；
+    ② **相似样本 P_sim**——当前 20 日特征（ret5/ret10/ret20/vol20/距20日高点回撤，**逐期扩张 z 标准化**，
+    绝无全样本统计量）在已结算锚点里取 **K=8 最近邻**的周度方向频率；③ **P = (P0 + P_sim) / 2**，
+    夹在 **5%~95%**；已结算锚点不足 4 个时退化为历史基准并如实标注。展示 **≥58% ▲看涨 / ≤42% ▼看跌 /
+    其间 ■中性（略偏）**，结算一律按 **P ≥ 0.5 的底牌方向**。
+  - **四条无未来函数硬约束**（对齐姊妹仓 k-macao/03 PR #54「AI 预测 · 未来函数」栏目）：
+    ① **输入闭合**——只读本次抓取的日线快照；② **目标日在严格之后**——特征只用 ≤t 数据、
+    相似锚点标签必须已结算（**s+5 ≤ t**，purged / embargo walk-forward 依据），并做**运行时「截断不变性」自检**
+    （[arielb57/peekahead](https://github.com/arielb57/peekahead) 式不变量：输出 ≤t 只依赖输入 ≤t，
+    删掉 / 扰动未来数据，历史输出必须逐位不变），自检不过**整栏降级、不出预测**；
+    ③ **先存档后结算**——预测先落盘 `output/weekly_forecast.json`（`settled=false`），满 5 个交易日
+    再按真实收盘回填实际涨跌与命中，**当次运行结构上不可能结算当次预测**；结算样本 **<10 只报样本量**，
+    不下命中率结论；④ **零写死叙事**——不落任何具体日期 / 点位，规则合成。
+  - **自己检验自己**：**滚动样本外（walk-forward）体检**输出 N 期方向命中率、恒定基准与 **Brier**
+    （相邻窗口重叠 5 个交易日如实标注）；方法参考 [akfamily/akquant](https://github.com/akfamily/akquant)
+    防未来函数教义、[paidaxing1234/quant-backtest-guard](https://github.com/paidaxing1234/quant-backtest-guard)
+    回测照妖镜清单，锚点隔离依据 [haeganm/walkforward](https://github.com/haeganm/walkforward) 的
+    purged walk-forward splits；主题与全仓清单见
+    [github.com/topics/lookahead-bias](https://github.com/topics/lookahead-bias)。
+  - **栏目内容**：方向与 P(周涨) → 概率拆解（基准 / 相似样本 / 合成规则）→ 20 日关键因子 →
+    滚动样本外回测 → 预测留痕（已结算次数、最近 3 条结算结果）→ 无未来函数口径行。
+  - **降级原则**：日线样本不足、引擎异常、自检不过或 `OCTOPUS_WEEKLY=0 / --no-weekly` 关闭时整栏缺席
+    （审计总源数按「键存在才计入」，关闸时总源数不变）；`--weekly-only` 研究模式单跑并打印结果。非投资建议。
 - **⌁ 逐栏目 AI 研判**（规则合成，2026-09-27 新增）：**每个有数据的内容栏目**（行情速览 /
   A股大盘全景复盘 / 每日量化策略（政策因子趋势预判） / 东方财富快讯 / 每日量化策略趋势跟踪线索 /
   港股名家频道 / AI 新闻情绪因子）正文末尾追加一行**概率化多空判断**；全球头条与A股资讯已从日报正文移除，其采集结果仍作为量化分析输入：
@@ -184,7 +212,7 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
   不附加，栏目无数据则自然缺席。无需大模型 API、可复现、不伪造内容，非投资建议。
 - **页面栏目固定阅读顺序（2026-09-27 精简排版：结论先行 → 分栏展开 → 盘点收尾）**：
   **今日结论**（市场倾向 / 核心判断 / A股·美股·港股一句话 / 政策定调）→ **未来30天影响经济时间点**
-  （窗口摘要 + 逐日时间点）→ 量化预测总览 → 港股概率走势分析 → 资金流动性分析 → 行情速览 →
+  （窗口摘要 + 逐日时间点）→ 量化预测总览 → 港股概率走势分析 → 资金流动性分析 → 每周量化走势预测 → 行情速览 →
   A股大盘全景复盘 →
   每日量化策略（政策因子趋势预判）（量化趋势分 / 政策冲击强度 / 趋势预判） → 每日量化策略（板块趋势跟踪）（量化强度 / 指数动能 / 风险预算）→ 每日量化策略趋势跟踪线索 → 东方财富快讯 → 港股名家频道 → AI 新闻情绪因子 → **盘点总结**（今日盘点 / 明日关注 / 风险关注 / 数据覆盖一行）。
   - **全球头条、A股资讯两个正文栏目已删除**；Google News 与新浪资讯仍参与量化策略 / 情绪及风险识别，但不再单独展示。
@@ -214,12 +242,16 @@ OCTOPUS_PUSH_THEME=pixel python3 output/push.py # 用环境变量固定主题（
 OCTOPUS_FONT_SCALE=0.7 python3 output/push.py    # guizang 主题全部字号整体缩放（默认 0.85；1.0 = 当前设计基准）
 python3 output/pipeline.py --no-quant             # 跳过港股量化引擎（只出常规栏目，更快）
 python3 output/pipeline.py --quant-only           # 研究模式：只跑量化引擎，打印概率/流动性/回测，不推送
+python3 output/pipeline.py --no-weekly            # 跳过每周量化走势预测
+python3 output/pipeline.py --weekly-only          # 研究模式：只跑每周预测，打印方向/概率/回测/留痕，不推送
 python3 output/pipeline.py --calendar-only        # 研究模式：只抓未来30天影响经济时间点并打印，不推送
 python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
 OCTOPUS_CALENDAR=0 python3 output/push.py         # 关闭财经日历采集（栏目缺席，审计总源数不变）
 OCTOPUS_CALENDAR_DAYS=14 OCTOPUS_CALENDAR_ROWS=30 python3 output/push.py  # 窗口 14 天 / 正文最多 30 行
 OCTOPUS_QUANT=0 python3 output/push.py            # 环境变量关闭量化引擎（同 --no-quant）
 OCTOPUS_QUANT_STOCKS=0 python3 output/push.py     # 只算指数与流动性，跳过逐只个股概率
+OCTOPUS_WEEKLY=0 python3 output/push.py           # 关闭每周量化走势预测（同 --no-weekly）
+OCTOPUS_WEEKLY_SYMBOL='^HSTECH' python3 output/push.py  # 每周预测换标的（默认 ^HSI 恒生指数）
 OCTOPUS_HK_UNIVERSE=0700.HK:腾讯,9988.HK:阿里      # 自定义量化个股池（默认 18 只港股蓝筹/科技龙头）
 PUSHPLUS_TOPIC=oai.1 python3 output/push.py     # 可选：显式启用一对多群组（默认不设则一对一）
 PUSHPLUS_MULTIPART=0 python3 output/push.py     # 关闭全量分条推送，回退到截断 + 完整版链接
@@ -312,6 +344,8 @@ output/
 │   ├── engine.py          ←   ⑤ 编排层（六阶段 + 预测留痕与次日结算）
 │   └── render.py          ←   ⑥ 呈现层（结果 → HTML，排版由 kit 注入，兼容两套主题）
 ├── quant_history.json     ← 🎯 预测留痕（每日预测 + 次日结算的命中/Brier）
+├── octopus_weekly.py      ← 📅 每周量化走势预测（无未来函数：截断不变性自检 + s+5≤t 类比）
+├── weekly_forecast.json   ← 🗓️ 周度预测留痕（先存档 settled=false → 满 5 个交易日结算）
 ├── daily_report_*.html    ← 📰 每日生成的日报
 └── latest.html            ← 📎 最新一份日报的副本
 ```
@@ -330,6 +364,10 @@ output/
 > 回归测试：`python3 -m unittest tests.test_quant.py`（46 项，全部离线）；
 > 其中包含两条「防自欺」测试——**未来函数检测**（直接检查第 t 步校准窗口只能是 `[0, t)`）
 > 与**概率边界**（任何概率夹在 5%~95%，绝不出现 0%/100% 的假确定性）。
+
+> 每周预测回归：`python3 -m unittest tests.test_weekly.py`（19 项，全部离线），核心是两条
+> **防自欺**测试——**截断不变性**（删掉 / 扰动 t 之后的未来数据，signals[:t+1] 必须逐位不变）
+> 与**先存档后结算**（issue → 满 5 个交易日 settle → 再 issue 的档案流转，含基准率独立双记账）。
 
 > 「国家政策官方网站」固定读取 `https://www.gov.cn/zhengce/zuixin/`（政策首页作为降级地址），
 > 由 `fetch_gov_policy()` 解析政策正文链接、发布日期并入 `news_history.json`；
