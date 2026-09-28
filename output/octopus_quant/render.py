@@ -123,6 +123,31 @@ def render_forecast(res, kit):
                        f'{esc(head.get("label", "中性"))} '
                        f'{prob(head.get("p_up"))}</b> · {esc(head["text"])}'),
         ]))
+        # 数据新鲜度与动态调整摘要（确保最新数据 + 动态调整可视化）
+        as_of = res.get("as_of")
+        gen_at = res.get("generated_at")
+        freshness_note = []
+        if as_of:
+            freshness_note.append(f'{esc(as_of)} 收盘 → {esc(res.get("target_label") or "下一交易日")}')
+        if gen_at:
+            freshness_note.append(f'生成于 {esc(gen_at)}')
+        # 检查是否有动态调整记录
+        primary = res.get("primary") or {}
+        p5 = (primary.get("probs") or {}).get(5) or {}
+        adjustments = []
+        if p5.get("delta") is not None and abs(p5["delta"]) > 1e-6:
+            adjustments.append(f'流动性 {p5["delta"]*100:+.1f}pp')
+        if p5.get("vol_adjust") is not None and abs(p5["vol_adjust"]) > 1e-6:
+            adjustments.append(f'波动率 {p5["vol_adjust"]*100:+.1f}pp')
+        if p5.get("perf_adjust") is not None and abs(p5["perf_adjust"]) > 1e-6:
+            adjustments.append(f'表现 {p5["perf_adjust"]*100:+.1f}pp')
+        if freshness_note:
+            out.append(kit.kv([("数据时效", " · ".join(freshness_note) + " · 每日 09:00 前更新（港股开盘前）")]))
+        if adjustments:
+            out.append(kit.kv([("动态调整", " · ".join(adjustments) + "（已含在概率中，有界 ±5pp，波动率与表现收缩额外）")]))
+        else:
+            out.append(kit.kv([("动态调整", "流动性/波动率/历史表现三重动态调整（本次无显著修正，概率为模型原始校准值）")]))
+
         out.append(kit.kv([("预测目标",
                             f'{esc(res.get("as_of") or "—")} 收盘后 → '
                             f'{esc(res.get("target_label") or "下一交易日")}')]))
@@ -157,9 +182,12 @@ def render_forecast(res, kit):
             rows, aligns=("left", "right", "right", "right", "right", "right", "right")))
         out.append(kit.kv(bands_pairs))
         out.append(kit.note("概率 = 五因子综合分经自身历史「分桶 + 保序 + 逻辑回归」校准后的"
-                            "上涨频率，已含流动性的有界修正，夹在 5%~95%；"
-                            "1 / 5 / 20 日三档各自独立校准（基准频率与样本不同，"
-                            "出现短高长低属正常，表示短中期动能不一致）。"))
+                            "上涨频率，已含三重动态调整：① 流动性有界修正 ±5pp（量能与深度，"
+                            "南向已计入 FLOW 因子不重复）；② 波动率分位动态收缩（高波动 85%+ 分位收缩 20% 向 50%，"
+                            "低波动 15%- 分位轻微放大）；③ 历史表现反馈收缩（近 5 次以上预测命中 <48% 或 Brier>0.27 时收缩 10%~20%）；"
+                            "最终夹在 5%~95%；1 / 5 / 20 日三档各自独立校准（基准频率与样本不同，"
+                            "出现短高长低属正常，表示短中期动能不一致）。因子权重本身也动态调整："
+                            "高波动降 MOM 提 REV，强趋势提 TRD，资金流强提 FLOW，详见五因子拆解。"))
 
     # ---- 模型可信度（推进式回测）----
     val = res.get("validation") or {}
@@ -268,19 +296,54 @@ def render_hk_probability(res, kit):
         names = {"mom": "动量 MOM", "trd": "趋势 TRD", "rev": "反转 REV",
                  "vol": "量能 VOL", "flow": "资金 FLOW"}
         pairs = []
+        # 动态权重说明
+        feat = primary.get("feat") or {}
+        dyn_reason = []
+        vol_pct = feat.get("vol_pct")
+        if vol_pct is not None:
+            if vol_pct >= 0.80:
+                dyn_reason.append(f"高波动 {vol_pct*100:.0f}% 分位 → 降 MOM 提 REV")
+            elif vol_pct <= 0.15:
+                dyn_reason.append(f"低波动 {vol_pct*100:.0f}% 分位 → 提 MOM/TRD 降 REV")
+        t_val = feat.get("trend_t")
+        if t_val is not None and abs(t_val) > 2.0:
+            dyn_reason.append(f"强趋势 t={t_val:.1f} → 提 TRD 降 REV")
+        align = feat.get("ma_align")
+        if align is not None and abs(align) >= 2:
+            dyn_reason.append(f"均线强排列 {align:+d} → 提 TRD/MOM")
+
         for key, label in names.items():
             v = primary["factors"].get(key)
             w = (primary.get("weights") or {}).get(key)
+            base_w = None
+            try:
+                # 如果有动态权重的基线，显示调整
+                base_w = (primary.get("feat") or {}).get("_weights_base") or {}
+            except Exception:
+                base_w = {}
             if v is None:
                 pairs.append((esc(label), f'暂缺（权重已重分配）'))
             else:
                 pairs.append((esc(label),
-                              f'{v:+.2f} · 权重 {w*100:.0f}%'))
-        out.append(kit.sub(f'{esc(primary["label"])} 五因子拆解'))
+                              f'{v:+.2f} · 权重 {w*100:.0f}%（动态调整）'))
+        out.append(kit.sub(f'{esc(primary["label"])} 五因子拆解（动态权重）'))
         out.append(kit.kv(pairs))
+        if dyn_reason:
+            out.append(kit.kv([("动态权重依据", " · ".join(dyn_reason))]))
         out.append(kit.kv([("综合分 S", f'{primary["score"]:+.2f}'
                                        f' → 校准后 5 日上涨概率 '
                                        f'{prob((primary["probs"].get(5) or {}).get("p_up"))}')]))
+        # 展示概率的动态修正明细
+        p5 = (primary.get("probs") or {}).get(5) or {}
+        adj_bits = []
+        if p5.get("delta") is not None and abs(p5["delta"]) > 1e-6:
+            adj_bits.append(f'流动性 {p5["delta"]*100:+.1f}pp')
+        if p5.get("vol_adjust") is not None and abs(p5["vol_adjust"]) > 1e-6:
+            adj_bits.append(f'波动率 {p5["vol_adjust"]*100:+.1f}pp')
+        if p5.get("perf_adjust") is not None and abs(p5["perf_adjust"]) > 1e-6:
+            adj_bits.append(f'表现 {p5["perf_adjust"]*100:+.1f}pp')
+        if adj_bits:
+            out.append(kit.kv([("概率动态修正", " · ".join(adj_bits))]))
 
     # ---- 个股概率表 ----
     stocks = [s for s in (res.get("stocks") or []) if s.get("probs")]

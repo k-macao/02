@@ -20,6 +20,7 @@ import math
 from . import stats
 
 # 因子权重（合计 1.0；缺失因子的权重按比例重分配给其余因子）
+# 基础权重：动量与趋势为主，反转/量能/资金为辅
 FACTOR_WEIGHTS = {
     "mom": 0.30,
     "trd": 0.25,
@@ -27,6 +28,9 @@ FACTOR_WEIGHTS = {
     "vol": 0.15,
     "flow": 0.15,
 }
+
+# 动态调整后的权重会在 factor_scores 中根据市场状态实时调整（见 _dynamic_weights）
+# 例如：高波动时降低 MOM、提高 REV；强趋势时提高 TRD；资金流强时提高 FLOW
 
 # 各因子的软上限（超过按 tanh 压缩，避免单因子绑架结论）
 FACTOR_CAP = 2.0
@@ -193,11 +197,85 @@ def _tanh_cap(value, cap=FACTOR_CAP):
     return cap * math.tanh(v / cap)
 
 
+def _dynamic_weights(feat, flow_z=None):
+    """根据市场状态动态调整因子权重（动态调整的核心）。
+
+    调整规则（全部确定性、可复现、无未来函数）：
+    - 高波动（vol_pct > 80%）：市场噪声大，动量易失效 → MOM 权重 ×0.6，REV ×1.6
+    - 低波动（vol_pct < 20%）：趋势更可信 → MOM ×1.2，TRD ×1.2，REV ×0.7
+    - 强趋势（|trend_t| > 2）：趋势因子更可靠 → TRD ×1.4
+    - 均线强多头/空头（|ma_align| >=2）：趋势确认 → TRD ×1.2，MOM ×1.1
+    - 资金流强（|flow_z| > 1.0）：资金主导 → FLOW ×1.3
+    - 量能背离（vol_ratio 极端）：VOL 权重下调
+    最终归一化到合计 1.0，缺失因子后续再重分配。
+    """
+    weights = dict(FACTOR_WEIGHTS)  # 拷贝基础权重
+    try:
+        vol_pct = feat.get("vol_pct")
+        if vol_pct is not None:
+            if vol_pct >= 0.80:
+                weights["mom"] *= 0.6
+                weights["rev"] *= 1.6
+                weights["vol"] *= 0.9
+            elif vol_pct >= 0.60:
+                weights["mom"] *= 0.85
+                weights["rev"] *= 1.2
+            elif vol_pct <= 0.15:
+                weights["mom"] *= 1.25
+                weights["trd"] *= 1.25
+                weights["rev"] *= 0.65
+            elif vol_pct <= 0.30:
+                weights["mom"] *= 1.1
+                weights["trd"] *= 1.1
+
+        t_val = feat.get("trend_t")
+        if t_val is not None and abs(t_val) > 2.0:
+            weights["trd"] *= 1.4
+            # 强趋势下，反转因子应降低（避免过早抄底/逃顶）
+            weights["rev"] *= 0.8
+        elif t_val is not None and abs(t_val) > 1.2:
+            weights["trd"] *= 1.15
+
+        align = feat.get("ma_align")
+        if align is not None and abs(align) >= 2:
+            weights["trd"] *= 1.2
+            weights["mom"] *= 1.1
+        elif align is not None and abs(align) >= 1:
+            weights["trd"] *= 1.05
+
+        if flow_z is not None and abs(flow_z) > 1.0:
+            weights["flow"] *= 1.35
+        elif flow_z is not None and abs(flow_z) > 0.5:
+            weights["flow"] *= 1.15
+
+        # 量能极端放量且与价格同向 → 量能因子更可信
+        vol_z = feat.get("vol_z")
+        chg = feat.get("chg_pct")
+        if vol_z is not None and chg is not None:
+            if abs(vol_z) > 2.0 and abs(chg) > 1.0:
+                weights["vol"] *= 1.2
+            elif abs(vol_z) < 0.3:
+                weights["vol"] *= 0.8
+
+        # 保证权重非负且不过小
+        for k in weights:
+            weights[k] = max(0.02, weights[k])
+
+    except Exception:
+        # 任何异常回落到基础权重，不影响主流程
+        weights = dict(FACTOR_WEIGHTS)
+
+    return weights
+
+
 def factor_scores(feat, *, flow_z=None):
-    """五因子打分。
+    """五因子打分（动态权重版）。
 
     ``flow_z``：外部资金流 z（南向资金 / 个股主力净流入的横截面 z），None 时
     该因子缺席，权重按比例重分配给其余因子（不做 0 填充，避免「假中性」）。
+
+    动态调整：根据当前波动率分位、趋势强度、均线排列、资金流强度实时调整
+    各因子权重，权重变化会记录在 weights_used 中供页面展示。
     """
     if not feat or not feat.get("ok"):
         return {"ok": False, "score": None, "factors": {},
@@ -245,13 +323,16 @@ def factor_scores(feat, *, flow_z=None):
 
     factors = {k: _tanh_cap(v) for k, v in raw.items()}
 
+    # 动态权重：根据市场状态实时调整
+    dyn_weights = _dynamic_weights(feat, flow_z=flow_z)
+
     # 权重重分配（缺失因子不参与）
     present = {k: v for k, v in factors.items() if v is not None}
     if not present:
         return {"ok": False, "score": None, "factors": factors,
                 "reason": "可用因子不足"}
-    wsum = sum(FACTOR_WEIGHTS[k] for k in present)
-    score = sum(FACTOR_WEIGHTS[k] * present[k] for k in present) / wsum
+    wsum = sum(dyn_weights[k] for k in present)
+    score = sum(dyn_weights[k] * present[k] for k in present) / wsum
     # 综合分再软压缩一次，保证落在 ±2 内、可直接喂给概率层
     score = 2.0 * math.tanh(score / 2.0)
 
@@ -259,7 +340,9 @@ def factor_scores(feat, *, flow_z=None):
         "ok": True,
         "score": score,
         "factors": factors,
-        "weights_used": {k: FACTOR_WEIGHTS[k] / wsum for k in present},
+        "weights_used": {k: dyn_weights[k] / wsum for k in present},
+        "weights_base": dict(FACTOR_WEIGHTS),
+        "weights_dynamic": dyn_weights,
         "missing": [k for k in FACTOR_WEIGHTS if factors.get(k) is None],
     }
 

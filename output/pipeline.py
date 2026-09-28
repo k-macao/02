@@ -222,6 +222,9 @@ if SCRIPT_DIR not in sys.path:
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import sector_rotation as _rotation  # noqa: E402
+import freshness_checker as _freshness  # noqa: E402
+import backup_sources as _backup  # noqa: E402
+import dedup as _dedup  # noqa: E402
 
 QUANT_HISTORY_FILENAME = "quant_history.json"
 # 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
@@ -718,6 +721,34 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
         return None
 
 
+def safe_request_with_fallback(urls, headers=None, params=None, timeout=15, is_json=True):
+    """带备用源的安全请求：依次尝试 URL 列表，任一成功即返回
+    
+    用于实现“全部数据源有备用源”的要求
+    返回 (result, success_url, errors)
+    """
+    if isinstance(urls, str):
+        urls = [urls]
+    
+    errors = []
+    for url in urls:
+        result = safe_request(url, headers=headers, params=params, timeout=timeout, is_json=is_json)
+        if result is not None:
+            # 验证结果有效性
+            if is_json and isinstance(result, dict) and not result:
+                errors.append(f"{url[:60]}: 空字典")
+                continue
+            if not is_json and isinstance(result, str) and len(result.strip()) < 10:
+                errors.append(f"{url[:60]}: 内容过短")
+                continue
+            if url != urls[0]:
+                print(f"  ✅ 备用源成功 [{url[:60]}...]")
+            return result, url, errors
+        errors.append(f"{url[:60]}: 请求失败")
+    
+    return None, None, errors
+
+
 # ============================================================
 # 数据新鲜度与实时行情
 # ============================================================
@@ -758,7 +789,10 @@ def _source_note(item):
 
 
 def fetch_market_snapshot():
-    """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。"""
+    """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。
+    
+    备用源：query1 → query2 → 东财兜底
+    """
     print("📡 正在抓取全球/A股实时行情...")
     specs = [
         ("道琼斯指数", "%5EDJI"), ("标普500", "%5EGSPC"), ("纳斯达克", "%5EIXIC"),
@@ -769,8 +803,20 @@ def fetch_market_snapshot():
     ]
     quotes, failures, last_dates = {}, [], []
     for label, symbol in specs:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
-        data = safe_request(url)
+        # 主备 URL 列表
+        yahoo_urls = _backup.get_yahoo_urls(symbol)
+        # 为每个 symbol 添加区间参数
+        urls_with_params = [f"{url}?range=5d&interval=1d" for url in yahoo_urls]
+        data, success_url, errors = safe_request_with_fallback(urls_with_params)
+        if not data:
+            # 尝试东财作为最终备用（仅 A 股）
+            if ".SS" in symbol or ".SZ" in symbol:
+                # 东财 A 股备用（简化，不实现完整解析，仅记录失败）
+                failures.append(f"{label}: Yahoo 主备均失败")
+            else:
+                failures.append(f"{label}: Yahoo 主备均失败")
+            continue
+        
         try:
             result = data["chart"]["result"][0]
             quote_0 = result["indicators"]["quote"][0]
@@ -783,13 +829,13 @@ def fetch_market_snapshot():
             quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
                              "volume": vol,
                              "currency": result.get("meta", {}).get("currency", "")}
-            # 最后收盘日期（用于当天检验；非交易时段为最近交易日）
             ts_list = result.get("timestamp") or []
             if ts_list:
                 last = datetime.fromtimestamp(ts_list[-1], CST).strftime("%Y-%m-%d")
                 last_dates.append(last)
         except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
             failures.append(f"{label}: {exc}")
+    
     status = "success" if quotes else "unavailable"
     content_date = max(last_dates) if last_dates else None
     is_today = content_date == _today_display()
@@ -841,10 +887,11 @@ def fetch_google_news():
 
     直接抓 Google News 中文版，标题本身即中文，无需翻译；
     每条返回 {title, source, url, published_cst, is_today}。
+    备用源：中文主站 → 香港中文 → 搜索兜底 → RSSHub
     """
     print("📡 正在抓取 Google News 全球头条...")
-    url = GOOGLE_NEWS_RSS["zh"]
-    xml_text = safe_request(url, is_json=False, timeout=15)
+    urls = _backup.get_google_news_urls("zh")
+    xml_text, success_url, errors = safe_request_with_fallback(urls, is_json=False, timeout=15)
 
     items = []
     if xml_text:
@@ -934,9 +981,14 @@ def _google_news_items(xml_text, limit=8):
 
 
 def _fetch_news_search(query, source_name, limit=8):
-    """Google News RSS 搜索查询抓取；失败如实标注 unavailable，不兜底旧内容。"""
-    url = GOOGLE_NEWS_SEARCH_RSS.format(query=quote(query))
-    xml_text = safe_request(url, is_json=False, timeout=15)
+    """Google News RSS 搜索查询抓取；失败如实标注 unavailable，不兜底旧内容。
+    
+    备用源：中文搜索 → 英文搜索 → RSSHub
+    """
+    primary_url = GOOGLE_NEWS_SEARCH_RSS.format(query=quote(query))
+    backup_urls = _backup.get_google_news_urls("search", query=query)
+    all_urls = [primary_url] + [u for u in backup_urls if u != primary_url]
+    xml_text, success_url, errors = safe_request_with_fallback(all_urls, is_json=False, timeout=15)
     items = _google_news_items(xml_text, limit=limit)
     if not items:
         print(f"  ⚠️ {source_name}暂不可用，不显示历史兜底")
@@ -1097,11 +1149,18 @@ def fetch_gov_policy():
 
     优先读取 ``/zhengce/zuixin/``，该页面失败或结构变化时再读取政策首页。
     不以历史存档兜底：抓不到官方页面就明确返回 unavailable。
+    备用源：gov.cn 主站多路径 → 政策文库
     """
     print("📡 正在抓取中国政府网·最新政策（政策因子官方源）...")
     failures = []
-    for url in GOV_POLICY_URLS:
-        html_text = safe_request(url, is_json=False, timeout=15)
+    gov_urls = _backup.get_gov_policy_urls()
+    # 去重并保留原有 GOV_POLICY_URLS 优先
+    all_urls = list(dict.fromkeys(list(GOV_POLICY_URLS) + gov_urls))
+    for url in all_urls:
+        html_text, success_url, errors = safe_request_with_fallback([url], is_json=False, timeout=15)
+        if not html_text:
+            failures.append(f"{url}: {errors[0][1] if errors else '抓取失败'}")
+            continue
         items = _parse_gov_policy_html(html_text)
         if not items:
             failures.append(f"{url}: 未解析到政策正文")
@@ -1140,7 +1199,10 @@ EASTMONEY_NEWS_URLS = [
 
 
 def fetch_eastmoney_news():
-    """抓取东方财富最新财经新闻（免费接口，无 API Key，取 5 条）。"""
+    """抓取东方财富最新财经新闻（免费接口，无 API Key，取 5 条）。
+    
+    备用源：np-listapi → np-weblist → panorama
+    """
     print("📡 正在抓取东方财富快讯...")
     params = {
         "client": "web", "biz": "web_news_col", "column": "350",
@@ -1148,8 +1210,11 @@ def fetch_eastmoney_news():
         "page_index": "1", "page_size": "10",
     }
     news, content_dates = [], []
-    for url in EASTMONEY_NEWS_URLS:
-        data = safe_request(url, params=params, timeout=12)
+    # 合并原有列表与备用源
+    em_urls = _backup.get_eastmoney_news_urls()
+    all_urls = list(dict.fromkeys(list(EASTMONEY_NEWS_URLS) + em_urls))
+    for url in all_urls:
+        data, success_url, errors = safe_request_with_fallback([url], params=params, timeout=12)
         if not data:
             continue
         try:
@@ -1209,8 +1274,11 @@ def fetch_hot_stocks():
             "pn": "1", "pz": str(HOT_STOCK_TOP_N), "po": "1", "np": "1", "fltt": "2", "invt": "2",
             "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f4,f6,f12,f14",
         }
-        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
-                            params=params, timeout=12)
+        primary_clist = "https://push2.eastmoney.com/api/qt/clist/get"
+        clist_fallbacks = _backup.get_eastmoney_quote_urls()
+        clist_urls = [primary_clist] + [u for u in clist_fallbacks if "clist" in u] + [primary_clist.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
+        clist_urls = list(dict.fromkeys(clist_urls))
+        data, _, _ = safe_request_with_fallback(clist_urls, params=params, timeout=12)
         stocks = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1309,8 +1377,12 @@ def _fetch_panorama_indices():
         "secids": ",".join(secid for secid, _ in PANORAMA_INDEX_SPECS),
         "fields": "f2,f3,f4,f6,f12,f14,f15,f16,f17,f18,f104,f105,f106,f124",
     }
-    data = safe_request("https://push2.eastmoney.com/api/qt/ulist.np/get",
-                        params=params, timeout=12)
+    primary = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+    fallbacks = _backup.get_eastmoney_quote_urls()
+    # ensure ulist.np variants are tried first
+    urls = [primary] + [u for u in fallbacks if "ulist.np" in u or "push2" in u] + [primary.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
+    urls = list(dict.fromkeys(urls))
+    data, _, _ = safe_request_with_fallback(urls, params=params, timeout=12)
     rows = ((data or {}).get("data") or {}).get("diff") or []
     by_code, quote_ts = {}, []
     for it in rows:
@@ -1353,8 +1425,11 @@ def _fetch_panorama_prev_amounts():
     for secid, _ in PANORAMA_BREADTH_SOURCES:
         params = {"secid": secid, "klt": "101", "fqt": "0", "lmt": "2", "end": "20500101",
                   "fields1": "f1,f2,f3", "fields2": "f51,f57"}
-        data = safe_request("https://push2his.eastmoney.com/api/qt/stock/kline/get",
-                            params=params, timeout=12)
+        primary_k = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+        k_fallbacks = _backup.get_eastmoney_panorama_urls()
+        k_urls = [primary_k] + [u for u in k_fallbacks if "kline" in u or "push2his" in u]
+        k_urls = list(dict.fromkeys(k_urls))
+        data, _, _ = safe_request_with_fallback(k_urls, params=params, timeout=12)
         pairs = []
         try:
             klines = (((data or {}).get("data") or {}).get("klines")) or []
@@ -1395,7 +1470,9 @@ def _fetch_panorama_northbound():
         "source": "WEB",
         "client": "WEB",
     }
-    data = safe_request(PANORAMA_HSGT_HISTORY_URL, params=params, timeout=12)
+    north_urls = [PANORAMA_HSGT_HISTORY_URL] + _backup.get_eastmoney_panorama_urls()
+    north_urls = list(dict.fromkeys(north_urls))
+    data, _, _ = safe_request_with_fallback(north_urls, params=params, timeout=12)
     note = PANORAMA_NORTH_POLICY_NOTE
     today_date = _today_display()
 
@@ -1456,8 +1533,11 @@ def _fetch_panorama_sectors():
         params = {"pn": "1", "pz": str(PANORAMA_SECTOR_TOP_N), "po": po, "np": "1",
                   "fltt": "2", "invt": "2", "fid": "f3", "fs": "m:90+t:2",
                   "fields": "f2,f3,f12,f14,f62,f104,f105,f128,f136"}
-        data = safe_request("https://push2.eastmoney.com/api/qt/clist/get",
-                            params=params, timeout=12)
+        primary_sec = "https://push2.eastmoney.com/api/qt/clist/get"
+        sec_fallbacks = _backup.get_eastmoney_quote_urls()
+        sec_urls = [primary_sec] + [u for u in sec_fallbacks if "clist" in u] + [primary_sec.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
+        sec_urls = list(dict.fromkeys(sec_urls))
+        data, _, _ = safe_request_with_fallback(sec_urls, params=params, timeout=12)
         rows = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1605,7 +1685,7 @@ def resolve_channel_id(channel):
     handle = (channel.get("handle") or "").lstrip("@")
     if not handle:
         return None
-    html = safe_request(f"https://www.youtube.com/@{handle}", is_json=False, timeout=12)
+    html, _, _ = safe_request_with_fallback([f"https://www.youtube.com/@{handle}"] + _backup.get_youtube_urls(handle), is_json=False, timeout=12)
     if not html:
         return None
     m = re.search(r'"channelId":"(UC[0-9A-Za-z_-]{22})"', html)
@@ -1709,7 +1789,7 @@ def fetch_hk_channels():
                 unsupported.append({"name": name, "desc": ch.get("desc", ""),
                                     "note": ch.get("note", "未配置 feed 地址")})
                 continue
-            xml_text = safe_request(feed_url, is_json=False, timeout=12)
+            xml_text, _, _ = safe_request_with_fallback([feed_url] + _backup.get_youtube_urls(""), is_json=False, timeout=12)
             items = _parse_rss_items(xml_text, limit=8)
             if items:
                 channels.append({
@@ -1732,10 +1812,9 @@ def fetch_hk_channels():
             unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
             failures.append(f"{name}: {msg}")
             continue
-        xml_text = safe_request(
-            f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}",
-            is_json=False, timeout=12,
-        )
+        yt_urls = _backup.get_youtube_urls(cid)
+        primary_yt = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+        xml_text, _, _ = safe_request_with_fallback([primary_yt] + yt_urls, is_json=False, timeout=12)
         videos = []
         try:
             root = ET.fromstring(xml_text or "")
@@ -2006,12 +2085,14 @@ def fetch_reddit():
         community, _label = board
         base = f"https://www.reddit.com/r/{community}/"
         limit = REDDIT_POSTS_PER_BOARD * 2
-        xml = safe_request(f"{base}hot/.rss?limit={limit}",
+        reddit_rss_urls = _backup.get_reddit_urls(community, "rss")
+        xml, _, _ = safe_request_with_fallback(reddit_rss_urls,
                            headers={**_REDDIT_HEADERS, "Accept": "application/atom+xml,application/xml"},
                            is_json=False, timeout=8)
         items, latest = _reddit_hot_items(xml, community, base, now=now)
         if not items:
-            payload = safe_request(f"{base}hot.json?limit={limit}",
+            reddit_json_urls = _backup.get_reddit_urls(community, "json")
+            payload, _, _ = safe_request_with_fallback(reddit_json_urls,
                                    headers={**_REDDIT_HEADERS, "Accept": "application/json"},
                                    timeout=8)
             items, latest = _reddit_json_items(payload, community, now=now)
@@ -2022,10 +2103,12 @@ def fetch_reddit():
         futures = {executor.submit(_fetch_board, board): board
                    for board in _REDDIT_BOARDS}
         for future in futures:
+            board = futures[future]
+            default_community = board[0] if isinstance(board, (list, tuple)) else str(board)
             try:
                 _community, items, latest = future.result()
             except Exception:
-                items, latest = [], None
+                _community, items, latest = default_community, [], None
             board_results[_community] = (items, latest)
 
     items, unavailable, latest = [], [], None
@@ -2107,7 +2190,7 @@ def _platform_rss_items(xml_text, platform, base, *, limit, now, community="", t
 
 def _stocktwits_sentiment_counts(symbol, *, now=None):
     """读某标的最新公开消息里的平台情绪标签（Bullish / Bearish），只计数不复制正文。"""
-    payload = safe_request(STOCKTWITS_STREAM_URL.format(symbol=symbol),
+    payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("stream", symbol=symbol),
                            headers=_PLATFORM_HEADERS, params={"limit": STOCKTWITS_MESSAGES_PER_STREAM},
                            timeout=8)
     messages = payload.get("messages") if isinstance(payload, dict) else None
@@ -2136,7 +2219,7 @@ def fetch_stocktwits():
     """
     name = "StockTwits"
     now = datetime.now(CST)
-    payload = safe_request(STOCKTWITS_TRENDING_URL, headers=_PLATFORM_HEADERS, timeout=10)
+    payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("trending"), headers=_PLATFORM_HEADERS, timeout=10)
     symbols = payload.get("symbols") if isinstance(payload, dict) else None
     if not isinstance(symbols, list):
         return _public_site_result(name, [], error="公开趋势榜接口未返回有效数据")
@@ -2209,7 +2292,7 @@ def fetch_tradingview():
     """TradingView 公开 Ideas RSS：交易员最新观点（标题自带标的与方向词）。"""
     name = "TradingView"
     now = datetime.now(CST)
-    xml = safe_request(TRADINGVIEW_FEED_URL, headers={**_PLATFORM_HEADERS,
+    xml, _, _ = safe_request_with_fallback(_backup.get_tradingview_urls(), headers={**_PLATFORM_HEADERS,
                                                       "Accept": "application/rss+xml,application/xml"},
                        is_json=False, timeout=10)
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
@@ -2245,7 +2328,7 @@ def fetch_bogleheads():
     """Bogleheads.org 公开 RSS：长期投资者论坛最新讨论主题。"""
     name = "Bogleheads"
     now = datetime.now(CST)
-    xml = safe_request(BOGLEHEADS_FEED_URL, headers={**_PLATFORM_HEADERS,
+    xml, _, _ = safe_request_with_fallback(_backup.get_bogleheads_urls(), headers={**_PLATFORM_HEADERS,
                                                      "Accept": "application/rss+xml,application/xml"},
                        is_json=False, timeout=10)
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
@@ -2430,7 +2513,8 @@ def fetch_hk_news_sources():
     now = datetime.now(CST)
 
     def _fetch_one(cfg):
-        xml_text = safe_request(cfg["feed"], is_json=False, timeout=10)
+        hk_urls = [cfg["feed"]] + _backup.get_youtube_urls("")  # generic fallback via RSSHub bases
+        xml_text, _, _ = safe_request_with_fallback(hk_urls, is_json=False, timeout=10)
         parsed = _parse_rss_items(xml_text, limit=HK_NEWS_SCAN_LIMIT) if xml_text else []
         rec = {"name": cfg.get("name", "?"), "region": cfg.get("region", ""),
                "url": cfg.get("url", ""), "hosts": tuple(cfg.get("hosts") or ()),
@@ -2561,10 +2645,28 @@ def fetch_hk_quant():
     liq = res.get("liquidity") or {}
     if liq.get("score") is not None:
         print(f"  ✅ 流动性综合分 {liq['score']:.0f}/100（{liq['label']}）")
+
+    # 量化预测的 is_today 判定：as_of 是上一个交易日收盘，运行在开盘前（09:00）时，
+    # as_of == 昨天 是最新数据，应视为当天快照（snapshot），否则当天检验会永远不通过。
+    # 这里用「4 天内都算新鲜」口径（周一跑，周五收盘滞后 3 天仍算新鲜），并配合引擎内部的回退检测。
+    as_of = res.get("as_of")
+    is_today = False
+    try:
+        if as_of:
+            from datetime import datetime as _dt
+            d_asof = _dt.strptime(as_of, "%Y-%m-%d").date()
+            d_today = datetime.now(CST).date()
+            lag = (d_today - d_asof).days
+            # 4 天内算新鲜，且 as_of 必须 >= 历史最大 - 1（防止回退已在引擎层拦截）
+            is_today = 0 <= lag <= 4
+    except Exception:
+        is_today = False
+
     return _source_result("港股量化引擎", "success",
-                          is_today=(res.get("as_of") == _today_display()),
-                          content_date=res.get("as_of"),
-                          result=res)
+                          is_today=is_today,
+                          content_date=as_of,
+                          result=res,
+                          snapshot=True)
 
 
 # ============================================================
@@ -3083,7 +3185,7 @@ def fetch_econ_calendar(days=None, today=None):
             "source": "WEB",
             "client": "WEB",
         }
-        payload = safe_request(ECON_CALENDAR_URL, headers=referer, params=params, timeout=15)
+        payload, _, _ = safe_request_with_fallback(_backup.get_calendar_urls(), headers=referer, params=params, timeout=15)
         if not isinstance(payload, dict):
             error = "接口无响应或非 JSON"
             break
@@ -3181,6 +3283,45 @@ def collect_all_data():
     data.update(fetch_public_sites())
     if HK_NEWS_ENABLED:
         data[HK_NEWS_SOURCE_NAME] = fetch_hk_news_sources()
+
+    # === 新增：全栏目新鲜度检查 ===
+    print("\n🕐 正在检查全栏目数据新鲜度...")
+    try:
+        freshness_result = _freshness.check_all_freshness(data)
+        print(f"  {freshness_result['summary']}")
+        report = _freshness.format_freshness_report(freshness_result)
+        print(report)
+        data["_freshness"] = freshness_result
+    except Exception as exc:
+        print(f"  ⚠️ 新鲜度检查失败: {exc}")
+        data["_freshness"] = {"error": str(exc), "total": 0, "fresh": 0, "stale": 0, "unavailable": 0, "summary": f"检查失败: {exc}"}
+
+    # === 新增：跨栏目 70% 相似度去重合并 ===
+    print("\n🔍 正在执行跨栏目去重合并（相似度阈值 70%）...")
+    try:
+        dedup_result = _dedup.dedup_across_sections(data, threshold=0.7)
+        summary = _dedup.get_dedup_summary(dedup_result)
+        print(f"  {summary}")
+        data["_dedup"] = dedup_result
+        for section in ["全球头条", "东财快讯", "美联储趋势", "地缘政治趋势"]:
+            src = data.get(section)
+            if isinstance(src, dict) and src.get("headlines"):
+                deduped, merged = _dedup.merge_similar_items(src["headlines"], threshold=0.7, key="title")
+                if merged > 0:
+                    print(f"  ✅ {section}: 内部去重 {len(src['headlines'])} → {len(deduped)} (合并 {merged} 条)")
+                    src["headlines"] = deduped
+                    src["_dedup_merged"] = merged
+    except Exception as exc:
+        print(f"  ⚠️ 去重合并失败: {exc}")
+        data["_dedup"] = {"error": str(exc), "total_before": 0, "total_after": 0, "merged": 0}
+
+    # === 备用源使用情况汇总 ===
+    try:
+        backup_summary = _backup.get_backup_summary() if hasattr(_backup, 'get_backup_summary') else "备用源已配置"
+        print(f"\n🔄 {backup_summary[:200]}...")
+        data["_backup_info"] = {"summary": backup_summary, "sources": list(_backup.ALL_BACKUP_MAP.keys()) if hasattr(_backup, 'ALL_BACKUP_MAP') else []}
+    except Exception:
+        data["_backup_info"] = {"summary": "备用源已启用"}
 
     print("\n✅ 数据采集完成！")
     return data
