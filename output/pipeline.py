@@ -2268,15 +2268,30 @@ def fetch_hk_quant():
 # 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
 # ============================================================
 def fetch_sector_rotation():
-    """独立中国行业指数轮动数据源；失败不影响其它栏目。"""
+    """独立中国行业指数轮动数据源；失败不影响其它栏目。
+
+    失败时把具体判死原因打到日志（行业列表 / 日K 口径 / 锚点日 / 评分 / 存档
+    哪一环不过），并已在 sector_rotation 内落盘诊断，便于隔日核查。
+    """
     print("📡 正在计算中国行业指数周度评分与月度轮动...")
     try:
         result = _rotation.run(safe_request)
     except Exception as exc:
-        result = {"available": False, "reason": str(exc)}
+        result = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
     if not result.get("available"):
+        diag = result.get("diag") or {}
+        detail = " · ".join(f"{k}={diag[k]}" for k in
+                            ("universe", "fqt", "kline_series", "asof", "scored")
+                            if diag.get(k) is not None)
+        print(f"  ⚠️ 行业轮动栏目缺席：{result.get('reason')}"
+              + (f"（{detail}）" if detail else ""))
         return _source_result("东方财富 · 中国行业板块指数日线", "unavailable",
                               error=result.get("reason"), result=result)
+    diag = result.get("diag") or {}
+    print(f"  ✅ 行业轮动：锚点 {result['asof']} · 有效 {result['scored_count']}/"
+          f"{result['universe_count']} 个行业 · 月度持仓"
+          f"{'沿用' if diag.get('state') == 'reused' else '新建'}"
+          f"（复权口径 fqt={diag.get('fqt')}）")
     return _source_result("东方财富 · 中国行业板块指数日线", "success",
                           is_today=result["asof"] == datetime.now(CST).strftime("%Y-%m-%d"),
                           content_date=result["asof"], result=result)
@@ -8791,16 +8806,17 @@ def main():
     fresh_items = _collect_headline_items(data, _today_display())
     news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
 
-    # TEMP-PROBE-BEGIN（临时诊断：把在线探测结果随存档提交，定位完即删）
-    try:
-        import probe_sector_rotation as _probe
-        news_corpus["sector_rotation_probe"] = _probe.build_report(verbose=True)
-        print("  🔎 行业轮动在线探测已写入标题存档（临时诊断键）")
-    except Exception as _probe_exc:
-        news_corpus["sector_rotation_probe"] = {
-            "probe_error": f"{type(_probe_exc).__name__}: {_probe_exc}"}
-        print(f"  ⚠️ 行业轮动在线探测失败：{_probe_exc}")
-    # TEMP-PROBE-END
+    # 行业轮动栏目缺席时留一次在线诊断（落进标题存档一起提交，供隔日核查；
+    # 健康运行时零额外请求；OCTOPUS_ROTATION_PROBE=0 可关闭）
+    if (data.get("行业轮动") or {}).get("status") != "success" and \
+            str(os.environ.get("OCTOPUS_ROTATION_PROBE", "1")).strip().lower() not in ("0", "false", "no"):
+        try:
+            import probe_sector_rotation as _probe
+            news_corpus["sector_rotation_probe"] = _probe.build_report(
+                verbose=True, keep_payloads=False)
+            print("  🔎 行业轮动缺席：在线诊断已写入标题存档（键 sector_rotation_probe）")
+        except Exception as _probe_exc:
+            print(f"  ⚠️ 行业轮动在线诊断失败：{_probe_exc}")
 
     # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）

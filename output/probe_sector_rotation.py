@@ -190,8 +190,11 @@ def run_module():
     return result
 
 
-def build_report(verbose=True):
-    """执行三步探测并返回结果字典（供 CLI 与临时诊断钩子共用）。"""
+def build_report(verbose=True, keep_payloads=True):
+    """执行三步探测并返回结果字典（供 CLI 与日报内自动诊断共用）。
+
+    keep_payloads=False 时只保留摘要与响应片段，避免把整包行情 JSON 写进存档。
+    """
     report = {"probe_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "probe_at_cst": datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S"),
               "runner": os.environ.get("GITHUB_RUN_ID", "local")}
@@ -230,6 +233,11 @@ def build_report(verbose=True):
     log(f"  · 行业列表 {report['module'].get('universe_count')} 个 · run="
         + str({k: v for k, v in (report['module'].get('run') or {}).items()
                if k != 'scores_top5'}))
+
+    if not keep_payloads:
+        for probe in report["universe"] + report["klines"]:
+            probe.pop("json", None)
+            probe["body_head"] = (probe.get("body_head") or "")[:300]
     return report
 
 
