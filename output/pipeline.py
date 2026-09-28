@@ -73,18 +73,8 @@
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
-  8. PushPlus 内容上限与「分条完整推送」（2026-09-28 起）：单条上限按会员额度 10 万字
-     （可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时**不再截断丢内容**，
-     而是按栏目边界拆成 N 条消息依次推送（标题追加 1/N、2/N…，条间等待
-     PUSHPLUS_PART_DELAY 秒避开频率限制）：每条 = 原文档头部外壳（含刊头）+ 条序横幅 +
-     若干完整栏目 + 页脚与闭合标签，因此每条都是独立、标签平衡、样式一致的 HTML，
-     微信端排版与单条推送相同，全部内容按原顺序送达。单个栏目自身就超预算时，再按完整
-     标签边界细分并在续片里原样重开父标签，同样不丢字。所需条数超过 PUSHPLUS_MAX_PARTS
-     （默认 12）时，前 N-1 条完整推送、收尾条截断并附「完整日报」链接，且横幅如实说明
-     未推完，绝不假装全文已送达。PUSHPLUS_MULTIPART=0 可整体关闭分条，回退到旧的
-     「按标签边界截断 + 完整版链接」；旧版日报文件没有分条标记时同样自动回退。
-     注意：分条会按条数消耗 PushPlus 当日额度（25 万字日报约 3 条）。
-     磁盘 / GitHub 上的日报文件始终是一份完整版，不受推送拆分影响。
+  8. 超长日报按栏目边界全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
+     完整栏目拆为多条独立 HTML 消息依次发送，全部明细不丢；磁盘 / GitHub 始终保留一份完整日报。
   9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股头条、
      港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
      信号分 + 置信度、板块热度、技术速读、风险提示、明日关注主题）。无需大模型 API、
@@ -199,11 +189,8 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
-# 完整推送（2026-09-28 起）：单条上限固定按 10 万字（会员额度），但日报不再被截断——
-# 超过上限时按「完整标签边界 + 栏目边界」拆成多条微信消息（1/n、2/n…）依次推送，
-# 全部内容都会送达。每条消息都是结构完整、标签自闭合的独立 HTML，
-# 并沿用原文档的 <head>／外层包裹与页尾，微信端排版与单条推送一致。
-# PUSHPLUS_MULTIPART=0 可关闭拆分，回退到旧行为（按标签边界截断 + 完整版链接）。
+# 完整推送：超过单条上限时，按完整栏目拆成多条独立 HTML 消息依次发送，全部明细不丢。
+# PUSHPLUS_MULTIPART=0 可恢复旧行为（安全截断 + 完整版链接）；磁盘日报始终保留完整版。
 PUSHPLUS_MULTIPART = str(os.environ.get("PUSHPLUS_MULTIPART", "1")).strip().lower() not in ("0", "false", "no")
 # 多条推送之间的间隔秒数，避免触发 PushPlus「发送频繁」频率限制（每条仍各自退避重试）。
 PUSHPLUS_PART_DELAY = float(os.environ.get("PUSHPLUS_PART_DELAY", "2"))
@@ -2472,10 +2459,10 @@ GZ_MONO = GZ_FONT          # 兼容旧调用：元信息（不再用等宽）
 GZ_W_BODY = 500            # 墨水屏不要细笔画：正文用 Medium
 GZ_W_BOLD = 700            # 标题 / 徽标 / 数值：Bold
 # 字号阶梯：图标独立，刊头/栏目标题收紧，关键数字仍醒目（微信详情页可缩放）。
-GZ_ICON_MASTHEAD = 128   # 刊头章鱼
-GZ_ICON_SECTION = 96     # 栏目图标（落在标题上方）
-GZ_ICON_ROW = 72         # 刊头栏目图标横排
-GZ_ICON_MIN, GZ_ICON_MAX = 16, 160
+GZ_ICON_MASTHEAD = 16   # 刊头章鱼：按用户要求改为最小尺寸
+GZ_ICON_SECTION = 16    # 栏目图标（落在标题上方）
+GZ_ICON_ROW = 16        # 刊头栏目图标横排
+GZ_ICON_MIN = GZ_ICON_MAX = 16  # 所有 Koboyo 装饰图标固定最小尺寸，不被调用参数放大
 
 
 # 环境变量 OCTOPUS_FONT_SCALE 一处控制 guizang 主题的全部字号（默认 0.85＝整体缩小）。
@@ -2550,11 +2537,11 @@ def gz_icon(name, size=None, *, masthead=False, inline=False):
         size = GZ_ICON_MASTHEAD if masthead else GZ_ICON_SECTION
     size = max(GZ_ICON_MIN, min(GZ_ICON_MAX, int(size)))
     if masthead:
-        spacing = "display:block;margin:0 0 24px;"
+        spacing = "display:block;margin:0 0 8px;"
     elif inline:
-        spacing = "vertical-align:middle;margin:0 16px 16px 0;"
+        spacing = "vertical-align:middle;margin:0 6px 6px 0;"
     else:
-        spacing = "display:block;margin:0 0 16px;"
+        spacing = "display:block;margin:0 0 8px;"
     loading = "eager" if masthead else "lazy"
     return (f'<img src="{KOBOYO_ICON_BASE}{name}.svg" width="{size}" height="{size}" '
             f'alt="" aria-hidden="true" loading="{loading}" decoding="async" '
@@ -2565,7 +2552,7 @@ def gz_masthead_icon_row(size=None):
     """刊头栏目图标列：多图标显示；外链失效时仅少一行装饰，刊头文字仍完整。"""
     size = GZ_ICON_ROW if size is None else size
     icons = "".join(gz_icon(name, size, inline=True) for name in KOBOYO_MASTHEAD_ICONS)
-    return f'<div style="padding-top:24px;line-height:1;">{icons}</div>'
+    return f'<div style="padding-top:8px;line-height:1;">{icons}</div>'
 
 
 def _sq(color=C_ACCENT, size=8):
@@ -3423,9 +3410,9 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
         f'letter-spacing:1px;line-height:1.4;">{_esc(title)}</h2>',
         bg=GZ_INK, pad="12px 16px")
     head = gz_shell(
-        f'<div style="border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:28px;">'
+        f'<div style="border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:8px;">'
         f'{gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"))}</div>'
-        f'{title_bar}{cap}{badge}', bg=GZ_PAPER, pad="40px 0 16px")
+        f'{title_bar}{cap}{badge}', bg=GZ_PAPER, pad="24px 0 12px")
     body = gz_shell(content, bg=GZ_PAPER, pad="0 0 12px")
     return head + body
 
@@ -6631,11 +6618,11 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 </head>
 <body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:{GZ_FS_BODY}px;font-weight:{GZ_W_BODY};line-height:1.85;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;word-wrap:break-word;">
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;background:{GZ_PAPER};">
-<tr><td align="center" valign="top" style="padding:0 24px;">
+<tr><td align="center" valign="top" style="padding:0 4%;">
 <table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;max-width:760px;margin:0 auto;border-collapse:collapse;table-layout:fixed;"><tr><td>
 
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;">
-<tr><td align="left" valign="top" style="padding:64px 0 24px;">
+<tr><td align="left" valign="top" style="padding:32px 0 16px;">
 {gz_icon("octopus", masthead=True)}
 <div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;">{_esc(date_display)}</div>
 <div style="padding-top:18px;">{masthead_title_bar}</div>
@@ -6694,7 +6681,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="octopus-report-date" content="{date_str}">
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
@@ -7114,9 +7101,9 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
       或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
-    - 日报 HTML 超过单条上限（PUSHPLUS_MAX_CONTENT_CHARS，默认 10 万字）时**不丢内容**：
-      按栏目边界拆成多条消息依次推送（标题追加 1/N、2/N…），全部内容都会送达；
-      拆分不可用时（旧版文件没有分条标记）才回退到「按标签边界截断 + 完整版链接」；
+    - 日报 HTML 超过单条上限（默认 10 万字符）时，按栏目边界拆成多条消息完整推送，
+      全部明细按原顺序送达；旧版 HTML 无拆分锚点或 PUSHPLUS_MULTIPART=0 时，
+      回退到「按标签边界截断 + 完整版链接」；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次），多条推送时每条各自享有重试；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
