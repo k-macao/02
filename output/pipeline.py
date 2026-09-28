@@ -788,10 +788,121 @@ def _source_note(item):
     return f"{item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
 
 
+# 行情速览的品种分组：用于「按市场标注数据截至日」与「识别某个市场整体滞后」。
+# 商品期货（WTI）周日晚间就开始下一交易日的电子盘，其 K 线日期天然领先股票指数，
+# 因此不参与「整份快照属于哪一天」与「哪个市场滞后」的判断。
+MARKET_QUOTE_GROUPS = (
+    ("美股", ("道琼斯指数", "标普500", "纳斯达克", "微软 MSFT", "Meta META")),
+    ("A股", ("上证指数", "深证成指", "创业板指", "科创50")),
+    ("港股", ("恒生指数", "恒生科技")),
+    ("商品", ("WTI 原油",)),
+)
+MARKET_LAG_EXEMPT_GROUPS = ("商品",)
+# 东方财富独立时间基准（回补用）：港股指数 secid 代码 → 行情速览品种名
+MARKET_HK_REFERENCE_CODES = {"HSI": "恒生指数", "HSTECH": "恒生科技"}
+
+
+def _market_group_of(label):
+    for group, labels in MARKET_QUOTE_GROUPS:
+        if label in labels:
+            return group
+    return "其他"
+
+
+def _market_group_dates(market):
+    """{分组: 该组已取得报价里最新的 as_of 日期}（没有日期信息的品种不计）。"""
+    out = {}
+    for label, q in ((market or {}).get("quotes") or {}).items():
+        if not isinstance(q, dict) or not q.get("as_of"):
+            continue
+        g = _market_group_of(label)
+        if not out.get(g) or q["as_of"] > out[g]:
+            out[g] = q["as_of"]
+    return out
+
+
+def _market_newest_session(market):
+    """股票市场（美股 / A股 / 港股）里最新的一个数据日期；无日期信息返回 None。"""
+    dates = [d for g, d in _market_group_dates(market).items()
+             if g not in MARKET_LAG_EXEMPT_GROUPS]
+    return max(dates) if dates else None
+
+
+def _market_lagging(market):
+    """返回 {品种: as_of}：数据日期落后于「股票市场最新日期」的品种（商品期货豁免）。
+
+    典型场景：Yahoo 在交易所本地 0 点后暂时丢掉刚收盘日线且 meta / 东财回补都失败时，
+    港股 / A股整组仍是上上个交易日，而美股是最新收盘 —— 这些品种不应再被当成最新行情
+    参与「主要指数平均」，页面上也要写明日期。
+    """
+    newest = _market_newest_session(market)
+    if not newest:
+        return {}
+    out = {}
+    for label, q in ((market or {}).get("quotes") or {}).items():
+        if not isinstance(q, dict) or not q.get("as_of"):
+            continue
+        if _market_group_of(label) in MARKET_LAG_EXEMPT_GROUPS:
+            continue
+        if q["as_of"] < newest:
+            out[label] = q["as_of"]
+    return out
+
+
+def _refresh_market_dates(market):
+    """按各品种 as_of 重算快照级日期字段（content_date / is_today / group_dates / lagging）。
+
+    content_date 只看股票市场（美股 / A股 / 港股）的最新日期，不再被 WTI 电子盘或某一根
+    「有时间戳但没有收盘价」的空 K 线拉成「当天」。
+    """
+    quotes = (market or {}).get("quotes") or {}
+    if not quotes:
+        return market
+    newest = _market_newest_session(market)
+    if not newest:
+        dates = [q.get("as_of") for q in quotes.values() if isinstance(q, dict) and q.get("as_of")]
+        newest = max(dates) if dates else None
+    market["content_date"] = newest
+    market["is_today"] = bool(newest) and newest == _today_display()
+    market["group_dates"] = _market_group_dates(market)
+    market["lagging"] = _market_lagging(market)
+    return market
+
+
+def _yahoo_quote_from_chart(data):
+    """把一份 Yahoo Chart 响应解析成单品种报价：
+
+    {price, change_pct, volume, currency, as_of, prev_date, via}
+      · as_of    —— 「price」实际所属的交易日（取自有收盘价的那根 K 线，不是时间戳末尾的空 K 线）；
+      · via      —— "bar"（日线）或 "meta"（Yahoo 暂缺刚收盘日线，用 meta 最新报价补出，见
+                    octopus_quant.providers.session_bar_from_meta）。
+    解析失败抛 ValueError（由调用方记入失败列表）。
+    """
+    result = data["chart"]["result"][0]
+    bars = _quant.providers.parse_chart_result(result)
+    if len(bars) < 2:
+        raise ValueError("报价记录不足")
+    last, prev = bars[-1], bars[-2]
+    price, previous = float(last["close"]), float(prev["close"])
+    if previous == 0:
+        raise ZeroDivisionError("前收为 0")
+    vol = last.get("volume")
+    if vol in (None, ""):
+        vols = [b.get("volume") for b in bars if b.get("volume") not in (None, "")]
+        vol = vols[-1] if vols else 0
+    return {"price": price, "change_pct": (price / previous - 1) * 100,
+            "volume": vol or 0,
+            "currency": (result.get("meta") or {}).get("currency", ""),
+            "as_of": last["date"], "prev_date": prev["date"],
+            "via": "meta" if last.get("from_meta") else "bar"}
+
+
 def fetch_market_snapshot():
     """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。
-    
-    备用源：query1 → query2 → 东财兜底
+
+    备用源：query1 → query2 → v7；港股 / A股指数另有东方财富独立时间基准回补
+    （见 _reconcile_market_snapshot，在 collect_all_data 里执行）。
+    每个品种都记录自己的数据日期 as_of，页面按市场标注「截至 MM-DD」。
     """
     print("📡 正在抓取全球/A股实时行情...")
     specs = [
@@ -801,7 +912,7 @@ def fetch_market_snapshot():
         ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
         ("恒生指数", "%5EHSI"), ("恒生科技", "%5EHSTECH"),
     ]
-    quotes, failures, last_dates = {}, [], []
+    quotes, failures, meta_filled = {}, [], []
     for label, symbol in specs:
         # 主备 URL 列表
         yahoo_urls = _backup.get_yahoo_urls(symbol)
@@ -809,45 +920,108 @@ def fetch_market_snapshot():
         urls_with_params = [f"{url}?range=5d&interval=1d" for url in yahoo_urls]
         data, success_url, errors = safe_request_with_fallback(urls_with_params)
         if not data:
-            # 尝试东财作为最终备用（仅 A 股）
-            if ".SS" in symbol or ".SZ" in symbol:
-                # 东财 A 股备用（简化，不实现完整解析，仅记录失败）
-                failures.append(f"{label}: Yahoo 主备均失败")
-            else:
-                failures.append(f"{label}: Yahoo 主备均失败")
+            failures.append(f"{label}: Yahoo 主备均失败")
             continue
-        
         try:
-            result = data["chart"]["result"][0]
-            quote_0 = result["indicators"]["quote"][0]
-            closes = [x for x in quote_0["close"] if x is not None]
-            volumes = [x for x in quote_0.get("volume", []) if x is not None]
-            if len(closes) < 2:
-                raise ValueError("报价记录不足")
-            price, previous = closes[-1], closes[-2]
-            vol = volumes[-1] if volumes else 0
-            quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
-                             "volume": vol,
-                             "currency": result.get("meta", {}).get("currency", "")}
-            ts_list = result.get("timestamp") or []
-            if ts_list:
-                last = datetime.fromtimestamp(ts_list[-1], CST).strftime("%Y-%m-%d")
-                last_dates.append(last)
+            quotes[label] = _yahoo_quote_from_chart(data)
+            if quotes[label]["via"] == "meta":
+                meta_filled.append(f"{label}({quotes[label]['as_of'][5:]})")
         except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
             failures.append(f"{label}: {exc}")
-    
+
     status = "success" if quotes else "unavailable"
-    content_date = max(last_dates) if last_dates else None
-    is_today = content_date == _today_display()
+    market = _source_result("Yahoo Finance Chart", status,
+                            quotes=quotes,
+                            error="；".join(failures[:2]) or None,
+                            partial=len(quotes) != len(specs))
+    market["source_primary"] = "Yahoo Finance Chart"
+    market["patched"] = []
+    _refresh_market_dates(market)
     if quotes:
-        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情（数据日期 {content_date}）")
+        gd = market.get("group_dates") or {}
+        span = " / ".join(f"{g} {gd[g]}" for g, _ in MARKET_QUOTE_GROUPS if gd.get(g))
+        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情（数据日期 {span}）")
+        if meta_filled:
+            print("  ℹ️ Yahoo 日线暂缺刚收盘 K 线，已用 meta 最新报价补齐："
+                  + "、".join(meta_filled))
+        if market.get("lagging"):
+            print("  ⚠️ 以下品种数据日期落后于最新交易日（页面将标注日期，不计入指数均值）："
+                  + "、".join(f"{k}={v}" for k, v in market["lagging"].items()))
     else:
         print("  ⚠️ 实时行情暂不可用；日报将明确显示数据暂缺")
-    return _source_result("Yahoo Finance Chart", status,
-                          is_today=is_today, content_date=content_date,
-                          quotes=quotes,
-                          error="；".join(failures[:2]) or None,
-                          partial=len(quotes) != len(specs))
+    return market
+
+
+def _fetch_hk_index_reference():
+    """东方财富港股指数报价（含 f124 行情时间）——「行情速览」核对 / 回补港股行情的独立基准。"""
+    try:
+        return _quant.providers.fetch_hk_index_quotes(safe_request) or {}
+    except Exception as exc:                      # 参考源失败只影响回补，不影响主流程
+        print(f"  ⚠️ 东财港股指数参考报价失败：{exc}")
+        return {}
+
+
+def _reconcile_market_snapshot(market, pan=None, hk_ref=None):
+    """用东方财富的独立时间基准核对 Yahoo 行情，回补「回退到上一个交易日」的港股 / A股指数。
+
+    规则（只在东财数据日期**严格晚于** Yahoo 该品种 as_of 时替换；东财失败或日期相同不动）：
+      · A股四指数：对照「全球大盘全景复盘」同一次抓取的东财指数（quote_time 为行情时间）；
+      · 恒生指数 / 恒生科技：对照东财 100.HSI / 100.HSTECH（f124 行情时间）；
+        Yahoo 完全没给港股报价时也用东财补上（港股是本日报的主市场）。
+    替换后的品种 via="eastmoney"，记录 yahoo_as_of 供审计；快照级 content_date /
+    is_today / lagging 重新计算；来源名追加「东方财富回补」。绝不回补成更旧的数字。
+    """
+    if not isinstance(market, dict) or market.get("status") != "success":
+        return market
+    quotes = market.setdefault("quotes", {})
+    patched = list(market.get("patched") or [])
+
+    def _apply(label, price, chg_pct, as_of, ref_name, quote_time=None):
+        old = quotes.get(label) or {}
+        if price is None or chg_pct is None or not as_of:
+            return
+        if old.get("as_of") and as_of <= old["as_of"]:
+            return
+        if old and not old.get("as_of"):
+            return                           # 无法比较日期就不动 Yahoo 的值
+        quotes[label] = {
+            "price": float(price), "change_pct": float(chg_pct),
+            "volume": old.get("volume") or 0, "currency": old.get("currency", ""),
+            "as_of": as_of, "prev_date": None, "via": "eastmoney",
+            "ref": ref_name, "quote_time": quote_time,
+            "yahoo_as_of": old.get("as_of"),
+        }
+        patched.append(label)
+
+    # ---- A股：对照全景复盘（东财 push2 ulist，f124 行情时间）----
+    if isinstance(pan, dict) and pan.get("status") == "success":
+        pan_date = str(pan.get("content_date") or "")[:10]
+        pan_rows = {str(r.get("name")): r for r in (pan.get("indices") or []) if isinstance(r, dict)}
+        if pan_date:
+            for label in MARKET_QUOTE_GROUPS[1][1]:
+                row = pan_rows.get(label)
+                if row and label in quotes:          # A股只回补已有品种，不重复全景表
+                    _apply(label, row.get("price"), row.get("chg_pct"), pan_date,
+                           "东方财富·A股全景", pan.get("quote_time"))
+
+    # ---- 港股：对照东财港股指数（100.HSI / 100.HSTECH）----
+    for code, label in MARKET_HK_REFERENCE_CODES.items():
+        ref = (hk_ref or {}).get(code) or {}
+        if not ref or not ref.get("as_of"):
+            continue
+        _apply(label, ref.get("price"), ref.get("chg_pct"), ref["as_of"],
+               "东方财富·港股指数", ref.get("quote_time"))
+
+    market["patched"] = patched
+    if patched:
+        market["source"] = f"{market.get('source_primary') or 'Yahoo Finance Chart'} · 东方财富回补"
+        print("  ✅ 东方财富回补（Yahoo 数据日期落后）："
+              + "、".join(f"{k}→{quotes[k]['as_of']}" for k in patched))
+    _refresh_market_dates(market)
+    if market.get("lagging"):
+        print("  ⚠️ 回补后仍滞后的品种："
+              + "、".join(f"{k}={v}" for k, v in market["lagging"].items()))
+    return market
 
 
 def _quote_value(market, label, precision=2):
@@ -3245,6 +3419,12 @@ def collect_all_data():
     time.sleep(0.5)
     data["A股大盘全景"] = fetch_market_panorama()
     time.sleep(0.5)
+    # Yahoo 在交易所本地 0 点后几小时内会暂时丢掉刚收盘的日线（2026-09-29 凌晨实测：
+    # 恒指 / 上证回退到上周五）。这里用东方财富的行情时间做独立基准核对并回补，
+    # 保证「今日预判」里的港股 / A股一句话是最近一个收盘，而不是上上个交易日。
+    if data["实时行情"].get("status") == "success":
+        _reconcile_market_snapshot(data["实时行情"], data["A股大盘全景"],
+                                   hk_ref=_fetch_hk_index_reference())
     # 政策因子的独立官方输入：直接读取中国政府网最新政策，不以媒体转载替代。
     data["国家政策"] = fetch_gov_policy()
     time.sleep(0.5)
@@ -4115,17 +4295,50 @@ def gz_market_row(label, price_str, pct):
     return gz_data_table(["名称", "最新价", "涨跌"], [_gz_quote_row(label, price_str, pct)])
 
 
+def _market_block_caption(market, title, specs):
+    """子块标题追加数据日期：「A股四指数 · 截至 09-28」；组内日期不一致写区间，滞后标出。"""
+    note = _market_asof_note(market, [(label, label) for label, _ in specs])
+    if not note:
+        return title
+    return f"{title} · {note.strip('（）')}"
+
+
+def _market_block_date(market, specs):
+    """子块标题所用的日期（YYYY-MM-DD，取股票品种最新一天）；无日期返回 None。"""
+    quotes = (market or {}).get("quotes") or {}
+    core = [quotes[l]["as_of"] for l, _ in specs
+            if _market_group_of(l) not in MARKET_LAG_EXEMPT_GROUPS
+            and isinstance(quotes.get(l), dict) and quotes[l].get("as_of")]
+    return max(core) if core else None
+
+
+def _market_row_label(market, label, block_date=None):
+    """品种名后缀：落后于最新交易日的写日期；商品期货日期与子块不同也写日期；
+    由东方财富回补的标「东财」。"""
+    q = ((market or {}).get("quotes") or {}).get(label) or {}
+    suffix = []
+    if q.get("as_of") and (label in (market or {}).get("lagging", {})
+                           or (block_date and _market_group_of(label) in MARKET_LAG_EXEMPT_GROUPS
+                               and q["as_of"] != block_date)):
+        suffix.append(_asof_short(q["as_of"]))
+    if q.get("via") == "eastmoney":
+        suffix.append("东财")
+    return f"{label}（{'·'.join(suffix)}）" if suffix else label
+
+
 def gz_market_section(market):
     def _block(title, specs):
         rows = []
+        block_date = _market_block_date(market, specs)
         for label, precision in specs:
             price_str, pct = _quote_parts(market, label, precision)
             if price_str is None:
                 continue          # 缺失品种不出「数据暂缺」行
-            rows.append(_gz_quote_row(label, price_str, pct))
+            rows.append(_gz_quote_row(_market_row_label(market, label, block_date), price_str, pct))
         if not rows:
             return ""
-        return gz_subsection(title) + gz_data_table(["名称", "最新价", "涨跌"], rows)
+        return (gz_subsection(_esc(_market_block_caption(market, title, specs)))
+                + gz_data_table(["名称", "最新价", "涨跌"], rows))
 
     return (
         _block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
@@ -4548,12 +4761,14 @@ class _RenderKit:
 def _pixel_market_section(market):
     def _block(title, specs):
         rows = []
+        block_date = _market_block_date(market, specs)
         for label, precision in specs:
             if _quote_parts(market, label, precision)[0] is None:
                 continue          # 缺失品种不出「数据暂缺」行
             value, color = _quote_value(market, label, precision)
-            rows.append((label, value, color))
-        return (_subsection(title) + _data_table(rows)) if rows else ""
+            rows.append((_market_row_label(market, label, block_date), value, color))
+        return ((_subsection(_esc(_market_block_caption(market, title, specs)))
+                 + _data_table(rows)) if rows else "")
 
     return (_block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
                                  ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)])
@@ -4895,14 +5110,49 @@ def _trend_clues_block(data, kit):
     return kit.rows("".join(rows)) if rows else ""
 
 
-def _market_brief(market, labels, kit):
-    """「道指 ▲+0.93% · 标普 ▲+0.51%」式一行行情摘要；缺失项直接略过。"""
+def _asof_short(date_str):
+    """'2026-09-28' → '09-28'；空值返回 ''。"""
+    d = str(date_str or "")
+    return d[5:10] if len(d) >= 10 else d
+
+
+def _market_asof_note(market, labels):
+    """「（截至 09-28）」：这几个品种的数据日期；日期不一致写区间，落后于最新交易日标「滞后」。
+
+    「今日预判」是开盘前推送的结论，行情只能是**上一个收盘**；把日期写出来，读者才能
+    分辨「昨日收盘（正常）」与「回退到上上个交易日（数据滞后）」。
+    """
+    quotes = (market or {}).get("quotes") or {}
+    # 商品期货（WTI）电子盘日期天然领先：同一子块里只要有股票品种，就按股票品种定日期，
+    # 期货行自己在名称后标日期（见 _market_row_label），避免出现「截至 09-28~09-29」。
+    core = [l for l, _ in labels if _market_group_of(l) not in MARKET_LAG_EXEMPT_GROUPS
+            and isinstance(quotes.get(l), dict) and quotes[l].get("as_of")]
+    use = core or [l for l, _ in labels]
+    dates = sorted({str(quotes[l].get("as_of")) for l in use
+                    if isinstance(quotes.get(l), dict) and quotes[l].get("as_of")})
+    if not dates:
+        return ""
+    span = _asof_short(dates[0]) if len(dates) == 1 else f"{_asof_short(dates[0])}~{_asof_short(dates[-1])}"
+    lagging = _market_lagging(market)
+    if any(l in lagging for l, _ in labels):
+        return f"（截至 {span} · 滞后）"
+    return f"（截至 {span}）"
+
+
+def _market_brief(market, labels, kit, with_date=False):
+    """「道指 ▲+0.93% · 标普 ▲+0.51%」式一行行情摘要；缺失项直接略过。
+
+    with_date=True 时末尾追加「（截至 MM-DD）」数据日期说明。
+    """
     bits = []
     for label, short in labels:
         _, pct = _quote_parts(market or {}, label)
         if pct is not None:
             bits.append(f"{_esc(short)} {kit.trend(pct, compact=True)}")
-    return " · ".join(bits)
+    line = " · ".join(bits)
+    if line and with_date:
+        line += _esc(_market_asof_note(market, labels))
+    return line
 
 
 def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
@@ -4946,18 +5196,34 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
             bits.append(f'成交 {_format_amount(t["total"])}'
                         + (f' {kit.trend(chg, compact=True)}' if chg is not None else ""))
         if bits:
-            pairs.append(("A股", " · ".join(bits)))
+            line = " · ".join(bits)
+            # 数据日期：东财行情时间（开盘前推送 = 上一收盘；盘中运行 = 截至该时刻）
+            pan_date = _asof_short(pan.get("content_date"))
+            if pan_date:
+                qt = str(pan.get("quote_time") or "")
+                clock = qt[11:16] if len(qt) >= 16 else ""
+                line += _esc(f"（截至 {pan_date}{' ' + clock if clock else ''}）")
+            pairs.append(("A股", line))
     elif market and market.get("status") == "success":
-        line = _market_brief(market, [("上证指数", "上证"), ("深证成指", "深成")], kit)
+        line = _market_brief(market, [("上证指数", "上证"), ("深证成指", "深成")], kit, with_date=True)
         if line:
             pairs.append(("A股", line))
     if market and market.get("status") == "success":
-        us = _market_brief(market, [("道琼斯指数", "道指"), ("标普500", "标普"), ("纳斯达克", "纳指")], kit)
+        us = _market_brief(market, [("道琼斯指数", "道指"), ("标普500", "标普"), ("纳斯达克", "纳指")],
+                           kit, with_date=True)
         if us:
             pairs.append(("美股", us))
-        hk = _market_brief(market, [("恒生指数", "恒指"), ("恒生科技", "恒科")], kit)
+        hk = _market_brief(market, [("恒生指数", "恒指"), ("恒生科技", "恒科")], kit, with_date=True)
         if hk:
             pairs.append(("港股", hk))
+        lag = _market_lagging(market)
+        if lag:
+            groups = sorted({_market_group_of(l) for l in lag})
+            newest = _asof_short(_market_newest_session(market))
+            pairs.append(("数据提示",
+                          _esc(f"{'、'.join(groups)}行情数据日期落后于最新交易日 {newest}"
+                               f"（{'、'.join(f'{l} {_asof_short(d)}' for l, d in sorted(lag.items()))}）"
+                               "，上游行情源尚未更新，已不计入核心判断的指数均值")))
     if policy and policy.get("available"):
         quant_info = f' · {policy.get("quant_trend") or ""} {policy.get("quant_composite"):+.2f}' if policy.get("quant_composite") is not None else ""
         line = f'PSI {policy["broad_score"]:+d}（{_esc(policy["broad_label"])}）{quant_info}'
@@ -6066,12 +6332,18 @@ def build_daily_quant_strategy(data):
     # 个股仍作为 策略研判输入：板块趋势识别与活跃标的提及。
 
     # —— 2. 情绪打分 ——
+    # 数据日期落后于最新交易日的品种（如 Yahoo 凌晨回退到上上个交易日的港股 / A股）
+    # 不计入「主要指数平均」：把上周五的涨跌和昨夜美股收盘平均在一起没有意义。
+    lagging_quotes = _market_lagging(market)
     changes = []
-    for q in quotes.values():
+    for label, q in quotes.items():
+        if label in lagging_quotes:
+            continue
         try:
             changes.append(float(q["change_pct"]))
         except (TypeError, ValueError, KeyError):
             pass
+    quotes_asof = _market_newest_session(market)
 
     present = [m for m, md in hot_markets.items() if (md or {}).get("stocks")]
 
@@ -6103,7 +6375,13 @@ def build_daily_quant_strategy(data):
 
     reason_parts = []
     if changes:
-        reason_parts.append(f"主要指数平均{sum(changes) / len(changes):+.2f}%")
+        part = f"主要指数平均{sum(changes) / len(changes):+.2f}%"
+        if quotes_asof:
+            part += f"（截至 {quotes_asof[5:]}"
+            if lagging_quotes:
+                part += f"，{'、'.join(sorted({_market_group_of(l) for l in lagging_quotes}))}行情滞后未计入"
+            part += "）"
+        reason_parts.append(part)
     if present:
         reason_parts.append(f"{len(present)} 个市场榜单活跃")
     if all_text:

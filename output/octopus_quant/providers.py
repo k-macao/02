@@ -84,19 +84,81 @@ def hk_stock_universe():
 # ------------------------------------------------------------------
 # Yahoo Finance Chart —— 日线序列
 # ------------------------------------------------------------------
-def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
-    """取一只标的的日线序列。
-
-    返回按日期升序的 ``[{date, open, high, low, close, volume}, ...]``；
-    任何一步失败都返回 ``[]``（由上层决定降级，绝不编造数据）。
-    """
-    if not fetch_json:
-        return []
-    url = YAHOO_CHART.format(symbol=symbol)
-    data = fetch_json(url, params={"range": rng, "interval": interval},
-                      timeout=timeout)
+def _meta_tz(meta):
+    """交易所本地时区：优先 ``meta.gmtoffset``（秒），缺失时退回北京时间。"""
     try:
-        result = (data or {})["chart"]["result"][0]
+        off = (meta or {}).get("gmtoffset")
+        if off is not None:
+            return timezone(timedelta(seconds=int(off)))
+    except (TypeError, ValueError):
+        pass
+    return CST
+
+
+def session_bar_from_meta(result, bars):
+    """用 ``meta`` 里的最新报价补出 Yahoo 日线暂时缺失的「最近一个已收盘交易日」。
+
+    背景（2026-09-29 凌晨实测）：Yahoo Chart API 在交易所本地 0 点之后的几个小时里，
+    ``interval=1d`` 序列会暂时丢掉刚刚收盘那一天的 K 线（要等官方 EOD 数据入库才回来），
+    此时 ``timestamp/close`` 的最后一根只到上上个交易日，而 ``meta.regularMarketPrice`` /
+    ``meta.regularMarketTime`` 仍是刚收盘的价格与时间。若不处理，「最新收盘」会整体
+    回退一个交易日（周二凌晨看到的是上周五收盘）。
+
+    规则（全部满足才补，否则返回 None，绝不凭空造数）：
+      1. ``regularMarketPrice`` / ``regularMarketTime`` 都存在；
+      2. 报价所在交易所本地日期 **晚于** 序列最后一根 K 线的日期；
+      3. 报价属于**已收盘**的交易日：``regularMarketTime`` 不落在
+         ``currentTradingPeriod.regular`` 的 [start, end) 区间内（盘中不补，避免把半天
+         行情当收盘）。``currentTradingPeriod`` 缺失时视为无法判断 → 不补。
+    返回的 K 线带 ``from_meta=True`` 标记；开盘价无从得知记为 None。
+    """
+    meta = (result or {}).get("meta") or {}
+    price = meta.get("regularMarketPrice")
+    ts = meta.get("regularMarketTime")
+    if price is None or ts in (None, 0, ""):
+        return None
+    try:
+        price = float(price)
+        ts = int(ts)
+    except (TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+    tz = _meta_tz(meta)
+    m_date = datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+    last_date = bars[-1]["date"] if bars else None
+    if last_date and m_date <= last_date:
+        return None
+    regular = ((meta.get("currentTradingPeriod") or {}).get("regular") or {})
+    try:
+        start = int(regular.get("start"))
+        end = int(regular.get("end"))
+    except (TypeError, ValueError):
+        return None          # 无法判断是否已收盘 → 宁缺毋滥
+    if start <= ts < end:
+        return None          # 当前交易日盘中：不把半日行情当收盘
+    vol = meta.get("regularMarketVolume")
+    try:
+        vol = float(vol) if vol not in (None, "") else None
+    except (TypeError, ValueError):
+        vol = None
+    return {
+        "date": m_date,
+        "open": None,
+        "high": _num(meta.get("regularMarketDayHigh")),
+        "low": _num(meta.get("regularMarketDayLow")),
+        "close": price,
+        "volume": vol,
+        "from_meta": True,
+    }
+
+
+def parse_chart_result(result):
+    """把 Yahoo Chart ``result[0]`` 解析成升序日线（含 meta 回补），供日线与快照共用。
+
+    返回 ``[{date, open, high, low, close, volume[, from_meta]}]``；解析失败返回 ``[]``。
+    """
+    try:
         stamps = result.get("timestamp") or []
         quote = result["indicators"]["quote"][0]
         closes = quote.get("close") or []
@@ -124,7 +186,30 @@ def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
         except (IndexError, TypeError, ValueError):
             continue
     bars.sort(key=lambda b: b["date"])
+    extra = session_bar_from_meta(result, bars)
+    if extra:
+        bars.append(extra)
     return bars
+
+
+def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
+    """取一只标的的日线序列。
+
+    返回按日期升序的 ``[{date, open, high, low, close, volume}, ...]``；
+    任何一步失败都返回 ``[]``（由上层决定降级，绝不编造数据）。
+    Yahoo 在交易所本地 0 点后暂时丢掉刚收盘日线时，用 meta 报价补回那一根
+    （见 ``session_bar_from_meta``），避免量化 / 周度预测整体回退一个交易日。
+    """
+    if not fetch_json:
+        return []
+    url = YAHOO_CHART.format(symbol=symbol)
+    data = fetch_json(url, params={"range": rng, "interval": interval},
+                      timeout=timeout)
+    try:
+        result = (data or {})["chart"]["result"][0]
+    except (KeyError, TypeError, IndexError, AttributeError):
+        return []
+    return parse_chart_result(result)
 
 
 def fetch_series_batch(fetch_json, specs, *, rng="1y", workers=6, timeout=15,
@@ -217,7 +302,9 @@ def fetch_hk_index_quotes(fetch_json, timeout=12):
     secids = ",".join(f"100.{code}" for code in ("HSI", "HSTECH", "HSCEI"))
     data = fetch_json(EASTMONEY_ULIST, params={
         "fltt": "2", "invt": "2", "secids": secids,
-        "fields": "f2,f3,f4,f6,f12,f14",
+        # f124 = 行情时间戳（秒）：用来标注这条报价属于哪个交易日，
+        # 也是「行情速览」核对 Yahoo 是否回退的独立时间基准。
+        "fields": "f2,f3,f4,f6,f12,f14,f124",
     }, timeout=timeout)
     out = {}
     try:
@@ -235,11 +322,21 @@ def fetch_hk_index_quotes(fetch_json, timeout=12):
             amount = float(it.get("f6"))
         except (TypeError, ValueError):
             amount = None
+        quote_ts = None
+        try:
+            quote_ts = int(it.get("f124")) if it.get("f124") not in (None, "", "-") else None
+        except (TypeError, ValueError):
+            quote_ts = None
         out[code] = {
             "name": str(it.get("f14") or "").strip() or code,
             "price": price,
             "chg_pct": _num(it.get("f3")),
             "amount": amount,  # 单位：元
+            "quote_ts": quote_ts,
+            "as_of": (datetime.fromtimestamp(quote_ts, CST).strftime("%Y-%m-%d")
+                      if quote_ts else None),
+            "quote_time": (datetime.fromtimestamp(quote_ts, CST).strftime("%Y-%m-%d %H:%M:%S")
+                           if quote_ts else None),
         }
     return out
 
