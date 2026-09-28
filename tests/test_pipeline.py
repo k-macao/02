@@ -447,11 +447,11 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
         self.assertIn("LVL 01 // CONCLUSION", html)  # 结论先行
         self.assertIn("LVL 02 // MARKET SNAPSHOT", html)
-        self.assertIn("// POLICY SHOCK", html)
-        self.assertIn("// AI READ", html)
+        self.assertIn("// QUANT POLICY", html)
+        self.assertIn("// QUANT STRATEGY", html)
         self.assertIn("LVL 08 // WRAP-UP", html)  # 盘点收尾
-        self.assertIn("AI CORE OUTPUT", html)
-        self.assertIn("AI 主结论 // CORE THESIS", html)
+        self.assertIn("QUANT CORE", html)
+        self.assertIn("量化主结论 // QUANT THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（行情速览：明细数字唯一出处）
@@ -478,8 +478,8 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertNotIn("watch", res)          # 不再产出个股清单
         self.assertIn("AI/算力", res["themes"])  # 主题行保留
         html = pipeline._ai_analysis_block(res)
-        self.assertIn("WATCH LIST // 明日关注", html)
-        self.assertIn("★ THEME UNLOCKED // AI/算力、半导体/芯片", html)
+        self.assertIn("QUANT ALLOC // 量化配置", html)
+        self.assertIn("★ THEME UNLOCKED // AI/算力", html)
         # 个股不再以「关注清单」形式渲染（榜单股名为 A股股票0 等）
         self.assertNotIn("<b>A股股票", html)
 
@@ -554,8 +554,8 @@ class GuizangThemeTests(unittest.TestCase):
         # 发丝线与留白
         self.assertIn(pipeline.GZ_HAIR, html)
         # 中文标题，不再重复英文栏目编号。
-        self.assertNotIn("01 · AI READ", html)
-        self.assertIn("AI 盘研判</h2>", html)
+        self.assertNotIn("01 · QUANT STRATEGY", html)
+        self.assertIn("每日量化策略（板块趋势跟踪）</h2>", html)
         self.assertIn("▲ 涨", html)
         # 涨跌三重编码保留（颜色 + 箭头 + 文字）
         self.assertIn("▲ 涨 +1.25%", html)
@@ -2374,7 +2374,7 @@ class NewsSentimentFactorTests(unittest.TestCase):
 
 
 class PolicyFactorTests(unittest.TestCase):
-    """政策因子：关键词矩阵 / 行业 PSI / 总结 / 首位渲染。
+    """每日量化策略（政策因子趋势预判）：关键词矩阵 / 行业 PSI / 量化趋势分 / 总结 / 首位渲染。
 
     2026-09-09 起标题窗口放宽为近 15 个自然日（含报告日）：
     单日无政策但近 15 日有政策/宏观新闻时栏目照常出现；更早（窗口外）
@@ -2520,7 +2520,7 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertEqual(yesterday["dims"], ["监管收紧"])
 
     def test_macro_data_dimension_counts_cpi_ppi(self):
-        # 2026-09-09 增补：CPI/PPI/统计局等宏观数据视为政策因子输入，
+        # 2026-09-09 增补：CPI/PPI/统计局等宏观数据视为每日量化策略（政策因子趋势预判）输入，
         # 让“0 政策新闻”的宏观数据日也能出栏目（不再整日缺席）
         res = pipeline.build_policy_factor(self._minimal_data(
             ["国家统计局：8月份CPI同比温和回升，PPI同比涨幅扩大"]), "20260802")
@@ -2537,9 +2537,9 @@ class PolicyFactorTests(unittest.TestCase):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
         self.assertIn("LVL 01 // CONCLUSION", html)        # 结论先行，政策定调进入结论
-        self.assertIn("// POLICY SHOCK", html)
-        self.assertLess(html.find("// POLICY SHOCK"), html.find("// AI READ"))
-        self.assertIn("政策冲击指数", html)
+        self.assertIn("// QUANT POLICY", html)
+        self.assertLess(html.find("// QUANT POLICY"), html.find("// QUANT STRATEGY"))
+        self.assertIn("量化强度", html)
         self.assertIn("PSI +2", html)
         self.assertIn("政策类新闻 6 条", html)
         self.assertIn("地产链", html)
@@ -2550,12 +2550,12 @@ class PolicyFactorTests(unittest.TestCase):
     def test_guizang_renders_first_with_summary(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
-        self.assertLess(html.find("政策因子</h2>"), html.find("AI 盘研判</h2>"))
-        self.assertLess(html.find("今日结论</h2>"), html.find("政策因子</h2>"))
+        self.assertLess(html.find("每日量化策略（政策因子趋势预判）</h2>"), html.find("每日量化策略（板块趋势跟踪）</h2>"))
+        self.assertLess(html.find("今日结论</h2>"), html.find("每日量化策略（政策因子趋势预判）</h2>"))
         self.assertIn("PSI +2", html)
         self.assertIn("6 条（近 15 日）", html)
-        self.assertIn("行业冲击榜", html)
-        self.assertNotIn("政策因子口径", html)          # 口径说明已移除
+        self.assertIn("政策冲击强度榜", html)
+        self.assertNotIn("每日量化策略（政策因子趋势预判）口径", html)          # 口径说明已移除
         self.assertIn("08-01 ·", html)
 
     def test_absent_without_policy_news(self):
@@ -2563,18 +2563,18 @@ class PolicyFactorTests(unittest.TestCase):
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 data, "2026年8月2日 · 周日", "20260802", theme=theme)
-            self.assertNotIn("政策因子", html)
+            self.assertNotIn("每日量化策略（政策因子趋势预判）", html)
 
     def test_main_stage_result_honored(self):
         data = self._policy_data()
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel",
             policy_result={"available": False})  # main 阶段结果优先
-        self.assertNotIn("政策因子", html)
+        self.assertNotIn("每日量化策略（政策因子趋势预判）", html)
         html2 = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel",
             policy_result=None)  # 缺省时渲染侧兜底构建
-        self.assertIn("政策因子", html2)
+        self.assertIn("每日量化策略（政策因子趋势预判）", html2)
 
 
 
@@ -2671,13 +2671,13 @@ class NationalPolicySourceTests(unittest.TestCase):
             self.assertIn("官方原文", html)
             self.assertIn("中国政府网（官方发布）", html)
             self.assertIn("https://www.gov.cn/zhengce/content/2026/08/content_7070009.htm?a=1&amp;b=2", html)
-            self.assertLess(html.find("政策因子"), html.find("盘点总结"))
+            self.assertLess(html.find("每日量化策略（政策因子趋势预判）"), html.find("盘点总结"))
 
 
 class SectionReadingOrderTests(unittest.TestCase):
     """2026-09-27：按人类阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
 
-    结论先行 → 分栏展开（行情速览 → A股大盘全景 → 政策因子 → AI 盘研判 →
+    结论先行 → 分栏展开（行情速览 → A股大盘全景 → 每日量化策略（政策因子趋势预判） → 每日量化策略（板块趋势跟踪） →
     资讯：全球头条 → 东财快讯 → A股资讯 → 港股名家频道 → AI 新闻情绪因子）→
     盘点总结收尾。无数据栏目缺席但不打乱其余顺序。
     """
@@ -2694,13 +2694,13 @@ class SectionReadingOrderTests(unittest.TestCase):
         return data
 
     # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
-    # AI 盘研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
+    # 每日量化策略内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
         "今日结论</h2>",
         "行情速览</h2>",
         "A股大盘全景复盘</h2>",
-        "政策因子</h2>",
-        "AI 盘研判</h2>",
+        "每日量化策略（政策因子趋势预判）</h2>",
+        "每日量化策略（板块趋势跟踪）</h2>",
         "全球头条</h2>",
         "东方财富快讯</h2>",
         "A股资讯</h2>",
@@ -2724,7 +2724,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         order = [
             "LVL 01 // CONCLUSION",
             "LVL 02 // MARKET SNAPSHOT", "LVL 03 // A-SHARE PANORAMA",
-            "LVL 04 // POLICY SHOCK", "LVL 05 // AI READ",
+            "LVL 04 // QUANT POLICY", "LVL 05 // QUANT STRATEGY",
             "LVL 06 // GLOBAL HEADLINES", "LVL 07 // EASTMONEY WIRE",
             "LVL 08 // A-SHARE DESK", "LVL 09 // HK GURU CHANNELS",
             "LVL 10 // NEWS SENTIMENT", "LVL 11 // WRAP-UP",
@@ -2748,12 +2748,12 @@ class SectionReadingOrderTests(unittest.TestCase):
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
         order = ["LVL 01 // CONCLUSION", "LVL 02 // MARKET SNAPSHOT",
-                 "LVL 03 // A-SHARE PANORAMA", "LVL 04 // AI READ",
+                 "LVL 03 // A-SHARE PANORAMA", "LVL 04 // QUANT STRATEGY",
                  "LVL 05 // WRAP-UP"]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
-        self.assertNotRegex(html, r"LVL \d+ // POLICY SHOCK")
+        self.assertNotRegex(html, r"LVL \d+ // QUANT POLICY")
         self.assertNotRegex(html, r"LVL \d+ // NEWS SENTIMENT")
 
 
@@ -2793,7 +2793,7 @@ class ConciseLayoutTests(unittest.TestCase):
         guizang = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
         self.assertNotIn("频道简介不应出现", guizang)
         self.assertNotIn("香港著名股評人", guizang)
-        self.assertNotIn("AI 盘研判由公开数据经确定性规则合成", guizang)
+        self.assertNotIn("每日量化策略（板块趋势跟踪）由公开数据经确定性规则合成", guizang)
 
     def test_concise_detail_drops_disclaimers(self):
         self.assertEqual(
