@@ -189,6 +189,7 @@ import random
 import re
 import glob
 import json
+import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html import unescape as _html_unescape
@@ -721,32 +722,80 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
         return None
 
 
-def safe_request_with_fallback(urls, headers=None, params=None, timeout=15, is_json=True):
-    """带备用源的安全请求：依次尝试 URL 列表，任一成功即返回
-    
-    用于实现“全部数据源有备用源”的要求
-    返回 (result, success_url, errors)
+# 本次运行里「备用源顶上」的记录：[(数据线名, 备用源序号标签, 备用源说明)]，
+# 采集结束写入 data["_backup_info"]["events"]，并在总结「数据覆盖」里点名，读者可知哪一路在供数。
+BACKUP_EVENTS = []
+_BACKUP_EVENTS_LOCK = threading.Lock()
+
+
+def _note_backup_served(line, url, **fmt):
+    """登记一次备用源命中（同一数据线同一路只记一次）。"""
+    if not line or line not in _backup.DATA_LINES:
+        return
+    tag = _backup.label_for(line, url, **fmt)
+    if tag == "主源":
+        return
+    label = next((lab for lab, u, _s in _backup.candidates(line, **fmt) if u == url), "")
+    rec = (_backup.DATA_LINES[line]["name"], tag, label)
+    with _BACKUP_EVENTS_LOCK:
+        if rec not in BACKUP_EVENTS:
+            BACKUP_EVENTS.append(rec)
+
+
+def backup_events_text(events=None):
+    """「数据覆盖」用：'实时行情 · Yahoo 日线快照→备用源1（Yahoo Finance query2）、…'。"""
+    evs = BACKUP_EVENTS if events is None else events
+    return "、".join(f"{name}→{tag}（{label.split('（')[0]}）" if label else f"{name}→{tag}"
+                    for name, tag, label in evs)
+
+
+def safe_request_with_fallback(urls, headers=None, params=None, timeout=15, is_json=True,
+                               validate=None, line=None, fmt=None):
+    """带备用源的安全请求：依次尝试 URL 列表（主源在前），任一 **有效** 即返回。
+
+    validate —— 可选校验函数 validate(result) -> bool；镜像主机可能返回 200 但正文是
+                {"data": null} / 空列表 / 错误页，这类响应视为失败并继续尝试下一路，
+                否则备用源形同虚设（2026-09-29 重构前只判「非空 dict」）。
+    line     —— backup_sources.DATA_LINES 的数据线 id；命中备用源时登记到 BACKUP_EVENTS。
+    返回 (result, success_url, errors)。
     """
     if isinstance(urls, str):
         urls = [urls]
-    
+    urls = [u for u in urls if u]
+
     errors = []
     for url in urls:
         result = safe_request(url, headers=headers, params=params, timeout=timeout, is_json=is_json)
-        if result is not None:
-            # 验证结果有效性
-            if is_json and isinstance(result, dict) and not result:
-                errors.append(f"{url[:60]}: 空字典")
+        if result is None:
+            errors.append(f"{url[:60]}: 请求失败")
+            continue
+        if is_json and isinstance(result, dict) and not result:
+            errors.append(f"{url[:60]}: 空字典")
+            continue
+        if not is_json and isinstance(result, str) and len(result.strip()) < 10:
+            errors.append(f"{url[:60]}: 内容过短")
+            continue
+        if validate is not None:
+            try:
+                ok = bool(validate(result))
+            except Exception:
+                ok = False
+            if not ok:
+                errors.append(f"{url[:60]}: 返回内容无效")
                 continue
-            if not is_json and isinstance(result, str) and len(result.strip()) < 10:
-                errors.append(f"{url[:60]}: 内容过短")
-                continue
-            if url != urls[0]:
-                print(f"  ✅ 备用源成功 [{url[:60]}...]")
-            return result, url, errors
-        errors.append(f"{url[:60]}: 请求失败")
-    
+        if url != urls[0]:
+            print(f"  ✅ 备用源成功 [{url[:60]}...]")
+            _note_backup_served(line, url, **(fmt or {}))
+        return result, url, errors
+
     return None, None, errors
+
+
+def _served_label(line, url, **fmt):
+    """URL → 主源 / 备用源N（找不到数据线时返回空串）。"""
+    if not line or not url or line not in _backup.DATA_LINES:
+        return ""
+    return _backup.label_for(line, url, **fmt)
 
 
 # ============================================================
@@ -900,7 +949,8 @@ def _yahoo_quote_from_chart(data):
 def fetch_market_snapshot():
     """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。
 
-    备用源：query1 → query2 → v7；港股 / A股指数另有东方财富独立时间基准回补
+    备用源（数据线 yahoo_chart）：query1 → query2（同格式）→ 东方财富行情快照（独立解析）；
+    港股 / A股指数另有东方财富独立时间基准回补
     （见 _reconcile_market_snapshot，在 collect_all_data 里执行）。
     每个品种都记录自己的数据日期 as_of，页面按市场标注「截至 MM-DD」。
     """
@@ -912,30 +962,60 @@ def fetch_market_snapshot():
         ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
         ("恒生指数", "%5EHSI"), ("恒生科技", "%5EHSTECH"),
     ]
-    quotes, failures, meta_filled = {}, [], []
+    quotes, failures, meta_filled, served = {}, [], [], {}
+
+    def _chart_ok(payload):
+        try:
+            _yahoo_quote_from_chart(payload)
+            return True
+        except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError):
+            return False
+
+    pending = []          # Yahoo 双主机都失败的品种 → 交给东方财富独立备用源
     for label, symbol in specs:
-        # 主备 URL 列表
-        yahoo_urls = _backup.get_yahoo_urls(symbol)
-        # 为每个 symbol 添加区间参数
-        urls_with_params = [f"{url}?range=5d&interval=1d" for url in yahoo_urls]
-        data, success_url, errors = safe_request_with_fallback(urls_with_params)
+        # 数据线 yahoo_chart：主源 query1 → 备用源1 query2（同格式）→ 备用源2 东财（独立解析）
+        yahoo_urls = [f"{url}?range=5d&interval=1d" for url in _backup.get_yahoo_urls(symbol)]
+        data, success_url, errors = safe_request_with_fallback(
+            yahoo_urls, validate=_chart_ok, line="yahoo_chart",
+            fmt={"symbol": symbol})
         if not data:
-            failures.append(f"{label}: Yahoo 主备均失败")
+            pending.append((label, symbol))
             continue
         try:
             quotes[label] = _yahoo_quote_from_chart(data)
-            if quotes[label]["via"] == "meta":
-                meta_filled.append(f"{label}({quotes[label]['as_of'][5:]})")
         except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
             failures.append(f"{label}: {exc}")
+            continue
+        served[label] = "备用源1" if success_url != yahoo_urls[0] else "主源"
+        if quotes[label]["via"] == "meta":
+            meta_filled.append(f"{label}({quotes[label]['as_of'][5:]})")
+
+    em_used = []
+    if pending:
+        em_quotes = _eastmoney_snapshot_quotes(pending)
+        for label, symbol in pending:
+            q = em_quotes.get(label)
+            if q:
+                quotes[label] = q
+                served[label] = "备用源2"
+                em_used.append(label)
+            else:
+                failures.append(f"{label}: Yahoo 主备与东财备用均失败")
+        if em_used:
+            print(f"  ✅ 备用源2（东方财富行情快照）顶上：{'、'.join(em_used)}")
+            _note_backup_served("yahoo_chart", _backup.candidates("yahoo_chart", symbol="")[2][1])
 
     status = "success" if quotes else "unavailable"
-    market = _source_result("Yahoo Finance Chart", status,
+    source_name = "Yahoo Finance Chart"
+    if em_used:
+        source_name += "（" + "、".join(em_used) + " 来自东方财富备用源）"
+    market = _source_result(source_name, status,
                             quotes=quotes,
                             error="；".join(failures[:2]) or None,
                             partial=len(quotes) != len(specs))
     market["source_primary"] = "Yahoo Finance Chart"
     market["patched"] = []
+    market["served_by"] = served
     _refresh_market_dates(market)
     if quotes:
         gd = market.get("group_dates") or {}
@@ -950,6 +1030,52 @@ def fetch_market_snapshot():
     else:
         print("  ⚠️ 实时行情暂不可用；日报将明确显示数据暂缺")
     return market
+
+
+_EM_MARKET_CURRENCY = {"100": "", "105": "USD", "106": "USD", "107": "USD", "102": "USD",
+                       "116": "HKD", "1": "CNY", "0": "CNY"}
+
+
+def _eastmoney_snapshot_quotes(pairs, quote_urls=None):
+    """行情速览的独立备用源（yahoo_chart 数据线的备用源2）：东方财富 ulist.np 一次批量取价。
+
+    pairs —— [(品种名, Yahoo 代码)]；只处理能映射到东财 secid 的品种。
+    返回 {品种名: quote}，quote 与 _yahoo_quote_from_chart 同结构（via="eastmoney"，
+    as_of 取东财行情时间戳 f124 的北京日期，prev_date 未知记 None）。失败返回 {}。
+    """
+    secid_to_label = {}
+    for label, symbol in pairs or []:
+        secid = _backup.em_secid_for_yahoo(symbol)
+        if secid:
+            secid_to_label[secid] = label
+    if not secid_to_label:
+        return {}
+    params = {"fltt": "2", "invt": "2", "secids": ",".join(secid_to_label),
+              "fields": "f2,f3,f4,f12,f13,f14,f18,f124"}
+    urls = quote_urls or _backup.get_eastmoney_ulist_urls()
+    data, _, _ = safe_request_with_fallback(
+        urls, params=params, timeout=12, line="em_ulist",
+        validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
+    rows = ((data or {}).get("data") or {}).get("diff") or []
+    out = {}
+    for it in rows:
+        secid = f"{it.get('f13')}.{it.get('f12')}"
+        label = secid_to_label.get(secid)
+        price, chg = _panorama_float(it.get("f2")), _panorama_float(it.get("f3"))
+        if not label or price is None or chg is None or price <= 0:
+            continue
+        ts = _panorama_int(it.get("f124"))
+        as_of = datetime.fromtimestamp(ts, CST).strftime("%Y-%m-%d") if ts else None
+        currency = _EM_MARKET_CURRENCY.get(str(it.get("f13")), "")
+        if str(it.get("f13")) == "100":
+            code = str(it.get("f12") or "")
+            currency = "HKD" if code.startswith("HS") else "USD"
+        out[label] = {"price": price, "change_pct": chg, "volume": 0, "currency": currency,
+                      "as_of": as_of, "prev_date": None, "via": "eastmoney",
+                      "ref": "东方财富行情快照（备用源2）",
+                      "quote_time": (datetime.fromtimestamp(ts, CST).strftime("%Y-%m-%d %H:%M:%S")
+                                     if ts else None)}
+    return out
 
 
 def _fetch_hk_index_reference():
@@ -1064,8 +1190,11 @@ def fetch_google_news():
     备用源：中文主站 → 香港中文 → 搜索兜底 → RSSHub
     """
     print("📡 正在抓取 Google News 全球头条...")
+    # 数据线 google_news：主源 中文大陆版 → 备用源1 中文香港版 → 备用源2 搜索「财经」
     urls = _backup.get_google_news_urls("zh")
-    xml_text, success_url, errors = safe_request_with_fallback(urls, is_json=False, timeout=15)
+    xml_text, success_url, errors = safe_request_with_fallback(
+        urls, is_json=False, timeout=15, line="google_news",
+        validate=lambda t: "<item" in str(t))
 
     items = []
     if xml_text:
@@ -1159,10 +1288,13 @@ def _fetch_news_search(query, source_name, limit=8):
     
     备用源：中文搜索 → 英文搜索 → RSSHub
     """
+    # 数据线 google_news_search：主源 中文大陆版搜索 → 备用源1 中文香港版 → 备用源2 英文美国版
     primary_url = GOOGLE_NEWS_SEARCH_RSS.format(query=quote(query))
     backup_urls = _backup.get_google_news_urls("search", query=query)
     all_urls = [primary_url] + [u for u in backup_urls if u != primary_url]
-    xml_text, success_url, errors = safe_request_with_fallback(all_urls, is_json=False, timeout=15)
+    xml_text, success_url, errors = safe_request_with_fallback(
+        all_urls, is_json=False, timeout=15, line="google_news_search",
+        fmt={"query": quote(query)}, validate=lambda t: "<item" in str(t))
     items = _google_news_items(xml_text, limit=limit)
     if not items:
         print(f"  ⚠️ {source_name}暂不可用，不显示历史兜底")
@@ -1342,6 +1474,8 @@ def fetch_gov_policy():
         dates = [it["date"] for it in items if it.get("date")]
         content_date = max(dates) if dates else None
         is_today = any(it.get("is_today") for it in items)
+        if url != all_urls[0]:
+            _note_backup_served("gov_policy", url)
         print(f"  ✅ 中国政府网抓取 {len(items)} 条最新政策（最新发布 {content_date or '日期暂缺'}）")
         return _source_result(
             GOV_POLICY_SOURCE_NAME, "success", is_today=is_today,
@@ -1384,43 +1518,87 @@ def fetch_eastmoney_news():
         "page_index": "1", "page_size": "10",
     }
     news, content_dates = [], []
-    # 合并原有列表与备用源
-    em_urls = _backup.get_eastmoney_news_urls()
-    all_urls = list(dict.fromkeys(list(EASTMONEY_NEWS_URLS) + em_urls))
-    for url in all_urls:
-        data, success_url, errors = safe_request_with_fallback([url], params=params, timeout=12)
-        if not data:
-            continue
+    # 数据线 em_news：主源 np-weblist → 备用源1 np-listapi（同格式）→ 备用源2 新浪 7×24（独立解析）
+    all_urls = list(dict.fromkeys(list(EASTMONEY_NEWS_URLS) + _backup.get_eastmoney_news_urls()))
+
+    def _news_list(payload):
         try:
-            lst = ((data.get("data") or {}).get("list")) or []
+            return ((payload.get("data") or {}).get("list")) or []
         except AttributeError:
-            lst = []
-        for it in lst[:10]:
-            title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
-            if not title:
-                continue
-            raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
-            news.append({
-                "title": title[:120],
-                "url": it.get("url") or it.get("articleUrl") or "",
-                "time": raw_time[:16],
-                "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
-                "is_today": raw_time[:10] == _today_display(),
-            })
-            if raw_time[:10]:
-                content_dates.append(raw_time[:10])
+            return []
+
+    data, success_url, errors = safe_request_with_fallback(
+        all_urls, params=params, timeout=12, line="em_news",
+        validate=lambda d: bool(_news_list(d)))
+    source_name = "东方财富"
+    for it in _news_list(data)[:10] if data else []:
+        title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
+        if not title:
+            continue
+        raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
+        news.append({
+            "title": title[:120],
+            "url": it.get("url") or it.get("articleUrl") or "",
+            "time": raw_time[:16],
+            "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
+            "is_today": raw_time[:10] == _today_display(),
+        })
+        if raw_time[:10]:
+            content_dates.append(raw_time[:10])
+    if not news:
+        news, content_dates = _sina_live_news_items()
         if news:
-            break
+            source_name = "新浪财经 7×24（东方财富快讯备用源2）"
+            print("  ✅ 备用源2（新浪财经 7×24）顶上：东财快讯接口不可用")
+            _note_backup_served("em_news", _backup.candidates("em_news")[2][1])
 
     if not news:
         print("  ⚠️ 东方财富快讯暂不可用，不显示历史兜底资讯")
         return _source_result("东方财富", "unavailable", headlines=[], error="未取得有效资讯")
     content_date = max(content_dates) if content_dates else None
     is_today = any(n["is_today"] for n in news)
-    print(f"  ✅ 成功抓取 {len(news)} 条东财快讯（最新 {content_date or '—'}）")
-    return _source_result("东方财富", "success",
+    print(f"  ✅ 成功抓取 {len(news)} 条{'东财快讯' if source_name == '东方财富' else '快讯（新浪备用）'}"
+          f"（最新 {content_date or '—'}）")
+    return _source_result(source_name, "success",
                           is_today=is_today, content_date=content_date,
                           headlines=news[:5])
+
+
+def _sina_live_news_items(limit=10):
+    """新浪财经 7×24 快讯（em_news 数据线的独立备用源2）。
+
+    接口 zhibo.sina.com.cn/api/zhibo/feed（zhibo_id=152 财经）：
+    result.data.feed.list[] → {rich_text, create_time, docurl}；
+    返回 (与东财快讯同结构的列表, 内容日期列表)。取不到返回 ([], [])。
+    """
+    data, _, _ = safe_request_with_fallback(
+        [_backup.SINA_LIVE_NEWS_URL], timeout=12,
+        validate=lambda d: bool(((((d or {}).get("result") or {}).get("data") or {})
+                                 .get("feed") or {}).get("list")))
+    if not data:
+        return [], []
+    rows = (((data.get("result") or {}).get("data") or {}).get("feed") or {}).get("list") or []
+    news, dates = [], []
+    for it in rows:
+        if not isinstance(it, dict):
+            continue
+        text = re.sub(r"<[^>]+>", "", str(it.get("rich_text") or "")).strip()
+        if not text:
+            continue
+        raw_time = str(it.get("create_time") or "")
+        title = text.split("。")[0][:120] if len(text) > 120 else text
+        news.append({
+            "title": title,
+            "url": str(it.get("docurl") or "https://finance.sina.com.cn/7x24/"),
+            "time": raw_time[:16],
+            "summary": text[:80] if title != text else "",
+            "is_today": raw_time[:10] == _today_display(),
+        })
+        if raw_time[:10]:
+            dates.append(raw_time[:10])
+        if len(news) >= limit:
+            break
+    return news, dates
 
 
 # ============================================================
@@ -1448,11 +1626,10 @@ def fetch_hot_stocks():
             "pn": "1", "pz": str(HOT_STOCK_TOP_N), "po": "1", "np": "1", "fltt": "2", "invt": "2",
             "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f4,f6,f12,f14",
         }
-        primary_clist = "https://push2.eastmoney.com/api/qt/clist/get"
-        clist_fallbacks = _backup.get_eastmoney_quote_urls()
-        clist_urls = [primary_clist] + [u for u in clist_fallbacks if "clist" in u] + [primary_clist.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-        clist_urls = list(dict.fromkeys(clist_urls))
-        data, _, _ = safe_request_with_fallback(clist_urls, params=params, timeout=12)
+        # 数据线 em_clist：push2 → 82.push2 → 72.push2（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_quote_urls(), params=params, timeout=12, line="em_clist",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
         stocks = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1543,6 +1720,46 @@ def _panorama_int(val):
     return int(num) if num is not None else None
 
 
+def _sina_index_rows(codes=None):
+    """新浪 hq.sinajs 指数快照（sina_index 数据线的独立备用源2）。
+
+    返回 ({6位代码: 行情行}, 报价时间字符串|None)；行结构与 _fetch_panorama_indices 一致，
+    但新浪不提供涨跌家数（up/down/flat=None）。取不到返回 ({}, None)。
+    响应形如 var hq_str_sh000001="上证指数,开盘,昨收,最新,最高,最低,,,成交量(股),成交额(元),…,日期,时间,";
+    """
+    mapping = codes or _backup.SINA_CODE_FOR_EM
+    text, _, _ = safe_request_with_fallback(
+        [_backup.SINA_HQ_URL.format(codes=",".join(mapping.values()))],
+        headers=_backup.SINA_HQ_HEADERS, timeout=12, is_json=False,
+        validate=lambda t: "hq_str_" in str(t))
+    if not text:
+        return {}, None
+    sina_to_secid = {v: k for k, v in mapping.items()}
+    out, stamps = {}, []
+    for m in re.finditer(r'hq_str_([a-z]{2}\d{6})="([^"]*)"', str(text)):
+        secid = sina_to_secid.get(m.group(1))
+        parts = m.group(2).split(",")
+        if not secid or len(parts) < 10:
+            continue
+        price = _panorama_float(parts[3])
+        prev_close = _panorama_float(parts[2])
+        if price is None or price <= 0 or not prev_close:
+            continue
+        code = secid.split(".", 1)[1]
+        out[code] = {
+            "code": code, "name": parts[0].strip() or code,
+            "price": price, "chg_pct": (price / prev_close - 1) * 100,
+            "chg": price - prev_close,
+            "amount": _panorama_float(parts[9]),
+            "open": _panorama_float(parts[1]), "high": _panorama_float(parts[4]),
+            "low": _panorama_float(parts[5]), "prev_close": prev_close,
+            "up": None, "down": None, "flat": None,
+        }
+        if len(parts) >= 32 and re.match(r"\d{4}-\d{2}-\d{2}$", parts[30].strip()):
+            stamps.append(f"{parts[30].strip()} {parts[31].strip()[:8] or '00:00:00'}")
+    return out, (max(stamps) if stamps else None)
+
+
 def _fetch_panorama_indices():
     """一次请求拉取全部宽基指数行情；返回 (按 PANORAMA_INDEX_SPECS 排序的指数列表,
     {代码: 行情}, 报价时间字符串|None)。"""
@@ -1551,13 +1768,21 @@ def _fetch_panorama_indices():
         "secids": ",".join(secid for secid, _ in PANORAMA_INDEX_SPECS),
         "fields": "f2,f3,f4,f6,f12,f14,f15,f16,f17,f18,f104,f105,f106,f124",
     }
-    primary = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-    fallbacks = _backup.get_eastmoney_quote_urls()
-    # ensure ulist.np variants are tried first
-    urls = [primary] + [u for u in fallbacks if "ulist.np" in u or "push2" in u] + [primary.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-    urls = list(dict.fromkeys(urls))
-    data, _, _ = safe_request_with_fallback(urls, params=params, timeout=12)
+    # 数据线 sina_index：主源 push2 ulist.np → 备用源1 82.push2（同格式）→ 备用源2 新浪 hq（独立解析）
+    urls = _backup.urls("sina_index")
+    data, success_url, _ = safe_request_with_fallback(
+        urls, params=params, timeout=12, line="sina_index",
+        validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
     rows = ((data or {}).get("data") or {}).get("diff") or []
+    if not rows:
+        sina_rows, sina_time = _sina_index_rows()
+        if sina_rows:
+            print("  ✅ 备用源2（新浪财经 hq）顶上：A股宽基指数快照（不含涨跌家数）")
+            _note_backup_served("sina_index", _backup.candidates("sina_index")[2][1])
+            indices = [dict(sina_rows[secid.split(".", 1)[1]], name=label)
+                       for secid, label in PANORAMA_INDEX_SPECS
+                       if secid.split(".", 1)[1] in sina_rows]
+            return indices, sina_rows, sina_time
     by_code, quote_ts = {}, []
     for it in rows:
         code = str(it.get("f12") or "")
@@ -1599,11 +1824,10 @@ def _fetch_panorama_prev_amounts():
     for secid, _ in PANORAMA_BREADTH_SOURCES:
         params = {"secid": secid, "klt": "101", "fqt": "0", "lmt": "2", "end": "20500101",
                   "fields1": "f1,f2,f3", "fields2": "f51,f57"}
-        primary_k = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-        k_fallbacks = _backup.get_eastmoney_panorama_urls()
-        k_urls = [primary_k] + [u for u in k_fallbacks if "kline" in u or "push2his" in u]
-        k_urls = list(dict.fromkeys(k_urls))
-        data, _, _ = safe_request_with_fallback(k_urls, params=params, timeout=12)
+        # 数据线 em_kline：push2his → 91.push2his → 63.push2his（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_kline_urls(), params=params, timeout=12, line="em_kline",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("klines")))
         pairs = []
         try:
             klines = (((data or {}).get("data") or {}).get("klines")) or []
@@ -1644,9 +1868,12 @@ def _fetch_panorama_northbound():
         "source": "WEB",
         "client": "WEB",
     }
-    north_urls = [PANORAMA_HSGT_HISTORY_URL] + _backup.get_eastmoney_panorama_urls()
-    north_urls = list(dict.fromkeys(north_urls))
-    data, _, _ = safe_request_with_fallback(north_urls, params=params, timeout=12)
+    # 数据线 em_datacenter：datacenter-web → datacenter → datacenter/securities（同格式镜像）
+    north_urls = list(dict.fromkeys([PANORAMA_HSGT_HISTORY_URL] + _backup.get_eastmoney_datacenter_urls()))
+    data, _, _ = safe_request_with_fallback(
+        north_urls, params=params, timeout=12, line="em_datacenter",
+        validate=lambda d: isinstance((d or {}).get("result"), dict)
+        and bool(d["result"].get("data")))
     note = PANORAMA_NORTH_POLICY_NOTE
     today_date = _today_display()
 
@@ -1707,11 +1934,10 @@ def _fetch_panorama_sectors():
         params = {"pn": "1", "pz": str(PANORAMA_SECTOR_TOP_N), "po": po, "np": "1",
                   "fltt": "2", "invt": "2", "fid": "f3", "fs": "m:90+t:2",
                   "fields": "f2,f3,f12,f14,f62,f104,f105,f128,f136"}
-        primary_sec = "https://push2.eastmoney.com/api/qt/clist/get"
-        sec_fallbacks = _backup.get_eastmoney_quote_urls()
-        sec_urls = [primary_sec] + [u for u in sec_fallbacks if "clist" in u] + [primary_sec.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-        sec_urls = list(dict.fromkeys(sec_urls))
-        data, _, _ = safe_request_with_fallback(sec_urls, params=params, timeout=12)
+        # 数据线 em_clist：push2 → 82.push2 → 72.push2（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_quote_urls(), params=params, timeout=12, line="em_clist",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
         rows = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1859,7 +2085,12 @@ def resolve_channel_id(channel):
     handle = (channel.get("handle") or "").lstrip("@")
     if not handle:
         return None
-    html, _, _ = safe_request_with_fallback([f"https://www.youtube.com/@{handle}"] + _backup.get_youtube_urls(handle), is_json=False, timeout=12)
+    # handle → channelId：官方频道页 → 移动版频道页 → 频道视频页（三路都是 YouTube 页面，解析同一 JSON 字段）
+    html, _, _ = safe_request_with_fallback(
+        [f"https://www.youtube.com/@{handle}", f"https://m.youtube.com/@{handle}",
+         f"https://www.youtube.com/@{handle}/videos"],
+        is_json=False, timeout=12,
+        validate=lambda t: bool(re.search(r'"(?:channelId|externalId)":"UC[0-9A-Za-z_-]{22}"', str(t))))
     if not html:
         return None
     m = re.search(r'"channelId":"(UC[0-9A-Za-z_-]{22})"', html)
@@ -1963,7 +2194,10 @@ def fetch_hk_channels():
                 unsupported.append({"name": name, "desc": ch.get("desc", ""),
                                     "note": ch.get("note", "未配置 feed 地址")})
                 continue
-            xml_text, _, _ = safe_request_with_fallback([feed_url] + _backup.get_youtube_urls(""), is_json=False, timeout=12)
+            # 通用 RSS 频道：官方订阅地址 + RSSHub 多实例（仅当订阅本身就是 RSSHub 地址时才有镜像）
+            xml_text, _, _ = safe_request_with_fallback(
+                _backup.get_rsshub_fallbacks(feed_url), is_json=False, timeout=12,
+                validate=lambda t: "<item" in str(t) or "<entry" in str(t))
             items = _parse_rss_items(xml_text, limit=8)
             if items:
                 channels.append({
@@ -1986,9 +2220,13 @@ def fetch_hk_channels():
             unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
             failures.append(f"{name}: {msg}")
             continue
+        # 数据线 youtube_feed：主源 YouTube 官方 Atom → 备用源1 RSSHub → 备用源2 Invidious（同格式）
         yt_urls = _backup.get_youtube_urls(cid)
         primary_yt = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
-        xml_text, _, _ = safe_request_with_fallback([primary_yt] + yt_urls, is_json=False, timeout=12)
+        xml_text, _, _ = safe_request_with_fallback(
+            list(dict.fromkeys([primary_yt] + yt_urls)), is_json=False, timeout=12,
+            line="youtube_feed", fmt={"channel_id": cid},
+            validate=lambda t: "<entry" in str(t))
         videos = []
         try:
             root = ET.fromstring(xml_text or "")
@@ -2362,6 +2600,32 @@ def _platform_rss_items(xml_text, platform, base, *, limit, now, community="", t
     return items, (latest.strftime("%Y-%m-%d") if latest else None)
 
 
+def _stocktwits_symbols_from_stream(payload, limit=STOCKTWITS_TRENDING_N):
+    """StockTwits streams/trending.json → 与 trending/symbols 同结构的标的榜（stocktwits 数据线备用源2）。
+
+    按热门消息里标的出现次数排名（次数即 trending_score 的代用指标），
+    watchlist_count / title 取自消息内的 symbol 对象；没有平台多空摘要（trends 缺省）。
+    """
+    messages = payload.get("messages") if isinstance(payload, dict) else None
+    if not isinstance(messages, list):
+        return []
+    tally, meta = {}, {}
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        for sym in message.get("symbols") or []:
+            if not isinstance(sym, dict) or not sym.get("symbol"):
+                continue
+            code = str(sym["symbol"]).strip()
+            tally[code] = tally.get(code, 0) + 1
+            meta.setdefault(code, {"title": sym.get("title") or code,
+                                   "watchlist_count": sym.get("watchlist_count") or 0})
+    ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return [{"symbol": code, "rank": i, "title": meta[code]["title"],
+             "watchlist_count": meta[code]["watchlist_count"], "trending_score": n}
+            for i, (code, n) in enumerate(ranked, 1)]
+
+
 def _stocktwits_sentiment_counts(symbol, *, now=None):
     """读某标的最新公开消息里的平台情绪标签（Bullish / Bearish），只计数不复制正文。"""
     payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("stream", symbol=symbol),
@@ -2393,9 +2657,23 @@ def fetch_stocktwits():
     """
     name = "StockTwits"
     now = datetime.now(CST)
-    payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("trending"), headers=_PLATFORM_HEADERS, timeout=10)
+    # 数据线 stocktwits：主源 trending/symbols → 备用源1 trending/symbols/equities（同格式）
+    #                    → 备用源2 streams/trending（按消息聚合标的，独立解析）
+    urls = _backup.get_stocktwits_urls("trending")
+    payload, _, _ = safe_request_with_fallback(
+        urls, headers=_PLATFORM_HEADERS, timeout=10, line="stocktwits",
+        validate=lambda d: isinstance(d, dict) and isinstance(d.get("symbols"), list) and d["symbols"])
     symbols = payload.get("symbols") if isinstance(payload, dict) else None
-    if not isinstance(symbols, list):
+    if not isinstance(symbols, list) or not symbols:
+        stream_url = _backup.candidates("stocktwits")[2][1]
+        stream, _, _ = safe_request_with_fallback(
+            [stream_url], headers=_PLATFORM_HEADERS, timeout=10,
+            validate=lambda d: isinstance(d, dict) and isinstance(d.get("messages"), list))
+        symbols = _stocktwits_symbols_from_stream(stream)
+        if symbols:
+            print("  ✅ 备用源2（StockTwits streams/trending）顶上：按热门消息聚合标的")
+            _note_backup_served("stocktwits", stream_url)
+    if not isinstance(symbols, list) or not symbols:
         return _public_site_result(name, [], error="公开趋势榜接口未返回有效数据")
 
     ranked = []
@@ -2468,7 +2746,8 @@ def fetch_tradingview():
     now = datetime.now(CST)
     xml, _, _ = safe_request_with_fallback(_backup.get_tradingview_urls(), headers={**_PLATFORM_HEADERS,
                                                       "Accept": "application/rss+xml,application/xml"},
-                       is_json=False, timeout=10)
+                       is_json=False, timeout=10, line="tradingview",
+                       validate=lambda t: "<item" in str(t) or "<entry" in str(t))
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
                                         limit=TRADINGVIEW_IDEAS_N, now=now,
                                         community="交易员观点")
@@ -2504,7 +2783,8 @@ def fetch_bogleheads():
     now = datetime.now(CST)
     xml, _, _ = safe_request_with_fallback(_backup.get_bogleheads_urls(), headers={**_PLATFORM_HEADERS,
                                                      "Accept": "application/rss+xml,application/xml"},
-                       is_json=False, timeout=10)
+                       is_json=False, timeout=10, line="bogleheads",
+                       validate=lambda t: "<item" in str(t) or "<entry" in str(t))
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
                                         limit=BOGLEHEADS_TOPICS_N, now=now,
                                         community="论坛最新主题",
@@ -2670,6 +2950,20 @@ def _hk_news_analysis(records):
     }
 
 
+_HK_NEWS_BACKUP_LINK_HOSTS = ("www.bing.com", "bing.com", "news.google.com")
+
+
+def _hk_news_site_host(cfg):
+    """新闻源头用于 site: 检索的主域名：取 hosts 里最短的一个（如 hket.com）。"""
+    hosts = [h for h in (cfg.get("hosts") or ()) if h]
+    if not hosts:
+        try:
+            return urlparse(cfg.get("url") or cfg.get("feed") or "").hostname or ""
+        except ValueError:
+            return ""
+    return sorted(hosts, key=len)[0]
+
+
 def fetch_hk_news_sources():
     """抓取全网 20 个新闻源头的公开 RSS/Atom 订阅，挖掘港股相关信息。
 
@@ -2687,14 +2981,25 @@ def fetch_hk_news_sources():
     now = datetime.now(CST)
 
     def _fetch_one(cfg):
-        hk_urls = [cfg["feed"]] + _backup.get_youtube_urls("")  # generic fallback via RSSHub bases
-        xml_text, _, _ = safe_request_with_fallback(hk_urls, is_json=False, timeout=10)
+        # 数据线 hk_news_rss：主源 媒体官方订阅 → 备用源1 Bing 站内检索 RSS → 备用源2 Google News 站内检索 RSS
+        site_host = _hk_news_site_host(cfg)
+        hk_urls = [cfg["feed"]] + _backup.get_news_site_backup_urls(site_host)
+        xml_text, served_url, _ = safe_request_with_fallback(
+            hk_urls, is_json=False, timeout=10,
+            validate=lambda t: bool(_parse_rss_items(t, limit=HK_NEWS_SCAN_LIMIT)))
         parsed = _parse_rss_items(xml_text, limit=HK_NEWS_SCAN_LIMIT) if xml_text else []
+        via_backup = bool(served_url) and served_url != cfg["feed"]
+        allowed_hosts = tuple(cfg.get("hosts") or ())
+        if via_backup:
+            _note_backup_served("hk_news_rss", served_url, feed=cfg["feed"], host=site_host)
+            # 备用源条目的链接经检索平台跳转：放行该平台主机名（仍要求 https）
+            allowed_hosts = allowed_hosts + _HK_NEWS_BACKUP_LINK_HOSTS
         rec = {"name": cfg.get("name", "?"), "region": cfg.get("region", ""),
                "url": cfg.get("url", ""), "hosts": tuple(cfg.get("hosts") or ()),
                "desc": cfg.get("desc", ""), "feed": cfg.get("feed", ""),
                "status": "fail", "scanned": 0, "today": 0, "newest": None,
-               "items": [], "hk_titles": [], "hk_n": 0, "note": ""}
+               "items": [], "hk_titles": [], "hk_n": 0, "note": "",
+               "served_by": ("备用源" if via_backup else "主源")}
         if not parsed:
             rec["note"] = "自动抓取失败（源可能需登录/被限流，或订阅地址变化），暂缺"
             return rec
@@ -2711,8 +3016,10 @@ def fetch_hk_news_sources():
                 continue
             if not _public_recent(dt, now, HK_NEWS_WINDOW_HOURS):
                 continue
-            url = _news_url(row.get("url"), rec["hosts"])
+            url = _news_url(row.get("url"), allowed_hosts)
             title = _public_text(row.get("title"), 160)
+            if via_backup and " - " in title:
+                title = title.rsplit(" - ", 1)[0].strip() or title   # 检索平台附加的「 - 媒体名」
             if not (url and title):
                 continue
             fresh.append({"title": title, "url": url,
@@ -2737,6 +3044,9 @@ def fetch_hk_news_sources():
             "hk_titles": [it["title"] for it in hk_all],
             "hk_n": len(hk_all),
         })
+        if via_backup:
+            rec["note"] = ("官方订阅不可用，本次经站内检索备用源"
+                           f"（{'Bing' if 'bing.com' in served_url else 'Google News'}）取得")
         return rec
 
     records = [None] * len(HK_NEWS_SOURCES)
@@ -3359,7 +3669,11 @@ def fetch_econ_calendar(days=None, today=None):
             "source": "WEB",
             "client": "WEB",
         }
-        payload, _, _ = safe_request_with_fallback(_backup.get_calendar_urls(), headers=referer, params=params, timeout=15)
+        # 数据线 em_datacenter：datacenter-web → datacenter → datacenter/securities（同格式镜像）
+        payload, _, _ = safe_request_with_fallback(
+            _backup.get_calendar_urls(), headers=referer, params=params, timeout=15,
+            line="em_datacenter",
+            validate=lambda d: isinstance(d, dict) and "result" in d)
         if not isinstance(payload, dict):
             error = "接口无响应或非 JSON"
             break
@@ -3409,6 +3723,8 @@ def fetch_econ_calendar(days=None, today=None):
 
 
 def collect_all_data():
+    with _BACKUP_EVENTS_LOCK:
+        BACKUP_EVENTS.clear()
     """采集所有数据源"""
     print("\n" + "=" * 50)
     print("🔍 开始全网数据采集")
@@ -3497,11 +3813,18 @@ def collect_all_data():
 
     # === 备用源使用情况汇总 ===
     try:
-        backup_summary = _backup.get_backup_summary() if hasattr(_backup, 'get_backup_summary') else "备用源已配置"
-        print(f"\n🔄 {backup_summary[:200]}...")
-        data["_backup_info"] = {"summary": backup_summary, "sources": list(_backup.ALL_BACKUP_MAP.keys()) if hasattr(_backup, 'ALL_BACKUP_MAP') else []}
+        backup_summary = _backup.get_backup_summary()
+        events = list(BACKUP_EVENTS)
+        print(f"\n🔄 数据线主备：{len(_backup.DATA_LINES)} 条数据线，每条 1 主源 + 2 备用源"
+              f"（python3 output/pipeline.py --sources 查看明细）")
+        if events:
+            print("  🔁 本次备用源顶上：" + backup_events_text(events))
+        else:
+            print("  ✅ 本次全部由主源供数，未启用备用源")
+        data["_backup_info"] = {"summary": backup_summary, "sources": list(_backup.ALL_BACKUP_MAP.keys()),
+                                "lines": len(_backup.DATA_LINES), "events": events}
     except Exception:
-        data["_backup_info"] = {"summary": "备用源已启用"}
+        data["_backup_info"] = {"summary": "备用源已启用", "events": list(BACKUP_EVENTS)}
 
     print("\n✅ 数据采集完成！")
     return data
@@ -5235,7 +5558,8 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
     return pairs
 
 
-def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None):
+def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None,
+                   backup_events=None):
     """末尾「总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
     pairs = []
     if quant and quant.get("available"):
@@ -5288,6 +5612,9 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     if missing:
         cover += " · 暂缺：" + "、".join(missing)
     pairs.append(("数据覆盖", _esc(cover)))
+    # 每条数据线 1 主源 + 2 备用源：本次哪几路由备用源顶上，读者需要知道数据来自哪一路。
+    if backup_events:
+        pairs.append(("备用源", _esc("本次启用：" + backup_events_text(list(backup_events)))))
     return pairs
 
 
@@ -6119,7 +6446,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     if conclusion:
         blocks["FORECAST"] = ("FORECAST", "今日预判", kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
-                             quant=quant)
+                             quant=quant,
+                             backup_events=(data.get("_backup_info") or {}).get("events"))
     blocks["SUMMARY"] = ("SUMMARY", "总结", kit.kv(summary), "", "")
 
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
@@ -9857,6 +10185,8 @@ def main():
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
     parser.add_argument("--weekly-only", action="store_true",
                        help="只跑每周量化走势预测并打印结果（研究模式：不生成日报、不推送）")
+    parser.add_argument("--sources", action="store_true",
+                       help="打印全部数据线的主源 / 两个备用源清单（不联网、不生成日报）")
     parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
                        help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
@@ -9874,6 +10204,11 @@ def main():
     # --list 模式
     if args.list:
         return list_reports()
+
+    # --sources 模式：数据线主备清单
+    if args.sources:
+        print(_backup.describe())
+        return 0
 
     # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
     if args.quant_only:

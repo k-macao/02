@@ -363,11 +363,37 @@ crontab -e
       └──────────┘
 ```
 
+### 🔄 数据线主备：每条数据线 1 个主源 + 2 个备用源（2026-09-29）
+
+日报用到的每一条「数据线」都在 `output/backup_sources.py` 的 `DATA_LINES` 注册：**主源 1 个、备用源 2 个**，
+`tests/test_data_lines.py` 逐条校验缺一不可；`python3 output/pipeline.py --sources` 打印完整清单。
+切换规则：只在主源**无响应或返回无效正文**（如 200 但 `data=null`、空列表、无 `<item>`）时依次尝试备用源 1、备用源 2；
+每一路都按解析结果判定有效，三路都失败才「暂缺」，绝不编造。启用了哪一路会写进采集日志、`data["_backup_info"]["events"]`
+与页面总结的「备用源」一行（如 `东方财富 快讯→备用源2（新浪财经 7×24 快讯）`），来源行同步标注。
+
+| 数据线 | 用于 | 主源 | 备用源 1 | 备用源 2 |
+|---|---|---|---|---|
+| 实时行情 · Yahoo 日线快照 | 行情速览 / 今日预判 | Yahoo `query1` v8 chart | Yahoo `query2`（同格式） | 东方财富 `ulist.np` 行情快照（独立源，secid 映射，标「东财」） |
+| 日线序列 · 量化 / 每周预测 | 量化预测 / 港股概率 / 每周预测 | Yahoo `query1` | Yahoo `query2` | 东方财富 `push2his` 日K（独立源，secid 映射） |
+| 东财指数 / 个股快照 `ulist.np` | 全景 / 港股核对 / 流动性 | `push2` | `82.push2`（镜像） | `72.push2`（镜像） |
+| A股宽基指数快照（独立第三源） | 全景·指数表现 | `push2 ulist.np` | `82.push2` | 新浪 `hq.sinajs`（独立源；无涨跌家数 → 全景 partial） |
+| 东财榜单 `clist` | 热门榜单 / 板块热力 / 行业列表 / 港股成交榜 | `push2` | `82.push2` | `72.push2` |
+| 东财日K `push2his` | 上日成交额 / 行业指数日线 | `push2his` | `91.push2his` | `63.push2his` |
+| 东财数据中心 | 南北向成交 / 财经日历 | `datacenter-web` | `datacenter` | `datacenter/securities` |
+| 东财快讯 | 东方财富快讯 / 新闻情绪 | `np-weblist` | `np-listapi` | 新浪财经 7×24 快讯（独立源，来源行改标） |
+| 全球头条 | 全球头条 | Google News 中文·大陆版 | 中文·香港版 | 搜索「财经」 |
+| 专题搜索 | 美联储 / 地缘政治 | Google News 搜索 zh-CN | zh-HK | en-US |
+| 国家政策 | 政策因子 | gov.cn 最新政策 | gov.cn 政策首页 | gov.cn 政策文库 |
+| 港股名家频道 | YouTube 频道 | YouTube 官方 Atom | RSSHub | Invidious（yewtu.be） |
+| Reddit / StockTwits / TradingView / Bogleheads | 趋势跟踪 | 各官方接口 | 同格式镜像 / 备用端点 | old.reddit JSON / StockTwits 消息流聚合 / RSSHub / phpBB feed.php |
+| 港股新闻源头（20 家） | 趋势跟踪·新闻源头 | 各媒体官方 RSS | Bing News `site:` 检索 RSS | Google News `site:` 检索 RSS |
+
 ## 📁 文件结构
 
 ```
 output/
 ├── pipeline.py            ← 🧠 核心引擎（采集→分析→生成→当天检验→推送）
+├── backup_sources.py      ← 🔄 数据线注册表（每条 1 主源 + 2 备用源；`--sources` 打印清单）
 ├── push.py                ← 🚀 快捷入口（= pipeline.py）
 ├── auto_push.sh           ← 🔁 Bash 版（cron 用）
 ├── manual_push.sh         ← 🖐 手动推送脚本（当天检验，--force 可强制）

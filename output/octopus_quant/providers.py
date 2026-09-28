@@ -20,6 +20,69 @@ YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 EASTMONEY_CLIST = "https://push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_ULIST = "https://push2.eastmoney.com/api/qt/ulist.np/get"
 EASTMONEY_DATACENTER = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+EASTMONEY_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+
+# ------------------------------------------------------------------
+# 每条数据线 1 主源 + 2 备用源（注册表在 output/backup_sources.py；引擎可脱离注册表独立运行）
+# ------------------------------------------------------------------
+try:                                   # 与日报共用同一份注册表
+    import backup_sources as _bk
+except Exception:                      # 单独使用引擎时退回内置候选
+    _bk = None
+
+_FALLBACK_CHAINS = {
+    "yahoo_chart": [YAHOO_CHART, "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"],
+    "em_clist": [EASTMONEY_CLIST, "https://82.push2.eastmoney.com/api/qt/clist/get",
+                 "https://72.push2.eastmoney.com/api/qt/clist/get"],
+    "em_ulist": [EASTMONEY_ULIST, "https://82.push2.eastmoney.com/api/qt/ulist.np/get",
+                 "https://72.push2.eastmoney.com/api/qt/ulist.np/get"],
+    "em_kline": [EASTMONEY_KLINE, "https://91.push2his.eastmoney.com/api/qt/stock/kline/get",
+                 "https://63.push2his.eastmoney.com/api/qt/stock/kline/get"],
+    "em_datacenter": [EASTMONEY_DATACENTER, "https://datacenter.eastmoney.com/api/data/v1/get",
+                      "https://datacenter.eastmoney.com/securities/api/data/v1/get"],
+}
+
+
+def chain_urls(line, **fmt):
+    """数据线的同格式候选 URL（主源在前）。"""
+    if _bk is not None and hasattr(_bk, "urls"):
+        try:
+            return _bk.urls("yahoo_bars" if line == "yahoo_chart" else line, **fmt)
+        except Exception:
+            pass
+    return [u.format(**fmt) if fmt else u for u in _FALLBACK_CHAINS[line]]
+
+
+def em_secid_for_yahoo(symbol):
+    if _bk is not None and hasattr(_bk, "em_secid_for_yahoo"):
+        return _bk.em_secid_for_yahoo(symbol)
+    sym = str(symbol or "")
+    table = {"^HSI": "100.HSI", "^HSTECH": "100.HSTECH", "^HSCE": "100.HSCEI"}
+    if sym in table:
+        return table[sym]
+    if sym.endswith(".HK") and sym[:-3].isdigit():
+        return f"116.{int(sym[:-3]):05d}"
+    return ""
+
+
+def fetch_json_chain(fetch_json, urls, params, ok, timeout=15):
+    """依次请求候选 URL，返回第一个通过 ok(data) 校验的 (data, url)；全部失败 (None, None)。
+
+    镜像主机可能 200 但正文 data=null，所以必须按解析结果判定，而不是只看有没有响应。
+    """
+    for url in urls:
+        try:
+            data = fetch_json(url, params=params, timeout=timeout)
+        except Exception:
+            data = None
+        if data is None:
+            continue
+        try:
+            if ok(data):
+                return data, url
+        except Exception:
+            continue
+    return None, None
 
 # ------------------------------------------------------------------
 # 标的池（可用环境变量覆盖，逗号分隔的 Yahoo 代码即可）
@@ -202,14 +265,62 @@ def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
     """
     if not fetch_json:
         return []
-    url = YAHOO_CHART.format(symbol=symbol)
-    data = fetch_json(url, params={"range": rng, "interval": interval},
-                      timeout=timeout)
-    try:
-        result = (data or {})["chart"]["result"][0]
-    except (KeyError, TypeError, IndexError, AttributeError):
+
+    def _result(data):
+        try:
+            return (data or {})["chart"]["result"][0]
+        except (KeyError, TypeError, IndexError, AttributeError):
+            return None
+
+    # 数据线 yahoo_bars：主源 query1 → 备用源1 query2（同格式）→ 备用源2 东财日 K（独立解析）
+    data, _url = fetch_json_chain(
+        fetch_json, chain_urls("yahoo_chart", symbol=symbol),
+        {"range": rng, "interval": interval},
+        ok=lambda d: bool(parse_chart_result(_result(d))) if _result(d) else False,
+        timeout=timeout)
+    if data is not None:
+        return parse_chart_result(_result(data))
+    if interval != "1d":
         return []
-    return parse_chart_result(result)
+    return fetch_bars_eastmoney(fetch_json, symbol, rng=rng, timeout=timeout)
+
+
+_EM_LIMIT_FOR_RANGE = {"5d": 8, "1mo": 25, "3mo": 70, "6mo": 135, "1y": 260, "2y": 520,
+                       "5y": 1300, "10y": 2600, "max": 10000}
+
+
+def fetch_bars_eastmoney(fetch_json, symbol, *, rng="1y", timeout=15):
+    """东方财富日 K → 与 Yahoo 同结构的日线序列（yahoo_bars 数据线的独立备用源2）。
+
+    klines 每行 "日期,开,收,高,低,成交量,成交额"；映射不到东财 secid 的代码返回 []。
+    """
+    secid = em_secid_for_yahoo(symbol)
+    if not fetch_json or not secid:
+        return []
+    params = {"secid": secid, "klt": "101", "fqt": "1", "end": "20500101",
+              "lmt": str(_EM_LIMIT_FOR_RANGE.get(str(rng), 520)),
+              "fields1": "f1,f2,f3,f4,f5,f6", "fields2": "f51,f52,f53,f54,f55,f56,f57"}
+    data, _url = fetch_json_chain(
+        fetch_json, chain_urls("em_kline"), params,
+        ok=lambda d: bool(((d or {}).get("data") or {}).get("klines")), timeout=timeout)
+    if data is None:
+        return []
+    bars = []
+    for line in ((data.get("data") or {}).get("klines") or []):
+        parts = str(line).split(",")
+        if len(parts) < 6:
+            continue
+        try:
+            close = float(parts[2])
+        except (TypeError, ValueError):
+            continue
+        if close <= 0:
+            continue
+        bars.append({"date": parts[0].strip(), "open": _num(parts[1]), "high": _num(parts[3]),
+                     "low": _num(parts[4]), "close": close, "volume": _num(parts[5]),
+                     "from_eastmoney": True})
+    bars.sort(key=lambda b: b["date"])
+    return bars
 
 
 def fetch_series_batch(fetch_json, specs, *, rng="1y", workers=6, timeout=15,
@@ -264,7 +375,9 @@ def fetch_mutual_series(fetch_json, page_size=500, timeout=15):
         "source": "WEB",
         "client": "WEB",
     }
-    data = fetch_json(EASTMONEY_DATACENTER, params=params, timeout=timeout)
+    data, _url = fetch_json_chain(
+        fetch_json, chain_urls("em_datacenter"), params,
+        ok=lambda d: bool(((d or {}).get("result") or {}).get("data")), timeout=timeout)
     try:
         rows = ((data or {}).get("result") or {}).get("data") or []
     except (AttributeError, TypeError):
@@ -300,12 +413,12 @@ def fetch_hk_index_quotes(fetch_json, timeout=12):
     if not fetch_json:
         return {}
     secids = ",".join(f"100.{code}" for code in ("HSI", "HSTECH", "HSCEI"))
-    data = fetch_json(EASTMONEY_ULIST, params={
+    data, _url = fetch_json_chain(fetch_json, chain_urls("em_ulist"), {
         "fltt": "2", "invt": "2", "secids": secids,
         # f124 = 行情时间戳（秒）：用来标注这条报价属于哪个交易日，
         # 也是「行情速览」核对 Yahoo 是否回退的独立时间基准。
         "fields": "f2,f3,f4,f6,f12,f14,f124",
-    }, timeout=timeout)
+    }, ok=lambda d: bool(((d or {}).get("data") or {}).get("diff")), timeout=timeout)
     out = {}
     try:
         rows = ((data or {}).get("data") or {}).get("diff") or []
@@ -349,12 +462,12 @@ def fetch_hk_top_turnover(fetch_json, top_n=50, timeout=12):
     """
     if not fetch_json:
         return []
-    data = fetch_json(EASTMONEY_CLIST, params={
+    data, _url = fetch_json_chain(fetch_json, chain_urls("em_clist"), {
         "pn": "1", "pz": str(top_n), "po": "1", "np": "1", "fltt": "2",
         "invt": "2", "fid": "f6",
         "fs": "m:128+t:1,m:128+t:2,m:128+t:3,m:128+t:4",
         "fields": "f2,f3,f6,f12,f14",
-    }, timeout=timeout)
+    }, ok=lambda d: bool(((d or {}).get("data") or {}).get("diff")), timeout=timeout)
     try:
         diff = ((data or {}).get("data") or {}).get("diff") or []
     except (AttributeError, TypeError):
@@ -394,10 +507,10 @@ def fetch_hk_fundflow(fetch_json, universe=None, timeout=12):
         return {}
     out = {}
     for i in range(0, len(secids), 8):  # 小批量，避免单请求过长
-        data = fetch_json(EASTMONEY_ULIST, params={
+        data, _url = fetch_json_chain(fetch_json, chain_urls("em_ulist"), {
             "fltt": "2", "invt": "2", "secids": ",".join(secids[i:i + 8]),
             "fields": "f12,f14,f2,f3,f62,f184",
-        }, timeout=timeout)
+        }, ok=lambda d: bool(((d or {}).get("data") or {}).get("diff")), timeout=timeout)
         try:
             rows = ((data or {}).get("data") or {}).get("diff") or []
         except (AttributeError, TypeError):

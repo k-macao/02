@@ -1,139 +1,342 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🔄 备用数据源模块 · 全数据源覆盖
+🔄 数据线注册表 · 每条数据线 = 1 个主源 + 2 个备用源（2026-09-29 重构）
 
 目标：
-- 为所有数据源提供备用源，确保主源失败时有兜底
-- 不伪造数据，只在主源失败时尝试备用
-- 每个备用源都有明确的来源标注和失败原因
+- 日报用到的每一条「数据线」都在 DATA_LINES 里登记：主源 1 个、备用源 2 个，缺一不可
+  （tests/test_data_lines.py 逐条校验）；
+- 备用源分两类：
+    · 同格式镜像（same_format=True）：换主机 / 换路径，返回结构与主源完全一致，直接复用主源解析器；
+    · 独立数据源（same_format=False）：其它供应商的公开接口，由 pipeline / providers 里对应的
+      适配器（adapter）解析成与主源相同的内部结构；
+- 只在主源失败或返回无效内容时才依次尝试备用源；启用了哪一路在日志与「数据覆盖」里写明；
+- 绝不伪造数据：全部候选都失败就如实「暂缺」。
 
-设计：
-- 每个数据源定义 primary + backups 列表
-- 备用源按优先级尝试，任一成功即返回
-- 失败时记录所有尝试的错误，供审计使用
+用法：
+    urls(line_id, **fmt)         → 同格式候选 URL 列表（主源在前），供 safe_request_with_fallback
+    candidates(line_id, **fmt)   → [(label, url, same_format)]，含独立源，供需要适配器的调用方
+    describe()                   → 人类可读的数据线总览（python3 output/pipeline.py --sources）
 """
 
-from typing import List, Dict, Callable, Any, Tuple
-import os
+from typing import Any, Callable, Dict, List, Tuple
+from urllib.parse import quote
 
-# Yahoo Finance 备用域名
-YAHOO_PRIMARY = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-YAHOO_BACKUPS = [
-    "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}",
-    "https://query1.finance.yahoo.com/v7/finance/chart/{symbol}",  # 旧版本 API
-]
+# ------------------------------------------------------------------
+# 主机常量
+# ------------------------------------------------------------------
+# 东方财富 push2 行情集群：push2 主站 + 编号镜像（官方站点与 akshare 等开源库长期使用的
+# 72 / 82 / 79 等编号节点，返回结构完全一致）；历史 K 线在 push2his 集群（63 / 91 编号镜像同理）。
+EM_PUSH2_HOSTS = ("push2.eastmoney.com", "82.push2.eastmoney.com", "72.push2.eastmoney.com")
+EM_PUSH2HIS_HOSTS = ("push2his.eastmoney.com", "91.push2his.eastmoney.com", "63.push2his.eastmoney.com")
+# 东方财富数据中心（报表型接口）：主站 -web 域名 + 两个同构入口
+EM_DATACENTER_URLS = (
+    "https://datacenter-web.eastmoney.com/api/data/v1/get",
+    "https://datacenter.eastmoney.com/api/data/v1/get",
+    "https://datacenter.eastmoney.com/securities/api/data/v1/get",
+)
+RSSHUB_BASES = ("https://rsshub.app", "https://rsshub.rssforever.com", "https://rsshub.pseudoyu.com")
 
-# 东财新闻备用接口
-EASTMONEY_NEWS_PRIMARY = [
-    "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns",
-    "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
-]
-EASTMONEY_NEWS_BACKUPS = [
-    "https://np-anotice-stock.eastmoney.com/api/security/ann",  # 公告接口作为降级
-    "https://guba.eastmoney.com/api/news",  # 股吧新闻作为降级
-]
-
-# 东财行情备用接口
-EASTMONEY_QUOTE_PRIMARY = "https://push2.eastmoney.com/api/qt/clist/get"
-EASTMONEY_QUOTE_BACKUPS = [
-    "https://push2.eastmoney.com/api/qt/ulist.np/get",
-    "https://push2his.eastmoney.com/api/qt/stock/kline/get",  # K 线接口可提取最新价
-    "https://datacenter-web.eastmoney.com/api/data/v1/get",  # 数据中心作为最终兜底
-]
-
-# 东财全景/板块备用
-EASTMONEY_PANORAMA_PRIMARY = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-EASTMONEY_PANORAMA_BACKUPS = [
-    "https://push2.eastmoney.com/api/qt/clist/get",  # 行业板块接口
-    "https://datacenter-web.eastmoney.com/api/data/v1/get",  # 数据中心
-]
-
-# Google News 备用
-GOOGLE_NEWS_PRIMARY = {
-    "zh": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+# Yahoo 代码 → 东方财富 secid（独立备用源的字段映射；映射不到的品种只走 Yahoo 双主机）
+EM_SECID_FOR_YAHOO = {
+    "^DJI": "100.DJIA", "%5EDJI": "100.DJIA",
+    "^GSPC": "100.SPX", "%5EGSPC": "100.SPX",
+    "^IXIC": "100.NDX", "%5EIXIC": "100.NDX",
+    "^HSI": "100.HSI", "%5EHSI": "100.HSI",
+    "^HSTECH": "100.HSTECH", "%5EHSTECH": "100.HSTECH",
+    "^HSCE": "100.HSCEI", "%5EHSCE": "100.HSCEI",
+    "MSFT": "105.MSFT", "META": "105.META",
+    # NYMEX 美原油连续（东财 globalfuture/CL00Y）；若接口不认该代码，行情速览的 WTI 行
+    # 只在 Yahoo 双主机失败时缺席，不会出现错误数字。
+    "CL=F": "102.CL00Y",
 }
-GOOGLE_NEWS_BACKUPS = {
-    "zh": [
-        "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=HK&ceid=HK:zh-Hant",  # 香港中文
-        "https://news.google.com/rss/search?q=财经&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",  # 搜索兜底
-        "https://rsshub.app/google/news/BUSINESS/zh-CN",  # RSSHub 兜底
-    ],
-    "en": [
-        "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en",
-        "https://rsshub.app/google/news/BUSINESS/en-US",
-    ],
-    "fed": [
-        "https://news.google.com/rss/search?q=美联储+OR+FOMC+OR+鲍威尔&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "https://news.google.com/rss/search?q=Federal+Reserve+OR+FOMC&hl=en-US&gl=US&ceid=US:en",
-        "https://rsshub.app/google/news/search/美联储/zh-CN",
-    ],
-    "geo": [
-        "https://news.google.com/rss/search?q=地缘政治+OR+制裁+OR+冲突+OR+关税&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "https://news.google.com/rss/search?q=geopolitics+OR+sanctions+OR+conflict&hl=en-US&gl=US&ceid=US:en",
-        "https://rsshub.app/google/news/search/地缘政治/zh-CN",
-    ],
+# 新浪行情代码（A股宽基指数快照的独立备用源）：东财 secid → 新浪 hq 代码
+SINA_CODE_FOR_EM = {
+    "1.000001": "sh000001", "0.399001": "sz399001", "0.399006": "sz399006",
+    "1.000688": "sh000688", "0.899050": "bj899050", "1.000300": "sh000300",
+    "1.000016": "sh000016", "1.000905": "sh000905",
+}
+SINA_HQ_URL = "https://hq.sinajs.cn/list={codes}"
+SINA_HQ_HEADERS = {"Referer": "https://finance.sina.com.cn/"}
+SINA_LIVE_NEWS_URL = ("https://zhibo.sina.com.cn/api/zhibo/feed?page=1&page_size=20"
+                      "&zhibo_id=152&tag_id=0&dire=f&dpc=1")
+
+
+def em_secid_for_yahoo(symbol: str) -> str:
+    """Yahoo 代码 → 东财 secid；港股 0700.HK → 116.00700，A股 600519.SS → 1.600519。"""
+    sym = str(symbol or "").strip()
+    if sym in EM_SECID_FOR_YAHOO:
+        return EM_SECID_FOR_YAHOO[sym]
+    if sym.endswith(".HK") and sym[:-3].isdigit():
+        return f"116.{int(sym[:-3]):05d}"
+    if sym.endswith(".SS") and sym[:-3].isdigit():
+        return f"1.{sym[:-3]}"
+    if sym.endswith(".SZ") and sym[:-3].isdigit():
+        return f"0.{sym[:-3]}"
+    return ""
+
+
+def _em(host: str, path: str) -> str:
+    return f"https://{host}{path}"
+
+
+def _google_search_rss(query: str, hl: str, gl: str, ceid: str) -> str:
+    return f"https://news.google.com/rss/search?q={quote(query)}&hl={hl}&gl={gl}&ceid={ceid}"
+
+
+# ------------------------------------------------------------------
+# 数据线注册表：line_id → 主源 + 两个备用源
+# ------------------------------------------------------------------
+# 字段：name 数据线名；used_by 日报栏目；primary (label, url)；backups 恰好两项 (label, url, same_format)
+#       note 说明（独立源的适配器位置 / 覆盖范围）
+DATA_LINES: Dict[str, Dict[str, Any]] = {
+    "yahoo_chart": {
+        "name": "实时行情 · Yahoo 日线快照",
+        "used_by": ("行情速览", "今日预判", "全球大盘全景复盘·全球指数"),
+        "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
+        "backups": (
+            ("Yahoo Finance query2（同格式镜像）",
+             "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}", True),
+            ("东方财富 行情快照（独立源，secid 映射）",
+             _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get"), False),
+        ),
+        "note": "适配器 pipeline._eastmoney_snapshot_quotes；美股/港股/A股指数与 MSFT/META 全覆盖，WTI 视东财代码可用性",
+    },
+    "yahoo_bars": {
+        "name": "日线序列 · 港股量化 / 每周预测",
+        "used_by": ("量化预测总览", "港股概率走势分析", "每周量化走势预测"),
+        "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
+        "backups": (
+            ("Yahoo Finance query2（同格式镜像）",
+             "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}", True),
+            ("东方财富 日K（独立源，secid 映射）",
+             _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get"), False),
+        ),
+        "note": "适配器 octopus_quant.providers.fetch_bars_eastmoney；恒指/恒科/国企指数与港股个股全覆盖",
+    },
+    "em_ulist": {
+        "name": "东方财富 指数 / 个股快照（ulist.np）",
+        "used_by": ("全球大盘全景复盘", "行情速览·港股核对", "资金流动性分析"),
+        "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get")),
+        "backups": (
+            ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/ulist.np/get"), True),
+            ("东方财富 72.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[2], "/api/qt/ulist.np/get"), True),
+        ),
+        "note": "A股宽基指数另有独立第三路：新浪 hq（见 sina_index）",
+    },
+    "sina_index": {
+        "name": "A股宽基指数快照 · 独立第三源",
+        "used_by": ("全球大盘全景复盘·指数表现",),
+        "primary": ("东方财富 push2 ulist.np", _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get")),
+        "backups": (
+            ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/ulist.np/get"), True),
+            ("新浪财经 hq.sinajs（独立源，代码映射）", SINA_HQ_URL, False),
+        ),
+        "note": "适配器 pipeline._sina_index_rows；新浪不提供涨跌家数，启用时全景只报指数与成交额（partial）",
+    },
+    "em_clist": {
+        "name": "东方财富 榜单列表（clist）",
+        "used_by": ("热门榜单", "全球大盘全景复盘·板块热力", "每日量化策略·行业列表", "资金流动性·港股成交榜"),
+        "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/clist/get")),
+        "backups": (
+            ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/clist/get"), True),
+            ("东方财富 72.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[2], "/api/qt/clist/get"), True),
+        ),
+        "note": "",
+    },
+    "em_kline": {
+        "name": "东方财富 日K（push2his）",
+        "used_by": ("全球大盘全景复盘·上日成交额", "每日量化策略·行业指数日线", "日线序列备用"),
+        "primary": ("东方财富 push2his", _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get")),
+        "backups": (
+            ("东方财富 91.push2his（同格式镜像）", _em(EM_PUSH2HIS_HOSTS[1], "/api/qt/stock/kline/get"), True),
+            ("东方财富 63.push2his（同格式镜像）", _em(EM_PUSH2HIS_HOSTS[2], "/api/qt/stock/kline/get"), True),
+        ),
+        "note": "",
+    },
+    "em_datacenter": {
+        "name": "东方财富 数据中心报表（沪深港通成交 / 财经日历）",
+        "used_by": ("全球大盘全景复盘·南北向", "资金流动性分析", "未来30天影响经济时间点"),
+        "primary": ("东方财富 datacenter-web", EM_DATACENTER_URLS[0]),
+        "backups": (
+            ("东方财富 datacenter（同格式镜像）", EM_DATACENTER_URLS[1], True),
+            ("东方财富 datacenter/securities（同格式镜像）", EM_DATACENTER_URLS[2], True),
+        ),
+        "note": "",
+    },
+    "em_news": {
+        "name": "东方财富 快讯",
+        "used_by": ("东方财富快讯", "新闻情绪"),
+        "primary": ("东方财富 np-weblist", "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns"),
+        "backups": (
+            ("东方财富 np-listapi（同格式镜像）",
+             "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns", True),
+            ("新浪财经 7×24 快讯（独立源）", SINA_LIVE_NEWS_URL, False),
+        ),
+        "note": "适配器 pipeline._sina_live_news_items；启用时栏目来源标注「新浪财经 7×24」",
+    },
+    "google_news": {
+        "name": "全球头条 · Google News 财经",
+        "used_by": ("全球头条", "新闻情绪"),
+        "primary": ("Google News 中文（中国大陆版）",
+                    "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        "backups": (
+            ("Google News 中文（香港版）",
+             "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-HK&gl=HK&ceid=HK:zh-Hant", True),
+            ("Google News 搜索「财经」", _google_search_rss("财经", "zh-CN", "CN", "CN:zh-Hans"), True),
+        ),
+        "note": "",
+    },
+    "google_news_search": {
+        "name": "专题新闻搜索 · 美联储 / 地缘政治",
+        "used_by": ("AI趋势分析（美联储）", "AI趋势分析（地缘政治）"),
+        "primary": ("Google News 搜索（中文·大陆版）", "https://news.google.com/rss/search?q={query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+        "backups": (
+            ("Google News 搜索（中文·香港版）",
+             "https://news.google.com/rss/search?q={query}&hl=zh-HK&gl=HK&ceid=HK:zh-Hant", True),
+            ("Google News 搜索（英文·美国版）",
+             "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en", True),
+        ),
+        "note": "英文备用仍按同一关键词检索；标题语言可能为英文，页面照实展示",
+    },
+    "gov_policy": {
+        "name": "国家政策 · 中国政府网",
+        "used_by": ("政策因子",),
+        "primary": ("政府网 最新政策", "https://www.gov.cn/zhengce/zuixin/"),
+        "backups": (
+            ("政府网 政策首页（同格式页面）", "https://www.gov.cn/zhengce/", True),
+            ("政府网 政策文库（同格式页面）", "https://www.gov.cn/zhengce/zhengceku/", True),
+        ),
+        "note": "三路都是 gov.cn 官方页面，解析器按「日期 + 标题链接」通用提取",
+    },
+    "youtube_feed": {
+        "name": "港股名家频道 · YouTube 频道订阅",
+        "used_by": ("港股名家频道",),
+        "primary": ("YouTube 官方 Atom", "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"),
+        "backups": (
+            ("RSSHub youtube/channel（同格式 Atom）", "https://rsshub.app/youtube/channel/{channel_id}", True),
+            ("Invidious yewtu.be 频道订阅（同格式 Atom）", "https://yewtu.be/feed/channel/{channel_id}", True),
+        ),
+        "note": "",
+    },
+    "reddit": {
+        "name": "趋势跟踪 · Reddit 板块热帖",
+        "used_by": ("趋势跟踪",),
+        "primary": ("Reddit 公开 Atom", "https://www.reddit.com/r/{community}/hot/.rss?limit={limit}"),
+        "backups": (
+            ("old.reddit 公开 Atom（同格式）", "https://old.reddit.com/r/{community}/hot/.rss?limit={limit}", True),
+            ("Reddit 公开 JSON（独立解析器）", "https://www.reddit.com/r/{community}/hot.json?limit={limit}", False),
+        ),
+        "note": "适配器 pipeline._reddit_json_items",
+    },
+    "stocktwits": {
+        "name": "趋势跟踪 · StockTwits 趋势榜",
+        "used_by": ("趋势跟踪",),
+        "primary": ("StockTwits trending/symbols", "https://api.stocktwits.com/api/2/trending/symbols.json"),
+        "backups": (
+            ("StockTwits trending/symbols/equities（同格式）",
+             "https://api.stocktwits.com/api/2/trending/symbols/equities.json", True),
+            ("StockTwits streams/trending（独立解析：按消息聚合标的）",
+             "https://api.stocktwits.com/api/2/streams/trending.json", False),
+        ),
+        "note": "适配器 pipeline._stocktwits_symbols_from_stream",
+    },
+    "tradingview": {
+        "name": "趋势跟踪 · TradingView Ideas",
+        "used_by": ("趋势跟踪",),
+        "primary": ("TradingView Ideas RSS", "https://www.tradingview.com/feed/"),
+        "backups": (
+            ("TradingView Ideas RSS（stream=all）", "https://www.tradingview.com/feed/?stream=all", True),
+            ("RSSHub tradingview/ideas（同格式 RSS）", "https://rsshub.app/tradingview/ideas", True),
+        ),
+        "note": "",
+    },
+    "bogleheads": {
+        "name": "趋势跟踪 · Bogleheads 论坛",
+        "used_by": ("趋势跟踪",),
+        "primary": ("Bogleheads 论坛 RSS", "https://www.bogleheads.org/forum/feed"),
+        "backups": (
+            ("Bogleheads app.php/feed（phpBB 同格式）", "https://www.bogleheads.org/forum/app.php/feed", True),
+            ("Bogleheads feed.php（phpBB 同格式）", "https://www.bogleheads.org/forum/feed.php", True),
+        ),
+        "note": "",
+    },
+    "hk_news_rss": {
+        "name": "港股新闻源头 · 20 家媒体 RSS",
+        "used_by": ("趋势跟踪·新闻源头",),
+        "primary": ("各媒体官方 RSS / Atom", "{feed}"),
+        "backups": (
+            ("Bing News 站内检索 RSS（同格式 RSS，链接直达原文）",
+             "https://www.bing.com/news/search?q=site%3A{host}&format=rss", True),
+            ("Google News 站内检索 RSS（同格式 RSS，链接经 news.google.com 跳转）",
+             "https://news.google.com/rss/search?q=site%3A{host}&hl=zh-HK&gl=HK&ceid=HK:zh-Hant", True),
+        ),
+        "note": "按每家媒体的主域名生成 site: 检索；备用源条目的链接主机名放行 bing.com / news.google.com",
+    },
 }
 
-# 中国政府网备用
-GOV_POLICY_PRIMARY = [
-    "https://www.gov.cn/zhengce/zuixin/",
-    "https://www.gov.cn/zhengce/",
-]
-GOV_POLICY_BACKUPS = [
-    "https://www.gov.cn/zhengce/jiedu/",
-    "https://www.gov.cn/zhengce/zhengceku/",
-    "https://rsshub.app/gov/zhengce/zuixin",  # RSSHub 兜底
-]
 
-# YouTube 备用
-YOUTUBE_PRIMARY = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-YOUTUBE_BACKUPS = [
-    "https://rsshub.app/youtube/channel/{channel_id}",
-    "https://www.youtube-nocookie.com/feeds/videos.xml?channel_id={channel_id}",
-]
+# ------------------------------------------------------------------
+# 查询接口
+# ------------------------------------------------------------------
+def _fmt(template: str, fmt: Dict[str, Any]) -> str:
+    try:
+        return template.format(**fmt) if fmt else template
+    except (KeyError, IndexError):
+        return template
 
-# Reddit 备用
-REDDIT_PRIMARY = "https://www.reddit.com/r/{community}/hot/.rss?limit={limit}"
-REDDIT_BACKUPS = [
-    "https://www.reddit.com/r/{community}/hot.json?limit={limit}",  # JSON 备用
-    "https://old.reddit.com/r/{community}/hot/.rss?limit={limit}",  # old 域名
-    "https://rsshub.app/reddit/subreddit/{community}",  # RSSHub
-]
 
-# StockTwits 备用
-STOCKTWITS_PRIMARY = "https://api.stocktwits.com/api/2/trending/symbols.json"
-STOCKTWITS_BACKUPS = [
-    "https://api.stocktwits.com/api/2/trending/symbols/equities.json",  # 仅股票
-]
+def candidates(line_id: str, **fmt) -> List[Tuple[str, str, bool]]:
+    """[(label, url, same_format)]：主源 + 两个备用源（按尝试顺序）。"""
+    line = DATA_LINES[line_id]
+    label, url = line["primary"]
+    out = [(label, _fmt(url, fmt), True)]
+    for b_label, b_url, same in line["backups"]:
+        out.append((b_label, _fmt(b_url, fmt), bool(same)))
+    return out
 
-# TradingView 备用
-TRADINGVIEW_PRIMARY = "https://www.tradingview.com/feed/"
-TRADINGVIEW_BACKUPS = [
-    "https://www.tradingview.com/ideas/feed/",
-    "https://rsshub.app/tradingview/ideas",
-]
 
-# Bogleheads 备用
-BOGLEHEADS_PRIMARY = "https://www.bogleheads.org/forum/feed"
-BOGLEHEADS_BACKUPS = [
-    "https://www.bogleheads.org/forum/feed.php?f=1",  # 按板块
-    "https://rsshub.app/bogleheads/forum",
-]
+def urls(line_id: str, **fmt) -> List[str]:
+    """同格式候选 URL（主源 + 同格式备用），去重保序；独立源需调用方按 candidates 走适配器。"""
+    return list(dict.fromkeys(u for _l, u, same in candidates(line_id, **fmt) if same))
 
-# 财经日历备用
-CALENDAR_PRIMARY = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-CALENDAR_BACKUPS = [
-    "https://datacenter.eastmoney.com/api/data/v1/get",  # 无 -web
-    "https://futsseapi.eastmoney.com/static/101_cjrl",  # 期货日历作为参考
-]
 
-# 20 家新闻源头的 RSSHub 备用基地址
-RSSHUB_BASES = [
-    "https://rsshub.app",
-    "https://rsshub.rssforever.com",
-    "https://rsshub.pseudoyu.com",
-]
+def label_for(line_id: str, url: str, **fmt) -> str:
+    """URL → 「主源」/「备用源1」/「备用源2」（供日志与数据覆盖标注）。"""
+    for i, (_label, u, _same) in enumerate(candidates(line_id, **fmt)):
+        if u == url:
+            return "主源" if i == 0 else f"备用源{i}"
+    return "备用源"
+
+
+def describe() -> str:
+    """全部数据线的主 / 备一览（纯文本）。"""
+    lines = ["🔄 数据线主备总览（每条 1 主源 + 2 备用源）："]
+    for lid, line in DATA_LINES.items():
+        lines.append(f"· {line['name']} [{lid}] —— 用于 {'、'.join(line['used_by'])}")
+        lines.append(f"    主源   {line['primary'][0]}：{line['primary'][1]}")
+        for i, (label, url, same) in enumerate(line["backups"], 1):
+            kind = "" if "（" in label else ("（同格式）" if same else "（独立源）")
+            lines.append(f"    备用{i} {label}{kind}：{url}")
+        if line.get("note"):
+            lines.append(f"    说明   {line['note']}")
+    return "\n".join(lines)
+
+
+def get_backup_summary() -> str:
+    """一行一条数据线的简表（沿用旧函数名，供采集日志打印）。"""
+    lines = ["🔄 数据源备用方案总览（每条数据线 1 主 + 2 备）："]
+    for lid, line in DATA_LINES.items():
+        names = " → ".join([line["primary"][0]] + [b[0].split("（")[0] for b in line["backups"]])
+        lines.append(f"· {line['name']}：{names}")
+    return "\n".join(lines)
+
+
+# 旧接口：数据源完整备用映射（供外部查询 / 审计）
+ALL_BACKUP_MAP = {
+    line["name"]: {"primary": line["primary"][1], "backups": [b[1] for b in line["backups"]]}
+    for line in DATA_LINES.values()
+}
 
 # 通用请求头（模拟浏览器，避免被 WAF 拦截）
 BACKUP_HEADERS = {
@@ -143,223 +346,134 @@ BACKUP_HEADERS = {
 }
 
 
-def try_urls_with_fallback(fetch_func: Callable, urls: List[str], **kwargs) -> Tuple[Any, str, List[str]]:
-    """
-    尝试多个 URL，任一成功即返回
-    
-    参数:
-        fetch_func: 取数函数，签名为 fetch_func(url, **kwargs)
-        urls: URL 列表，按优先级排序
-        **kwargs: 传给 fetch_func 的其他参数
-    
-    返回:
-        (result, success_url, errors)
-        - result: 成功的结果，全部失败则 None
-        - success_url: 成功的 URL，全部失败则 None
-        - errors: 所有失败的错误信息列表
-    """
+def try_urls_with_fallback(fetch_func: Callable, urls_: List[str], **kwargs) -> Tuple[Any, str, List[str]]:
+    """依次尝试多个 URL，任一成功即返回 (result, success_url, errors)；全部失败 (None, None, errors)。"""
     errors = []
-    for url in urls:
+    for url in urls_:
         try:
             result = fetch_func(url, **kwargs)
-            if result is not None:
-                # 对于 JSON 结果，检查是否有有效数据
-                if isinstance(result, dict):
-                    # 空字典或明确的错误标记视为失败
-                    if not result:
-                        errors.append(f"{url}: 返回空数据")
-                        continue
-                    # 检查是否有错误码
-                    if result.get("code") and result.get("code") != 200:
-                        errors.append(f"{url}: code={result.get('code')} msg={result.get('msg')}")
-                        continue
-                # 对于文本结果，检查长度
-                if isinstance(result, str) and len(result.strip()) < 10:
-                    errors.append(f"{url}: 返回内容过短")
-                    continue
-                return result, url, errors
-            else:
-                errors.append(f"{url}: 返回 None")
         except Exception as exc:
             errors.append(f"{url}: {type(exc).__name__}: {exc}")
-    
+            continue
+        if result is None:
+            errors.append(f"{url}: 返回 None")
+            continue
+        if isinstance(result, dict):
+            if not result:
+                errors.append(f"{url}: 返回空数据")
+                continue
+            if result.get("code") and result.get("code") != 200:
+                errors.append(f"{url}: code={result.get('code')} msg={result.get('msg')}")
+                continue
+        if isinstance(result, str) and len(result.strip()) < 10:
+            errors.append(f"{url}: 返回内容过短")
+            continue
+        return result, url, errors
     return None, None, errors
 
 
+# ------------------------------------------------------------------
+# 兼容旧调用名（全部改为从注册表取值）
+# ------------------------------------------------------------------
 def get_yahoo_urls(symbol: str) -> List[str]:
-    """获取 Yahoo 的主备 URL 列表"""
-    return [url.format(symbol=symbol) for url in [YAHOO_PRIMARY] + YAHOO_BACKUPS]
+    """Yahoo Chart 同格式主备（query1 → query2）；东财独立备用由调用方走适配器。"""
+    return urls("yahoo_chart", symbol=symbol)
 
 
 def get_google_news_urls(category: str = "zh", query: str = "") -> List[str]:
-    """获取 Google News 的主备 URL，支持 search 类别带 query"""
-    if category == "search" and query:
-        # 构造搜索 URL 的主备
-        from urllib.parse import quote
-        q = quote(query)
-        primary = f"https://news.google.com/rss/search?q={q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
-        backups = [
-            f"https://news.google.com/rss/search?q={q}&hl=zh-CN&gl=HK&ceid=HK:zh-Hant",
-            f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en",
-            f"https://rsshub.app/google/news/search/{query}/zh-CN",
-        ]
-        for base in RSSHUB_BASES[1:]:
-            backups.append(f"{base}/google/news/search/{query}/zh-CN")
-        return [primary] + backups
-    primary = GOOGLE_NEWS_PRIMARY.get(category, GOOGLE_NEWS_PRIMARY["zh"])
-    backups = GOOGLE_NEWS_BACKUPS.get(category, [])
-    # 追加 RSSHub 多基地址兜底
-    if "rsshub.app" in primary or any("rsshub.app" in b for b in backups):
-        for base in RSSHUB_BASES[1:]:
-            for tmpl in GOOGLE_NEWS_BACKUPS.get(category, []):
-                if "rsshub.app" in tmpl:
-                    backups.append(tmpl.replace(RSSHUB_BASES[0], base))
-    return [primary] + backups
+    """Google News 主备：zh → 头条三路；search/fed/geo → 按关键词三路。"""
+    if category in ("search", "fed", "geo") and query:
+        return urls("google_news_search", query=quote(query))
+    return urls("google_news")
 
 
 def get_gov_policy_urls() -> List[str]:
-    """获取政府网的主备 URL"""
-    return GOV_POLICY_PRIMARY + GOV_POLICY_BACKUPS
+    return urls("gov_policy")
 
 
 def get_reddit_urls(community: str, limit: int = 10, mode: str = "rss") -> List[str]:
-    """获取 Reddit 的主备 URL，mode=rss|json，兼容旧调用 get_reddit_urls(community, 'rss')
-    
-    为兼容离线测试，rss 模式仅返回主站 + old 域名（不含 RSSHub，避免测试 fake 解析失败）；
-    真实环境中 RSSHub 作为额外兜底由调用方追加。
-    """
+    """Reddit 主备；mode=rss 返回两路 Atom（www → old），mode=json 返回两路 JSON。
+    兼容旧调用 get_reddit_urls(community, 'rss')。"""
     if isinstance(limit, str) and limit in ("rss", "json"):
-        mode = limit
-        limit = 10
+        mode, limit = limit, 10
     if isinstance(mode, int):
-        limit = mode
-        mode = "rss"
-    # 仅使用主备，不含 RSSHub，避免测试环境 fake 因 URL 格式不同抛异常
-    primary_rss = REDDIT_PRIMARY
-    old_rss = "https://old.reddit.com/r/{community}/hot/.rss?limit={limit}"
-    primary_json = "https://www.reddit.com/r/{community}/hot.json?limit={limit}"
-    old_json = "https://old.reddit.com/r/{community}/hot.json?limit={limit}"
+        limit, mode = mode, "rss"
     if mode == "json":
-        templates = [primary_json, old_json]
+        templates = ["https://www.reddit.com/r/{community}/hot.json?limit={limit}",
+                     "https://old.reddit.com/r/{community}/hot.json?limit={limit}"]
     else:
-        templates = [primary_rss, old_rss]
-    urls = []
-    for tmpl in templates:
-        try:
-            urls.append(tmpl.format(community=community, limit=limit))
-        except KeyError:
-            urls.append(tmpl)
-    # 去重
-    seen = []
-    for u in urls:
-        if u not in seen:
-            seen.append(u)
-    return seen
+        templates = ["https://www.reddit.com/r/{community}/hot/.rss?limit={limit}",
+                     "https://old.reddit.com/r/{community}/hot/.rss?limit={limit}"]
+    return list(dict.fromkeys(t.format(community=community, limit=limit) for t in templates))
 
 
 def get_eastmoney_news_urls() -> List[str]:
-    """东财快讯主备"""
-    return EASTMONEY_NEWS_PRIMARY + EASTMONEY_NEWS_BACKUPS
+    """东财快讯同格式主备（np-weblist → np-listapi）；新浪 7×24 独立备用由调用方走适配器。"""
+    return urls("em_news")
 
 
 def get_eastmoney_quote_urls() -> List[str]:
-    """东财行情主备（clist/get, ulist.np/get 等通用）"""
-    # 保留所有可能的 push2 域名变体
-    bases = [
-        "https://push2.eastmoney.com/api/qt/clist/get",
-        "https://push2.eastmoney.com/api/qt/ulist.np/get",
-        "https://push2.eastmoney.com/api/qt/clist/get",
-        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-        "https://datacenter-web.eastmoney.com/api/data/v1/get",
-        "https://45.push2.eastmoney.com/api/qt/clist/get",
-    ]
-    # 合并去重
-    return list(dict.fromkeys(bases + EASTMONEY_QUOTE_BACKUPS))
+    """东财榜单 clist 三主机（主 + 两镜像）。"""
+    return urls("em_clist")
+
+
+def get_eastmoney_ulist_urls() -> List[str]:
+    """东财快照 ulist.np 三主机（主 + 两镜像）。"""
+    return urls("em_ulist")
 
 
 def get_eastmoney_panorama_urls() -> List[str]:
-    """东财全景/板块主备"""
-    return [EASTMONEY_PANORAMA_PRIMARY] + EASTMONEY_PANORAMA_BACKUPS + EASTMONEY_QUOTE_BACKUPS
+    """旧名：全景快照 = ulist.np 三主机。"""
+    return urls("em_ulist")
 
 
-def get_youtube_urls(channel_id: str) -> List[str]:
-    """YouTube 频道 RSS 主备"""
-    urls = []
-    for tmpl in [YOUTUBE_PRIMARY] + YOUTUBE_BACKUPS:
-        try:
-            urls.append(tmpl.format(channel_id=channel_id))
-        except Exception:
-            urls.append(tmpl)
-    # RSSHub 多基地址
-    for base in RSSHUB_BASES[1:]:
-        urls.append(f"{base}/youtube/channel/{channel_id}")
-    return list(dict.fromkeys(urls))
+def get_eastmoney_kline_urls() -> List[str]:
+    """东财日 K 三主机（主 + 两镜像）。"""
+    return urls("em_kline")
 
 
-def get_stocktwits_urls(kind: str = "trending", symbol: str = "") -> List[str]:
-    """StockTwits 主备"""
-    if kind == "stream" and symbol:
-        primary = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
-        backups = [
-            f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json?filter=top",
-        ]
-        return [primary] + backups
-    return [STOCKTWITS_PRIMARY] + STOCKTWITS_BACKUPS
-
-
-def get_tradingview_urls() -> List[str]:
-    return [TRADINGVIEW_PRIMARY] + TRADINGVIEW_BACKUPS
-
-
-def get_bogleheads_urls() -> List[str]:
-    return [BOGLEHEADS_PRIMARY] + BOGLEHEADS_BACKUPS
+def get_eastmoney_datacenter_urls() -> List[str]:
+    """东财数据中心三入口。"""
+    return urls("em_datacenter")
 
 
 def get_calendar_urls() -> List[str]:
-    return [CALENDAR_PRIMARY] + CALENDAR_BACKUPS
+    return urls("em_datacenter")
+
+
+def get_youtube_urls(channel_id: str) -> List[str]:
+    return urls("youtube_feed", channel_id=channel_id) if channel_id else []
+
+
+def get_stocktwits_urls(kind: str = "trending", symbol: str = "") -> List[str]:
+    if kind == "stream" and symbol:
+        return [f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json",
+                f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json?filter=top"]
+    return urls("stocktwits")
+
+
+def get_tradingview_urls() -> List[str]:
+    return urls("tradingview")
+
+
+def get_bogleheads_urls() -> List[str]:
+    return urls("bogleheads")
+
+
+def get_news_site_backup_urls(host: str) -> List[str]:
+    """新闻源头按主域名生成的两路站内检索 RSS（Bing → Google）。"""
+    if not host:
+        return []
+    return [u for _l, u, same in candidates("hk_news_rss", feed="", host=host)[1:] if same]
 
 
 def get_rsshub_fallbacks(feed_url: str) -> List[str]:
-    """为 RSSHub 订阅生成备用基地址"""
+    """为 RSSHub 订阅生成备用基地址。"""
     if "rsshub.app" not in feed_url:
         return [feed_url]
-    
-    fallbacks = [feed_url]
-    for base in RSSHUB_BASES[1:]:  # 跳过第一个（已是主）
-        fallback_url = feed_url.replace(RSSHUB_BASES[0], base)
-        if fallback_url not in fallbacks:
-            fallbacks.append(fallback_url)
-    
-    return fallbacks
-
-
-# 数据源完整备用映射，供外部查询
-ALL_BACKUP_MAP = {
-    "Yahoo 行情": {"primary": YAHOO_PRIMARY, "backups": YAHOO_BACKUPS},
-    "东财快讯": {"primary": EASTMONEY_NEWS_PRIMARY, "backups": EASTMONEY_NEWS_BACKUPS},
-    "东财行情": {"primary": EASTMONEY_QUOTE_PRIMARY, "backups": EASTMONEY_QUOTE_BACKUPS},
-    "东财全景": {"primary": EASTMONEY_PANORAMA_PRIMARY, "backups": EASTMONEY_PANORAMA_BACKUPS},
-    "Google News": {"primary": GOOGLE_NEWS_PRIMARY, "backups": GOOGLE_NEWS_BACKUPS},
-    "政府网": {"primary": GOV_POLICY_PRIMARY, "backups": GOV_POLICY_BACKUPS},
-    "YouTube": {"primary": YOUTUBE_PRIMARY, "backups": YOUTUBE_BACKUPS},
-    "Reddit": {"primary": REDDIT_PRIMARY, "backups": REDDIT_BACKUPS},
-    "StockTwits": {"primary": STOCKTWITS_PRIMARY, "backups": STOCKTWITS_BACKUPS},
-    "TradingView": {"primary": TRADINGVIEW_PRIMARY, "backups": TRADINGVIEW_BACKUPS},
-    "Bogleheads": {"primary": BOGLEHEADS_PRIMARY, "backups": BOGLEHEADS_BACKUPS},
-    "财经日历": {"primary": CALENDAR_PRIMARY, "backups": CALENDAR_BACKUPS},
-}
-
-
-def get_backup_summary() -> str:
-    """获取所有备用源的总结文本"""
-    lines = ["🔄 数据源备用方案总览："]
-    for name, cfg in ALL_BACKUP_MAP.items():
-        primary = cfg["primary"]
-        if isinstance(primary, list):
-            primary = primary[0] if primary else "无"
-        elif isinstance(primary, dict):
-            primary = list(primary.values())[0] if primary else "无"
-        backup_count = len(cfg["backups"]) if isinstance(cfg["backups"], list) else len(list(cfg["backups"].values())[0]) if isinstance(cfg["backups"], dict) else 0
-        lines.append(f"· {name}：主 {primary[:60]}... + {backup_count} 个备用")
-    
-    return "\n".join(lines)
+    out = [feed_url]
+    for base in RSSHUB_BASES[1:]:
+        alt = feed_url.replace(RSSHUB_BASES[0], base)
+        if alt not in out:
+            out.append(alt)
+    return out
