@@ -114,6 +114,31 @@
       PSI 归一 50% + 政策新闻量 30% + 维度覆盖 20% 复合分，输出趋势分、政策冲击强度榜、
       趋势预判信号与风险预算。官方条例、规划、办法等没有方向性触发词时按中性「政策发布」纳入；
       触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
+  13. 「每日量化策略趋势跟踪线索」升级（2026-09-28）：栏目由单一 Reddit 板块热帖扩展为
+      「全网 20 个新闻源头 · 港股信息挖掘 + 分析」与「Reddit 十板块热帖」两段。
+      20 个源头按 香港 7 / 内地 7 / 国际 6 配置（RTHK、HKET、SCMP、HKEX、Now、TVB、HKFP、
+      财联社、格隆汇、智通、证券时报、同花顺、东财策略研报、Google 新闻中/英文聚合、
+      Bloomberg、MarketWatch、Investing.com、FT、BBC），只读公开 RSS/Atom 订阅：
+      只保留 72 小时窗口内、带可验证时区发布时间的标题 + 原文链接（北京时间），
+      链接按每源域名白名单校验（https + 主机名精确匹配）；按港股关键词命中挖掘相关
+      信息（未命中只计扫描数），每源至多 3 条、正文合计至多 24 条。
+      分析为确定性规则合成：覆盖度（N/20 源有更新、扫描条数、港股相关条数）+
+      中英多空词概率（50±45，夹 5%~95%）+ 主题词表热点 TOP3 + 逐源命中明细，
+      并入栏目末尾「⌁ AI 研判」行；单源失败只标注暂缺与原因、不影响其余源，
+      全部失败整源缺席。OCTOPUS_HK_NEWS=0 关闭、OCTOPUS_RSSHUB_BASE 换 RSSHub 实例、
+      OCTOPUS_HK_NEWS_PER_SOURCE / OCTOPUS_HK_NEWS_MAX 调条数；规则合成，非投资建议。
+  14. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起）：未来一周
+      （5 个交易日）恒生指数升跌方向 + P(周涨) 概率，方法来自 GitHub 无未来函数
+      （look-ahead）量化工程实践调研：特征只用 ≤t 数据且扩张因果归一（akfamily/akquant）、
+      相似样本标签必须已结算 s+5≤t（haeganm/walkforward 的 purged/embargo 依据）、
+      运行时「截断不变性」自检（arielb57/peekahead：输出 ≤t 只依赖输入 ≤t，不过则整栏
+      降级）、预测先存档 settled=False 满 5 个交易日再按真实收盘结算（k-macao/03
+      PR #54 四条硬约束，留痕 output/weekly_forecast.json，样本 <10 只报样本量）、
+      回测体检清单（paidaxing1234/quant-backtest-guard）。预测器 = 扩张基准率 +
+      20 日特征最近邻（K=8）50/50 合成、夹 5%~95%，附滚动样本外命中率与 Brier；
+      纯标准库 + providers.fetch_bars 单一联网口。OCTOPUS_WEEKLY=0 / --no-weekly 关闭、
+      --weekly-only 研究模式；数据取不到、样本不足或自检不过 → 整栏缺席。规则合成，
+      非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -171,12 +196,16 @@ REPORT_DIR = SCRIPT_DIR
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
+import octopus_weekly as _weekly  # noqa: E402
 
 QUANT_HISTORY_FILENAME = "quant_history.json"
 # 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
 HK_QUANT_ENABLED = str(os.environ.get("OCTOPUS_QUANT", "1")).strip().lower() not in ("0", "false", "no")
 # 是否逐只跑个股概率（关掉后只出指数与流动性，明显更快）
 HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower() not in ("0", "false", "no")
+# 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
+WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
+WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
 
 # 时区
 CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
@@ -353,7 +382,7 @@ CALENDAR_CANON_DROP = ("季调", "非季调", "初值", "终值", "修正值", "
                        "折年率", "年化", "当月", "总计", "总值", "数据", "报告")
 CALENDAR_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
-# 每日量化策略趋势跟踪线索：源头数据只保留 Reddit 一个来源（2026-09-27 起由十站投研精简）。
+# 每日量化策略趋势跟踪线索 · 板块热帖部分：Reddit 一个来源（2026-09-27 起由十站投研精简）。
 # 只读取公开热帖 feed，不登录、不绕过付费墙、不复制帖子正文；
 # 扫描 10 个财经 / 投资 / 金融 / 经济类板块，每个板块取热门帖子 5 条作为样本数据，
 # 捕捉散户讨论风向与热门标的。板块顺序同时用于抓取、栏目和审计展示。
@@ -366,6 +395,140 @@ PUBLIC_SITE_DESCRIPTIONS = {
 }
 PUBLIC_SITE_WINDOW_HOURS = 72  # 帖子按发布时间过滤
 REDDIT_POSTS_PER_BOARD = 5     # 每个板块的热门帖样本条数
+
+# ── 每日量化策略趋势跟踪线索 · 全网 20 个新闻源头（2026-09-28 新增）────────────
+# 在 Reddit 板块热帖之外，固定跟踪全网 20 个新闻源头的公开 RSS/Atom 订阅，
+# 按港股关键词挖掘与港股市场相关的信息，并用确定性规则合成分析（多空词概率 +
+# 热点主题），随「每日量化策略趋势跟踪线索」栏目一起渲染。
+# 设计约束（与 Reddit 源同一口径）：
+#   · 只读公开订阅，不登录、不绕过付费墙；只保留标题、发布时间与原文链接，不复制正文；
+#   · 每条链接按该源头自己的域名白名单校验（https + 主机名精确匹配），防止标题/链接注入；
+#   · 只保留 72 小时窗口内、带可验证时区发布时间的条目；抓不到的源头如实标注暂缺与原因，
+#     绝不用历史内容冒充更新；分析只做词表命中计数，不猜测、不编造。
+# 源头分组：香港 7 / 内地 7 / 国际 6；顺序同时用于抓取、栏目与审计展示。
+# 增删源头直接改 HK_NEWS_SOURCES；公共 RSSHub 实例被限流时用
+# OCTOPUS_RSSHUB_BASE 换实例；OCTOPUS_HK_NEWS=0 可整体关闭本源。
+HK_NEWS_SOURCE_NAME = "港股新闻源头"
+RSSHUB_BASE = str(os.environ.get("OCTOPUS_RSSHUB_BASE", "https://rsshub.app")).rstrip("/")
+HK_NEWS_ENABLED = str(os.environ.get("OCTOPUS_HK_NEWS", "1")).strip().lower() not in ("0", "false", "no")
+HK_NEWS_PER_SOURCE = _env_int("OCTOPUS_HK_NEWS_PER_SOURCE", 3, 1, 8)  # 每源头最多保留的港股相关条数
+HK_NEWS_MAX_ITEMS = _env_int("OCTOPUS_HK_NEWS_MAX", 24, 4, 60)        # 栏目正文港股相关条数总上限
+HK_NEWS_SCAN_LIMIT = 12      # 每个源头先扫描的最新条目数（窗口过滤前）
+HK_NEWS_WINDOW_HOURS = PUBLIC_SITE_WINDOW_HOURS  # 72 小时，与 Reddit 源同窗口
+
+HK_NEWS_SOURCES = (
+    # ── 香港本地（7）─────────────────────────────────────────────
+    {"name": "RTHK 香港电台·财经", "region": "香港",
+     "url": "https://news.rthk.hk/rthk/ch/index.shtml",
+     "feed": "https://rthk.hk/rthk/news/rss/c_expressnews_cfinance.xml",
+     "hosts": ("rthk.hk", "news.rthk.hk", "www.rthk.hk"),
+     "desc": "香港电台中文财经新闻，本地利率、楼市与市况的一手消息"},
+    {"name": "香港经济日报 HKET·财经", "region": "香港",
+     "url": "https://www.hket.com/finance",
+     "feed": "https://www.hket.com/rss/finance",
+     "hosts": ("hket.com", "www.hket.com", "m.hket.com"),
+     "desc": "香港经济日报财经频道，港股大市、新股与本地经济"},
+    {"name": "南华早报 SCMP·Business", "region": "香港",
+     "url": "https://www.scmp.com/business",
+     "feed": "https://www.scmp.com/rss/92/feed",
+     "hosts": ("scmp.com", "www.scmp.com"),
+     "desc": "South China Morning Post 英文商业版，中国与香港市场视角"},
+    {"name": "港交所·新闻稿", "region": "香港",
+     "url": "https://www.hkex.com.hk/News/News-Release?sc_lang=en",
+     "feed": "https://www.hkex.com.hk/Services/RSS-Feeds/News-Releases?sc_lang=en",
+     "hosts": ("hkex.com.hk", "www.hkex.com.hk", "sc.hkex.com.hk"),
+     "desc": "HKEX 官方新闻稿：上市规则、市场机制与交易安排改革"},
+    {"name": "Now 新闻", "region": "香港",
+     "url": "https://www.now.com/news",
+     "feed": f"{RSSHUB_BASE}/now/news",
+     "hosts": ("now.news", "www.now.com", "news.now.com", "www.nownews.com",
+               "nowtv.com", "www.nowtv.com"),
+     "desc": "Now 新闻本地要闻（经 RSSHub 公开订阅）"},
+    {"name": "TVB 新闻", "region": "香港",
+     "url": "https://news.tvb.com/tc/",
+     "feed": f"{RSSHUB_BASE}/tvb/news",
+     "hosts": ("news.tvb.com", "www.tvb.com", "tvb.com"),
+     "desc": "无线新闻要闻与即时财经（经 RSSHub 公开订阅）"},
+    {"name": "香港自由新闻 HKFP", "region": "香港",
+     "url": "https://hongkongfp.com/",
+     "feed": "https://hongkongfp.com/feed/",
+     "hosts": ("hongkongfp.com", "www.hongkongfp.com"),
+     "desc": "Hong Kong Free Press 英文独立媒体，香港政策与经济"},
+    # ── 内地（7）───────────────────────────────────────────────
+    {"name": "财联社·电报", "region": "内地",
+     "url": "https://www.cls.cn/telegraph",
+     "feed": f"{RSSHUB_BASE}/cls/telegraph",
+     "hosts": ("cls.cn", "www.cls.cn", "m.cls.cn"),
+     "desc": "财联社 7×24 电报快讯，盘中异动与政策信号（经 RSSHub）"},
+    {"name": "格隆汇·实时快讯", "region": "内地",
+     "url": "https://www.gelonghui.com/",
+     "feed": f"{RSSHUB_BASE}/gelonghui/live",
+     "hosts": ("gelonghui.com", "www.gelonghui.com"),
+     "desc": "格隆汇 7×24 市场快讯，港股与美股中概动态（经 RSSHub）"},
+    {"name": "智通财经·推荐", "region": "内地",
+     "url": "https://www.zhitongcaijing.com/",
+     "feed": f"{RSSHUB_BASE}/zhitongcaijing",
+     "hosts": ("zhitongcaijing.com", "www.zhitongcaijing.com", "m.zhitongcaijing.com"),
+     "desc": "智通财经港股美股资讯，大盘策略与个股解读（经 RSSHub）"},
+    {"name": "证券时报·快讯", "region": "内地",
+     "url": "https://www.stcn.com/",
+     "feed": f"{RSSHUB_BASE}/stcn/article/list/kx",
+     "hosts": ("stcn.com", "www.stcn.com", "finance.stcn.com", "news.stcn.com"),
+     "desc": "证券时报网 7×24 快讯，监管与市场大事（经 RSSHub）"},
+    {"name": "同花顺·7×24 要闻", "region": "内地",
+     "url": "https://news.10jqka.com.cn/",
+     "feed": f"{RSSHUB_BASE}/10jqka/realtimenews",
+     "hosts": ("10jqka.com.cn", "www.10jqka.com.cn", "news.10jqka.com.cn",
+               "stock.10jqka.com.cn", "finance.10jqka.com.cn"),
+     "desc": "同花顺 7×24 全球财经直播，要闻与公告（经 RSSHub）"},
+    {"name": "东方财富·策略研报", "region": "内地",
+     "url": "https://data.eastmoney.com/report/strategyreport.html",
+     "feed": f"{RSSHUB_BASE}/eastmoney/report/strategyreport",
+     "hosts": ("eastmoney.com", "www.eastmoney.com", "data.eastmoney.com",
+               "pdf.dfcfw.com", "reportapi.eastmoney.com"),
+     "desc": "东财研究所策略研报，机构对大盘与港股的最新判断（经 RSSHub）"},
+    {"name": "Google 新闻·中文港股聚合", "region": "内地",
+     "url": "https://news.google.com/",
+     "feed": ("https://news.google.com/rss/search?q="
+              "%E6%B8%AF%E8%82%A1%20OR%20%E6%81%92%E7%94%9F%E6%8C%87%E6%95%B8"
+              "&hl=zh-Hans&gl=CN&ceid=CN:zh-Hans"),
+     "hosts": ("news.google.com",),
+     "desc": "Google 新闻按「港股 OR 恒生指数」聚合的中文报道"},
+    # ── 国际（6）───────────────────────────────────────────────
+    {"name": "Bloomberg·Markets", "region": "国际",
+     "url": "https://www.bloomberg.com/markets",
+     "feed": "https://feeds.bloomberg.com/markets/news.rss",
+     "hosts": ("bloomberg.com", "www.bloomberg.com"),
+     "desc": "彭博市场频道，全球风险偏好与利率主线"},
+    {"name": "MarketWatch·头条", "region": "国际",
+     "url": "https://www.marketwatch.com/",
+     "feed": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+     "hosts": ("marketwatch.com", "www.marketwatch.com", "feeds.content.dowjones.io"),
+     "desc": "MarketWatch 头条，美股与全球市场情绪"},
+    {"name": "Investing.com·市场新闻", "region": "国际",
+     "url": "https://www.investing.com/",
+     "feed": "https://www.investing.com/rss/news_1.rss",
+     "hosts": ("investing.com", "www.investing.com", "cn.investing.com", "m.investing.com"),
+     "desc": "Investing.com 市场新闻，汇率、商品与股指联动"},
+    {"name": "Financial Times·首页", "region": "国际",
+     "url": "https://www.ft.com/",
+     "feed": "https://www.ft.com/rss/home",
+     "hosts": ("ft.com", "www.ft.com"),
+     "desc": "金融时报全球头条，宏观与资本流动视角"},
+    {"name": "BBC·Business", "region": "国际",
+     "url": "https://www.bbc.com/news/business",
+     "feed": "https://feeds.bbci.co.uk/news/business/rss.xml",
+     "hosts": ("bbc.com", "www.bbc.com", "bbc.co.uk", "www.bbc.co.uk"),
+     "desc": "BBC 商业新闻，英国与全球市场动态"},
+    {"name": "Google 新闻·英文港股聚合", "region": "国际",
+     "url": "https://news.google.com/",
+     "feed": ("https://news.google.com/rss/search?q="
+              "%22Hang%20Seng%22%20OR%20%22Hong%20Kong%20stocks%22"
+              "&hl=en-US&gl=US&ceid=US:en"),
+     "hosts": ("news.google.com",),
+     "desc": "Google 新闻按「Hang Seng OR Hong Kong stocks」聚合的英文报道"},
+)
+HK_NEWS_TOTAL = len(HK_NEWS_SOURCES)  # 应为 20；测试会校验
 
 HK_CHANNELS = [
     # ── 港股股评人 YouTube 频道（可自动抓取）─────────────────
@@ -1564,7 +1727,8 @@ def fetch_hk_channels():
 
 
 # ============================================================
-# 每日量化策略趋势跟踪线索：单一来源 Reddit（仅标题/热度/原始链接，不复制帖子正文）
+# 每日量化策略趋势跟踪线索 · Reddit 板块热帖部分（仅标题/热度/原始链接，不复制帖子正文）
+# 港股新闻源头部分在下方「全网 20 个新闻源头」小节单独实现。
 # ============================================================
 _PUBLIC_ALLOWED_HOSTS = {
     "reddit.com", "www.reddit.com", "old.reddit.com",
@@ -1810,6 +1974,246 @@ def fetch_public_sites():
 
 
 # ============================================================
+# 每日量化策略趋势跟踪线索 · 全网 20 个新闻源头（港股挖掘 + 规则分析）
+# ============================================================
+# 港股相关判定：标题命中下列任一关键词（子串匹配，英文不区分大小写）。
+# 覆盖指数/市场（港股、恒生、恒指、H股、南向…）、香港本地（香港、本港、港府、
+# 金管局…）与英文同义（Hang Seng、Hong Kong、HKEX、Southbound…）；
+# 未命中的标题只计入「扫描」条数，不进栏目正文，避免把无关国际新闻算成港股信息。
+_HK_NEWS_KEYWORDS = (
+    "港股", "恒生", "恒指", "恒科", "港交所", "联交所", "H股", "港股通", "南向",
+    "沪深港通", "红筹", "紅籌", "窝轮", "窩輪", "牛熊证", "牛熊證", "国企指数", "大市",
+    "香港", "本港", "全港", "港府", "金管局", "财政司", "港元",
+    # 仅在香港上市的权重/明星股（用全称避免误伤 A 股同名概念；A+H 同名股不收，
+    # 否则「中芯国际」「比亚迪」这类 A 股高频词会把大量 A 股新闻算成港股信息）
+    "腾讯控股", "阿里巴巴", "美团", "快手", "泡泡玛特", "友邦保险", "汇丰控股",
+    "香港交易所", "小米集团", "京东集团", "网易", "商汤",
+    "Hang Seng", "Hong Kong", "HKEX", "HSCEI", "Southbound", "H-share", "Stock Connect",
+)
+_HK_NEWS_KW_RE = re.compile("|".join(re.escape(k) for k in _HK_NEWS_KEYWORDS), re.I)
+
+# 热点主题词表（子串 / ASCII 单词边界命中）：分析只统计命中量排序，不推断因果。
+HK_THEME_KEYWORDS = {
+    "南向资金": ("南向", "港股通", "沪深港通", "南下", "净买入", "southbound", "stock connect"),
+    "利率/美债": ("美联储", "加息", "降息", "利率", "美债", "收益率", "金管局", "fed", "treasury", "yield"),
+    "AI/科技": ("AI", "人工智能", "大模型", "算力", "芯片", "半导体", "科技", "恒科",
+                "腾讯", "阿里", "小米", "nvidia"),
+    "IPO/上市": ("IPO", "上市", "招股", "新股", "分拆", "挂牌", "listing"),
+    "政策/监管": ("政策", "监管", "证监会", "改革", "咨询", "意见稿", "sfc", "probe"),
+    "地产/楼市": ("地产", "楼市", "内房", "物业", "property"),
+    "医药/创新药": ("医药", "创新药", "生物", "biotech", "pharma"),
+    "消费/零售": ("消费", "零售", "旅游", "retail", "消费券"),
+    "资源/大宗": ("黄金", "原油", "油价", "铜价", "矿业", "gold", "oil"),
+    "汇率/货币": ("港元", "汇率", "美元", "人民币", "currency", "devalu"),
+}
+_HK_THEME_TOP_N = 3
+
+
+def _news_url(raw, hosts):
+    """新闻源头外链白名单：仅允许 https + 该源头自己列出的主机名（精确匹配）。
+
+    与 Reddit 源的 _public_url 同口径，防止外部标题/链接注入日报；
+    相对链接（无主机名）、非 443 端口、带账号密码的 URL 一律拒绝。
+    """
+    if not raw or any(c.isspace() or c in ('<', '>', '\\') for c in str(raw).strip()):
+        return ""
+    try:
+        parsed = urlparse(str(raw).strip())
+        if (parsed.scheme != "https" or parsed.hostname not in set(hosts or ())
+                or parsed.username or parsed.password or parsed.port not in (None, 443)):
+            return ""
+    except ValueError:
+        return ""
+    return str(raw).strip()
+
+
+def _hk_theme_hits(word, text):
+    """主题词命中计数：ASCII 词按字母边界（避免 rate 命中 generate），中文按子串。"""
+    if all(ord(c) < 128 for c in word):
+        return len(re.findall(r"(?<![A-Za-z])" + re.escape(word) + r"(?![A-Za-z])",
+                              str(text or ""), re.I))
+    return str(text or "").count(word)
+
+
+def _hk_news_themes(titles, top_n=_HK_THEME_TOP_N):
+    """港股相关标题的热点主题 TOP：只按词表命中量排序，无命中返回空（不猜）。"""
+    counts = {}
+    for theme, words in HK_THEME_KEYWORDS.items():
+        hits = sum(_hk_theme_hits(w, t) for t in titles for w in words)
+        if hits:
+            counts[theme] = hits
+    return [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_n]]
+
+
+def _hk_news_bull_bear(titles):
+    """港股相关标题的多空证据：中文词表 + 英文多空词（与 Reddit 源同一套英文词表）。"""
+    zh_bull, zh_bear = _zh_title_bull_bear(titles)
+    en_bull = sum(len(_REDDIT_BULL_RE.findall(str(t or ""))) for t in titles)
+    en_bear = sum(len(_REDDIT_BEAR_RE.findall(str(t or ""))) for t in titles)
+    return zh_bull + en_bull, zh_bear + en_bear
+
+
+def _hk_news_analysis(records):
+    """20 个新闻源头的港股挖掘分析（确定性规则，可复现，不调大模型）。
+
+    输入是 fetch 返回的逐源记录，输出：
+      scanned/ok_n/hk_n —— 覆盖度；bull/bear/prob/label —— 多空词概率（5%~95%）；
+      themes —— 热点主题 TOP；top_sources —— 命中最多源头；today_n/newest —— 新鲜度。
+    """
+    ok_n = empty_n = fail_n = 0
+    scanned = hk_n = today_n = 0
+    titles, top_sources, newest = [], [], None
+    for rec in records if isinstance(records, (list, tuple)) else []:
+        if not isinstance(rec, dict):
+            continue
+        status = rec.get("status")
+        if status == "ok":
+            ok_n += 1
+        elif status == "empty":
+            empty_n += 1
+        else:
+            fail_n += 1
+        scanned += int(rec.get("scanned") or 0)
+        today_n += int(rec.get("today") or 0)
+        d = str(rec.get("newest") or "")[:10]
+        if d and (not newest or d > newest):
+            newest = d
+        items = [it for it in (rec.get("items") or []) if isinstance(it, dict)]
+        hk_titles = [str(t) for t in (rec.get("hk_titles") or [])
+                     if isinstance(t, str) and t]
+        if not hk_titles:
+            hk_titles = [str(it.get("title") or "") for it in items]
+        hk_n += int(rec.get("hk_n") or len(items))
+        titles.extend(hk_titles)
+        if hk_titles:
+            top_sources.append((str(rec.get("name") or ""), int(rec.get("hk_n") or len(hk_titles))))
+    bull, bear = _hk_news_bull_bear(titles)
+    prob = _ai_judge_prob(bull, bear)
+    mark, label = _ai_judge_label(prob)
+    top_sources.sort(key=lambda kv: (-kv[1], kv[0]))
+    return {
+        "scanned": scanned, "hk_n": hk_n, "ok_n": ok_n, "empty_n": empty_n,
+        "fail_n": fail_n, "today_n": today_n, "newest": newest,
+        "bull": bull, "bear": bear, "prob": prob, "mark": mark, "label": label,
+        "themes": _hk_news_themes(titles), "top_sources": top_sources[:3],
+        "total": len(records) if isinstance(records, (list, tuple)) else 0,
+    }
+
+
+def fetch_hk_news_sources():
+    """抓取全网 20 个新闻源头的公开 RSS/Atom 订阅，挖掘港股相关信息。
+
+    逐源并行抓取 → 只保留 72 小时窗口内、带可验证时区发布时间的条目 →
+    按港股关键词命中筛选（未命中只计扫描数）→ 每源至多 HK_NEWS_PER_SOURCE 条、
+    全栏目至多 HK_NEWS_MAX_ITEMS 条 → 规则合成分析。
+    单源失败不影响其余源；全部失败时整源 unavailable 并给出原因，绝不历史兜底。
+    """
+    if not HK_NEWS_ENABLED:
+        print("⏭ 已关闭全网新闻源头采集（OCTOPUS_HK_NEWS=0）")
+        return _source_result(HK_NEWS_SOURCE_NAME, "unavailable", sources=[], analysis=None,
+                              note="", error="本次运行已关闭新闻源头采集（OCTOPUS_HK_NEWS=0）")
+
+    print(f"📡 正在采集每日量化策略趋势跟踪线索 · 全网 {len(HK_NEWS_SOURCES)} 个新闻源头（港股挖掘）...")
+    now = datetime.now(CST)
+
+    def _fetch_one(cfg):
+        xml_text = safe_request(cfg["feed"], is_json=False, timeout=10)
+        parsed = _parse_rss_items(xml_text, limit=HK_NEWS_SCAN_LIMIT) if xml_text else []
+        rec = {"name": cfg.get("name", "?"), "region": cfg.get("region", ""),
+               "url": cfg.get("url", ""), "hosts": tuple(cfg.get("hosts") or ()),
+               "desc": cfg.get("desc", ""), "feed": cfg.get("feed", ""),
+               "status": "fail", "scanned": 0, "today": 0, "newest": None,
+               "items": [], "hk_titles": [], "hk_n": 0, "note": ""}
+        if not parsed:
+            rec["note"] = "自动抓取失败（源可能需登录/被限流，或订阅地址变化），暂缺"
+            return rec
+        fresh, newest, fresh_today = [], None, 0
+        for row in parsed:
+            raw_date = str(row.get("published") or "").strip()
+            # 没有显式时区就不能确定自然日，拒绝用运行机器的本地时区猜测（与 Reddit 源同口径）。
+            if not re.search(r"(?:Z|[+-]\d{2}:?\d{2}|\bGMT|\bUTC)$", raw_date, re.I):
+                continue
+            try:
+                dt = datetime.strptime(str(row.get("published_cst") or ""),
+                                       "%Y-%m-%d %H:%M").replace(tzinfo=CST)
+            except ValueError:
+                continue
+            if not _public_recent(dt, now, HK_NEWS_WINDOW_HOURS):
+                continue
+            url = _news_url(row.get("url"), rec["hosts"])
+            title = _public_text(row.get("title"), 160)
+            if not (url and title):
+                continue
+            fresh.append({"title": title, "url": url,
+                          "published_cst": dt.strftime("%Y-%m-%d %H:%M"),
+                          "is_today": dt.date() == now.date(),
+                          "relevant": bool(_HK_NEWS_KW_RE.search(title))})
+            if not newest or dt > newest:
+                newest = dt
+            if dt.date() == now.date():
+                fresh_today += 1
+        if not fresh:
+            rec["status"] = "empty"
+            rec["note"] = f"近 {HK_NEWS_WINDOW_HOURS} 小时窗口内无可验证发布时间的新内容"
+            return rec
+        hk_all = [it for it in fresh if it["relevant"]]
+        hk_items = hk_all[:HK_NEWS_PER_SOURCE]
+        for it in hk_items:
+            it["detail"] = f"发布于 {it['published_cst']}（北京时间）"
+        rec.update({
+            "status": "ok", "scanned": len(fresh), "today": fresh_today,
+            "newest": newest.strftime("%Y-%m-%d"), "items": hk_items,
+            "hk_titles": [it["title"] for it in hk_all],
+            "hk_n": len(hk_all),
+        })
+        return rec
+
+    records = [None] * len(HK_NEWS_SOURCES)
+    with ThreadPoolExecutor(max_workers=min(10, len(HK_NEWS_SOURCES))) as executor:
+        futures = {executor.submit(_fetch_one, cfg): idx
+                   for idx, cfg in enumerate(HK_NEWS_SOURCES)}
+        for future, idx in futures.items():
+            try:
+                records[idx] = future.result()
+            except Exception as exc:  # 单源异常只标记该源，不拖垮其余源头
+                cfg = HK_NEWS_SOURCES[idx]
+                records[idx] = {"name": cfg.get("name", "?"), "region": cfg.get("region", ""),
+                                "url": cfg.get("url", ""), "hosts": tuple(cfg.get("hosts") or ()),
+                                "desc": cfg.get("desc", ""), "feed": cfg.get("feed", ""),
+                                "status": "fail", "scanned": 0, "today": 0, "newest": None,
+                                "items": [], "hk_titles": [], "hk_n": 0,
+                                "note": f"抓取异常（{type(exc).__name__}），暂缺"}
+    records = [r for r in records if isinstance(r, dict)]
+
+    analysis = _hk_news_analysis(records)
+    missing = [r["name"] for r in records if r.get("status") != "ok"]
+    note = ("只收录 20 个新闻源头公开订阅的标题、发布时间与原文链接（北京时间），"
+            "港股相关按关键词命中筛选；分析为多空词表 + 主题词表的规则合成，"
+            "社区与媒体观点未经核实，不构成投资建议。")
+    if missing:
+        note += f" 暂缺（{len(missing)} 家）：" + "、".join(missing) + "。"
+
+    if analysis["scanned"] == 0:
+        reason = (f"近 {HK_NEWS_WINDOW_HOURS} 小时窗口内 20 个源头均未取得"
+                  "带可验证时区发布时间的新闻（网络受限或订阅地址变化）")
+        print(f"  ⚠️ 全网新闻源头暂不可用：{reason}")
+        return _source_result(HK_NEWS_SOURCE_NAME, "unavailable",
+                              sources=records, analysis=analysis, note=note, error=reason)
+
+    hk_n, ok_n = analysis["hk_n"], analysis["ok_n"]
+    print(f"  ✅ {ok_n}/{len(HK_NEWS_SOURCES)} 个源头窗口内有更新 · 扫描 {analysis['scanned']} 条"
+          f" · 港股相关 {hk_n} 条 · 多空 {analysis['bull']}/{analysis['bear']}"
+          + (f" · 热点 {'、'.join(analysis['themes'])}" if analysis["themes"] else ""))
+    if missing:
+        print(f"  🕐 {len(missing)} 个源头暂缺：" + "、".join(missing))
+    return _source_result(
+        HK_NEWS_SOURCE_NAME, "success",
+        is_today=analysis["today_n"] > 0, content_date=analysis["newest"],
+        sources=records, analysis=analysis, note=note,
+        partial=bool(missing), error=None)
+
+
+# ============================================================
 # 数据采集主函数
 # ============================================================
 def fetch_hk_quant():
@@ -1846,6 +2250,55 @@ def fetch_hk_quant():
         print(f"  ✅ 流动性综合分 {liq['score']:.0f}/100（{liq['label']}）")
     return _source_result("港股量化引擎", "success",
                           is_today=(res.get("as_of") == _today_display()),
+                          content_date=res.get("as_of"),
+                          result=res)
+
+
+# ============================================================
+# 每周量化走势预测：未来一周（5 个交易日）港股升跌方向与概率
+# ------------------------------------------------------------
+# 方法来自 GitHub 无未来函数（look-ahead）量化工程实践调研：
+#   · 输入闭合：只读本次抓取的日线快照（^HSI 2y 日线）；
+#   · 目标日在严格之后：特征只用 ≤t 数据、相似样本标签必须已结算（s+5 ≤ t）、
+#     运行时截断不变性自检（peekahead 式）不过则整栏降级；
+#   · 先存档后结算：预测先落盘 output/weekly_forecast.json（settled=False），
+#     满 5 个交易日再按真实收盘回填 hit / 实际涨跌（当次运行不可能结算当次预测）；
+#   · 零写死叙事：不落任何具体日期/点位，规则合成，非投资建议。
+# 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
+# ============================================================
+def fetch_weekly_forecast():
+    """运行每周量化走势预测（恒指日线 · 无未来函数），失败时如实降级。"""
+    print("📡 正在计算每周量化走势预测（恒生指数 · 未来一周 · 无未来函数）...")
+    if not WEEKLY_ENABLED:
+        print("  ⏭ 每周预测已关闭（OCTOPUS_WEEKLY=0 / --no-weekly）")
+        return _source_result("每周量化走势预测", "unavailable", result=None,
+                              error="本次运行已关闭每周预测")
+    try:
+        res = _weekly.run_weekly(
+            safe_request,
+            history_path=os.path.join(REPORT_DIR, WEEKLY_HISTORY_FILENAME))
+    except Exception as exc:                       # 预测异常不影响日报其它栏目
+        print(f"  ⚠️ 每周预测异常：{exc}")
+        return _source_result("每周量化走势预测", "unavailable", result=None, error=str(exc))
+
+    if not res.get("available"):
+        print(f"  ⚠️ 每周预测暂不可用：{res.get('reason')}")
+        return _source_result("每周量化走势预测", "unavailable", result=None,
+                              error=str(res.get("reason") or "样本不足"))
+
+    entry = res.get("entry") or {}
+    print(f"  ✅ 周度预测：{entry.get('label')}（锚定 {entry.get('base_date')} 收盘"
+          f" → 未来 {entry.get('target_sessions')} 个交易日）")
+    bt = res.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        print(f"  ✅ 滚动样本外：{bt['n']} 期 · 命中 {bt['hit_rate'] * 100:.0f}%"
+              f"（基准 {bt['base_rate'] * 100:.0f}%）· Brier {bt['brier']:.3f}")
+    jr = res.get("journal") or {}
+    if jr.get("n"):
+        print(f"  ✅ 预测留痕：已结算 {jr['n']} 次"
+              + (f" · 命中 {jr['hits']}" if jr.get("hit_rate") is not None else "（样本 <10，只报样本量）"))
+    return _source_result("每周量化走势预测", "success",
+                          is_today=res.get("is_today", False),
                           content_date=res.get("as_of"),
                           result=res)
 
@@ -2366,13 +2819,19 @@ def collect_all_data():
     data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
 
+    data["每周走势预测"] = fetch_weekly_forecast()
+    time.sleep(0.5)
+
     if ECON_CALENDAR_ENABLED:
         print(f"\n📅 正在抓取未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
         data["财经日历"] = fetch_econ_calendar()
         time.sleep(0.5)
 
-    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十个板块热门帖）...")
+    # 每日量化策略趋势跟踪线索：Reddit 十板块热帖 + 全网 20 个新闻源头（港股挖掘）
+    print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十板块热帖 + 全网 20 个新闻源头）...")
     data.update(fetch_public_sites())
+    if HK_NEWS_ENABLED:
+        data[HK_NEWS_SOURCE_NAME] = fetch_hk_news_sources()
 
     print("\n✅ 数据采集完成！")
     return data
@@ -2524,6 +2983,7 @@ KOBOYO_SECTION_ICONS = {
     "QUANT FORECAST": "chart",
     "HK PROBABILITY": "chart",
     "LIQUIDITY FLOW": "chart",
+    "WEEKLY FORECAST": "chart",
 }
 
 
@@ -2671,6 +3131,7 @@ _SECTION_ICON_META = {
     "QUANT FORECAST": ("◈", "FORECAST", C_CYAN, "#092836"),
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
+    "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
 }
 
 
@@ -3774,40 +4235,83 @@ def _short_source(item):
 
 
 def _trend_clues_block(data, kit):
-    """两主题共用：Reddit 趋势跟踪线索 —— 10 个板块的热门帖样本（每板块至多 5 条）。
+    """两主题共用：每日量化策略趋势跟踪线索。
 
-    无数据的板块不进正文；缺失板块只在盘点总结的「数据覆盖」里点名。
+    ① 全网 20 个新闻源头 · 港股信息挖掘（头部行给覆盖度与相关条数，逐源列命中条目）；
+    ② Reddit 十板块热帖样本（每板块至多 5 条，原口径不变）。
+    无数据的源头 / 板块不进正文；缺失来源只在盘点总结的「数据覆盖」里点名。
     """
     color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
-    source = data.get("Reddit") or {}
-    if source.get("status") != "success":
-        return ""
-    by_board = {}
-    for item in source.get("items") or []:
-        if isinstance(item, dict):
-            by_board.setdefault(str(item.get("community") or ""), []).append(item)
     rows = []
-    homepage = _public_url(PUBLIC_SITE_URLS["Reddit"])
-    latest = _public_text(source.get("content_date") or "", 30)
-    heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
-               f'<b>Reddit</b></a> {kit.source_badge(source)}')
-    rows.append(kit.item_row("", heading, _esc(latest)))
-    for community, label in _REDDIT_BOARDS:
-        board_items = [it for it in by_board.get(f"r/{community}", [])
-                       if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
-        if not board_items:
-            continue
-        rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
-                                 f"热门帖样本 {len(board_items)} 条"))
-        for pick_no, item in enumerate(board_items, 1):
-            url = _public_url(item.get("url"), PUBLIC_SITE_URLS["Reddit"])
-            title = _public_text(item.get("title"), 235)
-            if not (url and title):
+
+    # ① 全网 20 个新闻源头 · 港股挖掘（结论先行：覆盖度 + 港股相关条数）
+    news = data.get(HK_NEWS_SOURCE_NAME) or {}
+    if news.get("status") == "success":
+        an = news.get("analysis") or {}
+        records = [r for r in (news.get("sources") or []) if isinstance(r, dict)]
+        total = int(an.get("total") or len(records) or len(HK_NEWS_SOURCES))
+        latest = _public_text(news.get("content_date") or "", 30)
+        heading = (f'<b>全网新闻源头 ×{total}</b> · {int(an.get("ok_n") or 0)} 家窗口内有更新'
+                   f' · 扫描 {int(an.get("scanned") or 0)} 条 · 港股相关 {int(an.get("hk_n") or 0)} 条'
+                   f' {kit.source_badge(news)}')
+        rows.append(kit.item_row("", heading, _esc(latest)))
+        shown = 0
+        for rec in records:
+            if shown >= HK_NEWS_MAX_ITEMS:
+                break
+            items = [it for it in (rec.get("items") or []) if isinstance(it, dict)]
+            if not items:
                 continue
-            link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
-                    f'{_esc(title)}</a>')
-            rows.append(kit.item_row(f"{pick_no:02d}", link,
-                                     _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
+            hk_n = int(rec.get("hk_n") or len(items))
+            name = str(rec.get("name") or "")
+            home = _news_url(rec.get("url"), rec.get("hosts") or ())
+            name_html = (f'<a href="{_esc(home)}" style="color:{color};text-decoration:underline;">'
+                         f'<b>{_esc(name)}</b></a>' if home else f"<b>{_esc(name)}</b>")
+            rows.append(kit.item_row(
+                "▤", f'{_esc(str(rec.get("region") or ""))} · {name_html}',
+                f"港股相关 {hk_n} 条" + (f" · 列出 {len(items)} 条" if hk_n > len(items) else "")))
+            for item in items[:HK_NEWS_PER_SOURCE]:
+                if shown >= HK_NEWS_MAX_ITEMS:
+                    break
+                url = _news_url(item.get("url"), rec.get("hosts") or ())
+                title = _public_text(item.get("title"), 235)
+                if not (url and title):
+                    continue
+                link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+                        f'{_esc(title)}</a>')
+                rows.append(kit.item_row(
+                    f"{shown + 1:02d}", link,
+                    _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
+                shown += 1
+
+    # ② Reddit 十板块热帖样本（原口径：无数据的板块不进正文，每板块至多 5 条）
+    source = data.get("Reddit") or {}
+    if source.get("status") == "success":
+        by_board = {}
+        for item in source.get("items") or []:
+            if isinstance(item, dict):
+                by_board.setdefault(str(item.get("community") or ""), []).append(item)
+        homepage = _public_url(PUBLIC_SITE_URLS["Reddit"])
+        latest = _public_text(source.get("content_date") or "", 30)
+        heading = (f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;">'
+                   f'<b>Reddit</b></a> {kit.source_badge(source)}')
+        rows.append(kit.item_row("", heading, _esc(latest)))
+        for community, label in _REDDIT_BOARDS:
+            board_items = [it for it in by_board.get(f"r/{community}", [])
+                           if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
+            if not board_items:
+                continue
+            rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
+                                     f"热门帖样本 {len(board_items)} 条"))
+            for pick_no, item in enumerate(board_items, 1):
+                url = _public_url(item.get("url"), PUBLIC_SITE_URLS["Reddit"])
+                title = _public_text(item.get("title"), 235)
+                if not (url and title):
+                    continue
+                link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+                        f'{_esc(title)}</a>')
+                rows.append(kit.item_row(f"{pick_no:02d}", link,
+                                         _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
     return kit.rows("".join(rows)) if rows else ""
 
 
@@ -3821,8 +4325,8 @@ def _market_brief(market, labels, kit):
     return " · ".join(bits)
 
 
-def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
-    """页首「今日结论」：倾向 → 量化预测 → 核心判断 → 各市场一句话 → 政策定调。"""
+def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
+    """页首「今日结论」：倾向 → 量化预测 → 周度预测 → 核心判断 → 各市场一句话 → 政策定调。"""
     pairs = []
     # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
     if quant and quant.get("available"):
@@ -3833,6 +4337,14 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
                           f'{_esc(head.get("label", "中性"))} '
                           f'{head.get("p_up", 0) * 100:.0f}%</b>'
                           f' · {_esc(quant.get("target_label") or "下一交易日")}'))
+    # 周度预测：未来一周（5 个交易日）港股方向与概率（独立周度视角）
+    if weekly and weekly.get("available"):
+        wk_entry = weekly.get("entry") or {}
+        if wk_entry.get("label"):
+            pairs.append(("周度预测",
+                          f'<b>{_esc(str(wk_entry.get("label") or ""))}</b>'
+                          f' · 锚定 {_esc(str(wk_entry.get("base_date") or ""))} 收盘'
+                          f' · 未来 {_esc(str(wk_entry.get("target_sessions") or _weekly.HORIZON))} 个交易日'))
     if ai_result and ai_result.get("available"):
         score = int(ai_result["score"])
         arrow = "▲" if score > 8 else ("▼" if score < -8 else "■")
@@ -3938,7 +4450,7 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 REPORT_SECTION_ORDER = (
     "CONCLUSION",
     "ECON CALENDAR",
-    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
+    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY",
     "TREND CLUES", "EASTMONEY WIRE", "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
@@ -4101,10 +4613,40 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             detail += "，承压 " + "、".join(_esc(str(l.get('name'))) for l in losers[:2])
         notes["QUANT POLICY"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
 
-    # ④ 趋势跟踪线索（Reddit）：多空词命中 + 热股提取 → 散户情绪判断
+    # ④ 趋势跟踪线索：全网 20 个新闻源头的港股挖掘（优先）+ Reddit 热帖（合并证据）
+    #    多空词命中（中词表 + 英词表）+ 主题词命中 → 港股消息面概率定调（规则合成）。
+    news_src = data.get(HK_NEWS_SOURCE_NAME) or {}
+    news_an = news_src.get("analysis") if news_src.get("status") == "success" else None
     reddit = data.get("Reddit") or {}
-    if reddit.get("status") == "success" and reddit.get("items"):
-        items = [it for it in reddit["items"] if isinstance(it, dict)]
+    reddit_items = ([it for it in reddit.get("items") or [] if isinstance(it, dict)]
+                    if reddit.get("status") == "success" else [])
+    if isinstance(news_an, dict) and (news_an.get("scanned") or reddit_items):
+        detail = (f"20 源扫描 {int(news_an.get('scanned') or 0)} 条 · 港股相关 "
+                  f"{int(news_an.get('hk_n') or 0)} 条（{int(news_an.get('ok_n') or 0)} 源有更新），"
+                  f"多空词 {int(news_an.get('bull') or 0)} 多 / {int(news_an.get('bear') or 0)} 空")
+        themes = news_an.get("themes") or []
+        if themes:
+            detail += "，热点 " + "、".join(_esc(t) for t in themes)
+        bull = int(news_an.get("bull") or 0)
+        bear = int(news_an.get("bear") or 0)
+        if reddit_items:
+            r_bull = r_bear = 0
+            for it in reddit_items:
+                title = str(it.get("title") or "")
+                r_bull += len(_REDDIT_BULL_RE.findall(title))
+                r_bear += len(_REDDIT_BEAR_RE.findall(title))
+            bull += r_bull
+            bear += r_bear
+            detail += f"；Reddit 热帖 {len(reddit_items)} 条（多 {r_bull} / 空 {r_bear}）"
+        prob = _ai_judge_prob(bull, bear)
+        _mark, label = _ai_judge_label(prob)
+        verdict = {"偏多": "港股消息面偏多，关注热点主题的持续性与量能配合",
+                   "偏空": "港股消息面偏空，防御优先，警惕高位回撤",
+                   "中性": "港股消息面多空拉锯，趋势信号待确认，控制仓位"}[label]
+        notes["TREND CLUES"] = _judge_note(
+            prob, f"{detail} → 预测：{verdict}（规则合成，非投资建议）")
+    elif reddit_items:
+        items = reddit_items
         bull = bear = 0
         tickers = {}
         for it in items:
@@ -4193,6 +4735,92 @@ def _ai_judge_row(note, kit):
     return kit.item_row("⌁", f"{head} — {note['text']}")
 
 
+def _weekly_forecast_block(res, kit):
+    """每周量化走势预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
+
+    结论型栏目：全部数字来自本次计算与留痕文件，零写死叙事；
+    无未来函数口径（截断不变性自检 / s+5≤t 类比 / 先存档后结算）在栏内如实披露。
+    """
+    entry = res.get("entry") or {}
+    if not entry or entry.get("p_up") is None:
+        return ""
+    esc = kit.esc
+    p_up = float(entry["p_up"])
+    icon = {"up": "▲", "down": "▼"}.get(entry.get("direction"), "■")
+    rows = [kit.item_row(
+        icon, f'<b>{esc(str(entry.get("label") or ""))}</b>',
+        f'锚定 {esc(str(entry.get("base_date") or ""))} 收盘'
+        f'（{esc(str(entry.get("symbol_label") or entry.get("symbol") or ""))}）'
+        f' · 未来 {int(entry.get("target_sessions") or _weekly.HORIZON)} 个交易日'
+        f' · {esc(str(entry.get("target_note") or ""))}')]
+
+    # 概率拆解：基准率 + 相似样本 + 合成规则（不足 4 个类比则如实退化）
+    if entry.get("blended") and entry.get("p_sim") is not None:
+        prob_sub = (f'历史基准 {float(entry.get("p_base") or 0.5) * 100:.0f}%'
+                    f' · 相似样本 {float(entry["p_sim"]) * 100:.0f}%'
+                    f'（{int(entry.get("n_analog") or 0)} 个已结算近邻）'
+                    f' · 已结算 {int(entry.get("n_resolved") or 0)} 周为底 · 50/50 合成夹 5%~95%')
+    else:
+        prob_sub = (f'相似样本不足 {_weekly.MIN_ANALOGS} 个，退化为历史基准'
+                    f' {float(entry.get("p_base") or 0.5) * 100:.0f}%'
+                    f'（已结算 {int(entry.get("n_resolved") or 0)} 周）· 概率夹 5%~95%')
+    rows.append(kit.item_row("P", f'P(周涨) {p_up * 100:.0f}%', prob_sub))
+
+    # 关键因子（20 日窗口；全部 ≤t 数据，窗口内/扩张因果归一）
+    f = entry.get("factors") or {}
+    bits = [f'{label} {float(f[key]) * 100:+.1f}%'
+            for key, label in (("ret5", "5日"), ("ret10", "10日"), ("ret20", "20日"))
+            if f.get(key) is not None]
+    sub_bits = []
+    if f.get("vol20") is not None:
+        vol_txt = f'20日波动 {float(f["vol20"]) * 100:.2f}%'
+        if res.get("vol_pct") is not None:
+            vol_txt += f'（扩张分位 {res["vol_pct"] * 100:.0f}%）'
+        sub_bits.append(vol_txt)
+    if f.get("dd20") is not None:
+        sub_bits.append(f'距20日高点 {float(f["dd20"]) * 100:+.1f}%')
+    if bits:
+        rows.append(kit.item_row("▤", " · ".join(bits), " · ".join(sub_bits)))
+
+    # 滚动样本外体检（walk-forward；样本 <10 只报样本量）
+    bt = res.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        rows.append(kit.item_row(
+            "↺", f'{int(bt.get("n") or 0)} 期 · 命中 {bt["hit_rate"] * 100:.0f}%'
+                 f'（恒定基准 {bt["base_rate"] * 100:.0f}%）· Brier {bt["brier"]:.3f}',
+            '滚动样本外（walk-forward）：每步只用 ≤t 数据打分 · 相邻窗口重叠 5 个交易日'))
+    else:
+        rows.append(kit.item_row(
+            "↺", esc(str(bt.get("note") or "回测样本不足")),
+            '滚动样本外（walk-forward）体检暂无结论'))
+
+    # 预测留痕：先存档后结算；样本 <10 不下命中率结论
+    jr = res.get("journal") or {}
+    if jr.get("hit_rate") is not None:
+        j_txt = (f'已结算 {int(jr.get("n") or 0)} 次 · 命中 {int(jr.get("hits") or 0)}'
+                 f'（{jr["hit_rate"] * 100:.0f}%）')
+    elif jr.get("n"):
+        j_txt = f'已结算 {int(jr["n"])} 次（样本 <10，只报样本量）'
+    else:
+        j_txt = "预测已存档（settled=False），待满 5 个交易日按真实收盘结算"
+    recent = jr.get("recent") or []
+    recent_txt = " · ".join(
+        f'{esc(str(r.get("date") or ""))} '
+        f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
+        f'{"✓" if r.get("hit") else "✗"}'
+        for r in recent)
+    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+
+    note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
+            f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
+            f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
+            f' · 先存档后结算（weekly_forecast.json · settled 字段）'
+            f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
+    # 口径行按 item_row 走（pixel 精简排版会丢弃 note 脚注，两主题都必须能看到口径披露）
+    rows.append(kit.item_row("⚖", note))
+    return kit.rows("".join(rows))
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -4238,6 +4866,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
         source_items.append((f"财经日历（未来{ECON_CALENDAR_DAYS}天时间点）", data["财经日历"]))
+    # 每周量化走势预测（恒指 · 未来一周）：独立周度栏目，存在即按需进审计。
+    if isinstance(data.get("每周走势预测"), dict):
+        source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
+    # 全网 20 个新闻源头（港股挖掘）：与 Reddit 同为趋势跟踪线索，按需加入审计；
+    # 外部旧调用若无该键仍维持原来的基础数据源数量。
+    if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
+        source_items.append(("全网新闻源头（20家）", data[HK_NEWS_SOURCE_NAME]))
     # 仅运行过十站采集时加入审计；外部旧调用若无新键仍维持原来的基础数据源数量。
     source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
 
@@ -4275,6 +4910,18 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["LIQUIDITY FLOW"] = (
                 "LIQUIDITY FLOW", "资金流动性分析", lq_html,
                 kit.source_badge(quant_src), _short_source(quant_src))
+
+    # ---- 每周量化走势预测：未来一周港股方向与概率（无未来函数 · 独立周度视角）----
+    weekly_res = {}
+    weekly_src = data.get("每周走势预测") or {}
+    if isinstance(weekly_src, dict):
+        weekly_res = weekly_src.get("result") or {}
+    if weekly_res.get("available") and isinstance(weekly_res.get("entry"), dict):
+        wk_html = _weekly_forecast_block(weekly_res, kit)
+        if wk_html:
+            blocks["WEEKLY FORECAST"] = (
+                "WEEKLY FORECAST", "每周量化走势预测", wk_html,
+                kit.badge("周度预测", "ai"), _short_source(weekly_src))
 
     # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
     cal = data.get("财经日历") or {}
@@ -4318,8 +4965,10 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         # 兼容旧 kicker 的锚点引用（如风险提示中的 AI READ 引用）
         blocks["AI READ"] = blocks["QUANT STRATEGY"]
 
-    # ⑤ 每日量化策略趋势跟踪线索：单一来源 Reddit（抓取成功且有条目才渲染）
-    if (data.get("Reddit") or {}).get("status") == "success":
+    # ⑤ 每日量化策略趋势跟踪线索：全网 20 个新闻源头（港股挖掘）与 Reddit 热帖，
+    #    任一来源抓取成功且有内容才渲染；两者都缺席则整栏不进正文。
+    if ((data.get("Reddit") or {}).get("status") == "success"
+            or (data.get(HK_NEWS_SOURCE_NAME) or {}).get("status") == "success"):
         digest = _trend_clues_block(data, kit)
         if digest:
             blocks["TREND CLUES"] = ("TREND CLUES", "每日量化策略趋势跟踪线索", digest, "", "")
@@ -4351,7 +5000,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             )
 
     # 页首结论 / 末尾盘点
-    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy, quant=quant)
+    conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy,
+                                   quant=quant, weekly=weekly_res)
     if conclusion:
         blocks["CONCLUSION"] = ("CONCLUSION", "今日结论", kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
@@ -7866,6 +8516,45 @@ def quant_only_report(*, enable_stocks=True):
     return 0
 
 
+def weekly_only_report():
+    """只跑每周量化走势预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    print("🐙 " + "=" * 48)
+    print("   章鱼 AI · 每周量化走势预测（研究模式）")
+    print("🐙 " + "=" * 48)
+    res = fetch_weekly_forecast()
+    if res.get("status") != "success":
+        print(f"❌ 每周预测不可用：{res.get('error')}")
+        return 1
+    r = res.get("result") or {}
+    entry = r.get("entry") or {}
+    print(f"\n【周度预测】{entry.get('label')}")
+    print(f"  锚定 {entry.get('base_date')} 收盘（{entry.get('symbol_label')}）"
+          f" → 未来 {entry.get('target_sessions')} 个交易日")
+    print(f"  概率拆解：P(周涨)={entry.get('p_up'):.3f}"
+          f" · 基准 {entry.get('p_base'):.3f}"
+          f" · 相似样本 {entry.get('p_sim') if entry.get('p_sim') is not None else '—'}"
+          f"（{entry.get('n_analog')} 近邻 / 已结算 {entry.get('n_resolved')} 周）")
+    bt = r.get("backtest") or {}
+    if bt.get("hit_rate") is not None:
+        print(f"\n【滚动样本外】{bt['n']} 期 · 命中 {bt['hit_rate']*100:.1f}%"
+              f" · 恒定基准 {bt['base_rate']*100:.1f}% · Brier {bt['brier']:.3f}")
+    else:
+        print(f"\n【滚动样本外】{bt.get('note')}")
+    jr = r.get("journal") or {}
+    if jr.get("n"):
+        rate = (f"命中 {jr['hits']}（{jr['hit_rate']*100:.0f}%）"
+                if jr.get("hit_rate") is not None else "样本 <10，只报样本量")
+        print(f"【预测留痕】已结算 {jr['n']} 次 · {rate}")
+        for item in jr.get("recent") or []:
+            print(f"  {item.get('date')} {item.get('ret')*100:+.1f}%"
+                  f" {'✓' if item.get('hit') else '✗'}")
+    else:
+        print("【预测留痕】暂无已结算样本")
+    print(f"\n【未来函数自检】{r.get('self_check')}")
+    print("✅ 每周预测运行完成（研究模式不推送）")
+    return 0
+
+
 def calendar_only_report(days=None):
     """只抓「未来 N 天影响经济时间点」并打印（研究 / 排障用：不生成日报、不推送）。
 
@@ -7912,6 +8601,8 @@ def main():
   python3 output/pipeline.py --list                 # 列出日报
   python3 output/pipeline.py --no-quant             # 跳过港股量化引擎（运行更快）
   python3 output/pipeline.py --quant-only           # 只跑量化引擎并打印概率/流动性/回测
+  python3 output/pipeline.py --no-weekly            # 跳过每周量化走势预测
+  python3 output/pipeline.py --weekly-only          # 只跑每周预测并打印方向/概率/回测/留痕
   python3 output/pipeline.py --calendar-only        # 只抓未来30天影响经济时间点并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
@@ -7942,6 +8633,10 @@ def main():
                        help="跳过港股量化引擎（只出常规栏目，运行更快）")
     parser.add_argument("--quant-only", action="store_true",
                        help="只跑港股量化引擎并打印结果（研究模式：不生成日报、不推送）")
+    parser.add_argument("--no-weekly", action="store_true",
+                       help="跳过每周量化走势预测（只出常规栏目，运行更快）")
+    parser.add_argument("--weekly-only", action="store_true",
+                       help="只跑每周量化走势预测并打印结果（研究模式：不生成日报、不推送）")
     parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
                        help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
@@ -7952,6 +8647,10 @@ def main():
         global HK_QUANT_ENABLED
         HK_QUANT_ENABLED = False
 
+    if args.no_weekly:
+        global WEEKLY_ENABLED
+        WEEKLY_ENABLED = False
+
     # --list 模式
     if args.list:
         return list_reports()
@@ -7959,6 +8658,10 @@ def main():
     # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
     if args.quant_only:
         return quant_only_report(enable_stocks=HK_QUANT_STOCKS)
+
+    # --weekly-only 模式：只跑每周量化走势预测，把方向 / 概率 / 回测 / 留痕打到控制台
+    if args.weekly_only:
+        return weekly_only_report()
 
     # --calendar-only 模式：只抓未来 N 天影响经济时间点，验证接口与筛选口径
     if args.calendar_only is not None:

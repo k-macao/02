@@ -1,4 +1,5 @@
-"""每日量化策略趋势跟踪线索（Reddit 单一来源）的离线解析、降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
+"""每日量化策略趋势跟踪线索（Reddit 板块热帖 + 全网 20 个新闻源头·港股挖掘）的离线解析、
+降级、主题渲染及推送门禁测试（不访问网站/不写历史报告）。"""
 import importlib.util
 import sys
 import types
@@ -205,10 +206,12 @@ class SentimentFactorTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
                   "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant",
-                  "fetch_econ_calendar")
+                  "fetch_weekly_forecast", "fetch_econ_calendar")
         reddit = pipeline._public_site_result(
             "Reddit", [{"title": "Sample", "url": "https://www.reddit.com/r/stocks/comments/1/x/",
                         "is_today": True}])
+        news = pipeline._source_result(pipeline.HK_NEWS_SOURCE_NAME, "unavailable",
+                                       sources=[], analysis=None, error="offline")
         with patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
             mocks = [patch.object(pipeline, fn, return_value={"status": "unavailable"})
                      for fn in legacy]
@@ -216,15 +219,39 @@ class SentimentFactorTests(unittest.TestCase):
                 p.start()
             try:
                 with patch.object(pipeline, "fetch_public_sites", return_value={"Reddit": reddit}):
-                    data = pipeline.collect_all_data()
+                    with patch.object(pipeline, "fetch_hk_news_sources", return_value=news):
+                        data = pipeline.collect_all_data()
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        # 10 个基础数据源（含港股量化引擎与未来30天财经日历）+ Reddit 趋势跟踪线索
+        # 11 个基础数据源（含港股量化引擎、每周走势预测与未来30天财经日历）+ Reddit + 全网新闻源头
         self.assertEqual(sorted(data), sorted((
             "实时行情", "A股大盘全景", "国家政策", "港股名家频道", "全球头条",
-            "A股资讯", "东财快讯", "热门榜单", "港股量化", "财经日历", "Reddit")))
+            "A股资讯", "东财快讯", "热门榜单", "港股量化", "每周走势预测",
+            "财经日历", "Reddit", pipeline.HK_NEWS_SOURCE_NAME)))
         self.assertEqual(data["Reddit"]["status"], "success")
+        self.assertEqual(data[pipeline.HK_NEWS_SOURCE_NAME]["status"], "unavailable")
+
+    def test_collect_all_data_skips_news_sources_when_disabled(self):
+        legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
+                  "fetch_hk_channels", "fetch_google_news", "fetch_sina_headlines",
+                  "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant",
+                  "fetch_weekly_forecast", "fetch_econ_calendar")
+        with patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
+            mocks = [patch.object(pipeline, fn, return_value={"status": "unavailable"})
+                     for fn in legacy]
+            for p in mocks:
+                p.start()
+            try:
+                with patch.object(pipeline, "fetch_public_sites", return_value={}):
+                    with patch.object(pipeline, "fetch_hk_news_sources",
+                                      side_effect=AssertionError("开关关闭时不得调用")):
+                        with patch.object(pipeline, "HK_NEWS_ENABLED", False):
+                            data = pipeline.collect_all_data()
+            finally:
+                for p in reversed(mocks):
+                    p.stop()
+        self.assertNotIn(pipeline.HK_NEWS_SOURCE_NAME, data)
 
     def _reddit_data(self):
         items = []
@@ -301,6 +328,230 @@ class SentimentFactorTests(unittest.TestCase):
             # 9 个基础数据源 + Reddit（未采集财经日历时不进审计）
             self.assertEqual(pipeline._report_meta(report)["total_sources"], 10)
         self.assertFalse(pipeline.check_push_eligibility(failed)[0])
+
+
+def _rss_feed(items):
+    """构造 RSS 2.0 文档；items 为 (title, link, pubDate) 元组列表。"""
+    body = "".join(
+        f"<item><title>{t}</title><link>{u}</link><pubDate>{p}</pubDate></item>"
+        for t, u, p in items)
+    return f'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>{body}</channel></rss>'
+
+
+class HKNewsSourceTests(unittest.TestCase):
+    """全网 20 个新闻源头：注册表 / 白名单 / 港股挖掘 / 规则分析 / 栏目渲染（离线 mock）。"""
+
+    @staticmethod
+    def _rfc(dt):
+        # 固定英文星期/月份，避免本地化差异（parsedate 按英文解析）
+        return dt.astimezone(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+    def _fetch_result(self, feeds):
+        def fake_request(url, **kwargs):
+            return feeds.get(url)
+        with patch.object(pipeline, "safe_request", side_effect=fake_request):
+            return pipeline.fetch_hk_news_sources()
+
+    def _sample_feeds(self):
+        now = datetime.now(pipeline.CST)
+        fresh = now - timedelta(hours=2)
+        stale = now - timedelta(hours=96)
+        srcs = pipeline.HK_NEWS_SOURCES
+        # 源0（RTHK）：5 条窗口内（4 港股相关 + 1 无关）+ 1 过期 + 1 无时区
+        feeds = {
+            srcs[0]["feed"]: _rss_feed([
+                ("港股反弹，恒指收复25000点",
+                 "https://news.rthk.hk/rthk/news/1/a.html", self._rfc(fresh)),
+                ("南向资金净买入超百亿港元",
+                 "https://news.rthk.hk/rthk/news/1/b.html", self._rfc(fresh)),
+                ("香港金管局维持基本利率不变",
+                 "https://news.rthk.hk/rthk/news/1/c.html", self._rfc(fresh)),
+                ("港股跳水，恒指跌破25000点",
+                 "https://news.rthk.hk/rthk/news/1/d.html", self._rfc(fresh)),
+                ("Wall Street slips as yields rise",
+                 "https://news.rthk.hk/rthk/news/1/e.html", self._rfc(fresh)),
+                ("恒指昨日收跌", "https://news.rthk.hk/rthk/news/1/f.html", self._rfc(stale)),
+                ("港股开盘", "https://news.rthk.hk/rthk/news/1/g.html",
+                 "Mon, 28 Sep 2026 01:00:00"),
+            ]),
+            # 源1（HKET）：2 条当天港股相关
+            srcs[1]["feed"]: _rss_feed([
+                ("港股通ETF获大额净买入，恒指升1%",
+                 "https://www.hket.com/article/1/a.html", self._rfc(fresh)),
+                ("香港零售销售回暖带动本地消费股",
+                 "https://www.hket.com/article/1/b.html", self._rfc(fresh)),
+            ]),
+            # 源2（SCMP）：窗口内 1 条但与港股无关 → status ok、无港股命中
+            srcs[2]["feed"]: _rss_feed([
+                ("UK inflation cools, pound steadies",
+                 "https://www.scmp.com/article/1/x", self._rfc(fresh)),
+            ]),
+            # 源3（HKEX）：链接落在白名单外 → 条目剔除，不计入
+            srcs[3]["feed"]: _rss_feed([
+                ("港股交易安排调整", "https://evil.example.com/x", self._rfc(fresh)),
+            ]),
+        }
+        return feeds
+
+    def test_registry_twenty_sources_https_hosts_and_regions(self):
+        self.assertEqual(len(pipeline.HK_NEWS_SOURCES), 20)
+        self.assertEqual(pipeline.HK_NEWS_TOTAL, 20)
+        names = [s["name"] for s in pipeline.HK_NEWS_SOURCES]
+        self.assertEqual(len(set(names)), 20)
+        from collections import Counter
+        self.assertEqual(Counter(s["region"] for s in pipeline.HK_NEWS_SOURCES),
+                         {"香港": 7, "内地": 7, "国际": 6})
+        for s in pipeline.HK_NEWS_SOURCES:
+            self.assertTrue(s["feed"].startswith("https://"), s["name"])
+            self.assertTrue(s["url"].startswith("https://"), s["name"])
+            self.assertTrue(s["hosts"], s["name"])
+            self.assertTrue(s["desc"], s["name"])
+
+    def test_news_url_whitelist_is_per_source_host(self):
+        self.assertEqual(pipeline._news_url("https://www.hket.com/rss/finance",
+                                            ("www.hket.com",)),
+                         "https://www.hket.com/rss/finance")
+        for bad in ("http://www.hket.com/x", "https://evil.com/x",
+                    "https://www.hket.com@evil.com/x", "javascript:alert(1)",
+                    "https://www.hket.com/<script>", "//evil.net/path"):
+            self.assertEqual(pipeline._news_url(bad, ("www.hket.com",)), "", bad)
+
+    def test_hk_relevance_keywords(self):
+        for hit in ("恒指收跌1%", "港股通资金流入", "Hang Seng closes higher",
+                    "Hong Kong stocks rally", "港府公布财政预算", "Southbound flow grows"):
+            self.assertRegex(hit, pipeline._HK_NEWS_KW_RE)
+        for miss in ("Wall Street closes higher", "A股沪指窄幅震荡",
+                     "Fed keeps rates unchanged", "Macau gaming revenue rises"):
+            self.assertNotRegex(miss, pipeline._HK_NEWS_KW_RE)
+
+    def test_fetch_filters_window_relevance_and_caps(self):
+        result = self._fetch_result(self._sample_feeds())
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["is_today"])
+        records = {r["name"]: r for r in result["sources"]}
+        self.assertEqual(len(result["sources"]), 20)
+
+        r0 = records[pipeline.HK_NEWS_SOURCES[0]["name"]]
+        self.assertEqual(r0["status"], "ok")
+        self.assertEqual(r0["scanned"], 5)          # 过期 + 无时区两条被剔除
+        self.assertEqual(r0["hk_n"], 4)             # 挖掘口径 = 全部港股相关
+        self.assertEqual(len(r0["items"]), 3)       # 展示口径 = 每源上限 3 条
+        self.assertEqual(r0["hk_n"] - len(r0["items"]), 1)
+        self.assertEqual(r0["today"], 5)
+        self.assertIn("港股反弹，恒指收复25000点", [it["title"] for it in r0["items"]])
+        self.assertNotIn("Wall Street slips as yields rise",
+                         [it["title"] for it in r0["items"]])
+        self.assertTrue(all(it["published_cst"] for it in r0["items"]))
+
+        r2 = records[pipeline.HK_NEWS_SOURCES[2]["name"]]
+        self.assertEqual(r2["status"], "ok")        # 抓得到但无港股命中
+        self.assertEqual(r2["hk_n"], 0)
+        self.assertEqual(r2["items"], [])
+
+        r3 = records[pipeline.HK_NEWS_SOURCES[3]["name"]]
+        self.assertEqual(r3["status"], "empty")     # 白名单外链接被剔除 → 无有效内容
+        self.assertEqual(r3["hk_n"], 0)
+
+        failed = [r for r in result["sources"] if r["status"] == "fail"]
+        self.assertEqual(len(failed), 16)           # 其余 16 源未配置 feed 返回
+        self.assertIn("暂缺", result["note"])
+        self.assertIn(pipeline.HK_NEWS_SOURCES[5]["name"], result["note"])
+        self.assertTrue(result["partial"])
+
+        an = result["analysis"]
+        self.assertEqual(an["ok_n"], 3)
+        self.assertEqual(an["fail_n"], 16)
+        self.assertEqual(an["scanned"], 8)
+        self.assertEqual(an["hk_n"], 6)             # 4 + 2
+        self.assertEqual(an["total"], 20)
+        self.assertGreaterEqual(an["bull"], 2)      # 反弹/升 → 多头证据
+        self.assertGreaterEqual(an["bear"], 1)      # 跳水 → 空头证据
+        self.assertEqual(an["prob"] + (100 - an["prob"]), 100)
+        self.assertTrue(5 <= an["prob"] <= 95)
+        self.assertIn("南向资金", an["themes"])
+
+    def test_fetch_all_failed_is_unavailable_without_history_fallback(self):
+        result = self._fetch_result({})
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["items"] if "items" in result else [], [])
+        self.assertFalse(result["is_today"])
+        self.assertIn("72", result["error"])
+        self.assertEqual(len(result["sources"]), 20)
+
+    def test_disabled_switch_returns_unavailable(self):
+        with patch.object(pipeline, "HK_NEWS_ENABLED", False):
+            with patch.object(pipeline, "safe_request",
+                              side_effect=AssertionError("关闭时不得请求网络")):
+                result = pipeline.fetch_hk_news_sources()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("OCTOPUS_HK_NEWS=0", result["error"])
+
+    def test_analysis_note_prefers_news_and_merges_reddit(self):
+        news = self._fetch_result(self._sample_feeds())
+        reddit = pipeline._public_site_result("Reddit", [
+            {"title": "$TSLA rally to the moon", "url": "https://www.reddit.com/r/stocks/comments/1/a/",
+             "detail": "发布于 2026-09-28 10:00（北京时间）", "published_cst": "2026-09-28 10:00",
+             "community": "r/stocks", "is_today": True}])
+        notes = pipeline.build_section_ai_notes({pipeline.HK_NEWS_SOURCE_NAME: news, "Reddit": reddit})
+        n = notes["TREND CLUES"]
+        self.assertIn("20 源扫描", n["text"])
+        self.assertIn("港股相关", n["text"])
+        self.assertIn("Reddit 热帖 1 条", n["text"])
+        self.assertIn("→ 预测：", n["text"])
+        self.assertIn("非投资建议", n["text"])
+        self.assertEqual(n["bull_pct"] + n["bear_pct"], 100)
+        self.assertTrue(5 <= n["bull_pct"] <= 95)
+
+    def test_news_only_data_still_renders_section_and_unlocks_gate(self):
+        news = self._fetch_result(self._sample_feeds())
+        data = {pipeline.HK_NEWS_SOURCE_NAME: news}
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
+            for theme in ("guizang", "pixel"):
+                with self.subTest(theme=theme):
+                    report = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
+                                                      theme=theme)
+                    self.assertIn("每日量化策略趋势跟踪线索", report)
+                    self.assertIn("全网新闻源头 ×20", report)
+                    self.assertIn("港股相关 6 条", report)      # 汇总行 4+2
+                    self.assertIn("港股反弹，恒指收复25000点", report)
+                    self.assertIn("香港经济日报 HKET·财经", report)
+                    self.assertNotIn("Wall Street slips as yields rise", report)
+                    # 9 个基础数据源 + 全网新闻源头（无 Reddit 键）
+                    self.assertEqual(pipeline._report_meta(report)["total_sources"], 10)
+        can_push, reason = pipeline.check_push_eligibility(data)
+        self.assertTrue(can_push)
+        self.assertIn("当天", reason)
+
+    def test_news_and_reddit_render_together_with_audit_count(self):
+        news = self._fetch_result(self._sample_feeds())
+        reddit = pipeline._public_site_result("Reddit", [
+            {"title": "Stocks hot 0", "url": "https://www.reddit.com/r/stocks/comments/s0/t0/",
+             "detail": "发布于 2026-09-28 10:00（北京时间） · 100 赞",
+             "published_cst": "2026-09-28 10:00", "community": "r/stocks", "is_today": True}])
+        data = {pipeline.HK_NEWS_SOURCE_NAME: news, "Reddit": reddit}
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
+            report = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928")
+        self.assertIn("全网新闻源头 ×20", report)
+        self.assertIn("Reddit", report)
+        self.assertIn("r/stocks", report)
+        # 9 个基础数据源 + 全网新闻源头 + Reddit
+        self.assertEqual(pipeline._report_meta(report)["total_sources"], 11)
+        # 审计行标签
+        parts = pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT)
+        self.assertEqual(parts["total"], 11)
+
+    def test_unsafe_item_url_never_rendered(self):
+        news = self._fetch_result(self._sample_feeds())
+        # 手工注入一条白名单外链接（模拟被篡改的数据）
+        news["sources"][0]["items"].append({
+            "title": "注入测试", "url": "https://evil.example.com/payload",
+            "published_cst": "2026-09-28 10:00", "is_today": True,
+            "detail": "发布于 2026-09-28 10:00（北京时间）"})
+        data = {pipeline.HK_NEWS_SOURCE_NAME: news}
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
+            report = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928")
+        self.assertNotIn("evil.example.com", report)
+        self.assertNotIn("注入测试", report)
 
 
 if __name__ == "__main__":
