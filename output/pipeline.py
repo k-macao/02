@@ -3579,7 +3579,7 @@ GZ_WARN_INK = "#111827"
 GZ_PRIMARY = "#2563EB"
 GZ_PRIMARY_HOVER = "#1D4ED8"
 GZ_PRIMARY_LIGHT = "#EFF6FF"
-REPORT_TITLE = "章鱼 AI·全景分析 —量化策略（趋势跟踪）"
+REPORT_TITLE = "章鱼 AI·新鲜分析"
 # 字体：Inter 现代无衬线，极简 SaaS 标准
 # Inter 是 SaaS 落地页最常用的字体，-apple-system 兜底，紧排 -0.03em
 GZ_FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
