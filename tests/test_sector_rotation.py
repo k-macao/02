@@ -5,7 +5,6 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "output"))
 import sector_rotation as sr
@@ -45,13 +44,25 @@ class SectorRotationTests(unittest.TestCase):
             self.assertEqual(sr.monthly_holdings(reversed_scores, "2026-09-29", path), first)
             self.assertNotEqual(sr.monthly_holdings(reversed_scores, "2026-10-01", path)["holdings"], first["holdings"])
 
-    def test_incomplete_universe_and_missing_data_hide_section(self):
+    def test_missing_data_hides_section(self):
         # 用临时存档：run() 会把诊断写进存档，不能污染仓库里的 output/news_history.json
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(sr, "fetch_universe", return_value=[]):
-                res = sr.run(lambda *a, **kw: None,
-                             state_path=os.path.join(tmp, "news_history.json"))
+            # 东财三主机与申万官方源都取不到任何日线 → 整栏缺席，且从不调用 clist 列表接口
+            calls = []
+
+            def dead(url, **kw):
+                calls.append(url)
+                return None
+            res = sr.run(dead, state_path=os.path.join(tmp, "news_history.json"))
             self.assertFalse(res["available"])
+            self.assertIn("行业日K接口未返回数据", res["reason"])
+            self.assertEqual(res["diag"]["universe"], len(sr.SW_L1_SECTORS))
+            self.assertFalse(any("clist" in u for u in calls))
+            # 股票池本身不足五个也缺席（不允许用两三个行业冒充轮动）
+            res = sr.run(dead, state_path=os.path.join(tmp, "news_history.json"),
+                         universe=[("BK0001", "甲"), ("BK0002", "乙")])
+            self.assertFalse(res["available"])
+            self.assertIn("行业名单不足五个", res["reason"])
         html = pipeline.generate_report({"行业轮动": pipeline._source_result(
             "fake", "unavailable", result={"available": False})}, "2026年9月28日", "20260928")
         self.assertNotIn("SECTOR ROTATION", html)
