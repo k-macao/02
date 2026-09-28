@@ -5584,6 +5584,52 @@ def _sector_rotation_block(res, kit):
     return kit.rows("".join(rows))
 
 
+def _opening_digest(sections, notes, conclusion, today_n, total, kit):
+    """仅从本次实际渲染的栏目提炼首屏；不新增预测、不以历史数据补空。"""
+    def brief(value, limit):
+        text = _strip_html_text(value)
+        return text if len(text) <= limit else text[:limit].rstrip(" ·，；") + "…"
+
+    conclusions = dict(conclusion)
+    lead = (conclusions.get("核心判断") or conclusions.get("市场倾向")
+            or conclusions.get("量化预测"))
+    if not lead:
+        lead = "当前信息不足以形成综合方向判断，请先关注已获取内容与数据覆盖。"
+    groups = [
+        ("市场与资金", {"MARKET SNAPSHOT", "GLOBAL PANORAMA", "LIQUIDITY FLOW"}),
+        ("量化与策略", {"QUANT FORECAST", "HK PROBABILITY", "WEEKLY FORECAST",
+                       "STRATEGY READ", "SECTOR ROTATION"}),
+        ("政策与日程", {"ECON CALENDAR", "POLICY SHOCK", "FED TREND", "GEO TREND"}),
+        ("资讯与情绪", {"TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
+                       "HK GURU CHANNELS", "NEWS SENTIMENT"}),
+    ]
+    rows = []
+    covered = set()
+    for label, keys in groups:
+        bits = []
+        for kick, title, content, badge, caption in sections:
+            if kick not in keys:
+                continue
+            note = notes.get(kick) or {}
+            text = brief(note.get("text") or content, 48)
+            if text:
+                bits.append(f"{_esc(title)}：{_esc(text)}")
+                covered.add(kick)
+        if bits:
+            rows.append((label, "<br>".join(bits)))
+    # 新增栏目也必须进入速览，避免维护分组时漏掉正文内容。
+    for kick, title, content, badge, caption in sections:
+        if kick not in covered and kick not in {"FORECAST", "SUMMARY"}:
+            rows.append((title, _esc(brief(content, 48))))
+    rows.append(("阅读提醒", _esc(
+        f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。"
+        "预测存在不确定性，完整依据、来源与暂缺项见下文。")))
+    lead_html = (f'<div style="font-size:26px;font-weight:700;line-height:1.5;'
+                 f'margin:8px 0 20px;overflow-wrap:anywhere;">{_esc(brief(lead, 110))}</div>')
+    return ("AI DIGEST", "AI 全篇速览", lead_html + kit.kv(rows), "",
+            "先看重点，再读全文 · 规则/量化合成，非大模型生成 · 非投资建议")
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -5828,6 +5874,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
+    # 全部栏目构建完成后再提炼，保证首屏与本次推送正文一致。
+    sections.insert(0, _opening_digest(sections, judge_notes, conclusion,
+                                       today_n, total, kit))
     return {
         "sections": sections,
         "total": total,
@@ -8428,7 +8477,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     today_n = parts["today_n"]
     content_html = "".join(
         PART_BREAK_MARK + GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
-        for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
+        for i, (kicker, title, content, badge, caption) in enumerate(sections[1:], 1))
     generated_at = _now()
     # Hero：48-56px / 700 / -0.03em，Inter，真白底，黑字
     masthead_title_bar = gz_shell(
@@ -8471,6 +8520,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 </td></tr>
 </table>
 
+{PART_BREAK_MARK}{GUIZANG_KIT.section("00", *sections[0])}
 <div id="report"></div>
 {content_html}
 
@@ -8511,7 +8561,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
     # 每个栏目前都插入分条标记（含第一栏），供超长日报按完整栏目分条推送
     content_html = "".join(
         PART_BREAK_MARK + PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
-        for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
+        for i, (kicker, title, content, badge, caption) in enumerate(sections, 0))
 
     # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
     generated_at = _now()

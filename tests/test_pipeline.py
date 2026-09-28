@@ -2670,3 +2670,35 @@ class EconCalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpeningDigestTests(unittest.TestCase):
+    def test_digest_precedes_details_in_both_themes(self):
+        data = {"实时行情": pipeline._source_result(
+            "test", "success", quotes={"标普500": {"price": 6123, "change_pct": 1.25}})}
+        for theme in ("guizang", "pixel"):
+            html = pipeline.generate_report(data, "2026年9月28日", "20260928", theme=theme)
+            self.assertEqual(html.count("AI 全篇速览"), 1)
+            self.assertLess(html.index("AI 全篇速览"), html.index("今日预判"))
+            self.assertIn("非大模型生成", html)
+
+    def test_all_content_sections_covered_and_html_escaped(self):
+        sections = [(k, k, "<b>原始内容</b>", "", "")
+                    for k in pipeline.REPORT_SECTION_ORDER]
+        sections.append(("NEW", "新栏目", "新增证据", "", ""))
+        result = pipeline._opening_digest(
+            sections, {"MARKET SNAPSHOT": {"text": "重点 &lt;script&gt;"}},
+            [("核心判断", "<b>谨慎观察</b>")], 2, 8, pipeline.GUIZANG_KIT)
+        text = result[2]
+        for kick in pipeline.REPORT_SECTION_ORDER:
+            if kick not in {"FORECAST", "SUMMARY"}:
+                self.assertIn(kick, text)
+        self.assertIn("新增证据", text)
+        self.assertIn("重点 &lt;script&gt;", text)
+        self.assertNotIn("<script>", text)
+        self.assertIn("当天来源 2/8", text)
+
+    def test_empty_report_does_not_invent_direction(self):
+        html = pipeline.generate_report({}, "2026年9月28日", "20260928")
+        self.assertIn("当前信息不足以形成综合方向判断", html)
+        self.assertIn("当天来源 0/", html)
