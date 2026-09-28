@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
+🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
 核心规则（2026-08-02 新版，当天修订）：
@@ -3902,7 +3902,11 @@ GZ_WARN_INK = "#111827"
 GZ_PRIMARY = "#2563EB"
 GZ_PRIMARY_HOVER = "#1D4ED8"
 GZ_PRIMARY_LIGHT = "#EFF6FF"
-REPORT_TITLE = "章鱼 AI·新鲜分析"
+REPORT_TITLE = "章鱼 AI · 打氧日报"
+# 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
+REPORT_TAGLINE = "每日上水，新鲜活泼"
+# 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
+PUSH_TITLE_PREFIX = f"🐙 {REPORT_TITLE}"
 # 字体：Inter 现代无衬线，极简 SaaS 标准
 # Inter 是 SaaS 落地页最常用的字体，-apple-system 兜底，紧排 -0.03em
 GZ_FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
@@ -9089,7 +9093,9 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     masthead_title_bar = gz_shell(
         f'<h1 style="margin:0;background:#FFFFFF;font-size:52px;'
         f'font-weight:700;color:#111827;font-family:{GZ_SANS};'
-        f'letter-spacing:-0.03em;line-height:1.05;">{_esc(REPORT_TITLE)}</h1>',
+        f'letter-spacing:-0.03em;line-height:1.05;">{_esc(REPORT_TITLE)}</h1>'
+        f'<div style="margin:14px 0 0;font-size:18px;font-weight:500;color:#6B7280;'
+        f'font-family:{GZ_SANS};letter-spacing:0.02em;line-height:1.5;">{_esc(REPORT_TAGLINE)}</div>',
         bg="#FFFFFF", pad="0 0 16px")
     # SaaS 极简：真白底 #ffffff，Inter 52px/700/-0.03em，单一主色 #2563eb，1px #E5E7EB，线条图标
     html = f"""<!DOCTYPE html>
@@ -9102,6 +9108,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
 <meta name="octopus-theme" content="guizang">
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
 <title>{REPORT_TITLE}</title>
 </head>
 <body bgcolor="#FFFFFF" style="margin:0;padding:0;background:#FFFFFF;font-family:'Inter', -apple-system, sans-serif;color:#111827;font-size:15px;line-height:1.6;">
@@ -9182,7 +9189,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
 <meta name="octopus-theme" content="pixel">
-<title>章鱼AI · 财经作战日志 | RETRO PIXEL EDITION</title>
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
+<title>{REPORT_TITLE} | RETRO PIXEL EDITION</title>
 </head>
 <body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
 
@@ -9212,8 +9220,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 </tr>
 </table>
 
-<div style="font-size:27px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;line-height:1.3;padding-top:16px;font-family:{FONT_MONO};text-shadow:3px 3px 0 {C_ACCENT_SOFT};">财经作战日志<span style="color:{C_ACCENT};">_</span></div>
-<div style="font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:5px;font-family:{FONT_MONO};">DAILY MARKET QUEST // SIGNAL · AI · FLOW · UTC+8</div>
+<div style="font-size:27px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;line-height:1.3;padding-top:16px;font-family:{FONT_MONO};text-shadow:3px 3px 0 {C_ACCENT_SOFT};">{_esc(REPORT_TITLE)}<span style="color:{C_ACCENT};">_</span></div>
+<div style="font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:5px;font-family:{FONT_MONO};">{_esc(REPORT_TAGLINE)} // SIGNAL · AI · FLOW · UTC+8</div>
 <div style="margin-top:12px;border-top:1px solid {C_ACCENT};border-bottom:1px solid {C_ACCENT_MAGENTA};height:5px;font-size:0;line-height:0;"><span style="color:{C_ACCENT};">■■■■</span></div>
 
 <!-- 导语：终端开机文字 -->
@@ -10134,7 +10142,7 @@ def calendar_only_report(days=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🐙 章鱼AI · 每日财经日报流水线（当天检验后推送）",
+        description="🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -10249,7 +10257,7 @@ def main():
             print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, html, report_name=os.path.basename(push_path)):
             print("\n🎉 全部完成！")
             return 0
@@ -10262,7 +10270,7 @@ def main():
     mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
     theme = _resolve_push_theme(args.theme)
     print("🐙 " + "=" * 48)
-    print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
+    print(f"   {REPORT_TITLE} ·「{REPORT_TAGLINE}」· 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
     print(f"   推送主题: {theme}（OCTOPUS_PUSH_THEME / --theme 可切换）")
@@ -10378,7 +10386,7 @@ def main():
 
     if can_push:
         print(f"\n📤 当天检验通过：{reason}")
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
@@ -10390,7 +10398,7 @@ def main():
     if args.force_push:
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX}(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
@@ -10400,7 +10408,7 @@ def main():
     if args.allow_incomplete_push:
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX}(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",
