@@ -154,7 +154,11 @@ class KlineFetchTests(unittest.TestCase):
                          now=datetime(2026, 9, 25, 20, 0, tzinfo=CST))
         self.assertFalse(res["available"])
         self.assertIn("行业日K接口未返回数据", res["reason"])
-        self.assertEqual(len(api.calls), 1 + 4)      # 1 次列表 + 2 个样本 × 2 种口径
+        # 1 次列表 + 2 个样本 × 2 种口径；每次探测按「主源 + 2 个同格式镜像」依次尝试
+        # （空响应也会试镜像，避免把单主机故障误判成口径不可用），仍然不会对 80+ 个行业逐个重试。
+        self.assertEqual(len(api.calls), 1 + 4 * len(sr.KLINE_URLS))
+        probed = {p["secid"] for u, p in api.calls if "kline" in u}
+        self.assertEqual(len(probed), 2)
 
     def test_legacy_fetcher_without_headers_still_works(self):
         asof = "2026-09-25"

@@ -27,6 +27,11 @@ from datetime import datetime, timedelta, timezone
 CST = timezone(timedelta(hours=8))
 LIST_URL = "https://push2.eastmoney.com/api/qt/clist/get"
 KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+# 每条数据线 1 主源 + 2 备用源（同格式镜像；注册表见 output/backup_sources.py）
+LIST_URLS = (LIST_URL, "https://82.push2.eastmoney.com/api/qt/clist/get",
+             "https://72.push2.eastmoney.com/api/qt/clist/get")
+KLINE_URLS = (KLINE_URL, "https://91.push2his.eastmoney.com/api/qt/stock/kline/get",
+              "https://63.push2his.eastmoney.com/api/qt/stock/kline/get")
 STATE_FILE = os.path.join(os.path.dirname(__file__), "news_history.json")
 MIN_WEEKS = 12
 # 行业列表逐页抓取：单页 100，最多 6 页（行业板块约 86 个，留足余量）。
@@ -56,6 +61,23 @@ def _get_json(fetch_json, url, params, timeout=15, headers=None):
         return fetch_json(url, params=params, timeout=timeout)
 
 
+def _get_json_chain(fetch_json, urls, params, ok, timeout=15, headers=None):
+    """主源 → 备用源依次尝试，返回第一个通过 ok(data) 的响应；全部失败返回 None。"""
+    for url in urls:
+        try:
+            data = _get_json(fetch_json, url, params, timeout=timeout, headers=headers)
+        except Exception:
+            data = None
+        if data is None:
+            continue
+        try:
+            if ok(data):
+                return data
+        except Exception:
+            continue
+    return None
+
+
 def fetch_universe(fetch_json):
     """逐页抓取完整行业板块列表，不只取涨幅榜前五。
 
@@ -65,10 +87,12 @@ def fetch_universe(fetch_json):
     collected = {}
     total = None
     for page in range(1, LIST_MAX_PAGES + 1):
-        data = _get_json(fetch_json, LIST_URL,
-                         {"pn": str(page), "pz": str(LIST_PAGE_SIZE), "po": "1", "np": "1",
-                          "fltt": "2", "invt": "2", "fid": "f12", "fs": "m:90+t:2",
-                          "fields": "f12,f14"}, timeout=15, headers=EM_HEADERS)
+        data = _get_json_chain(fetch_json, LIST_URLS,
+                               {"pn": str(page), "pz": str(LIST_PAGE_SIZE), "po": "1", "np": "1",
+                                "fltt": "2", "invt": "2", "fid": "f12", "fs": "m:90+t:2",
+                                "fields": "f12,f14"},
+                               ok=lambda d: bool(((d or {}).get("data") or {}).get("diff")),
+                               timeout=15, headers=EM_HEADERS)
         root = (data or {}).get("data") or {}
         diff = root.get("diff") or []
         if isinstance(diff, dict):
@@ -93,12 +117,13 @@ def fetch_universe(fetch_json):
 
 def fetch_closes(fetch_json, code, fqt="1"):
     """单个板块指数的前复权日线（date, close）列表；取不到返回空列表。"""
-    data = _get_json(fetch_json, KLINE_URL,
-                     {"secid": "90." + code, "klt": "101", "fqt": fqt,
-                      "lmt": "180", "end": "20500101",
-                      "fields1": "f1,f2,f3,f4,f5,f6",
-                      "fields2": "f51,f52,f53,f54,f55,f56"},
-                     timeout=15, headers=EM_HEADERS)
+    data = _get_json_chain(fetch_json, KLINE_URLS,
+                           {"secid": "90." + code, "klt": "101", "fqt": fqt,
+                            "lmt": "180", "end": "20500101",
+                            "fields1": "f1,f2,f3,f4,f5,f6",
+                            "fields2": "f51,f52,f53,f54,f55,f56"},
+                           ok=lambda d: bool(((d or {}).get("data") or {}).get("klines")),
+                           timeout=15, headers=EM_HEADERS)
     raw = ((data or {}).get("data") or {}).get("klines") or []
     rows = {}
     for line in raw:

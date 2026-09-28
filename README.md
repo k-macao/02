@@ -1,5 +1,7 @@
 # 02
-# 章鱼 AI·全景分析 —量化策略（趋势跟踪）
+# 章鱼 AI · 打氧日报
+
+> 每日上水，新鲜活泼
 
 ## ⚡ 一键运行
 
@@ -33,7 +35,7 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
 - **推送模式**：默认 **PushPlus「一对一」直发自己**，日报与检验/失败告警都不带 `topic` 字段。
   需要「一对多」群组推送时，显式设置环境变量 `PUSHPLUS_TOPIC=你的群组编码`
   （例如 `oai.1`）；设置 `PUSHPLUS_TOPIC=""` 可明确保持一对一。
-- **推送标题带当日时分**（如 `🐙 章鱼AI日报 08/01 18:30`）：同一天多次手动推送不会因标题
+- **推送标题带当日时分**（如 `🐙 章鱼 AI · 打氧日报 08/01 18:30`）：同一天多次手动推送不会因标题
   完全重复被反垃圾/去重拦截，也便于区分每一次推送；
 - **全量推送 + 超长日报自动分条**：PushPlus 会员单条上限默认 **10 万字符**（可用
   `PUSHPLUS_MAX_CONTENT_CHARS` 覆盖）。当完整 HTML 超限时，按栏目边界拆成多条独立消息依次推送，
@@ -245,6 +247,14 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
     超过 7 天（`REPORT_STALE_DAYS`）的频道视频与全球头条自动剔除，情绪因子无个股归因时整栏缺席。
   - 原「本次数据可用性」审计表压缩为总结里的「数据覆盖」一行（当天源 x/n · 暂缺来源名单）；
     当天检验推送门禁与 `octopus-*-sources` 元信息不变。
+- **行情日期核对与标注**（2026-09-29 修复，见 `今日预判-数据不新鲜-原因诊断.md`）：Yahoo Chart 日线在交易所
+  本地 0 点后几小时会暂缺刚收盘那天的 K 线（yfinance #890），过去会让「今日预判」与「行情速览」悄悄退回上一交易日。
+  现在 **①** `providers.parse_chart_result()` 用 `meta.regularMarketPrice/Time` + `currentTradingPeriod` 只在
+  "已收盘且晚于最后一根 K 线"时补齐日线（行情速览 / 量化引擎 / 周度预测共用，盘中价绝不当收盘）；
+  **②** `_reconcile_market_snapshot()` 用东方财富（A股全景 `quote_time`、恒指 / 恒科 `f124`）做独立基准，
+  仅当东财日期严格更新时回补并标「（东财）」；**③** 每条报价带 `as_of`，快照按 美股 / A股 / 港股 / 商品
+  分组记日期，「今日预判」各行写「（截至 MM-DD）」，落后于最新交易日的品种标「滞后」并**不计入**核心判断的
+  指数均值，行情速览子块标题带日期。离线回归见 `tests/test_market_freshness.py`。
 - 全部数据源不可用时生成明确标注“数据暂缺”的状态报告，默认不推送，避免把旧内容当作新日报。
 
 ## 🎛️ 高级用法
@@ -355,11 +365,37 @@ crontab -e
       └──────────┘
 ```
 
+### 🔄 数据线主备：每条数据线 1 个主源 + 2 个备用源（2026-09-29）
+
+日报用到的每一条「数据线」都在 `output/backup_sources.py` 的 `DATA_LINES` 注册：**主源 1 个、备用源 2 个**，
+`tests/test_data_lines.py` 逐条校验缺一不可；`python3 output/pipeline.py --sources` 打印完整清单。
+切换规则：只在主源**无响应或返回无效正文**（如 200 但 `data=null`、空列表、无 `<item>`）时依次尝试备用源 1、备用源 2；
+每一路都按解析结果判定有效，三路都失败才「暂缺」，绝不编造。启用了哪一路会写进采集日志、`data["_backup_info"]["events"]`
+与页面总结的「备用源」一行（如 `东方财富 快讯→备用源2（新浪财经 7×24 快讯）`），来源行同步标注。
+
+| 数据线 | 用于 | 主源 | 备用源 1 | 备用源 2 |
+|---|---|---|---|---|
+| 实时行情 · Yahoo 日线快照 | 行情速览 / 今日预判 | Yahoo `query1` v8 chart | Yahoo `query2`（同格式） | 东方财富 `ulist.np` 行情快照（独立源，secid 映射，标「东财」） |
+| 日线序列 · 量化 / 每周预测 | 量化预测 / 港股概率 / 每周预测 | Yahoo `query1` | Yahoo `query2` | 东方财富 `push2his` 日K（独立源，secid 映射） |
+| 东财指数 / 个股快照 `ulist.np` | 全景 / 港股核对 / 流动性 | `push2` | `82.push2`（镜像） | `72.push2`（镜像） |
+| A股宽基指数快照（独立第三源） | 全景·指数表现 | `push2 ulist.np` | `82.push2` | 新浪 `hq.sinajs`（独立源；无涨跌家数 → 全景 partial） |
+| 东财榜单 `clist` | 热门榜单 / 板块热力 / 行业列表 / 港股成交榜 | `push2` | `82.push2` | `72.push2` |
+| 东财日K `push2his` | 上日成交额 / 行业指数日线 | `push2his` | `91.push2his` | `63.push2his` |
+| 东财数据中心 | 南北向成交 / 财经日历 | `datacenter-web` | `datacenter` | `datacenter/securities` |
+| 东财快讯 | 东方财富快讯 / 新闻情绪 | `np-weblist` | `np-listapi` | 新浪财经 7×24 快讯（独立源，来源行改标） |
+| 全球头条 | 全球头条 | Google News 中文·大陆版 | 中文·香港版 | 搜索「财经」 |
+| 专题搜索 | 美联储 / 地缘政治 | Google News 搜索 zh-CN | zh-HK | en-US |
+| 国家政策 | 政策因子 | gov.cn 最新政策 | gov.cn 政策首页 | gov.cn 政策文库 |
+| 港股名家频道 | YouTube 频道 | YouTube 官方 Atom | RSSHub | Invidious（yewtu.be） |
+| Reddit / StockTwits / TradingView / Bogleheads | 趋势跟踪 | 各官方接口 | 同格式镜像 / 备用端点 | old.reddit JSON / StockTwits 消息流聚合 / RSSHub / phpBB feed.php |
+| 港股新闻源头（20 家） | 趋势跟踪·新闻源头 | 各媒体官方 RSS | Bing News `site:` 检索 RSS | Google News `site:` 检索 RSS |
+
 ## 📁 文件结构
 
 ```
 output/
 ├── pipeline.py            ← 🧠 核心引擎（采集→分析→生成→当天检验→推送）
+├── backup_sources.py      ← 🔄 数据线注册表（每条 1 主源 + 2 备用源；`--sources` 打印清单）
 ├── push.py                ← 🚀 快捷入口（= pipeline.py）
 ├── auto_push.sh           ← 🔁 Bash 版（cron 用）
 ├── manual_push.sh         ← 🖐 手动推送脚本（当天检验，--force 可强制）

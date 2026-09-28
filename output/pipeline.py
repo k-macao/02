@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐙 章鱼 AI · 全网多模型协同 · 每日财经日报流水线
+🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
 核心规则（2026-08-02 新版，当天修订）：
@@ -189,6 +189,7 @@ import random
 import re
 import glob
 import json
+import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html import unescape as _html_unescape
@@ -721,32 +722,80 @@ def safe_request(url, headers=None, params=None, timeout=15, is_json=True):
         return None
 
 
-def safe_request_with_fallback(urls, headers=None, params=None, timeout=15, is_json=True):
-    """带备用源的安全请求：依次尝试 URL 列表，任一成功即返回
-    
-    用于实现“全部数据源有备用源”的要求
-    返回 (result, success_url, errors)
+# 本次运行里「备用源顶上」的记录：[(数据线名, 备用源序号标签, 备用源说明)]，
+# 采集结束写入 data["_backup_info"]["events"]，并在总结「数据覆盖」里点名，读者可知哪一路在供数。
+BACKUP_EVENTS = []
+_BACKUP_EVENTS_LOCK = threading.Lock()
+
+
+def _note_backup_served(line, url, **fmt):
+    """登记一次备用源命中（同一数据线同一路只记一次）。"""
+    if not line or line not in _backup.DATA_LINES:
+        return
+    tag = _backup.label_for(line, url, **fmt)
+    if tag == "主源":
+        return
+    label = next((lab for lab, u, _s in _backup.candidates(line, **fmt) if u == url), "")
+    rec = (_backup.DATA_LINES[line]["name"], tag, label)
+    with _BACKUP_EVENTS_LOCK:
+        if rec not in BACKUP_EVENTS:
+            BACKUP_EVENTS.append(rec)
+
+
+def backup_events_text(events=None):
+    """「数据覆盖」用：'实时行情 · Yahoo 日线快照→备用源1（Yahoo Finance query2）、…'。"""
+    evs = BACKUP_EVENTS if events is None else events
+    return "、".join(f"{name}→{tag}（{label.split('（')[0]}）" if label else f"{name}→{tag}"
+                    for name, tag, label in evs)
+
+
+def safe_request_with_fallback(urls, headers=None, params=None, timeout=15, is_json=True,
+                               validate=None, line=None, fmt=None):
+    """带备用源的安全请求：依次尝试 URL 列表（主源在前），任一 **有效** 即返回。
+
+    validate —— 可选校验函数 validate(result) -> bool；镜像主机可能返回 200 但正文是
+                {"data": null} / 空列表 / 错误页，这类响应视为失败并继续尝试下一路，
+                否则备用源形同虚设（2026-09-29 重构前只判「非空 dict」）。
+    line     —— backup_sources.DATA_LINES 的数据线 id；命中备用源时登记到 BACKUP_EVENTS。
+    返回 (result, success_url, errors)。
     """
     if isinstance(urls, str):
         urls = [urls]
-    
+    urls = [u for u in urls if u]
+
     errors = []
     for url in urls:
         result = safe_request(url, headers=headers, params=params, timeout=timeout, is_json=is_json)
-        if result is not None:
-            # 验证结果有效性
-            if is_json and isinstance(result, dict) and not result:
-                errors.append(f"{url[:60]}: 空字典")
+        if result is None:
+            errors.append(f"{url[:60]}: 请求失败")
+            continue
+        if is_json and isinstance(result, dict) and not result:
+            errors.append(f"{url[:60]}: 空字典")
+            continue
+        if not is_json and isinstance(result, str) and len(result.strip()) < 10:
+            errors.append(f"{url[:60]}: 内容过短")
+            continue
+        if validate is not None:
+            try:
+                ok = bool(validate(result))
+            except Exception:
+                ok = False
+            if not ok:
+                errors.append(f"{url[:60]}: 返回内容无效")
                 continue
-            if not is_json and isinstance(result, str) and len(result.strip()) < 10:
-                errors.append(f"{url[:60]}: 内容过短")
-                continue
-            if url != urls[0]:
-                print(f"  ✅ 备用源成功 [{url[:60]}...]")
-            return result, url, errors
-        errors.append(f"{url[:60]}: 请求失败")
-    
+        if url != urls[0]:
+            print(f"  ✅ 备用源成功 [{url[:60]}...]")
+            _note_backup_served(line, url, **(fmt or {}))
+        return result, url, errors
+
     return None, None, errors
+
+
+def _served_label(line, url, **fmt):
+    """URL → 主源 / 备用源N（找不到数据线时返回空串）。"""
+    if not line or not url or line not in _backup.DATA_LINES:
+        return ""
+    return _backup.label_for(line, url, **fmt)
 
 
 # ============================================================
@@ -788,10 +837,122 @@ def _source_note(item):
     return f"{item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
 
 
+# 行情速览的品种分组：用于「按市场标注数据截至日」与「识别某个市场整体滞后」。
+# 商品期货（WTI）周日晚间就开始下一交易日的电子盘，其 K 线日期天然领先股票指数，
+# 因此不参与「整份快照属于哪一天」与「哪个市场滞后」的判断。
+MARKET_QUOTE_GROUPS = (
+    ("美股", ("道琼斯指数", "标普500", "纳斯达克", "微软 MSFT", "Meta META")),
+    ("A股", ("上证指数", "深证成指", "创业板指", "科创50")),
+    ("港股", ("恒生指数", "恒生科技")),
+    ("商品", ("WTI 原油",)),
+)
+MARKET_LAG_EXEMPT_GROUPS = ("商品",)
+# 东方财富独立时间基准（回补用）：港股指数 secid 代码 → 行情速览品种名
+MARKET_HK_REFERENCE_CODES = {"HSI": "恒生指数", "HSTECH": "恒生科技"}
+
+
+def _market_group_of(label):
+    for group, labels in MARKET_QUOTE_GROUPS:
+        if label in labels:
+            return group
+    return "其他"
+
+
+def _market_group_dates(market):
+    """{分组: 该组已取得报价里最新的 as_of 日期}（没有日期信息的品种不计）。"""
+    out = {}
+    for label, q in ((market or {}).get("quotes") or {}).items():
+        if not isinstance(q, dict) or not q.get("as_of"):
+            continue
+        g = _market_group_of(label)
+        if not out.get(g) or q["as_of"] > out[g]:
+            out[g] = q["as_of"]
+    return out
+
+
+def _market_newest_session(market):
+    """股票市场（美股 / A股 / 港股）里最新的一个数据日期；无日期信息返回 None。"""
+    dates = [d for g, d in _market_group_dates(market).items()
+             if g not in MARKET_LAG_EXEMPT_GROUPS]
+    return max(dates) if dates else None
+
+
+def _market_lagging(market):
+    """返回 {品种: as_of}：数据日期落后于「股票市场最新日期」的品种（商品期货豁免）。
+
+    典型场景：Yahoo 在交易所本地 0 点后暂时丢掉刚收盘日线且 meta / 东财回补都失败时，
+    港股 / A股整组仍是上上个交易日，而美股是最新收盘 —— 这些品种不应再被当成最新行情
+    参与「主要指数平均」，页面上也要写明日期。
+    """
+    newest = _market_newest_session(market)
+    if not newest:
+        return {}
+    out = {}
+    for label, q in ((market or {}).get("quotes") or {}).items():
+        if not isinstance(q, dict) or not q.get("as_of"):
+            continue
+        if _market_group_of(label) in MARKET_LAG_EXEMPT_GROUPS:
+            continue
+        if q["as_of"] < newest:
+            out[label] = q["as_of"]
+    return out
+
+
+def _refresh_market_dates(market):
+    """按各品种 as_of 重算快照级日期字段（content_date / is_today / group_dates / lagging）。
+
+    content_date 只看股票市场（美股 / A股 / 港股）的最新日期，不再被 WTI 电子盘或某一根
+    「有时间戳但没有收盘价」的空 K 线拉成「当天」。
+    """
+    quotes = (market or {}).get("quotes") or {}
+    if not quotes:
+        return market
+    newest = _market_newest_session(market)
+    if not newest:
+        dates = [q.get("as_of") for q in quotes.values() if isinstance(q, dict) and q.get("as_of")]
+        newest = max(dates) if dates else None
+    market["content_date"] = newest
+    market["is_today"] = bool(newest) and newest == _today_display()
+    market["group_dates"] = _market_group_dates(market)
+    market["lagging"] = _market_lagging(market)
+    return market
+
+
+def _yahoo_quote_from_chart(data):
+    """把一份 Yahoo Chart 响应解析成单品种报价：
+
+    {price, change_pct, volume, currency, as_of, prev_date, via}
+      · as_of    —— 「price」实际所属的交易日（取自有收盘价的那根 K 线，不是时间戳末尾的空 K 线）；
+      · via      —— "bar"（日线）或 "meta"（Yahoo 暂缺刚收盘日线，用 meta 最新报价补出，见
+                    octopus_quant.providers.session_bar_from_meta）。
+    解析失败抛 ValueError（由调用方记入失败列表）。
+    """
+    result = data["chart"]["result"][0]
+    bars = _quant.providers.parse_chart_result(result)
+    if len(bars) < 2:
+        raise ValueError("报价记录不足")
+    last, prev = bars[-1], bars[-2]
+    price, previous = float(last["close"]), float(prev["close"])
+    if previous == 0:
+        raise ZeroDivisionError("前收为 0")
+    vol = last.get("volume")
+    if vol in (None, ""):
+        vols = [b.get("volume") for b in bars if b.get("volume") not in (None, "")]
+        vol = vols[-1] if vols else 0
+    return {"price": price, "change_pct": (price / previous - 1) * 100,
+            "volume": vol or 0,
+            "currency": (result.get("meta") or {}).get("currency", ""),
+            "as_of": last["date"], "prev_date": prev["date"],
+            "via": "meta" if last.get("from_meta") else "bar"}
+
+
 def fetch_market_snapshot():
     """从 Yahoo Chart API 获取实际最新收盘/最新报价，不提供历史数字兜底。
-    
-    备用源：query1 → query2 → 东财兜底
+
+    备用源（数据线 yahoo_chart）：query1 → query2（同格式）→ 东方财富行情快照（独立解析）；
+    港股 / A股指数另有东方财富独立时间基准回补
+    （见 _reconcile_market_snapshot，在 collect_all_data 里执行）。
+    每个品种都记录自己的数据日期 as_of，页面按市场标注「截至 MM-DD」。
     """
     print("📡 正在抓取全球/A股实时行情...")
     specs = [
@@ -801,53 +962,192 @@ def fetch_market_snapshot():
         ("创业板指", "399006.SZ"), ("科创50", "000688.SS"),
         ("恒生指数", "%5EHSI"), ("恒生科技", "%5EHSTECH"),
     ]
-    quotes, failures, last_dates = {}, [], []
-    for label, symbol in specs:
-        # 主备 URL 列表
-        yahoo_urls = _backup.get_yahoo_urls(symbol)
-        # 为每个 symbol 添加区间参数
-        urls_with_params = [f"{url}?range=5d&interval=1d" for url in yahoo_urls]
-        data, success_url, errors = safe_request_with_fallback(urls_with_params)
-        if not data:
-            # 尝试东财作为最终备用（仅 A 股）
-            if ".SS" in symbol or ".SZ" in symbol:
-                # 东财 A 股备用（简化，不实现完整解析，仅记录失败）
-                failures.append(f"{label}: Yahoo 主备均失败")
-            else:
-                failures.append(f"{label}: Yahoo 主备均失败")
-            continue
-        
+    quotes, failures, meta_filled, served = {}, [], [], {}
+
+    def _chart_ok(payload):
         try:
-            result = data["chart"]["result"][0]
-            quote_0 = result["indicators"]["quote"][0]
-            closes = [x for x in quote_0["close"] if x is not None]
-            volumes = [x for x in quote_0.get("volume", []) if x is not None]
-            if len(closes) < 2:
-                raise ValueError("报价记录不足")
-            price, previous = closes[-1], closes[-2]
-            vol = volumes[-1] if volumes else 0
-            quotes[label] = {"price": price, "change_pct": (price / previous - 1) * 100,
-                             "volume": vol,
-                             "currency": result.get("meta", {}).get("currency", "")}
-            ts_list = result.get("timestamp") or []
-            if ts_list:
-                last = datetime.fromtimestamp(ts_list[-1], CST).strftime("%Y-%m-%d")
-                last_dates.append(last)
+            _yahoo_quote_from_chart(payload)
+            return True
+        except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError):
+            return False
+
+    pending = []          # Yahoo 双主机都失败的品种 → 交给东方财富独立备用源
+    for label, symbol in specs:
+        # 数据线 yahoo_chart：主源 query1 → 备用源1 query2（同格式）→ 备用源2 东财（独立解析）
+        yahoo_urls = [f"{url}?range=5d&interval=1d" for url in _backup.get_yahoo_urls(symbol)]
+        data, success_url, errors = safe_request_with_fallback(
+            yahoo_urls, validate=_chart_ok, line="yahoo_chart",
+            fmt={"symbol": symbol})
+        if not data:
+            pending.append((label, symbol))
+            continue
+        try:
+            quotes[label] = _yahoo_quote_from_chart(data)
         except (KeyError, TypeError, IndexError, ValueError, ZeroDivisionError) as exc:
             failures.append(f"{label}: {exc}")
-    
+            continue
+        served[label] = "备用源1" if success_url != yahoo_urls[0] else "主源"
+        if quotes[label]["via"] == "meta":
+            meta_filled.append(f"{label}({quotes[label]['as_of'][5:]})")
+
+    em_used = []
+    if pending:
+        em_quotes = _eastmoney_snapshot_quotes(pending)
+        for label, symbol in pending:
+            q = em_quotes.get(label)
+            if q:
+                quotes[label] = q
+                served[label] = "备用源2"
+                em_used.append(label)
+            else:
+                failures.append(f"{label}: Yahoo 主备与东财备用均失败")
+        if em_used:
+            print(f"  ✅ 备用源2（东方财富行情快照）顶上：{'、'.join(em_used)}")
+            _note_backup_served("yahoo_chart", _backup.candidates("yahoo_chart", symbol="")[2][1])
+
     status = "success" if quotes else "unavailable"
-    content_date = max(last_dates) if last_dates else None
-    is_today = content_date == _today_display()
+    source_name = "Yahoo Finance Chart"
+    if em_used:
+        source_name += "（" + "、".join(em_used) + " 来自东方财富备用源）"
+    market = _source_result(source_name, status,
+                            quotes=quotes,
+                            error="；".join(failures[:2]) or None,
+                            partial=len(quotes) != len(specs))
+    market["source_primary"] = "Yahoo Finance Chart"
+    market["patched"] = []
+    market["served_by"] = served
+    _refresh_market_dates(market)
     if quotes:
-        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情（数据日期 {content_date}）")
+        gd = market.get("group_dates") or {}
+        span = " / ".join(f"{g} {gd[g]}" for g, _ in MARKET_QUOTE_GROUPS if gd.get(g))
+        print(f"  ✅ 成功抓取 {len(quotes)}/{len(specs)} 个实时行情（数据日期 {span}）")
+        if meta_filled:
+            print("  ℹ️ Yahoo 日线暂缺刚收盘 K 线，已用 meta 最新报价补齐："
+                  + "、".join(meta_filled))
+        if market.get("lagging"):
+            print("  ⚠️ 以下品种数据日期落后于最新交易日（页面将标注日期，不计入指数均值）："
+                  + "、".join(f"{k}={v}" for k, v in market["lagging"].items()))
     else:
         print("  ⚠️ 实时行情暂不可用；日报将明确显示数据暂缺")
-    return _source_result("Yahoo Finance Chart", status,
-                          is_today=is_today, content_date=content_date,
-                          quotes=quotes,
-                          error="；".join(failures[:2]) or None,
-                          partial=len(quotes) != len(specs))
+    return market
+
+
+_EM_MARKET_CURRENCY = {"100": "", "105": "USD", "106": "USD", "107": "USD", "102": "USD",
+                       "116": "HKD", "1": "CNY", "0": "CNY"}
+
+
+def _eastmoney_snapshot_quotes(pairs, quote_urls=None):
+    """行情速览的独立备用源（yahoo_chart 数据线的备用源2）：东方财富 ulist.np 一次批量取价。
+
+    pairs —— [(品种名, Yahoo 代码)]；只处理能映射到东财 secid 的品种。
+    返回 {品种名: quote}，quote 与 _yahoo_quote_from_chart 同结构（via="eastmoney"，
+    as_of 取东财行情时间戳 f124 的北京日期，prev_date 未知记 None）。失败返回 {}。
+    """
+    secid_to_label = {}
+    for label, symbol in pairs or []:
+        secid = _backup.em_secid_for_yahoo(symbol)
+        if secid:
+            secid_to_label[secid] = label
+    if not secid_to_label:
+        return {}
+    params = {"fltt": "2", "invt": "2", "secids": ",".join(secid_to_label),
+              "fields": "f2,f3,f4,f12,f13,f14,f18,f124"}
+    urls = quote_urls or _backup.get_eastmoney_ulist_urls()
+    data, _, _ = safe_request_with_fallback(
+        urls, params=params, timeout=12, line="em_ulist",
+        validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
+    rows = ((data or {}).get("data") or {}).get("diff") or []
+    out = {}
+    for it in rows:
+        secid = f"{it.get('f13')}.{it.get('f12')}"
+        label = secid_to_label.get(secid)
+        price, chg = _panorama_float(it.get("f2")), _panorama_float(it.get("f3"))
+        if not label or price is None or chg is None or price <= 0:
+            continue
+        ts = _panorama_int(it.get("f124"))
+        as_of = datetime.fromtimestamp(ts, CST).strftime("%Y-%m-%d") if ts else None
+        currency = _EM_MARKET_CURRENCY.get(str(it.get("f13")), "")
+        if str(it.get("f13")) == "100":
+            code = str(it.get("f12") or "")
+            currency = "HKD" if code.startswith("HS") else "USD"
+        out[label] = {"price": price, "change_pct": chg, "volume": 0, "currency": currency,
+                      "as_of": as_of, "prev_date": None, "via": "eastmoney",
+                      "ref": "东方财富行情快照（备用源2）",
+                      "quote_time": (datetime.fromtimestamp(ts, CST).strftime("%Y-%m-%d %H:%M:%S")
+                                     if ts else None)}
+    return out
+
+
+def _fetch_hk_index_reference():
+    """东方财富港股指数报价（含 f124 行情时间）——「行情速览」核对 / 回补港股行情的独立基准。"""
+    try:
+        return _quant.providers.fetch_hk_index_quotes(safe_request) or {}
+    except Exception as exc:                      # 参考源失败只影响回补，不影响主流程
+        print(f"  ⚠️ 东财港股指数参考报价失败：{exc}")
+        return {}
+
+
+def _reconcile_market_snapshot(market, pan=None, hk_ref=None):
+    """用东方财富的独立时间基准核对 Yahoo 行情，回补「回退到上一个交易日」的港股 / A股指数。
+
+    规则（只在东财数据日期**严格晚于** Yahoo 该品种 as_of 时替换；东财失败或日期相同不动）：
+      · A股四指数：对照「全球大盘全景复盘」同一次抓取的东财指数（quote_time 为行情时间）；
+      · 恒生指数 / 恒生科技：对照东财 100.HSI / 100.HSTECH（f124 行情时间）；
+        Yahoo 完全没给港股报价时也用东财补上（港股是本日报的主市场）。
+    替换后的品种 via="eastmoney"，记录 yahoo_as_of 供审计；快照级 content_date /
+    is_today / lagging 重新计算；来源名追加「东方财富回补」。绝不回补成更旧的数字。
+    """
+    if not isinstance(market, dict) or market.get("status") != "success":
+        return market
+    quotes = market.setdefault("quotes", {})
+    patched = list(market.get("patched") or [])
+
+    def _apply(label, price, chg_pct, as_of, ref_name, quote_time=None):
+        old = quotes.get(label) or {}
+        if price is None or chg_pct is None or not as_of:
+            return
+        if old.get("as_of") and as_of <= old["as_of"]:
+            return
+        if old and not old.get("as_of"):
+            return                           # 无法比较日期就不动 Yahoo 的值
+        quotes[label] = {
+            "price": float(price), "change_pct": float(chg_pct),
+            "volume": old.get("volume") or 0, "currency": old.get("currency", ""),
+            "as_of": as_of, "prev_date": None, "via": "eastmoney",
+            "ref": ref_name, "quote_time": quote_time,
+            "yahoo_as_of": old.get("as_of"),
+        }
+        patched.append(label)
+
+    # ---- A股：对照全景复盘（东财 push2 ulist，f124 行情时间）----
+    if isinstance(pan, dict) and pan.get("status") == "success":
+        pan_date = str(pan.get("content_date") or "")[:10]
+        pan_rows = {str(r.get("name")): r for r in (pan.get("indices") or []) if isinstance(r, dict)}
+        if pan_date:
+            for label in MARKET_QUOTE_GROUPS[1][1]:
+                row = pan_rows.get(label)
+                if row and label in quotes:          # A股只回补已有品种，不重复全景表
+                    _apply(label, row.get("price"), row.get("chg_pct"), pan_date,
+                           "东方财富·A股全景", pan.get("quote_time"))
+
+    # ---- 港股：对照东财港股指数（100.HSI / 100.HSTECH）----
+    for code, label in MARKET_HK_REFERENCE_CODES.items():
+        ref = (hk_ref or {}).get(code) or {}
+        if not ref or not ref.get("as_of"):
+            continue
+        _apply(label, ref.get("price"), ref.get("chg_pct"), ref["as_of"],
+               "东方财富·港股指数", ref.get("quote_time"))
+
+    market["patched"] = patched
+    if patched:
+        market["source"] = f"{market.get('source_primary') or 'Yahoo Finance Chart'} · 东方财富回补"
+        print("  ✅ 东方财富回补（Yahoo 数据日期落后）："
+              + "、".join(f"{k}→{quotes[k]['as_of']}" for k in patched))
+    _refresh_market_dates(market)
+    if market.get("lagging"):
+        print("  ⚠️ 回补后仍滞后的品种："
+              + "、".join(f"{k}={v}" for k, v in market["lagging"].items()))
+    return market
 
 
 def _quote_value(market, label, precision=2):
@@ -890,8 +1190,11 @@ def fetch_google_news():
     备用源：中文主站 → 香港中文 → 搜索兜底 → RSSHub
     """
     print("📡 正在抓取 Google News 全球头条...")
+    # 数据线 google_news：主源 中文大陆版 → 备用源1 中文香港版 → 备用源2 搜索「财经」
     urls = _backup.get_google_news_urls("zh")
-    xml_text, success_url, errors = safe_request_with_fallback(urls, is_json=False, timeout=15)
+    xml_text, success_url, errors = safe_request_with_fallback(
+        urls, is_json=False, timeout=15, line="google_news",
+        validate=lambda t: "<item" in str(t))
 
     items = []
     if xml_text:
@@ -985,10 +1288,13 @@ def _fetch_news_search(query, source_name, limit=8):
     
     备用源：中文搜索 → 英文搜索 → RSSHub
     """
+    # 数据线 google_news_search：主源 中文大陆版搜索 → 备用源1 中文香港版 → 备用源2 英文美国版
     primary_url = GOOGLE_NEWS_SEARCH_RSS.format(query=quote(query))
     backup_urls = _backup.get_google_news_urls("search", query=query)
     all_urls = [primary_url] + [u for u in backup_urls if u != primary_url]
-    xml_text, success_url, errors = safe_request_with_fallback(all_urls, is_json=False, timeout=15)
+    xml_text, success_url, errors = safe_request_with_fallback(
+        all_urls, is_json=False, timeout=15, line="google_news_search",
+        fmt={"query": quote(query)}, validate=lambda t: "<item" in str(t))
     items = _google_news_items(xml_text, limit=limit)
     if not items:
         print(f"  ⚠️ {source_name}暂不可用，不显示历史兜底")
@@ -1168,6 +1474,8 @@ def fetch_gov_policy():
         dates = [it["date"] for it in items if it.get("date")]
         content_date = max(dates) if dates else None
         is_today = any(it.get("is_today") for it in items)
+        if url != all_urls[0]:
+            _note_backup_served("gov_policy", url)
         print(f"  ✅ 中国政府网抓取 {len(items)} 条最新政策（最新发布 {content_date or '日期暂缺'}）")
         return _source_result(
             GOV_POLICY_SOURCE_NAME, "success", is_today=is_today,
@@ -1210,43 +1518,87 @@ def fetch_eastmoney_news():
         "page_index": "1", "page_size": "10",
     }
     news, content_dates = [], []
-    # 合并原有列表与备用源
-    em_urls = _backup.get_eastmoney_news_urls()
-    all_urls = list(dict.fromkeys(list(EASTMONEY_NEWS_URLS) + em_urls))
-    for url in all_urls:
-        data, success_url, errors = safe_request_with_fallback([url], params=params, timeout=12)
-        if not data:
-            continue
+    # 数据线 em_news：主源 np-weblist → 备用源1 np-listapi（同格式）→ 备用源2 新浪 7×24（独立解析）
+    all_urls = list(dict.fromkeys(list(EASTMONEY_NEWS_URLS) + _backup.get_eastmoney_news_urls()))
+
+    def _news_list(payload):
         try:
-            lst = ((data.get("data") or {}).get("list")) or []
+            return ((payload.get("data") or {}).get("list")) or []
         except AttributeError:
-            lst = []
-        for it in lst[:10]:
-            title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
-            if not title:
-                continue
-            raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
-            news.append({
-                "title": title[:120],
-                "url": it.get("url") or it.get("articleUrl") or "",
-                "time": raw_time[:16],
-                "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
-                "is_today": raw_time[:10] == _today_display(),
-            })
-            if raw_time[:10]:
-                content_dates.append(raw_time[:10])
+            return []
+
+    data, success_url, errors = safe_request_with_fallback(
+        all_urls, params=params, timeout=12, line="em_news",
+        validate=lambda d: bool(_news_list(d)))
+    source_name = "东方财富"
+    for it in _news_list(data)[:10] if data else []:
+        title = re.sub(r"<[^>]+>", "", (it.get("title") or it.get("name") or "")).strip()
+        if not title:
+            continue
+        raw_time = str(it.get("showTime") or it.get("createTime") or it.get("publishTime") or "")
+        news.append({
+            "title": title[:120],
+            "url": it.get("url") or it.get("articleUrl") or "",
+            "time": raw_time[:16],
+            "summary": re.sub(r"<[^>]+>", "", (it.get("summary") or it.get("digest") or ""))[:80],
+            "is_today": raw_time[:10] == _today_display(),
+        })
+        if raw_time[:10]:
+            content_dates.append(raw_time[:10])
+    if not news:
+        news, content_dates = _sina_live_news_items()
         if news:
-            break
+            source_name = "新浪财经 7×24（东方财富快讯备用源2）"
+            print("  ✅ 备用源2（新浪财经 7×24）顶上：东财快讯接口不可用")
+            _note_backup_served("em_news", _backup.candidates("em_news")[2][1])
 
     if not news:
         print("  ⚠️ 东方财富快讯暂不可用，不显示历史兜底资讯")
         return _source_result("东方财富", "unavailable", headlines=[], error="未取得有效资讯")
     content_date = max(content_dates) if content_dates else None
     is_today = any(n["is_today"] for n in news)
-    print(f"  ✅ 成功抓取 {len(news)} 条东财快讯（最新 {content_date or '—'}）")
-    return _source_result("东方财富", "success",
+    print(f"  ✅ 成功抓取 {len(news)} 条{'东财快讯' if source_name == '东方财富' else '快讯（新浪备用）'}"
+          f"（最新 {content_date or '—'}）")
+    return _source_result(source_name, "success",
                           is_today=is_today, content_date=content_date,
                           headlines=news[:5])
+
+
+def _sina_live_news_items(limit=10):
+    """新浪财经 7×24 快讯（em_news 数据线的独立备用源2）。
+
+    接口 zhibo.sina.com.cn/api/zhibo/feed（zhibo_id=152 财经）：
+    result.data.feed.list[] → {rich_text, create_time, docurl}；
+    返回 (与东财快讯同结构的列表, 内容日期列表)。取不到返回 ([], [])。
+    """
+    data, _, _ = safe_request_with_fallback(
+        [_backup.SINA_LIVE_NEWS_URL], timeout=12,
+        validate=lambda d: bool(((((d or {}).get("result") or {}).get("data") or {})
+                                 .get("feed") or {}).get("list")))
+    if not data:
+        return [], []
+    rows = (((data.get("result") or {}).get("data") or {}).get("feed") or {}).get("list") or []
+    news, dates = [], []
+    for it in rows:
+        if not isinstance(it, dict):
+            continue
+        text = re.sub(r"<[^>]+>", "", str(it.get("rich_text") or "")).strip()
+        if not text:
+            continue
+        raw_time = str(it.get("create_time") or "")
+        title = text.split("。")[0][:120] if len(text) > 120 else text
+        news.append({
+            "title": title,
+            "url": str(it.get("docurl") or "https://finance.sina.com.cn/7x24/"),
+            "time": raw_time[:16],
+            "summary": text[:80] if title != text else "",
+            "is_today": raw_time[:10] == _today_display(),
+        })
+        if raw_time[:10]:
+            dates.append(raw_time[:10])
+        if len(news) >= limit:
+            break
+    return news, dates
 
 
 # ============================================================
@@ -1274,11 +1626,10 @@ def fetch_hot_stocks():
             "pn": "1", "pz": str(HOT_STOCK_TOP_N), "po": "1", "np": "1", "fltt": "2", "invt": "2",
             "fid": "f6", "fs": cfg["fs"], "fields": "f2,f3,f4,f6,f12,f14",
         }
-        primary_clist = "https://push2.eastmoney.com/api/qt/clist/get"
-        clist_fallbacks = _backup.get_eastmoney_quote_urls()
-        clist_urls = [primary_clist] + [u for u in clist_fallbacks if "clist" in u] + [primary_clist.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-        clist_urls = list(dict.fromkeys(clist_urls))
-        data, _, _ = safe_request_with_fallback(clist_urls, params=params, timeout=12)
+        # 数据线 em_clist：push2 → 82.push2 → 72.push2（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_quote_urls(), params=params, timeout=12, line="em_clist",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
         stocks = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1369,6 +1720,46 @@ def _panorama_int(val):
     return int(num) if num is not None else None
 
 
+def _sina_index_rows(codes=None):
+    """新浪 hq.sinajs 指数快照（sina_index 数据线的独立备用源2）。
+
+    返回 ({6位代码: 行情行}, 报价时间字符串|None)；行结构与 _fetch_panorama_indices 一致，
+    但新浪不提供涨跌家数（up/down/flat=None）。取不到返回 ({}, None)。
+    响应形如 var hq_str_sh000001="上证指数,开盘,昨收,最新,最高,最低,,,成交量(股),成交额(元),…,日期,时间,";
+    """
+    mapping = codes or _backup.SINA_CODE_FOR_EM
+    text, _, _ = safe_request_with_fallback(
+        [_backup.SINA_HQ_URL.format(codes=",".join(mapping.values()))],
+        headers=_backup.SINA_HQ_HEADERS, timeout=12, is_json=False,
+        validate=lambda t: "hq_str_" in str(t))
+    if not text:
+        return {}, None
+    sina_to_secid = {v: k for k, v in mapping.items()}
+    out, stamps = {}, []
+    for m in re.finditer(r'hq_str_([a-z]{2}\d{6})="([^"]*)"', str(text)):
+        secid = sina_to_secid.get(m.group(1))
+        parts = m.group(2).split(",")
+        if not secid or len(parts) < 10:
+            continue
+        price = _panorama_float(parts[3])
+        prev_close = _panorama_float(parts[2])
+        if price is None or price <= 0 or not prev_close:
+            continue
+        code = secid.split(".", 1)[1]
+        out[code] = {
+            "code": code, "name": parts[0].strip() or code,
+            "price": price, "chg_pct": (price / prev_close - 1) * 100,
+            "chg": price - prev_close,
+            "amount": _panorama_float(parts[9]),
+            "open": _panorama_float(parts[1]), "high": _panorama_float(parts[4]),
+            "low": _panorama_float(parts[5]), "prev_close": prev_close,
+            "up": None, "down": None, "flat": None,
+        }
+        if len(parts) >= 32 and re.match(r"\d{4}-\d{2}-\d{2}$", parts[30].strip()):
+            stamps.append(f"{parts[30].strip()} {parts[31].strip()[:8] or '00:00:00'}")
+    return out, (max(stamps) if stamps else None)
+
+
 def _fetch_panorama_indices():
     """一次请求拉取全部宽基指数行情；返回 (按 PANORAMA_INDEX_SPECS 排序的指数列表,
     {代码: 行情}, 报价时间字符串|None)。"""
@@ -1377,13 +1768,21 @@ def _fetch_panorama_indices():
         "secids": ",".join(secid for secid, _ in PANORAMA_INDEX_SPECS),
         "fields": "f2,f3,f4,f6,f12,f14,f15,f16,f17,f18,f104,f105,f106,f124",
     }
-    primary = "https://push2.eastmoney.com/api/qt/ulist.np/get"
-    fallbacks = _backup.get_eastmoney_quote_urls()
-    # ensure ulist.np variants are tried first
-    urls = [primary] + [u for u in fallbacks if "ulist.np" in u or "push2" in u] + [primary.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-    urls = list(dict.fromkeys(urls))
-    data, _, _ = safe_request_with_fallback(urls, params=params, timeout=12)
+    # 数据线 sina_index：主源 push2 ulist.np → 备用源1 82.push2（同格式）→ 备用源2 新浪 hq（独立解析）
+    urls = _backup.urls("sina_index")
+    data, success_url, _ = safe_request_with_fallback(
+        urls, params=params, timeout=12, line="sina_index",
+        validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
     rows = ((data or {}).get("data") or {}).get("diff") or []
+    if not rows:
+        sina_rows, sina_time = _sina_index_rows()
+        if sina_rows:
+            print("  ✅ 备用源2（新浪财经 hq）顶上：A股宽基指数快照（不含涨跌家数）")
+            _note_backup_served("sina_index", _backup.candidates("sina_index")[2][1])
+            indices = [dict(sina_rows[secid.split(".", 1)[1]], name=label)
+                       for secid, label in PANORAMA_INDEX_SPECS
+                       if secid.split(".", 1)[1] in sina_rows]
+            return indices, sina_rows, sina_time
     by_code, quote_ts = {}, []
     for it in rows:
         code = str(it.get("f12") or "")
@@ -1425,11 +1824,10 @@ def _fetch_panorama_prev_amounts():
     for secid, _ in PANORAMA_BREADTH_SOURCES:
         params = {"secid": secid, "klt": "101", "fqt": "0", "lmt": "2", "end": "20500101",
                   "fields1": "f1,f2,f3", "fields2": "f51,f57"}
-        primary_k = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-        k_fallbacks = _backup.get_eastmoney_panorama_urls()
-        k_urls = [primary_k] + [u for u in k_fallbacks if "kline" in u or "push2his" in u]
-        k_urls = list(dict.fromkeys(k_urls))
-        data, _, _ = safe_request_with_fallback(k_urls, params=params, timeout=12)
+        # 数据线 em_kline：push2his → 91.push2his → 63.push2his（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_kline_urls(), params=params, timeout=12, line="em_kline",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("klines")))
         pairs = []
         try:
             klines = (((data or {}).get("data") or {}).get("klines")) or []
@@ -1470,9 +1868,12 @@ def _fetch_panorama_northbound():
         "source": "WEB",
         "client": "WEB",
     }
-    north_urls = [PANORAMA_HSGT_HISTORY_URL] + _backup.get_eastmoney_panorama_urls()
-    north_urls = list(dict.fromkeys(north_urls))
-    data, _, _ = safe_request_with_fallback(north_urls, params=params, timeout=12)
+    # 数据线 em_datacenter：datacenter-web → datacenter → datacenter/securities（同格式镜像）
+    north_urls = list(dict.fromkeys([PANORAMA_HSGT_HISTORY_URL] + _backup.get_eastmoney_datacenter_urls()))
+    data, _, _ = safe_request_with_fallback(
+        north_urls, params=params, timeout=12, line="em_datacenter",
+        validate=lambda d: isinstance((d or {}).get("result"), dict)
+        and bool(d["result"].get("data")))
     note = PANORAMA_NORTH_POLICY_NOTE
     today_date = _today_display()
 
@@ -1533,11 +1934,10 @@ def _fetch_panorama_sectors():
         params = {"pn": "1", "pz": str(PANORAMA_SECTOR_TOP_N), "po": po, "np": "1",
                   "fltt": "2", "invt": "2", "fid": "f3", "fs": "m:90+t:2",
                   "fields": "f2,f3,f12,f14,f62,f104,f105,f128,f136"}
-        primary_sec = "https://push2.eastmoney.com/api/qt/clist/get"
-        sec_fallbacks = _backup.get_eastmoney_quote_urls()
-        sec_urls = [primary_sec] + [u for u in sec_fallbacks if "clist" in u] + [primary_sec.replace("push2.eastmoney.com", "45.push2.eastmoney.com")]
-        sec_urls = list(dict.fromkeys(sec_urls))
-        data, _, _ = safe_request_with_fallback(sec_urls, params=params, timeout=12)
+        # 数据线 em_clist：push2 → 82.push2 → 72.push2（同格式镜像）
+        data, _, _ = safe_request_with_fallback(
+            _backup.get_eastmoney_quote_urls(), params=params, timeout=12, line="em_clist",
+            validate=lambda d: bool(((d or {}).get("data") or {}).get("diff")))
         rows = []
         try:
             diff = ((data or {}).get("data") or {}).get("diff") or []
@@ -1685,7 +2085,12 @@ def resolve_channel_id(channel):
     handle = (channel.get("handle") or "").lstrip("@")
     if not handle:
         return None
-    html, _, _ = safe_request_with_fallback([f"https://www.youtube.com/@{handle}"] + _backup.get_youtube_urls(handle), is_json=False, timeout=12)
+    # handle → channelId：官方频道页 → 移动版频道页 → 频道视频页（三路都是 YouTube 页面，解析同一 JSON 字段）
+    html, _, _ = safe_request_with_fallback(
+        [f"https://www.youtube.com/@{handle}", f"https://m.youtube.com/@{handle}",
+         f"https://www.youtube.com/@{handle}/videos"],
+        is_json=False, timeout=12,
+        validate=lambda t: bool(re.search(r'"(?:channelId|externalId)":"UC[0-9A-Za-z_-]{22}"', str(t))))
     if not html:
         return None
     m = re.search(r'"channelId":"(UC[0-9A-Za-z_-]{22})"', html)
@@ -1789,7 +2194,10 @@ def fetch_hk_channels():
                 unsupported.append({"name": name, "desc": ch.get("desc", ""),
                                     "note": ch.get("note", "未配置 feed 地址")})
                 continue
-            xml_text, _, _ = safe_request_with_fallback([feed_url] + _backup.get_youtube_urls(""), is_json=False, timeout=12)
+            # 通用 RSS 频道：官方订阅地址 + RSSHub 多实例（仅当订阅本身就是 RSSHub 地址时才有镜像）
+            xml_text, _, _ = safe_request_with_fallback(
+                _backup.get_rsshub_fallbacks(feed_url), is_json=False, timeout=12,
+                validate=lambda t: "<item" in str(t) or "<entry" in str(t))
             items = _parse_rss_items(xml_text, limit=8)
             if items:
                 channels.append({
@@ -1812,9 +2220,13 @@ def fetch_hk_channels():
             unsupported.append({"name": name, "desc": ch.get("desc", ""), "note": msg})
             failures.append(f"{name}: {msg}")
             continue
+        # 数据线 youtube_feed：主源 YouTube 官方 Atom → 备用源1 RSSHub → 备用源2 Invidious（同格式）
         yt_urls = _backup.get_youtube_urls(cid)
         primary_yt = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
-        xml_text, _, _ = safe_request_with_fallback([primary_yt] + yt_urls, is_json=False, timeout=12)
+        xml_text, _, _ = safe_request_with_fallback(
+            list(dict.fromkeys([primary_yt] + yt_urls)), is_json=False, timeout=12,
+            line="youtube_feed", fmt={"channel_id": cid},
+            validate=lambda t: "<entry" in str(t))
         videos = []
         try:
             root = ET.fromstring(xml_text or "")
@@ -2188,6 +2600,32 @@ def _platform_rss_items(xml_text, platform, base, *, limit, now, community="", t
     return items, (latest.strftime("%Y-%m-%d") if latest else None)
 
 
+def _stocktwits_symbols_from_stream(payload, limit=STOCKTWITS_TRENDING_N):
+    """StockTwits streams/trending.json → 与 trending/symbols 同结构的标的榜（stocktwits 数据线备用源2）。
+
+    按热门消息里标的出现次数排名（次数即 trending_score 的代用指标），
+    watchlist_count / title 取自消息内的 symbol 对象；没有平台多空摘要（trends 缺省）。
+    """
+    messages = payload.get("messages") if isinstance(payload, dict) else None
+    if not isinstance(messages, list):
+        return []
+    tally, meta = {}, {}
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        for sym in message.get("symbols") or []:
+            if not isinstance(sym, dict) or not sym.get("symbol"):
+                continue
+            code = str(sym["symbol"]).strip()
+            tally[code] = tally.get(code, 0) + 1
+            meta.setdefault(code, {"title": sym.get("title") or code,
+                                   "watchlist_count": sym.get("watchlist_count") or 0})
+    ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return [{"symbol": code, "rank": i, "title": meta[code]["title"],
+             "watchlist_count": meta[code]["watchlist_count"], "trending_score": n}
+            for i, (code, n) in enumerate(ranked, 1)]
+
+
 def _stocktwits_sentiment_counts(symbol, *, now=None):
     """读某标的最新公开消息里的平台情绪标签（Bullish / Bearish），只计数不复制正文。"""
     payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("stream", symbol=symbol),
@@ -2219,9 +2657,23 @@ def fetch_stocktwits():
     """
     name = "StockTwits"
     now = datetime.now(CST)
-    payload, _, _ = safe_request_with_fallback(_backup.get_stocktwits_urls("trending"), headers=_PLATFORM_HEADERS, timeout=10)
+    # 数据线 stocktwits：主源 trending/symbols → 备用源1 trending/symbols/equities（同格式）
+    #                    → 备用源2 streams/trending（按消息聚合标的，独立解析）
+    urls = _backup.get_stocktwits_urls("trending")
+    payload, _, _ = safe_request_with_fallback(
+        urls, headers=_PLATFORM_HEADERS, timeout=10, line="stocktwits",
+        validate=lambda d: isinstance(d, dict) and isinstance(d.get("symbols"), list) and d["symbols"])
     symbols = payload.get("symbols") if isinstance(payload, dict) else None
-    if not isinstance(symbols, list):
+    if not isinstance(symbols, list) or not symbols:
+        stream_url = _backup.candidates("stocktwits")[2][1]
+        stream, _, _ = safe_request_with_fallback(
+            [stream_url], headers=_PLATFORM_HEADERS, timeout=10,
+            validate=lambda d: isinstance(d, dict) and isinstance(d.get("messages"), list))
+        symbols = _stocktwits_symbols_from_stream(stream)
+        if symbols:
+            print("  ✅ 备用源2（StockTwits streams/trending）顶上：按热门消息聚合标的")
+            _note_backup_served("stocktwits", stream_url)
+    if not isinstance(symbols, list) or not symbols:
         return _public_site_result(name, [], error="公开趋势榜接口未返回有效数据")
 
     ranked = []
@@ -2294,7 +2746,8 @@ def fetch_tradingview():
     now = datetime.now(CST)
     xml, _, _ = safe_request_with_fallback(_backup.get_tradingview_urls(), headers={**_PLATFORM_HEADERS,
                                                       "Accept": "application/rss+xml,application/xml"},
-                       is_json=False, timeout=10)
+                       is_json=False, timeout=10, line="tradingview",
+                       validate=lambda t: "<item" in str(t) or "<entry" in str(t))
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
                                         limit=TRADINGVIEW_IDEAS_N, now=now,
                                         community="交易员观点")
@@ -2330,7 +2783,8 @@ def fetch_bogleheads():
     now = datetime.now(CST)
     xml, _, _ = safe_request_with_fallback(_backup.get_bogleheads_urls(), headers={**_PLATFORM_HEADERS,
                                                      "Accept": "application/rss+xml,application/xml"},
-                       is_json=False, timeout=10)
+                       is_json=False, timeout=10, line="bogleheads",
+                       validate=lambda t: "<item" in str(t) or "<entry" in str(t))
     items, latest = _platform_rss_items(xml, name, PUBLIC_SITE_URLS[name],
                                         limit=BOGLEHEADS_TOPICS_N, now=now,
                                         community="论坛最新主题",
@@ -2496,6 +2950,20 @@ def _hk_news_analysis(records):
     }
 
 
+_HK_NEWS_BACKUP_LINK_HOSTS = ("www.bing.com", "bing.com", "news.google.com")
+
+
+def _hk_news_site_host(cfg):
+    """新闻源头用于 site: 检索的主域名：取 hosts 里最短的一个（如 hket.com）。"""
+    hosts = [h for h in (cfg.get("hosts") or ()) if h]
+    if not hosts:
+        try:
+            return urlparse(cfg.get("url") or cfg.get("feed") or "").hostname or ""
+        except ValueError:
+            return ""
+    return sorted(hosts, key=len)[0]
+
+
 def fetch_hk_news_sources():
     """抓取全网 20 个新闻源头的公开 RSS/Atom 订阅，挖掘港股相关信息。
 
@@ -2513,14 +2981,25 @@ def fetch_hk_news_sources():
     now = datetime.now(CST)
 
     def _fetch_one(cfg):
-        hk_urls = [cfg["feed"]] + _backup.get_youtube_urls("")  # generic fallback via RSSHub bases
-        xml_text, _, _ = safe_request_with_fallback(hk_urls, is_json=False, timeout=10)
+        # 数据线 hk_news_rss：主源 媒体官方订阅 → 备用源1 Bing 站内检索 RSS → 备用源2 Google News 站内检索 RSS
+        site_host = _hk_news_site_host(cfg)
+        hk_urls = [cfg["feed"]] + _backup.get_news_site_backup_urls(site_host)
+        xml_text, served_url, _ = safe_request_with_fallback(
+            hk_urls, is_json=False, timeout=10,
+            validate=lambda t: bool(_parse_rss_items(t, limit=HK_NEWS_SCAN_LIMIT)))
         parsed = _parse_rss_items(xml_text, limit=HK_NEWS_SCAN_LIMIT) if xml_text else []
+        via_backup = bool(served_url) and served_url != cfg["feed"]
+        allowed_hosts = tuple(cfg.get("hosts") or ())
+        if via_backup:
+            _note_backup_served("hk_news_rss", served_url, feed=cfg["feed"], host=site_host)
+            # 备用源条目的链接经检索平台跳转：放行该平台主机名（仍要求 https）
+            allowed_hosts = allowed_hosts + _HK_NEWS_BACKUP_LINK_HOSTS
         rec = {"name": cfg.get("name", "?"), "region": cfg.get("region", ""),
                "url": cfg.get("url", ""), "hosts": tuple(cfg.get("hosts") or ()),
                "desc": cfg.get("desc", ""), "feed": cfg.get("feed", ""),
                "status": "fail", "scanned": 0, "today": 0, "newest": None,
-               "items": [], "hk_titles": [], "hk_n": 0, "note": ""}
+               "items": [], "hk_titles": [], "hk_n": 0, "note": "",
+               "served_by": ("备用源" if via_backup else "主源")}
         if not parsed:
             rec["note"] = "自动抓取失败（源可能需登录/被限流，或订阅地址变化），暂缺"
             return rec
@@ -2537,8 +3016,10 @@ def fetch_hk_news_sources():
                 continue
             if not _public_recent(dt, now, HK_NEWS_WINDOW_HOURS):
                 continue
-            url = _news_url(row.get("url"), rec["hosts"])
+            url = _news_url(row.get("url"), allowed_hosts)
             title = _public_text(row.get("title"), 160)
+            if via_backup and " - " in title:
+                title = title.rsplit(" - ", 1)[0].strip() or title   # 检索平台附加的「 - 媒体名」
             if not (url and title):
                 continue
             fresh.append({"title": title, "url": url,
@@ -2563,6 +3044,9 @@ def fetch_hk_news_sources():
             "hk_titles": [it["title"] for it in hk_all],
             "hk_n": len(hk_all),
         })
+        if via_backup:
+            rec["note"] = ("官方订阅不可用，本次经站内检索备用源"
+                           f"（{'Bing' if 'bing.com' in served_url else 'Google News'}）取得")
         return rec
 
     records = [None] * len(HK_NEWS_SOURCES)
@@ -3185,7 +3669,11 @@ def fetch_econ_calendar(days=None, today=None):
             "source": "WEB",
             "client": "WEB",
         }
-        payload, _, _ = safe_request_with_fallback(_backup.get_calendar_urls(), headers=referer, params=params, timeout=15)
+        # 数据线 em_datacenter：datacenter-web → datacenter → datacenter/securities（同格式镜像）
+        payload, _, _ = safe_request_with_fallback(
+            _backup.get_calendar_urls(), headers=referer, params=params, timeout=15,
+            line="em_datacenter",
+            validate=lambda d: isinstance(d, dict) and "result" in d)
         if not isinstance(payload, dict):
             error = "接口无响应或非 JSON"
             break
@@ -3235,6 +3723,8 @@ def fetch_econ_calendar(days=None, today=None):
 
 
 def collect_all_data():
+    with _BACKUP_EVENTS_LOCK:
+        BACKUP_EVENTS.clear()
     """采集所有数据源"""
     print("\n" + "=" * 50)
     print("🔍 开始全网数据采集")
@@ -3245,6 +3735,12 @@ def collect_all_data():
     time.sleep(0.5)
     data["A股大盘全景"] = fetch_market_panorama()
     time.sleep(0.5)
+    # Yahoo 在交易所本地 0 点后几小时内会暂时丢掉刚收盘的日线（2026-09-29 凌晨实测：
+    # 恒指 / 上证回退到上周五）。这里用东方财富的行情时间做独立基准核对并回补，
+    # 保证「今日预判」里的港股 / A股一句话是最近一个收盘，而不是上上个交易日。
+    if data["实时行情"].get("status") == "success":
+        _reconcile_market_snapshot(data["实时行情"], data["A股大盘全景"],
+                                   hk_ref=_fetch_hk_index_reference())
     # 政策因子的独立官方输入：直接读取中国政府网最新政策，不以媒体转载替代。
     data["国家政策"] = fetch_gov_policy()
     time.sleep(0.5)
@@ -3317,11 +3813,18 @@ def collect_all_data():
 
     # === 备用源使用情况汇总 ===
     try:
-        backup_summary = _backup.get_backup_summary() if hasattr(_backup, 'get_backup_summary') else "备用源已配置"
-        print(f"\n🔄 {backup_summary[:200]}...")
-        data["_backup_info"] = {"summary": backup_summary, "sources": list(_backup.ALL_BACKUP_MAP.keys()) if hasattr(_backup, 'ALL_BACKUP_MAP') else []}
+        backup_summary = _backup.get_backup_summary()
+        events = list(BACKUP_EVENTS)
+        print(f"\n🔄 数据线主备：{len(_backup.DATA_LINES)} 条数据线，每条 1 主源 + 2 备用源"
+              f"（python3 output/pipeline.py --sources 查看明细）")
+        if events:
+            print("  🔁 本次备用源顶上：" + backup_events_text(events))
+        else:
+            print("  ✅ 本次全部由主源供数，未启用备用源")
+        data["_backup_info"] = {"summary": backup_summary, "sources": list(_backup.ALL_BACKUP_MAP.keys()),
+                                "lines": len(_backup.DATA_LINES), "events": events}
     except Exception:
-        data["_backup_info"] = {"summary": "备用源已启用"}
+        data["_backup_info"] = {"summary": "备用源已启用", "events": list(BACKUP_EVENTS)}
 
     print("\n✅ 数据采集完成！")
     return data
@@ -3399,7 +3902,11 @@ GZ_WARN_INK = "#111827"
 GZ_PRIMARY = "#2563EB"
 GZ_PRIMARY_HOVER = "#1D4ED8"
 GZ_PRIMARY_LIGHT = "#EFF6FF"
-REPORT_TITLE = "章鱼 AI·全景分析 —量化策略（趋势跟踪）"
+REPORT_TITLE = "章鱼 AI · 打氧日报"
+# 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
+REPORT_TAGLINE = "每日上水，新鲜活泼"
+# 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
+PUSH_TITLE_PREFIX = f"🐙 {REPORT_TITLE}"
 # 字体：Inter 现代无衬线，极简 SaaS 标准
 # Inter 是 SaaS 落地页最常用的字体，-apple-system 兜底，紧排 -0.03em
 GZ_FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
@@ -4115,17 +4622,50 @@ def gz_market_row(label, price_str, pct):
     return gz_data_table(["名称", "最新价", "涨跌"], [_gz_quote_row(label, price_str, pct)])
 
 
+def _market_block_caption(market, title, specs):
+    """子块标题追加数据日期：「A股四指数 · 截至 09-28」；组内日期不一致写区间，滞后标出。"""
+    note = _market_asof_note(market, [(label, label) for label, _ in specs])
+    if not note:
+        return title
+    return f"{title} · {note.strip('（）')}"
+
+
+def _market_block_date(market, specs):
+    """子块标题所用的日期（YYYY-MM-DD，取股票品种最新一天）；无日期返回 None。"""
+    quotes = (market or {}).get("quotes") or {}
+    core = [quotes[l]["as_of"] for l, _ in specs
+            if _market_group_of(l) not in MARKET_LAG_EXEMPT_GROUPS
+            and isinstance(quotes.get(l), dict) and quotes[l].get("as_of")]
+    return max(core) if core else None
+
+
+def _market_row_label(market, label, block_date=None):
+    """品种名后缀：落后于最新交易日的写日期；商品期货日期与子块不同也写日期；
+    由东方财富回补的标「东财」。"""
+    q = ((market or {}).get("quotes") or {}).get(label) or {}
+    suffix = []
+    if q.get("as_of") and (label in (market or {}).get("lagging", {})
+                           or (block_date and _market_group_of(label) in MARKET_LAG_EXEMPT_GROUPS
+                               and q["as_of"] != block_date)):
+        suffix.append(_asof_short(q["as_of"]))
+    if q.get("via") == "eastmoney":
+        suffix.append("东财")
+    return f"{label}（{'·'.join(suffix)}）" if suffix else label
+
+
 def gz_market_section(market):
     def _block(title, specs):
         rows = []
+        block_date = _market_block_date(market, specs)
         for label, precision in specs:
             price_str, pct = _quote_parts(market, label, precision)
             if price_str is None:
                 continue          # 缺失品种不出「数据暂缺」行
-            rows.append(_gz_quote_row(label, price_str, pct))
+            rows.append(_gz_quote_row(_market_row_label(market, label, block_date), price_str, pct))
         if not rows:
             return ""
-        return gz_subsection(title) + gz_data_table(["名称", "最新价", "涨跌"], rows)
+        return (gz_subsection(_esc(_market_block_caption(market, title, specs)))
+                + gz_data_table(["名称", "最新价", "涨跌"], rows))
 
     return (
         _block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
@@ -4548,12 +5088,14 @@ class _RenderKit:
 def _pixel_market_section(market):
     def _block(title, specs):
         rows = []
+        block_date = _market_block_date(market, specs)
         for label, precision in specs:
             if _quote_parts(market, label, precision)[0] is None:
                 continue          # 缺失品种不出「数据暂缺」行
             value, color = _quote_value(market, label, precision)
-            rows.append((label, value, color))
-        return (_subsection(title) + _data_table(rows)) if rows else ""
+            rows.append((_market_row_label(market, label, block_date), value, color))
+        return ((_subsection(_esc(_market_block_caption(market, title, specs)))
+                 + _data_table(rows)) if rows else "")
 
     return (_block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
                                  ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)])
@@ -4895,14 +5437,49 @@ def _trend_clues_block(data, kit):
     return kit.rows("".join(rows)) if rows else ""
 
 
-def _market_brief(market, labels, kit):
-    """「道指 ▲+0.93% · 标普 ▲+0.51%」式一行行情摘要；缺失项直接略过。"""
+def _asof_short(date_str):
+    """'2026-09-28' → '09-28'；空值返回 ''。"""
+    d = str(date_str or "")
+    return d[5:10] if len(d) >= 10 else d
+
+
+def _market_asof_note(market, labels):
+    """「（截至 09-28）」：这几个品种的数据日期；日期不一致写区间，落后于最新交易日标「滞后」。
+
+    「今日预判」是开盘前推送的结论，行情只能是**上一个收盘**；把日期写出来，读者才能
+    分辨「昨日收盘（正常）」与「回退到上上个交易日（数据滞后）」。
+    """
+    quotes = (market or {}).get("quotes") or {}
+    # 商品期货（WTI）电子盘日期天然领先：同一子块里只要有股票品种，就按股票品种定日期，
+    # 期货行自己在名称后标日期（见 _market_row_label），避免出现「截至 09-28~09-29」。
+    core = [l for l, _ in labels if _market_group_of(l) not in MARKET_LAG_EXEMPT_GROUPS
+            and isinstance(quotes.get(l), dict) and quotes[l].get("as_of")]
+    use = core or [l for l, _ in labels]
+    dates = sorted({str(quotes[l].get("as_of")) for l in use
+                    if isinstance(quotes.get(l), dict) and quotes[l].get("as_of")})
+    if not dates:
+        return ""
+    span = _asof_short(dates[0]) if len(dates) == 1 else f"{_asof_short(dates[0])}~{_asof_short(dates[-1])}"
+    lagging = _market_lagging(market)
+    if any(l in lagging for l, _ in labels):
+        return f"（截至 {span} · 滞后）"
+    return f"（截至 {span}）"
+
+
+def _market_brief(market, labels, kit, with_date=False):
+    """「道指 ▲+0.93% · 标普 ▲+0.51%」式一行行情摘要；缺失项直接略过。
+
+    with_date=True 时末尾追加「（截至 MM-DD）」数据日期说明。
+    """
     bits = []
     for label, short in labels:
         _, pct = _quote_parts(market or {}, label)
         if pct is not None:
             bits.append(f"{_esc(short)} {kit.trend(pct, compact=True)}")
-    return " · ".join(bits)
+    line = " · ".join(bits)
+    if line and with_date:
+        line += _esc(_market_asof_note(market, labels))
+    return line
 
 
 def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
@@ -4946,18 +5523,34 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
             bits.append(f'成交 {_format_amount(t["total"])}'
                         + (f' {kit.trend(chg, compact=True)}' if chg is not None else ""))
         if bits:
-            pairs.append(("A股", " · ".join(bits)))
+            line = " · ".join(bits)
+            # 数据日期：东财行情时间（开盘前推送 = 上一收盘；盘中运行 = 截至该时刻）
+            pan_date = _asof_short(pan.get("content_date"))
+            if pan_date:
+                qt = str(pan.get("quote_time") or "")
+                clock = qt[11:16] if len(qt) >= 16 else ""
+                line += _esc(f"（截至 {pan_date}{' ' + clock if clock else ''}）")
+            pairs.append(("A股", line))
     elif market and market.get("status") == "success":
-        line = _market_brief(market, [("上证指数", "上证"), ("深证成指", "深成")], kit)
+        line = _market_brief(market, [("上证指数", "上证"), ("深证成指", "深成")], kit, with_date=True)
         if line:
             pairs.append(("A股", line))
     if market and market.get("status") == "success":
-        us = _market_brief(market, [("道琼斯指数", "道指"), ("标普500", "标普"), ("纳斯达克", "纳指")], kit)
+        us = _market_brief(market, [("道琼斯指数", "道指"), ("标普500", "标普"), ("纳斯达克", "纳指")],
+                           kit, with_date=True)
         if us:
             pairs.append(("美股", us))
-        hk = _market_brief(market, [("恒生指数", "恒指"), ("恒生科技", "恒科")], kit)
+        hk = _market_brief(market, [("恒生指数", "恒指"), ("恒生科技", "恒科")], kit, with_date=True)
         if hk:
             pairs.append(("港股", hk))
+        lag = _market_lagging(market)
+        if lag:
+            groups = sorted({_market_group_of(l) for l in lag})
+            newest = _asof_short(_market_newest_session(market))
+            pairs.append(("数据提示",
+                          _esc(f"{'、'.join(groups)}行情数据日期落后于最新交易日 {newest}"
+                               f"（{'、'.join(f'{l} {_asof_short(d)}' for l, d in sorted(lag.items()))}）"
+                               "，上游行情源尚未更新，已不计入核心判断的指数均值")))
     if policy and policy.get("available"):
         quant_info = f' · {policy.get("quant_trend") or ""} {policy.get("quant_composite"):+.2f}' if policy.get("quant_composite") is not None else ""
         line = f'PSI {policy["broad_score"]:+d}（{_esc(policy["broad_label"])}）{quant_info}'
@@ -4969,7 +5562,8 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
     return pairs
 
 
-def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None):
+def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None,
+                   backup_events=None):
     """末尾「总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
     pairs = []
     if quant and quant.get("available"):
@@ -5022,6 +5616,9 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     if missing:
         cover += " · 暂缺：" + "、".join(missing)
     pairs.append(("数据覆盖", _esc(cover)))
+    # 每条数据线 1 主源 + 2 备用源：本次哪几路由备用源顶上，读者需要知道数据来自哪一路。
+    if backup_events:
+        pairs.append(("备用源", _esc("本次启用：" + backup_events_text(list(backup_events)))))
     return pairs
 
 
@@ -5853,7 +6450,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     if conclusion:
         blocks["FORECAST"] = ("FORECAST", "今日预判", kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
-                             quant=quant)
+                             quant=quant,
+                             backup_events=(data.get("_backup_info") or {}).get("events"))
     blocks["SUMMARY"] = ("SUMMARY", "总结", kit.kv(summary), "", "")
 
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
@@ -6066,12 +6664,18 @@ def build_daily_quant_strategy(data):
     # 个股仍作为 策略研判输入：板块趋势识别与活跃标的提及。
 
     # —— 2. 情绪打分 ——
+    # 数据日期落后于最新交易日的品种（如 Yahoo 凌晨回退到上上个交易日的港股 / A股）
+    # 不计入「主要指数平均」：把上周五的涨跌和昨夜美股收盘平均在一起没有意义。
+    lagging_quotes = _market_lagging(market)
     changes = []
-    for q in quotes.values():
+    for label, q in quotes.items():
+        if label in lagging_quotes:
+            continue
         try:
             changes.append(float(q["change_pct"]))
         except (TypeError, ValueError, KeyError):
             pass
+    quotes_asof = _market_newest_session(market)
 
     present = [m for m, md in hot_markets.items() if (md or {}).get("stocks")]
 
@@ -6103,7 +6707,13 @@ def build_daily_quant_strategy(data):
 
     reason_parts = []
     if changes:
-        reason_parts.append(f"主要指数平均{sum(changes) / len(changes):+.2f}%")
+        part = f"主要指数平均{sum(changes) / len(changes):+.2f}%"
+        if quotes_asof:
+            part += f"（截至 {quotes_asof[5:]}"
+            if lagging_quotes:
+                part += f"，{'、'.join(sorted({_market_group_of(l) for l in lagging_quotes}))}行情滞后未计入"
+            part += "）"
+        reason_parts.append(part)
     if present:
         reason_parts.append(f"{len(present)} 个市场榜单活跃")
     if all_text:
@@ -8483,7 +9093,9 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     masthead_title_bar = gz_shell(
         f'<h1 style="margin:0;background:#FFFFFF;font-size:52px;'
         f'font-weight:700;color:#111827;font-family:{GZ_SANS};'
-        f'letter-spacing:-0.03em;line-height:1.05;">{_esc(REPORT_TITLE)}</h1>',
+        f'letter-spacing:-0.03em;line-height:1.05;">{_esc(REPORT_TITLE)}</h1>'
+        f'<div style="margin:14px 0 0;font-size:18px;font-weight:500;color:#6B7280;'
+        f'font-family:{GZ_SANS};letter-spacing:0.02em;line-height:1.5;">{_esc(REPORT_TAGLINE)}</div>',
         bg="#FFFFFF", pad="0 0 16px")
     # SaaS 极简：真白底 #ffffff，Inter 52px/700/-0.03em，单一主色 #2563eb，1px #E5E7EB，线条图标
     html = f"""<!DOCTYPE html>
@@ -8496,6 +9108,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
 <meta name="octopus-theme" content="guizang">
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
 <title>{REPORT_TITLE}</title>
 </head>
 <body bgcolor="#FFFFFF" style="margin:0;padding:0;background:#FFFFFF;font-family:'Inter', -apple-system, sans-serif;color:#111827;font-size:15px;line-height:1.6;">
@@ -8576,7 +9189,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
 <meta name="octopus-theme" content="pixel">
-<title>章鱼AI · 财经作战日志 | RETRO PIXEL EDITION</title>
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
+<title>{REPORT_TITLE} | RETRO PIXEL EDITION</title>
 </head>
 <body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
 
@@ -8606,8 +9220,8 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 </tr>
 </table>
 
-<div style="font-size:27px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;line-height:1.3;padding-top:16px;font-family:{FONT_MONO};text-shadow:3px 3px 0 {C_ACCENT_SOFT};">财经作战日志<span style="color:{C_ACCENT};">_</span></div>
-<div style="font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:5px;font-family:{FONT_MONO};">DAILY MARKET QUEST // SIGNAL · AI · FLOW · UTC+8</div>
+<div style="font-size:27px;font-weight:900;color:{C_ACCENT_DEEP};letter-spacing:.5px;line-height:1.3;padding-top:16px;font-family:{FONT_MONO};text-shadow:3px 3px 0 {C_ACCENT_SOFT};">{_esc(REPORT_TITLE)}<span style="color:{C_ACCENT};">_</span></div>
+<div style="font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:2px;padding-top:5px;font-family:{FONT_MONO};">{_esc(REPORT_TAGLINE)} // SIGNAL · AI · FLOW · UTC+8</div>
 <div style="margin-top:12px;border-top:1px solid {C_ACCENT};border-bottom:1px solid {C_ACCENT_MAGENTA};height:5px;font-size:0;line-height:0;"><span style="color:{C_ACCENT};">■■■■</span></div>
 
 <!-- 导语：终端开机文字 -->
@@ -9528,7 +10142,7 @@ def calendar_only_report(days=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🐙 章鱼AI · 每日财经日报流水线（当天检验后推送）",
+        description="🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -9579,6 +10193,8 @@ def main():
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
     parser.add_argument("--weekly-only", action="store_true",
                        help="只跑每周量化走势预测并打印结果（研究模式：不生成日报、不推送）")
+    parser.add_argument("--sources", action="store_true",
+                       help="打印全部数据线的主源 / 两个备用源清单（不联网、不生成日报）")
     parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
                        help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
@@ -9596,6 +10212,11 @@ def main():
     # --list 模式
     if args.list:
         return list_reports()
+
+    # --sources 模式：数据线主备清单
+    if args.sources:
+        print(_backup.describe())
+        return 0
 
     # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
     if args.quant_only:
@@ -9636,7 +10257,7 @@ def main():
             print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, html, report_name=os.path.basename(push_path)):
             print("\n🎉 全部完成！")
             return 0
@@ -9649,7 +10270,7 @@ def main():
     mode = "🖐 手动推送模式" if args.manual else "每日自动模式"
     theme = _resolve_push_theme(args.theme)
     print("🐙 " + "=" * 48)
-    print(f"   章鱼 AI · 全网多模型协同 · 每日财经日报（{mode}）")
+    print(f"   {REPORT_TITLE} ·「{REPORT_TAGLINE}」· 全网多模型协同 · 每日财经日报（{mode}）")
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
     print(f"   推送主题: {theme}（OCTOPUS_PUSH_THEME / --theme 可切换）")
@@ -9765,7 +10386,7 @@ def main():
 
     if can_push:
         print(f"\n📤 当天检验通过：{reason}")
-        title = f"🐙 章鱼AI日报 {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
@@ -9777,7 +10398,7 @@ def main():
     if args.force_push:
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX}(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
@@ -9787,7 +10408,7 @@ def main():
     if args.allow_incomplete_push:
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
-        title = f"🐙 章鱼AI日报(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = f"{PUSH_TITLE_PREFIX}(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",
