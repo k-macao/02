@@ -32,7 +32,7 @@
       净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，指数与宽度全缺
       时整个栏目才缺席；规则合成，非投资建议。
   6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / A股大盘全景复盘 /
-      政策因子 / 全球头条 / 东方财富快讯 / A股资讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
+      每日量化策略（政策因子趋势预判） / 全球头条 / 东方财富快讯 / A股资讯 / 每日量化策略趋势跟踪线索 / 港股名家频道 /
       AI 新闻情绪因子）正文末尾追加一行概率化多空判断：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
@@ -105,14 +105,15 @@
       0~100 与对概率的有界修正）。概率全部由「同一套因子在自身历史上滚动重算 →
       分桶 + 保序 + 逻辑回归校准」得到，并经推进式回测检验（每步只用过去数据），
       夹在 5%~95%，非投资建议；数据取不到时对应子块明确显示「暂缺」，绝不编造。
-  12. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
+  12. 「每日量化策略（政策因子趋势预判）」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
       直接读取中国政府网「最新政策」官方页面，保留发布日期与 gov.cn 原文链接；
       近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度识别
       （货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI / PPI /
       社融 / 统计局 等经济数据口径），经关键词矩阵映射到行业受益/受损权重，
-      汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则生成的总结）。官方条例、
-      规划、办法等没有方向性触发词时按中性「政策发布」纳入；触发词被否定修饰时跳过；
-      窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
+      汇总为 PolicyShockIndex（行业 PSI 与大盘 PSI，附规则生成的总结），并做量化趋势预判：
+      PSI 归一 50% + 政策新闻量 30% + 维度覆盖 20% 复合分，输出趋势分、政策冲击强度榜、
+      趋势预判信号与风险预算。官方条例、规划、办法等没有方向性触发词时按中性「政策发布」纳入；
+      触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -2509,7 +2510,7 @@ KOBOYO_SECTION_ICONS = {
     "ECON CALENDAR": "card-calendar",
     "QUANT STRATEGY": "chart",
     "AI READ": "brain",
-    "POLICY SHOCK": "document",
+    "QUANT POLICY": "document",
     "MARKET SNAPSHOT": "chart",
     "A-SHARE PANORAMA": "chart",
     "HK GURU CHANNELS": "camera",
@@ -2657,7 +2658,7 @@ _SECTION_ICON_META = {
     "ECON CALENDAR": ("▦", "30-DAY", C_LEMON, C_FLAT_BG),
     "QUANT STRATEGY": ("◆", "QUANT", C_LEMON, C_AI_BG),
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
-    "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
+    "QUANT POLICY": ("◉", "QUANT", C_AMBER, C_FLAT_BG),
     "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
@@ -3866,7 +3867,8 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None):
         if hk:
             pairs.append(("港股", hk))
     if policy and policy.get("available"):
-        line = f'PSI {policy["broad_score"]:+d}（{_esc(policy["broad_label"])}）'
+        quant_info = f' · {policy.get("quant_trend") or ""} {policy.get("quant_composite"):+.2f}' if policy.get("quant_composite") is not None else ""
+        line = f'PSI {policy["broad_score"]:+d}（{_esc(policy["broad_label"])}）{quant_info}'
         if policy.get("winners"):
             line += " · 受益 " + "、".join(_esc(w["name"]) for w in policy["winners"][:2])
         if policy.get("losers"):
@@ -3933,7 +3935,7 @@ REPORT_SECTION_ORDER = (
     "CONCLUSION",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
-    "MARKET SNAPSHOT", "A-SHARE PANORAMA", "POLICY SHOCK", "QUANT STRATEGY",
+    "MARKET SNAPSHOT", "A-SHARE PANORAMA", "QUANT POLICY", "QUANT STRATEGY",
     "TREND CLUES", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
     "WRAP-UP",
@@ -4076,7 +4078,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             bits.append(f"领涨 {_esc(str(lead['name']))}")
         notes["A-SHARE PANORAMA"] = _judge_note(prob, "，".join(bits) + f" → 预测：{verdict}")
 
-    # ③ 政策因子：PSI 方向 + 受益/承压行业 → 实施节奏预测
+    # ③ 每日量化策略（政策因子趋势预判）：PSI 方向 + 受益/承压行业 + 量化趋势分 → 实施节奏预测
     if isinstance(policy, dict) and policy.get("available"):
         score = int(policy.get("broad_score") or 0)
         prob = _ai_judge_prob(max(score, 0), max(-score, 0))
@@ -4094,7 +4096,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None):
             detail += "，受益 " + "、".join(_esc(str(w.get('name'))) for w in winners[:2])
         if losers:
             detail += "，承压 " + "、".join(_esc(str(l.get('name'))) for l in losers[:2])
-        notes["POLICY SHOCK"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
+        notes["QUANT POLICY"] = _judge_note(prob, f"{detail} → 预测：{verdict}")
 
     # ④ 趋势跟踪线索（Reddit）：多空词命中 + 热股提取 → 散户情绪判断
     reddit = data.get("Reddit") or {}
@@ -4298,11 +4300,12 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             kit.source_badge(pan), _short_source(pan),
         )
 
-    # ③ 政策因子
+    # ③ 每日量化策略（政策因子趋势预判）
     if policy.get("available"):
-        blocks["POLICY SHOCK"] = (
-            "POLICY SHOCK", "政策因子", kit.policy_block(policy), kit.ai_badge(), "",
+        blocks["QUANT POLICY"] = (
+            "QUANT POLICY", "每日量化策略（政策因子趋势预判）", kit.policy_block(policy), kit.badge("量化策略", "ai"), "",
         )
+        blocks["POLICY SHOCK"] = blocks["QUANT POLICY"]
 
     # ④ 每日量化策略（板块趋势跟踪）——量化趋势分 + 板块轮动信号
     if ai_result.get("available"):
@@ -6434,12 +6437,15 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
 
 
 def build_policy_factor(data, date_str=None, news_corpus=None):
-    """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
+    """构建每日量化策略（政策因子趋势预判）（抓取后、推送前单独构建；推送页首位栏目）。
 
     标题窗口：近 POLICY_WINDOW_DAYS=15 日（自然日，含锚定日；news_corpus 为
     跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。中国政府网
     直接发布的条目带 official=True、官方原文 URL；即使没有方向性触发词也按
     「政策发布」中性维度纳入。窗口内零政策/宏观新闻时 available=False，栏目缺席。
+
+    量化趋势预判（2026-09-29 升级）：在 PSI 基础上做量化复合分：
+    PSI 归一 50% + 政策新闻量 30% + 维度覆盖 20%，输出趋势分、强度榜与预判信号。
     """
     anchor_dt = _factor_anchor_dt(date_str) if date_str else datetime.now(CST)
     anchor_date = anchor_dt.strftime("%Y-%m-%d")
@@ -6466,8 +6472,6 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
             triggers = _match_policy_triggers(title, dim["triggers"])
             if triggers:
                 hit_dims.append(dim)
-        # 直采的政府网政策正文是官方政策证据。没有方向性词时也保留为中性
-        # 政策事件，确保「条例/规划/决定」等正式发布信息不被资讯词表漏掉。
         if not hit_dims and head.get("official"):
             hit_dims.append(_OFFICIAL_POLICY_DIMENSION)
         if not hit_dims:
@@ -6525,6 +6529,60 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
     broad_label = "偏暖" if broad_score > 0 else ("偏冷" if broad_score < 0 else "中性")
     summary = _policy_summary(len(policy_heads), len(headlines), dim_counts,
                               broad_score, broad_label, winners, losers, official_n)
+    # —— 量化趋势预判：PSI归一50% + 新闻量30% + 维度覆盖20% ——
+    psi_z = max(-3, min(3, broad_score / 2.0))
+    news_score = min(2, len(policy_heads) / 3.0)
+    dim_score = min(2, len(dim_counts) / 2.0)
+    quant_composite = round(0.5 * psi_z + 0.3 * news_score + 0.2 * dim_score, 2)
+    if quant_composite > 1.2:
+        quant_trend = "强势趋暖"
+        quant_signal = "趋势预判·积极布局"
+    elif quant_composite > 0.5:
+        quant_trend = "偏强趋暖"
+        quant_signal = "趋势预判·逢低布局"
+    elif quant_composite > -0.5:
+        quant_trend = "中性震荡"
+        quant_signal = "趋势预判·中性配置"
+    elif quant_composite > -1.2:
+        quant_trend = "偏弱趋冷"
+        quant_signal = "趋势预判·防御为主"
+    else:
+        quant_trend = "弱势趋冷"
+        quant_signal = "趋势预判·规避观望"
+    if broad_score > 2 and len(policy_heads) < 2:
+        quant_signal += "（量能背离·谨慎）"
+    if broad_score < -2 and len(policy_heads) < 2:
+        quant_signal += "（量能背离·谨慎）"
+    quant_industries = []
+    for s in industries:
+        s_psi_z = max(-3, min(3, s["score"] / 2.0))
+        s_news = min(2, s["count"] / 2.0)
+        s_dim = min(2, len(s["dims"]) / 1.5)
+        s_composite = round(0.6 * s_psi_z + 0.3 * s_news + 0.1 * s_dim, 2)
+        if s_composite > 1.2:
+            s_trend = "强势"
+        elif s_composite > 0.5:
+            s_trend = "偏强"
+        elif s_composite > -0.5:
+            s_trend = "中性"
+        elif s_composite > -1.2:
+            s_trend = "偏弱"
+        else:
+            s_trend = "弱势"
+        quant_industries.append({
+            "name": s["name"], "score": s["score"], "count": s["count"],
+            "dims": s["dims"], "composite": s_composite, "trend": s_trend,
+            "direction": s["direction"]
+        })
+    quant_industries.sort(key=lambda x: -x["composite"])
+    if losers and broad_score < 0:
+        quant_risk = f"趋势预判风险预算：PSI {broad_score:+d}偏冷，承压居前 {losers[0]['name']}（{losers[0]['score']:+d}），趋势策略宜防御，关注政策落地节奏。"
+    elif losers:
+        quant_risk = f"趋势预判风险预算：承压行业 {losers[0]['name']}（{losers[0]['score']:+d}），注意政策分化，趋势跟踪宜均衡配置。"
+    elif broad_score < 0:
+        quant_risk = "趋势预判风险预算：大盘PSI偏冷，政策边际收紧，趋势策略宜控制仓位，等待转暖信号。"
+    else:
+        quant_risk = "趋势预判风险预算：未检出显著政策利空，趋势预判可正常执行，注意维度覆盖与新闻量背离。"
     return {
         "available": bool(policy_heads),
         "policy_n": len(policy_heads),
@@ -6541,7 +6599,16 @@ def build_policy_factor(data, date_str=None, news_corpus=None):
         "summary": summary,
         "window_days": POLICY_WINDOW_DAYS,
         "corpus_n": len(headlines),
+        "quant_composite": quant_composite,
+        "quant_trend": quant_trend,
+        "quant_signal": quant_signal,
+        "quant_risk": quant_risk,
+        "quant_industries": quant_industries,
     }
+
+def build_daily_quant_policy(data, date_str=None, news_corpus=None):
+    """兼容别名：每日量化策略（政策因子趋势预判）入口。"""
+    return build_policy_factor(data, date_str, news_corpus)
 
 
 def _policy_headline_markup(headline, color=C_INK):
@@ -6570,7 +6637,7 @@ def _policy_source_text(headline):
 
 
 def _pixel_policy_block(res):
-    """像素主题：政策因子（总结置顶 + PSI 行业榜 + 政策新闻逐条）。"""
+    """像素主题：每日量化策略（政策因子趋势预判）（量化预判 + PSI 行业榜 + 政策新闻逐条）。"""
     if res["broad_score"] > 0:
         color, icon = C_GREEN, "▲"
     elif res["broad_score"] < 0:
@@ -6582,7 +6649,7 @@ def _pixel_policy_block(res):
         f'margin-bottom:10px;border:1px solid {color};background:#0C1020;box-shadow:4px 4px 0 #000;">'
         f'<tr><td style="padding:10px 12px;">'
         f'<div style="font-size:9px;color:{color};font-weight:900;font-family:{FONT_MONO};'
-        f'letter-spacing:1px;">POLICY READ // 政策因子总结</div>'
+        f'letter-spacing:1px;">QUANT POLICY // 每日量化策略·政策因子趋势预判</div>'
         f'<div style="font-size:12px;color:{C_INK};font-weight:700;line-height:1.8;'
         f'font-family:{FONT_MONO};padding-top:4px;">{_esc(res["summary"])}</div>'
         f'</td></tr></table>')
@@ -6597,15 +6664,31 @@ def _pixel_policy_block(res):
     ])
     if res.get("official_n"):
         head += _mini_table([("官方来源", f'中国政府网官方发布 {res["official_n"]} 条')])
+    quant_composite = res.get("quant_composite")
+    if quant_composite is not None:
+        head += _mini_table([
+            ("量化趋势分", f'<b style="color:{color};">{quant_composite:+.2f}</b> · {_esc(res.get("quant_trend") or "—")}'),
+            ("趋势预判信号", f'<b style="color:{color};">{_esc(res.get("quant_signal") or "—")}</b>'),
+        ])
+        if res.get("quant_risk"):
+            head += _mini_table([("风险预算", _esc(res["quant_risk"]))])
     board = []
-    for s in res["winners"]:
-        board.append((f'▲ {_esc(s["name"])}',
-                      f'PSI <b style="color:{C_GREEN};">+{s["score"]}</b>'
-                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
-    for s in res["losers"]:
-        board.append((f'▼ {_esc(s["name"])}',
-                      f'PSI <b style="color:{C_RED};">{s["score"]}</b>'
-                      f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+    quant_inds = res.get("quant_industries") or []
+    if quant_inds:
+        for s in quant_inds[:5]:
+            arrow = "▲" if s["composite"] > 0.5 else ("▼" if s["composite"] < -0.5 else "■")
+            color_s = C_GREEN if s["composite"] > 0.5 else (C_RED if s["composite"] < -0.5 else C_AMBER)
+            board.append((f'{arrow} {_esc(s["name"])} <span style="color:{color_s};">{s["composite"]:+.2f}</span>',
+                          f'PSI <b style="color:{color_s};">{s["score"]:+d}</b>（{s["count"]}条 · {_esc("/".join(s["dims"]))} · {s["trend"]}）'))
+    else:
+        for s in res["winners"]:
+            board.append((f'▲ {_esc(s["name"])}',
+                          f'PSI <b style="color:{C_GREEN};">+{s["score"]}</b>'
+                          f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
+        for s in res["losers"]:
+            board.append((f'▼ {_esc(s["name"])}',
+                          f'PSI <b style="color:{C_RED};">{s["score"]}</b>'
+                          f'（{s["count"]}条 · {_esc("/".join(s["dims"]))}）'))
     rows = []
     for h in res["headlines"][:POLICY_DISPLAY_HEADLINES]:
         if h["direction"] > 0:
@@ -6629,13 +6712,13 @@ def _pixel_policy_block(res):
             f'line-height:1.7;font-family:{FONT_MONO};">'
             f'＋其余 {more} 条已计入指数（仅展示前 {POLICY_DISPLAY_HEADLINES} 条）</div>')
     body = head + (_mini_table(board) if board else "") + "".join(rows)
-    note = _note(f"政策因子口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
-                 "关键词矩阵映射行业权重 → 汇总PSI；触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
-    return summary_html + _pixel_panel("POLICY SHOCK // 政策冲击指数", body, color, icon) + note
+    note = _note(f"每日量化策略（政策因子趋势预判）口径：近 {res.get('window_days') or POLICY_WINDOW_DAYS} 日窗口标题 → 政策维度触发词命中 → "
+                 "关键词矩阵映射行业权重 → 汇总PSI + 量化复合分(PSI50%+新闻量30%+维度20%)；触发词被否定修饰时跳过 // RULESET v3 // 非投资建议")
+    return summary_html + _pixel_panel("QUANT POLICY // 政策因子趋势预判·量化强度", body, color, icon) + note
 
 
 def gz_policy_block(res):
-    """政策因子（黑白模式：方向只用 ▲▼■ 符号区分）。定调已置顶到「今日结论」。"""
+    """每日量化策略（政策因子趋势预判）（黑白模式：方向只用 ▲▼■ 符号区分）。定调已置顶到「今日结论」。"""
     dims_line = " · ".join(f"{k}×{v}" for k, v in sorted(
         res["dim_counts"].items(), key=lambda kv: (-kv[1], kv[0]))) or "—"
     window = res.get("window_days") or POLICY_WINDOW_DAYS
@@ -6645,16 +6728,28 @@ def gz_policy_block(res):
                      + (f'，其中政府网官方 {res["official_n"]} 条' if res.get("official_n") else "")),
         ("覆盖维度", _esc(dims_line)),
     ]
+    if res.get("quant_composite") is not None:
+        pairs.append(("量化趋势分", f'{res["quant_composite"]:+.2f} · {_esc(res.get("quant_trend") or "—")}'))
+        pairs.append(("趋势预判信号", _esc(res.get("quant_signal") or "—")))
+        if res.get("quant_risk"):
+            pairs.append(("风险预算", _esc(res["quant_risk"])))
     out = [gz_kv_table(pairs)]
     board = []
-    for s in res["winners"]:
-        board.append([f'▲ {_esc(s["name"])}', f'+{s["score"]}', f'{s["count"]}条',
-                      _esc("/".join(s["dims"]))])
-    for s in res["losers"]:
-        board.append([f'▼ {_esc(s["name"])}', f'{s["score"]}', f'{s["count"]}条',
-                      _esc("/".join(s["dims"]))])
+    quant_inds = res.get("quant_industries") or []
+    if quant_inds:
+        for s in quant_inds[:5]:
+            arrow = "▲" if s["composite"] > 0.5 else ("▼" if s["composite"] < -0.5 else "■")
+            board.append([f'{arrow} {_esc(s["name"])} {s["composite"]:+.2f}', f'{s["score"]:+d}', f'{s["count"]}条',
+                          _esc("/".join(s["dims"])) + f' · {s["trend"]}'])
+    else:
+        for s in res["winners"]:
+            board.append([f'▲ {_esc(s["name"])}', f'+{s["score"]}', f'{s["count"]}条',
+                          _esc("/".join(s["dims"]))])
+        for s in res["losers"]:
+            board.append([f'▼ {_esc(s["name"])}', f'{s["score"]}', f'{s["count"]}条',
+                          _esc("/".join(s["dims"]))])
     if board:
-        out.append(gz_subsection("行业冲击榜")
+        out.append(gz_subsection("政策冲击强度榜 · 量化趋势")
                    + gz_data_table(["行业", "PSI", "条数", "维度"], board))
     heads = res["headlines"][:POLICY_DISPLAY_HEADLINES]
     if heads:
@@ -7946,9 +8041,9 @@ def main():
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
     policy_result = build_policy_factor(data, date_str, news_corpus)
     if policy_result.get("available"):
-        print(f"  📊 政策因子：{policy_result['summary']}")
+        print(f"  📊 每日量化策略（政策因子趋势预判）：{policy_result['summary']}")
     else:
-        print(f"  📊 政策因子：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
+        print(f"  📊 每日量化策略（政策因子趋势预判）：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
 
     # 2. 生成报告
     print("\n📝 正在生成日报...")
