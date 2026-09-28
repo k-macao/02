@@ -2747,19 +2747,26 @@
    "section": "东财快讯",
    "ts": "",
    "date": "2026-09-29"
+  },
+  {
+   "title": "楼市新政发布满月，上海出台地方落地细则",
+   "source": "第一财经",
+   "section": "全球头条",
+   "ts": "2026-09-28 21:44",
+   "date": "2026-09-28"
   }
  ],
- "updated_cst": "2026-09-29 02:39:35",
+ "updated_cst": "2026-09-29 02:56:36",
  "sector_rotation_diag": {
-  "ran_at": "2026-09-29 02:39:00",
+  "ran_at": "2026-09-29 02:56:06",
   "cutoff": "2026-09-28",
   "universe": 0,
   "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
  },
  "sector_rotation_probe": {
-  "probe_at_utc": "2026-09-28T18:39:15Z",
-  "probe_at_cst": "2026-09-29 02:39:15",
-  "runner": "36466578300",
+  "probe_at_utc": "2026-09-28T18:56:21Z",
+  "probe_at_cst": "2026-09-29 02:56:21",
+  "runner": "36468571770",
   "universe": [
    {
     "label": "现行参数 pz=500",
@@ -2777,7 +2784,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1123,
+    "elapsed_ms": 2018,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2800,7 +2807,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1221,
+    "elapsed_ms": 1059,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2825,7 +2832,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1214,
+    "elapsed_ms": 1035,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2850,7 +2857,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1127,
+    "elapsed_ms": 962,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2875,7 +2882,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m%3A90%2Bt%3A2&fields=f12%2Cf13%2Cf14%2Cf3",
-    "elapsed_ms": 1212,
+    "elapsed_ms": 981,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2900,7 +2907,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 2210,
+    "elapsed_ms": 693,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2922,7 +2929,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0447",
-    "elapsed_ms": 805,
+    "elapsed_ms": 465,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2944,7 +2951,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 779,
+    "elapsed_ms": 463,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2966,7 +2973,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "elapsed_ms": 810,
+    "elapsed_ms": 542,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -2988,7 +2995,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 1647,
+    "elapsed_ms": 463,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3010,7 +3017,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK1044",
-    "elapsed_ms": 841,
+    "elapsed_ms": 530,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3032,7 +3039,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 759,
+    "elapsed_ms": 461,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3054,7 +3061,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "elapsed_ms": 818,
+    "elapsed_ms": 459,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3076,7 +3083,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 794,
+    "elapsed_ms": 462,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3098,7 +3105,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0475",
-    "elapsed_ms": 803,
+    "elapsed_ms": 542,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3120,7 +3127,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 779,
+    "elapsed_ms": 522,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3142,7 +3149,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "elapsed_ms": 797,
+    "elapsed_ms": 458,
     "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
      "note": "data 缺失或不是对象",
@@ -3158,14 +3165,14 @@
     "available": false,
     "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）",
     "diag": {
-     "ran_at": "2026-09-29 02:39:34",
+     "ran_at": "2026-09-29 02:56:35",
      "cutoff": "2026-09-28",
      "universe": 0,
      "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
     },
     "scores_top5": []
    },
-   "elapsed_ms": 2257
+   "elapsed_ms": 2353
   }
  }
 }
