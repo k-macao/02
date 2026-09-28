@@ -8,7 +8,8 @@
   1.1 手动 / 自动推送前先清理 output/ 目录下的全部历史 HTML 报告（含
       daily_report_*.html 与 latest.html），再抓取数据并生成新报告；
       避免历史残留文件（含旧版本特征）被误推或被 latest.html 引用。
-      --push-only / --list / --dry-run 不清理（前者基于旧文件，后两者不写文件）。
+      --push-only / --list / --dry-run / --quant-only / --calendar-only 不清理
+      （前者基于旧文件，后四者不写文件）。
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
      只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
      但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
@@ -36,7 +37,22 @@
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
-      （今日结论 / AI 盘研判 / 盘点总结）不附加，栏目无数据自然缺席。规则合成，非投资建议。
+      （今日结论 / AI 盘研判 / 盘点总结）与前瞻日程类栏目（未来30天影响经济时间点：
+      日程不含方向信息，只给「最密集日 + 事件密度提示」）不附加，栏目无数据自然缺席。
+      规则合成，非投资建议。
+  6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，日报开头第一个数据栏目）：
+      数据源为东方财富财经日历（数据中心公开报表 RPT_CPH_FECALENDAR，无需密钥，
+      START_DATE 即北京时间）。服务端只支持按日期过滤，故一次拉全窗口 + 翻页，
+      再在本地按写死的口径筛选：保留 数据（中美欧日英港等市场的宏观读数）/
+      事件（央行议息、国民经济运行情况发布会、中央全会等重要会议）/ 动态（央行官员
+      讲话、货币政策会议纪要、CFTC 周度持仓）三类，剔除个股事项、非保留地区读数、
+      冗余子序列与超长条目；同一天同一指标的 同比/环比/初值/终值 多行合并为一行。
+      重要度 ★★★（中美一级读数 + 主要央行议息与中国宏观决策会议）/ ★★ / ★；
+      抓取后本地再夹一次窗口，栏目写「未来 N 天」就绝不出现窗口外的行。
+      正文行数上限（默认 60）只作版面保护，被裁条数按重要度如实写进摘要。
+      前瞻性日程属于「今日抓取快照」而非当天发布内容：is_today=False + snapshot=True，
+      因此它永远不会单独把日报推过当天检验闸门；抓取失败则整栏缺席并在盘点总结点名。
+      OCTOPUS_CALENDAR=0 关闭、OCTOPUS_CALENDAR_DAYS 调窗口、OCTOPUS_CALENDAR_ROWS 调行数。
   4. 支持手动推送：--manual / manual_push.sh / GitHub Actions 手动按钮（可勾选 force_push），
      内容非当天时可用 --force-push 强制推送（谨慎）。
   5. 任何「应当推送却失败」的情况（PushPlus 报错、未配置 PUSHPLUS_TOKEN、网络异常，
@@ -57,10 +73,18 @@
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 AI 研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
-  8. PushPlus 内容上限（账号已升级会员，默认按 10 万字；可用环境变量
-     PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时，发送前会按完整标签边界
-     截断并闭合所有标签、末尾附「完整版」链接，保证微信端排版正常；磁盘上的日报文件
-     始终保留完整版。
+  8. PushPlus 内容上限与「分条完整推送」（2026-09-28 起）：单条上限按会员额度 10 万字
+     （可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖）。日报 HTML 超过上限时**不再截断丢内容**，
+     而是按栏目边界拆成 N 条消息依次推送（标题追加 1/N、2/N…，条间等待
+     PUSHPLUS_PART_DELAY 秒避开频率限制）：每条 = 原文档头部外壳（含刊头）+ 条序横幅 +
+     若干完整栏目 + 页脚与闭合标签，因此每条都是独立、标签平衡、样式一致的 HTML，
+     微信端排版与单条推送相同，全部内容按原顺序送达。单个栏目自身就超预算时，再按完整
+     标签边界细分并在续片里原样重开父标签，同样不丢字。所需条数超过 PUSHPLUS_MAX_PARTS
+     （默认 12）时，前 N-1 条完整推送、收尾条截断并附「完整日报」链接，且横幅如实说明
+     未推完，绝不假装全文已送达。PUSHPLUS_MULTIPART=0 可整体关闭分条，回退到旧的
+     「按标签边界截断 + 完整版链接」；旧版日报文件没有分条标记时同样自动回退。
+     注意：分条会按条数消耗 PushPlus 当日额度（25 万字日报约 3 条）。
+     磁盘 / GitHub 上的日报文件始终是一份完整版，不受推送拆分影响。
   9. 「AI 盘研判」栏目：基于当日多源信号（实时行情、热门榜单、全球/东财/A股头条、
      港股名家频道观点）做确定性规则合成，输出跨市场综合研判（情绪定调 +
      信号分 + 置信度、板块热度、技术速读、风险提示、明日关注主题）。无需大模型 API、
@@ -175,6 +199,24 @@ PUSHPLUS_URL = "https://www.pushplus.plus/send"
 # 末尾附「完整版」链接；磁盘上的日报文件始终保留完整版。
 # 如账号额度变化，可用环境变量 PUSHPLUS_MAX_CONTENT_CHARS 覆盖（如 20000 / 100000）。
 PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "100000"))
+# 完整推送（2026-09-28 起）：单条上限固定按 10 万字（会员额度），但日报不再被截断——
+# 超过上限时按「完整标签边界 + 栏目边界」拆成多条微信消息（1/n、2/n…）依次推送，
+# 全部内容都会送达。每条消息都是结构完整、标签自闭合的独立 HTML，
+# 并沿用原文档的 <head>／外层包裹与页尾，微信端排版与单条推送一致。
+# PUSHPLUS_MULTIPART=0 可关闭拆分，回退到旧行为（按标签边界截断 + 完整版链接）。
+PUSHPLUS_MULTIPART = str(os.environ.get("PUSHPLUS_MULTIPART", "1")).strip().lower() not in ("0", "false", "no")
+# 多条推送之间的间隔秒数，避免触发 PushPlus「发送频繁」频率限制（每条仍各自退避重试）。
+PUSHPLUS_PART_DELAY = float(os.environ.get("PUSHPLUS_PART_DELAY", "2"))
+# 渲染时插入的两个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
+#   PART_BREAK_MARK —— 每个栏目之前，拆分时切在这里，保证每条消息都从完整栏目开始；
+#   DOC_FOOT_MARK   —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
+# 有了这两个标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
+# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 页脚 + 闭合标签，
+# 微信端排版与单条推送完全一致，且全部内容按原顺序送达。
+PART_BREAK_MARK = "<!--SPLIT-->"
+DOC_FOOT_MARK = "<!--FOOT-->"
+# 单份日报最多拆成多少条（防御性上限：正常 25 万字日报约 3 条）
+PUSHPLUS_MAX_PARTS = int(os.environ.get("PUSHPLUS_MAX_PARTS", "12"))
 
 # 默认「一对一」直发自己（不携带 topic 字段）；如需一对多群组推送，
 # 显式设置环境变量 PUSHPLUS_TOPIC=群组编码（例如 oai.1）。
@@ -228,6 +270,100 @@ CHANNEL_TOP_N = 3
 GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 SINA_DISPLAY_N = 5  # A股资讯展示前 5 条
+
+# ------------------------------------------------------------
+# 未来 N 天影响经济时间点（东方财富财经日历 RPT_CPH_FECALENDAR）
+# 放在日报开头：先看清「未来 30 天哪些时点会动市场」，再读今天的盘。
+# 接口是东财数据中心公开报表（与「A股大盘全景复盘」的南北向资金同一台主机），无需密钥；
+# START_DATE 为北京时间（形如 2026-10-28 20:30:00）。服务端只支持按日期过滤
+# （按 CITY / FE_TYPE 过滤返回空），所以一次拉全窗口（翻页）再在本地按重要度筛选。
+# 筛选口径全部写死在下面的常量里：确定性计算、可复现、不调大模型、不伪造内容；
+# 读不到就在栏目与审计里如实标「暂缺」及原因。
+# 前瞻性日程不属于「当天发布的内容」→ is_today=False + snapshot=True，
+# 因此它永远不会单独把日报推过当天检验闸门（见 check_push_eligibility）。
+# ------------------------------------------------------------
+def _env_int(name, default, lo, hi):
+    """读整数环境变量：非法值回落 default，合法值夹在 [lo, hi]。"""
+    try:
+        value = int(str(os.environ.get(name, "")).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, value))
+
+
+ECON_CALENDAR_ENABLED = str(os.environ.get("OCTOPUS_CALENDAR", "1")).strip().lower() not in ("0", "false", "no")
+ECON_CALENDAR_DAYS = _env_int("OCTOPUS_CALENDAR_DAYS", 30, 1, 120)      # 前瞻窗口天数
+ECON_CALENDAR_MAX_ROWS = _env_int("OCTOPUS_CALENDAR_ROWS", 60, 5, 300)  # 正文行数上限（版面保护）
+ECON_CALENDAR_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+ECON_CALENDAR_REPORT = "RPT_CPH_FECALENDAR"
+ECON_CALENDAR_COLUMNS = "START_DATE,END_DATE,FE_CODE,FE_NAME,FE_TYPE,STD_TYPE_CODE,CITY"
+ECON_CALENDAR_PAGE = "https://data.eastmoney.com/cjrl/default.html"  # 溯源页（完整日历）
+ECON_CALENDAR_SOURCE = "东方财富财经日历"
+ECON_CALENDAR_PAGE_SIZE = 500   # 服务端单页上限
+ECON_CALENDAR_MAX_PAGES = 8     # 30 天窗口实测 1 页足够，翻页只为窗口调大时兜底
+
+# 保留地区：只留有定价权的市场，其余地区的读数不进正文（全窗口原始日程一月 300+ 条）。
+CALENDAR_KEEP_CITY = (
+    "中国", "美国", "欧元区", "欧盟", "日本", "英国", "中国香港",
+    "加拿大", "澳大利亚", "韩国", "瑞士", "新西兰", "OPEC",
+)
+CALENDAR_CORE_CITY = ("中国", "美国")                     # 一级读数在这两个市场给 ★★★
+CALENDAR_MAJOR_CITY = CALENDAR_CORE_CITY + ("欧元区", "欧盟", "日本", "英国")
+# 事件类的最高重要度判定：① 中国宏观决策会议直接最高；② 主要央行 + 议息/决议动作。
+# 注意：事件行的 CITY 字段常是城市名（如「华盛顿」「法兰克福」）而不是国家，
+# 所以重要度只按名称里的「机构 + 动作」判定，不依赖地区字段。
+CALENDAR_EVENT_TOP = (
+    "国民经济运行情况发布会", "中国共产党中央全会", "中央全会", "中央经济工作会议",
+    "政府工作报告", "全国人民代表大会", "政治局会议", "国务院常务会议",
+)
+CALENDAR_EVENT_ORG = (
+    "美联储", "联邦储备", "欧洲央行", "欧央行", "日本央行", "英国央行", "瑞士央行",
+    "加拿大央行", "澳洲联储", "新西兰联储", "韩国央行", "中国人民银行", "中国央行",
+)
+CALENDAR_EVENT_ACT = (
+    "议息", "利率决议", "利率决定", "货币政策", "决议", "会议纪要", "发布会",
+)
+# 一级读数：真正驱动资产定价的宏观数据
+CALENDAR_TIER3_KW = (
+    "CPI", "PPI", "PCE", "GDP", "PMI", "非农", "失业率", "利率决议", "M2",
+    "货币供应", "社融", "社会融资", "新增信贷", "LPR", "MLF", "工业增加值",
+    "社会消费品零售", "固定资产投资", "进出口", "贸易帐", "贸易差额",
+    "外汇储备", "工业企业利润", "货币政策会议纪要",
+)
+# 二级读数：重要但非核心（EIA 原油库存是每周真正推动油价的读数，显式保留）
+CALENDAR_TIER2_KW = (
+    "ISM", "初请", "ADP", "耐用品", "工业产出", "新屋", "成屋", "营建",
+    "产能利用率", "零售销售", "消费者信心", "景气", "职位空缺", "时薪",
+    "制造业", "服务业", "综合", "经济展望", "就业", "工业订单",
+    "EIA原油库存", "EIA汽油库存", "EIA精炼油库存", "库欣原油库存",
+    "出口", "进口", "利率", "汇率", "信贷", "贷款",
+)
+# 动态类（无 FE_TYPE：央行官员讲话 / 会议纪要 / 周报）里价值高的信号
+CALENDAR_DYN_TIER2 = (
+    "美联储主席", "美联储公布", "货币政策会议纪要", "利率决议", "主席鲍威尔",
+    "非农", "议息", "CFTC", "OPEC", "月报",
+)
+# 个股事项：与「宏观时间点」无关，直接剔除（否则每只新股都是一条噪音）
+CALENDAR_DROP_KW = (
+    "新股申购", "新股上市", "限售解禁", "分红", "送转", "股东大会",
+    "增持", "减持", "回购", "股权激励", "停牌", "复牌",
+)
+# 同名指标的冗余子序列（户籍口径失业率 / 现价 GDP / 汇率中间价…）
+CALENDAR_DROP_NAME_KW = ("人口数", "现价", "折年数", "期末汇率", "人民币汇率", "战略储备", "预测年度")
+CALENDAR_DROP_NAME_SFX = (":值",)   # 仅当名称以「:值」结尾才丢（否则会误杀「EIA原油库存:变动值」）
+# 展会 / 论坛：对交易价值低，只给一星（正文触顶时最先被裁掉）
+CALENDAR_LOW_KW = (
+    "展览会", "博览会", "展会", "交易会", "糖酒会", "车展",
+    "高峰论坛", "交流会议", "研讨会", "论坛",
+)
+CALENDAR_MAX_NAME_LEN = 40          # 超长条目（移仓换月提醒 / 停摆公告）既是噪音又占版面
+CALENDAR_NOISE_TAG = ("[同传]", "（同传）", "(同传)", "【同传】")
+CALENDAR_KIND_LABELS = {0: "数据", 1: "事件", 2: "动态"}
+# 归一化时剥掉的修饰词：必须先归一化再判「是不是同一个指标」，
+# 否则「CPI:当月同比」「CPI:累计同比」「CPI:季调:环比」会被当成三个指标，一天排出 6 行。
+CALENDAR_CANON_DROP = ("季调", "非季调", "初值", "终值", "修正值", "预估值",
+                       "折年率", "年化", "当月", "总计", "总值", "数据", "报告")
+CALENDAR_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 # 每日量化策略趋势跟踪线索：源头数据只保留 Reddit 一个来源（2026-09-27 起由十站投研精简）。
 # 只读取公开热帖 feed，不登录、不绕过付费墙、不复制帖子正文；
@@ -1726,6 +1862,490 @@ def fetch_hk_quant():
                           result=res)
 
 
+# ============================================================
+# 未来 N 天影响经济时间点：抓取 + 筛选（东方财富财经日历）
+# ------------------------------------------------------------
+# 三类内容（缺一不可）：
+#   kind 0 经济数据 —— 中/美/欧/日/英等市场的宏观读数发布（CPI、非农、LPR…）
+#   kind 1 事件     —— 各国央行议息会议、国民经济运行情况发布会、中央全会等
+#   kind 2 动态     —— 央行官员讲话、货币政策会议纪要、EIA/CFTC 周度报告
+# 重要度 imp：3 最高（央行议息 + 中美核心读数）/ 2 重要 / 1 一般（展会论坛等）。
+# 全部为确定性规则，写死在上方常量里：可复现、不预测方向、不伪造任何日程；
+# 接口读不到就如实降级为「暂缺 + 原因」，绝不用推算日期冒充数据源。
+# ============================================================
+def _cal_date_obj(date_str):
+    """'YYYY-MM-DD' → date；非法返回 None。"""
+    try:
+        return datetime.strptime(str(date_str or "")[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _cal_clean_tags(name):
+    """去掉名称里没有信息量的标注（同日可能同时存在带与不带标注的两条）。"""
+    name = str(name or "")
+    for tag in CALENDAR_NOISE_TAG:
+        name = name.replace(tag, "")
+    return name.strip()
+
+
+def _cal_split_period(name):
+    """拆出「(报告期:2026年09月)」→ (基础名, '2609')；无报告期时第二位为空串。"""
+    name = str(name or "").strip()
+    match = re.match(r"^(.*?)\s*[（(]报告期[:：]([^）)]*)[)）]\s*$", name)
+    if not match:
+        return name, ""
+    base = match.group(1).strip()
+    ym = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月", match.group(2) or "")
+    if ym:
+        return base, ym.group(1)[2:] + ym.group(2).zfill(2)
+    return base, (match.group(2) or "").strip()
+
+
+def _cal_strip_country(name, city):
+    """剥掉「美国:」「美国EIA…」这类地区前缀（地区已单独成列，前缀会重复显示）。
+
+    只在后面跟冒号或 ASCII 字母数字时才剥：「美国EIA原油库存」能处理，
+    而「中国银行间同业拆借」这种地区名本就是词一部分的不会被误伤。
+    """
+    name = str(name or "").strip()
+    city = str(city or "").strip()
+    if not city or not name.startswith(city) or len(name) <= len(city):
+        return name
+    rest = name[len(city):]
+    for sep in (":", "："):
+        if rest.startswith(sep):
+            return rest[len(sep):].strip()
+    if rest[0].isascii() and (rest[0].isalnum() or rest[0] in "._-"):
+        return rest.strip()
+    return name
+
+
+def _cal_canon(name):
+    """归一化指标名：统一冒号/括号并剥掉「季调/初值/当月」等修饰词。"""
+    n = str(name or "").replace("：", ":").replace("（", "(").replace("）", ")")
+    for word in CALENDAR_CANON_DROP:
+        n = n.replace(word, "")
+    while "::" in n:
+        n = n.replace("::", ":")
+    return n.strip(": ")
+
+
+def _cal_kou(name):
+    """取口径（同比 / 环比）；东财同一指标常同时排两行，偶尔还多一条裸名。"""
+    n = _cal_canon(name)
+    if n.endswith("同比"):
+        return "同比"
+    if n.endswith("环比"):
+        return "环比"
+    return ""
+
+
+def _cal_base_of(name):
+    """去掉口径后的基础指标名，用于判断「同一天同一指标排了几行」。"""
+    n = _cal_canon(name)
+    for suffix in (":同比", ":环比", "同比", "环比"):
+        if n.endswith(suffix):
+            return n[:-len(suffix)].strip(": ")
+    return n
+
+
+def _cal_period_ok(date_str, period):
+    """报告期与发布日相差过远视为异常标注：正常经济数据报告期领先发布日 0~4 个月。
+
+    实测东财部分行会给出「报告期:2027年07月」这种远期口径挂在 2026 年的日期上，
+    原样展示会让人误读，因此只丢标注、不丢这条时间点。
+    """
+    if not period or len(period) != 4:
+        return True
+    day = _cal_date_obj(date_str)
+    if not day:
+        return False
+    try:
+        p_year, p_month = 2000 + int(period[:2]), int(period[2:])
+    except (TypeError, ValueError):
+        return False
+    if not 1 <= p_month <= 12:
+        return False
+    return 0 <= (day.year * 12 + day.month) - (p_year * 12 + p_month) <= 4
+
+
+def _cal_period_label(period, today=None):
+    """'2609' → '9月'（同年）/ '2027年1月'（跨年）；无法解析时原样返回。"""
+    period = str(period or "")
+    if len(period) != 4 or not period.isdigit():
+        return period
+    year, month = 2000 + int(period[:2]), int(period[2:])
+    if not 1 <= month <= 12:
+        return period
+    base = today or datetime.now(CST).date()
+    return f"{month}月" if year == base.year else f"{year}年{month}月"
+
+
+def _cal_item_text(item, today=None):
+    """时间点正文（纯文本）：名称（含合并后的口径）+ 报告期 + 类型标签。
+
+    如「CPI：同比/环比 · 9月 · 数据」「非农就业人数 · 9月 · 数据」。
+    """
+    item = item if isinstance(item, dict) else {}
+    name = str(item.get("name") or "").strip()
+    kous = [k for k in (item.get("kou") or []) if k]
+    if kous:
+        name = f"{_cal_base_of(name)}:{'/'.join(kous)}"
+    parts = [name]
+    period = _cal_period_label(item.get("period"), today)
+    if period:
+        parts.append(period)
+    kind_label = CALENDAR_KIND_LABELS.get(item.get("kind"), "")
+    if kind_label:
+        parts.append(kind_label)
+    return " · ".join(p for p in parts if p)
+
+
+def _cal_event_imp(text, low=False):
+    """事件类重要度：中国宏观决策会议 → ★★★；主要央行的议息/决议动作 → ★★★；
+    其余事件（小国央行、行业会议）→ ★★；展会论坛 → ★。"""
+    text = str(text or "")
+    if any(k in text for k in CALENDAR_EVENT_TOP):
+        return 3
+    if (any(k in text for k in CALENDAR_EVENT_ORG)
+            and any(k in text for k in CALENDAR_EVENT_ACT)):
+        return 3
+    return 1 if low else 2
+
+
+def _cal_classify(row):
+    """把一条东财日历原始记录判成结构化时间点；判定为噪音时返回 None。"""
+    if not isinstance(row, dict):
+        return None
+    raw_name = _cal_clean_tags(row.get("FE_NAME"))
+    start = str(row.get("START_DATE") or "")
+    date_str = start[:10]
+    if not raw_name or not _cal_date_obj(date_str):
+        return None
+    if len(raw_name) > CALENDAR_MAX_NAME_LEN:
+        return None
+    if any(k in raw_name for k in CALENDAR_DROP_KW):
+        return None                       # 个股事项：与宏观时间点无关
+    if any(k in raw_name for k in CALENDAR_DROP_NAME_KW):
+        return None                       # 冗余子序列（户籍失业率 / 现价 GDP…）
+    if any(raw_name.endswith(k) for k in CALENDAR_DROP_NAME_SFX):
+        return None
+
+    city = str(row.get("CITY") or "").strip()
+    ftype = str(row.get("FE_TYPE") or "").strip()
+    std = str(row.get("STD_TYPE_CODE") or "").strip()
+    base, period = _cal_split_period(raw_name)
+    low = any(k in base for k in CALENDAR_LOW_KW)
+    # 地区已单独成列，名称里的「美国:」「美国EIA…」前缀会重复显示（事件行的 CITY
+    # 常是城市名，此时前缀剥不掉、原样保留，不会误伤）。
+    item = {"date": date_str, "time": start[11:16], "city": city,
+            "name": _cal_strip_country(base, city), "period": period}
+
+    # ① 事件类：FE_TYPE 直接给出事件名（美联储议息会议 / 国民经济运行情况发布会…）
+    if ftype and ftype != "经济数据":
+        item.update(kind=1, imp=_cal_event_imp(ftype + base, low), period="")
+        return item
+    # ② 事件类：无 FE_TYPE 但报表类型标记为事件
+    if std in ("1", "3"):
+        item.update(kind=1, imp=_cal_event_imp(base, low), period="")
+        return item
+    # ③ 动态类：无 FE_TYPE（央行官员讲话 / 会议纪要 / 周度报告）
+    #    动态行没有确认的国家 + 指标结构，最高只给 ★★，不冒充 ★★★。
+    if not ftype:
+        if (any(k in base for k in CALENDAR_DYN_TIER2)
+                or any(k in base for k in CALENDAR_TIER3_KW)
+                or (any(k in base for k in CALENDAR_TIER2_KW) and city in CALENDAR_KEEP_CITY)):
+            imp = 2
+        else:
+            imp = 1
+        item.update(kind=2, imp=imp, period="")
+        return item
+    # ④ 经济数据：只保留有定价权的市场 + 一二级读数
+    if city not in CALENDAR_KEEP_CITY:
+        return None
+    if any(k in base for k in CALENDAR_TIER3_KW):
+        imp = 3 if city in CALENDAR_CORE_CITY else 2
+    elif any(k in base for k in CALENDAR_TIER2_KW):
+        imp = 2 if city in CALENDAR_MAJOR_CITY else 1
+    else:
+        return None
+    item.update(kind=0, imp=imp,
+                period=period if _cal_period_ok(date_str, period) else "")
+    return item
+
+
+def _cal_dedupe(items):
+    """同一天同一指标的多口径行合并成一行：口径并进 kou 列表（如「CPI:同比/环比」）。
+
+    东财常把同一指标按 同比 / 环比 / 初值 / 终值 排成多行，逐行列出会让同一天
+    出现 3~6 条重复。本栏只回答「什么时候发」，所以合并为一行、口径全部保留：
+    既不丢信息也不刷屏。事件 / 动态行按（日期, 时间, 归一化名称）去重。
+    """
+    merged, order = {}, []
+    for it in items:
+        if it.get("kind") == 0:
+            key = (it.get("date"), it.get("city"), _cal_base_of(it.get("name")))
+        else:
+            key = (it.get("date"), it.get("time"), _cal_canon(it.get("name")))
+        hit = merged.get(key)
+        if hit is None:
+            kou = _cal_kou(it.get("name"))
+            merged[key] = dict(it, kou=[kou] if kou else [])
+            order.append(key)
+            continue
+        kou = _cal_kou(it.get("name"))
+        if kou and kou not in hit["kou"]:
+            hit["kou"].append(kou)
+        hit["imp"] = max(int(hit.get("imp") or 0), int(it.get("imp") or 0))
+        if kou and not _cal_kou(hit.get("name")):
+            hit["name"] = it.get("name")     # 有口径的行信息量更高，用它当代表名
+        if it.get("period") and not hit.get("period"):
+            hit["period"] = it.get("period")
+        if str(it.get("time") or "99:99") < str(hit.get("time") or "99:99"):
+            hit["time"] = it.get("time")     # 同指标多行取最早那个时点
+    out = []
+    for key in order:
+        it = merged[key]
+        it["kou"].sort(key=lambda k: (0 if k == "同比" else (1 if k == "环比" else 2)))
+        out.append(it)
+    return out
+
+
+def _cal_sort_key(item):
+    return (str(item.get("date") or ""), str(item.get("time") or "99:99"))
+
+
+def _cal_cut_priority(item):
+    """裁剪优先级：重要度高者优先；同级里「数据 / 事件」优先于「动态」（讲话、
+    周报最容易刷屏）；再同级按时间先后。"""
+    kind = int(item.get("kind") or 0)
+    return (-(int(item.get("imp") or 0)), 1 if kind == 2 else 0) + _cal_sort_key(item)
+
+
+def _cal_select(items, max_rows=None):
+    """正文行数裁剪：按优先级保留到上限，返回 (kept, dropped)。
+
+    kept 按（日期, 时间）排序；dropped 是被裁掉的条目列表，调用方据此如实披露
+    各重要度被裁了多少条（绝不静默丢内容）。上限只是版面保护，正常月份
+    ★★★ / ★★ 都能全部列出。
+    """
+    limit = int(max_rows or ECON_CALENDAR_MAX_ROWS)
+    if limit <= 0 or len(items) <= limit:
+        return sorted(items, key=_cal_sort_key), []
+    ranked = sorted(items, key=_cal_cut_priority)[:limit]
+    kept_ids = {id(it) for it in ranked}
+    dropped = [it for it in items if id(it) not in kept_ids]
+    ranked.sort(key=_cal_sort_key)
+    return ranked, dropped
+
+
+def _cal_imp_counts(items):
+    """按重要度统计条数 → {"3": n, "2": n, "1": n}（摘要与裁剪披露共用）。"""
+    counts = {"3": 0, "2": 0, "1": 0}
+    for it in items or []:
+        if isinstance(it, dict):
+            counts[str(max(1, min(3, int(it.get("imp") or 1))))] += 1
+    return counts
+
+
+def _cal_imp_text(counts):
+    """{"3":2,"2":5,"1":0} → '★★★ 2 / ★★ 5 / ★ 0'（零值档省略）。"""
+    parts = [f"{'★' * int(level)} {counts.get(level) or 0}"
+             for level in ("3", "2", "1") if counts.get(level)]
+    return " / ".join(parts) or "—"
+
+
+def _cal_day_label(date_str, today=None):
+    """('10-28 周二', 30)：月日 + 星期 + 距今 T+n（今天为 0）。"""
+    day = _cal_date_obj(date_str)
+    if not day:
+        return str(date_str or ""), None
+    base = today or datetime.now(CST).date()
+    return f"{day.month:02d}-{day.day:02d} {CALENDAR_WEEKDAYS[day.weekday()]}", (day - base).days
+
+
+def _cal_countdown(t_plus):
+    """T+n 的中文说法：0 → 今天，1 → 明天，其余 → T+n；非法值返回空串。"""
+    if not isinstance(t_plus, int):
+        return ""
+    if t_plus == 0:
+        return "今天"
+    if t_plus == 1:
+        return "明天"
+    return f"T+{t_plus}" if t_plus > 0 else ""
+
+
+def _cal_digest(res, today=None):
+    """把抓取结果整理成两主题共用的中性结构（纯文本，渲染端各自上色）。
+
+    返回 {"pairs": [(标签, 值)], "days": [(日期, 日期标签, T+n, [时间点])]}。
+    摘要里的每个数字都来自本次抓取结果：确定性合成、不引入新数据、不预测方向。
+    """
+    res = res if isinstance(res, dict) else {}
+    items = [it for it in (res.get("items") or []) if isinstance(it, dict)]
+    base = today or datetime.now(CST).date()
+    pairs = []
+    window = str(res.get("window") or "")
+    if window:
+        pairs.append(("时间窗口", window))
+    if not items:
+        pairs.append(("时间点合计", "0 个 · 窗口内未筛出影响经济的时间点"
+                                    f"（原始日程 {int(res.get('raw_count') or 0)} 条）"))
+        return {"pairs": pairs, "days": []}
+
+    counts = _cal_imp_counts(items)
+    n3 = counts.get("3") or 0
+    total_txt = f"{len(items)} 个 · {_cal_imp_text(counts)}"
+    dropped = int(res.get("dropped") or 0)
+    if dropped > 0:
+        # 被版面裁掉的条目按重要度如实披露：读者能看出 ★★★ 是否已全部列出。
+        total_txt += (f"（版面另有 {dropped} 条未列出："
+                      f"{_cal_imp_text(res.get('dropped_imp') or {})}）")
+    pairs.append(("时间点合计", total_txt))
+
+    def _picked(pred, limit=4):
+        """命中的时间点压成「10-29 名称」短标签，超出 limit 时如实给出总数。"""
+        hit = [it for it in items if pred(it)]
+        if not hit:
+            return ""
+        labels = []
+        for it in hit[:limit]:
+            label, _ = _cal_day_label(it.get("date"), base)
+            name = str(it.get("name") or "")[:22]
+            labels.append(f"{label.split(' ')[0]} {name}".strip())
+        text = "、".join(labels)
+        return f"{text} 等 {len(hit)} 项" if len(hit) > limit else text
+
+    top_events = _picked(lambda it: it.get("kind") == 1 and (it.get("imp") or 0) >= 3)
+    pairs.append(("央行议息 / 重要会议", top_events or "窗口内暂无"))
+    pairs.append(("中国关键读数",
+                  _picked(lambda it: it.get("kind") == 0 and it.get("city") == "中国"
+                          and (it.get("imp") or 0) >= 2) or "窗口内暂无"))
+    pairs.append(("美国关键读数",
+                  _picked(lambda it: it.get("kind") == 0 and it.get("city") == "美国"
+                          and (it.get("imp") or 0) >= 2) or "窗口内暂无"))
+
+    by_day = {}
+    for it in items:
+        by_day.setdefault(str(it.get("date") or ""), []).append(it)
+    hot_date = sorted(by_day, key=lambda d: (-len(by_day[d]), d))[0]
+    hot_label, hot_t = _cal_day_label(hot_date, base)
+    dense_days = sum(1 for group in by_day.values() if len(group) >= 3)
+    if n3 >= 4 or dense_days >= 3:
+        verdict = "事件密度偏高，注意窗口内的波动放大"
+    elif n3:
+        verdict = "事件分布相对均衡"
+    else:
+        verdict = "窗口内无最高级事件"
+    pairs.append(("最密集日", f"{hot_label}（{len(by_day[hot_date])} 项"
+                             f"{' · ' + _cal_countdown(hot_t) if hot_t else ''}）· {verdict}"
+                             "（规则合成，非方向判断）"))
+    pairs.append(("筛选口径",
+                  f"东财全窗口 {int(res.get('raw_count') or 0)} 条 → 命中 "
+                  f"{int(res.get('matched') or 0)} 条 → 正文 {len(items)} 条；"
+                  "保留中美欧日英港宏观读数 / 央行议息与重要会议 / 央行动态，"
+                  "剔除个股事项、展会论坛与同指标冗余口径"))
+
+    days = []
+    for date_str in sorted(by_day):
+        label, t_plus = _cal_day_label(date_str, base)
+        group = sorted(by_day[date_str], key=lambda it: (str(it.get("time") or "99:99"),
+                                                         -(it.get("imp") or 0)))
+        days.append((date_str, label, t_plus, group))
+    return {"pairs": pairs, "days": days}
+
+
+def _calendar_table_rows(res, cell_builder, today=None):
+    """两主题共用：摘要键值 + 逐日展平成表格行（cell_builder 决定各主题的配色）。"""
+    digest = _cal_digest(res, today)
+    rows = []
+    for _date, label, t_plus, items in digest.get("days") or []:
+        for i, it in enumerate(items):
+            rows.append(cell_builder(label, t_plus, it, first=(i == 0)))
+    return digest, rows
+
+
+def fetch_econ_calendar(days=None, today=None):
+    """抓取未来 N 天影响经济的时间点（东方财富财经日历，公开接口无需密钥）。
+
+    返回 _source_result：
+      items     —— [{date, time, city, name, imp, kind, period}]，已排序并按上限裁剪；
+      raw_count —— 窗口内原始日程条数；matched —— 命中筛选口径的条数；
+      dropped   —— 因正文行数上限被裁掉的一般级条数；window —— 窗口文字。
+    任何异常都如实降级为 status=failed + error 原因，绝不用推算日期冒充数据源。
+    前瞻性日程 is_today=False + snapshot=True：只作「今日抓取」，不参与当天检验计数。
+    """
+    window_days = int(days or ECON_CALENDAR_DAYS)
+    base = today or datetime.now(CST).date()
+    end = base + timedelta(days=window_days)
+    window = f"{base.isoformat()} ~ {end.isoformat()} · 未来 {window_days} 天"
+    # 服务端只支持按日期过滤（按 CITY / FE_TYPE 过滤返回空），故拉全窗口后本地筛。
+    flt = (f"(START_DATE>='{base.isoformat()}')"
+           f"(START_DATE<'{(end + timedelta(days=1)).isoformat()}')")
+    referer = {"Referer": "https://data.eastmoney.com/"}
+    rows, page, error = [], 1, ""
+    while page <= ECON_CALENDAR_MAX_PAGES:
+        params = {
+            "reportName": ECON_CALENDAR_REPORT,
+            "columns": ECON_CALENDAR_COLUMNS,
+            "filter": flt,
+            "pageNumber": str(page),
+            "pageSize": str(ECON_CALENDAR_PAGE_SIZE),
+            "sortColumns": "START_DATE",
+            "sortTypes": "1",
+            "source": "WEB",
+            "client": "WEB",
+        }
+        payload = safe_request(ECON_CALENDAR_URL, headers=referer, params=params, timeout=15)
+        if not isinstance(payload, dict):
+            error = "接口无响应或非 JSON"
+            break
+        result = payload.get("result")
+        result = result if isinstance(result, dict) else {}
+        batch = [r for r in (result.get("data") or [])
+                 if isinstance(r, dict) and r.get("FE_NAME") and r.get("START_DATE")]
+        rows.extend(batch)
+        try:
+            count = int(result.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if not batch or (count and len(rows) >= count):
+            break
+        page += 1
+        time.sleep(0.3)
+
+    # 服务端过滤之外再本地夹一次窗口：栏目写的是「未来 N 天」，就绝不能出现 T+N 之外的行。
+    in_window = []
+    for r in rows:
+        day = _cal_date_obj(str(r.get("START_DATE") or "")[:10])
+        if day and base <= day <= end:
+            in_window.append(r)
+    rows = in_window
+
+    if not rows:
+        reason = error or "接口未返回窗口内日程"
+        print(f"  ⚠️ 财经日历暂缺：{reason}")
+        return _source_result(ECON_CALENDAR_SOURCE, "failed", is_today=False,
+                              content_date=base.isoformat(), error=reason,
+                              items=[], raw_count=0, matched=0, dropped=0,
+                              window=window, days=window_days,
+                              page=ECON_CALENDAR_PAGE)
+
+    items = [it for it in (_cal_classify(r) for r in rows) if it]
+    items = _cal_dedupe(items)
+    kept, dropped = _cal_select(items)
+    dropped_imp = _cal_imp_counts(dropped)
+    print(f"  📅 财经日历：原始 {len(rows)} 条 → 命中 {len(items)} 条 → 正文 {len(kept)} 条"
+          + (f"（版面裁掉 {len(dropped)} 条）" if dropped else "") + f"（{window}）")
+    return _source_result(ECON_CALENDAR_SOURCE, "success", is_today=False,
+                          content_date=base.isoformat(), snapshot=True,
+                          items=kept, raw_count=len(rows), matched=len(items),
+                          dropped=len(dropped), dropped_imp=dropped_imp,
+                          window=window, days=window_days,
+                          page=ECON_CALENDAR_PAGE)
+
+
 def collect_all_data():
     """采集所有数据源"""
     print("\n" + "=" * 50)
@@ -1757,6 +2377,11 @@ def collect_all_data():
 
     data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
+
+    if ECON_CALENDAR_ENABLED:
+        print(f"\n📅 正在抓取未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
+        data["财经日历"] = fetch_econ_calendar()
+        time.sleep(0.5)
 
     print("\n📰 正在采集每日量化策略趋势跟踪线索（Reddit 十个板块热门帖）...")
     data.update(fetch_public_sites())
@@ -1894,6 +2519,7 @@ GZ_FS_METER = _gz_fs(14)      # 信号格 ●○ 字号
 # 许可：https://koboyo.com/icons/license（允许个人及商业网站使用）。
 KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
 KOBOYO_SECTION_ICONS = {
+    "ECON CALENDAR": "card-calendar",
     "AI READ": "brain",
     "POLICY SHOCK": "document",
     "MARKET SNAPSHOT": "chart",
@@ -2040,6 +2666,7 @@ def _badge(text, kind="ok"):
 
 
 _SECTION_ICON_META = {
+    "ECON CALENDAR": ("▦", "30-DAY", C_LEMON, C_FLAT_BG),
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
     "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
     "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
@@ -2076,8 +2703,12 @@ def _pixel_icon(kicker, size=44):
             f'</td></tr></table>')
 
 
-def _pixel_table(headers, rows, aligns=None):
-    """pixel 主题的多列数据表（等宽字体 + 霓虹表头；单元格内容由调用方转义）。"""
+def _pixel_table(headers, rows, aligns=None, widths=None):
+    """pixel 主题的多列数据表（等宽字体 + 霓虹表头；单元格内容由调用方转义）。
+
+    widths 为各列百分比（如 ("17%", "13%", "70%")）：表格是 table-layout:fixed，
+    给出列宽才能让「窄日期 + 窄时间 + 宽正文」这类排版不被平均分配。
+    """
     rows = [list(r) for r in (rows or [])]
     if not rows:
         return ""
@@ -2086,21 +2717,31 @@ def _pixel_table(headers, rows, aligns=None):
         return ""
     aligns = list(aligns or (["left"] + ["right"] * (n - 1)))
     aligns = (aligns + ["left"] * n)[:n]
+    widths = (list(widths) + [None] * n)[:n] if widths else [None] * n
+
+    def _width_css(i):
+        return f"width:{widths[i]};" if widths[i] else ""
+
+    def _width_attr(i):
+        return f' width="{widths[i]}"' if widths[i] else ""
+
     head = "".join(
-        f'<td align="{aligns[i]}" style="padding:5px 6px;border-bottom:1px solid {C_ACCENT};'
+        f'<td{_width_attr(i)} align="{aligns[i]}" style="{_width_css(i)}padding:5px 6px;'
+        f'border-bottom:1px solid {C_ACCENT};'
         f'font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:.5px;'
         f'font-family:{FONT_MONO};text-align:{aligns[i]};">{_esc(h)}</td>'
         for i, h in enumerate(headers or []))
     body = []
     for row in rows:
         body.append("<tr>" + "".join(
-            f'<td align="{aligns[i]}" valign="top" style="padding:5px 6px;'
+            f'<td{_width_attr(i)} align="{aligns[i]}" valign="top" style="{_width_css(i)}padding:5px 6px;'
             f'border-bottom:1px solid {C_HAIR};font-size:11px;color:{C_INK};'
             f'line-height:1.6;font-family:{FONT_MONO};text-align:{aligns[i]};">'
             f'{row[i] if i < len(row) else ""}</td>' for i in range(n)) + "</tr>")
+    head_row = f"<tr>{head}</tr>" if headers else ""
     return (f'<table width="100%" cellpadding="0" cellspacing="0" '
             f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
-            f'<tr>{head}</tr>{"".join(body)}</table>')
+            f'{head_row}{"".join(body)}</table>')
 
 
 def _pixel_panel(title, body, color=C_CYAN, icon="■"):
@@ -2398,12 +3039,15 @@ def _gz_num(text):
     return f'<span style="font-family:{GZ_MONO};font-weight:700;">{text}</span>'
 
 
-def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None):
+def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths=None):
     """微信兼容满宽数据表。
 
     整表一张 ``width=100%`` + ``width:100%!important``，``table-layout:fixed``；
     不用 ``nowrap`` / ``inline-block`` / ``width="33%"``；行全部包在本函数的
     ``<table>`` 里，不产出裸 ``<tr>``。``kv=True`` 时第一列为元信息色标签。
+    ``widths`` 为各列百分比（如 ``("17%", "13%", "70%")``）：表格是
+    ``table-layout:fixed``，给出列宽才能让窄列（日期 / 时间）不被平均分配；
+    属性与内联样式双写，兼容微信客户端的 HTML 清洗。
     """
     rows = [list(r) for r in (rows or [])]
     if not rows:
@@ -2414,6 +3058,7 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None):
     if aligns is None:
         aligns = ["left"] + ["right"] * (n - 1) if n > 1 else ["left"]
     aligns = (list(aligns) + ["left"] * n)[:n]
+    widths = (list(widths) + [None] * n)[:n] if widths else [None] * n
     anchors = list(row_anchors or [])
     while len(anchors) < len(rows):
         anchors.append(None)
@@ -2431,9 +3076,11 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None):
             size, color, weight = GZ_FS_BODY, GZ_INK, GZ_W_BODY
         align = aligns[i]
         id_attr = f' id="{_esc(anchor)}"' if anchor else ""
+        width_attr = f' width="{widths[i]}"' if widths[i] else ""
+        width_css = f"width:{widths[i]};" if widths[i] else ""
         return (
-            f'<td{id_attr} valign="top" align="{align}" '
-            f'style="padding:10px {pad_r} 10px 0;{border}'
+            f'<td{id_attr}{width_attr} valign="top" align="{align}" '
+            f'style="{width_css}padding:10px {pad_r} 10px 0;{border}'
             f'font-size:{size}px;color:{color};font-weight:{weight};'
             f'line-height:1.45;text-align:{align};">{html}</td>'
         )
@@ -2614,6 +3261,47 @@ def gz_panorama_block(pan):
             parts.append(gz_subsection(title) + gz_data_table(
                 ["板块", "涨跌", "主力净流入", "领涨股"], s_rows))
 
+    return "".join(parts)
+
+
+def _cal_gz_cells(day_label, t_plus, item, first=False):
+    """guizang 日历表的一行：日期（当天首行附 T+n）/ 时间 / 星号 + 地区 + 时间点。
+
+    墨水屏只有黑白：重要度用「星号数量 + 字重 + 灰阶」区分，不依赖颜色。
+    """
+    item = item if isinstance(item, dict) else {}
+    imp = max(1, min(3, int(item.get("imp") or 1)))
+    day_html = ""
+    if first:
+        day_html = f'<b style="color:{GZ_INK};font-family:{GZ_SANS};">{_esc(day_label)}</b>'
+        when = _cal_countdown(t_plus)
+        if when:
+            day_html += (f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};'
+                         f'padding-top:2px;">{_esc(when)}</div>')
+    star_style = (f"color:{GZ_INK};font-weight:{GZ_W_BOLD};" if imp >= 3
+                  else (f"color:{GZ_INK};" if imp == 2 else f"color:{GZ_META};"))
+    city = str(item.get("city") or "").strip()
+    city_html = f'<span style="color:{GZ_META};">{_esc(city)}</span> · ' if city else ""
+    body = (f'<span style="{star_style}">{"★" * imp}</span> '
+            f'{city_html}{_esc(_cal_item_text(item))}')
+    return [day_html, _esc(str(item.get("time") or "—")), body]
+
+
+def gz_calendar_block(res):
+    """黑白研报版「未来 N 天影响经济时间点」：窗口摘要表 + 全窗口一张三列日历表。"""
+    digest, rows = _calendar_table_rows(res, _cal_gz_cells)
+    parts = []
+    pairs = digest.get("pairs") or []
+    if pairs:
+        parts.append(gz_subsection("窗口摘要"))
+        parts.append(gz_data_table(None, [[_esc(a), _esc(b)] for a, b in pairs],
+                                   aligns=("left", "left"), kv=True,
+                                   widths=("26%", "74%")))
+    if rows:
+        parts.append(gz_subsection("逐日时间点（北京时间）"))
+        parts.append(gz_data_table(["日期", "时间", "影响经济的时间点"], rows,
+                                   aligns=("left", "left", "left"),
+                                   widths=("17%", "13%", "70%")))
     return "".join(parts)
 
 
@@ -2946,6 +3634,42 @@ def _panorama_block(pan):
     return "".join(parts)
 
 
+def _cal_pixel_cells(day_label, t_plus, item, first=False):
+    """pixel 日历表的一行：日期（当天首行附 T+n）/ 时间 / 星号 + 地区 + 时间点。"""
+    item = item if isinstance(item, dict) else {}
+    imp = max(1, min(3, int(item.get("imp") or 1)))
+    color = C_LEMON if imp >= 3 else (C_CYAN if imp == 2 else C_MUTED)
+    day_html = ""
+    if first:
+        day_html = f'<b style="color:{C_INK};">{_esc(day_label)}</b>'
+        when = _cal_countdown(t_plus)
+        if when:
+            day_html += (f'<div style="font-size:9px;color:{C_FAINT};padding-top:2px;">'
+                         f'{_esc(when)}</div>')
+    city = str(item.get("city") or "").strip()
+    city_html = f'<span style="color:{C_FAINT};">{_esc(city)}</span> ' if city else ""
+    body = (f'<span style="color:{color};font-weight:900;">{"★" * imp}</span> '
+            f'{city_html}{_esc(_cal_item_text(item))}')
+    return [day_html, _esc(str(item.get("time") or "—")), body]
+
+
+def _calendar_block(res):
+    """pixel 版「未来 N 天影响经济时间点」：窗口摘要 + 全窗口一张三列日历表。"""
+    digest, rows = _calendar_table_rows(res, _cal_pixel_cells)
+    parts = []
+    pairs = digest.get("pairs") or []
+    if pairs:
+        parts.append(_subsection("窗口摘要"))
+        parts.append(_pixel_table(None, [[_esc(a), _esc(b)] for a, b in pairs],
+                                  aligns=("left", "left"), widths=("26%", "74%")))
+    if rows:
+        parts.append(_subsection("逐日时间点（北京时间）"))
+        parts.append(_pixel_table(["日期", "时间", "影响经济的时间点"], rows,
+                                  aligns=("left", "left", "left"),
+                                  widths=("17%", "13%", "70%")))
+    return "".join(parts)
+
+
 # ============================================================
 # 精简排版（2026-09-27）：结论先行 → 分栏展开 → 盘点收尾
 # ——正文不再出现口径说明 / 免责声明脚注、「数据暂缺」占位行、抓取失败的来源
@@ -3169,9 +3893,11 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     return pairs
 
 
-# 阅读顺序：结论 → 数据（行情 / 全景 / 政策 / 研判依据）→ 趋势跟踪线索与资讯 → 新闻情绪 → 盘点。
+# 阅读顺序：结论 → 前瞻日程（未来30天影响经济时间点）→ 数据（行情 / 全景 / 政策 / 研判依据）
+#           → 趋势跟踪线索与资讯 → 新闻情绪 → 盘点。
 REPORT_SECTION_ORDER = (
     "CONCLUSION",
+    "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
     "MARKET SNAPSHOT", "A-SHARE PANORAMA", "POLICY SHOCK", "AI READ",
     "TREND CLUES", "GLOBAL HEADLINES", "EASTMONEY WIRE", "A-SHARE DESK",
@@ -3469,6 +4195,10 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("热门榜单", hot),
         ("港股量化引擎（概率/流动性）", data.get("港股量化") or {}),
     ]
+    # 前瞻日程（未来 N 天影响经济时间点）：关掉采集时不进审计，总源数保持不变。
+    # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
+    if isinstance(data.get("财经日历"), dict):
+        source_items.append((f"财经日历（未来{ECON_CALENDAR_DAYS}天时间点）", data["财经日历"]))
     # 仅运行过十站采集时加入审计；外部旧调用若无新键仍维持原来的基础数据源数量。
     source_items.extend((name, data[name]) for name in PUBLIC_SITE_NAMES if name in data)
 
@@ -3506,6 +4236,17 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["LIQUIDITY FLOW"] = (
                 "LIQUIDITY FLOW", "资金流动性分析", lq_html,
                 kit.source_badge(quant_src), _short_source(quant_src))
+
+    # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
+    cal = data.get("财经日历") or {}
+    if cal.get("status") == "success":
+        cal_html = kit.calendar_block(cal)
+        if cal_html:
+            cal_days = int(cal.get("days") or ECON_CALENDAR_DAYS)
+            blocks["ECON CALENDAR"] = (
+                "ECON CALENDAR", f"未来{cal_days}天影响经济时间点", cal_html,
+                kit.source_badge(cal), _short_source(cal),
+            )
 
     # ① 行情速览（逐项行情的唯一展示位置；缺失的品种不出行）
     if market.get("status") == "success":
@@ -5752,6 +6493,7 @@ PIXEL_KIT = _RenderKit(
     senti_empty_badge=lambda: _badge("样本不足", "warn"),
     policy_block=_pixel_policy_block,
     panorama_block=_panorama_block,
+    calendar_block=_calendar_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
     table=lambda headers, rows, aligns=None: _pixel_table(headers, rows, aligns),
@@ -5783,6 +6525,7 @@ GUIZANG_KIT = _RenderKit(
     senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
     policy_block=gz_policy_block,
     panorama_block=gz_panorama_block,
+    calendar_block=gz_calendar_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
     table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
@@ -5860,8 +6603,10 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     sections = parts["sections"]
     total = parts["total"]
     today_n = parts["today_n"]
+    # 每个栏目前都插入分条标记（含第一栏）：日报超过微信单条上限时，推送侧据此
+    # 按「完整栏目」把日报拆成多条消息，绝不把某一栏切成两半，也不丢任何内容。
     content_html = "".join(
-        GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+        PART_BREAK_MARK + GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
     generated_at = _now()
     masthead_title_bar = gz_shell(
@@ -5881,6 +6626,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="guizang">
 <title>{REPORT_TITLE}</title>
 </head>
 <body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};font-family:{GZ_SANS};color:{GZ_INK};font-size:{GZ_FS_BODY}px;font-weight:{GZ_W_BODY};line-height:1.85;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;word-wrap:break-word;">
@@ -5900,6 +6646,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 
 {content_html}
 
+{DOC_FOOT_MARK}
 <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;table-layout:fixed;background:{GZ_PAPER};">
 <tr><td bgcolor="{GZ_PAPER}" align="left" valign="top" style="padding:40px 0 56px;background:{GZ_PAPER};">
 <div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.8;border-top:{GZ_HAIR_W}px solid {GZ_HAIR};padding-top:12px;">
@@ -5935,8 +6682,9 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
     content_n = parts["content_n"]
 
     # 6. 拼版：栏目编号按渲染顺序生成（只在场的栏目占用编号）
+    # 每个栏目前都插入分条标记（含第一栏），供超长日报按完整栏目分条推送
     content_html = "".join(
-        PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+        PART_BREAK_MARK + PIXEL_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections, 1))
 
     # 7. 拼接完整 HTML（头部嵌入元信息，供 --push-only 二次当天检验）
@@ -5951,6 +6699,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
 <meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="pixel">
 <title>章鱼AI · 财经作战日志 | RETRO PIXEL EDITION</title>
 </head>
 <body style="margin:0;padding:0;background:{C_BG};font-family:{FONT};color:{C_INK};font-size:13px;line-height:1.7;-webkit-text-size-adjust:100%;">
@@ -6013,6 +6762,7 @@ def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
 <!-- 内容关卡列表 -->
 {content_html}
 
+{DOC_FOOT_MARK}
 <!-- 版权页 colophon：像素终端关机界面 -->
 <div style="border-top:1px solid {C_ACCENT};margin-top:26px;padding-top:12px;background:#0F1222;padding:12px;">
 <div style="font-family:{FONT_MONO};font-size:10px;font-weight:900;color:{C_ACCENT};letter-spacing:2px;">{ _heart(C_ACCENT, 10) } OCTOPUS-CHAN // SYSTEM SHUTDOWN</div>
@@ -6151,14 +6901,224 @@ def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=
     return notice, True
 
 
+# ------------------------------------------------------------
+# PushPlus 分条完整推送（2026-09-28 起）
+# ------------------------------------------------------------
+# 日报（含港股量化引擎后）常有 15~25 万字，远超单条 10 万字上限；旧做法在 10 万字处
+# 截断，等于每天有近六成内容根本没送到微信。改为「分条完整推送」：
+#   渲染时在栏目前插入分条标记（PART_BREAK_MARK）、在页脚前插入 DOC_FOOT_MARK，
+#   于是任意一份日报都能被切成 头部外壳 + 若干完整栏目 + 页脚外壳 三段；
+#   拆分时按栏目边界装箱，每条消息都是「结构完整、标签自闭合、样式一致」的独立 HTML，
+#   微信端读起来就是同一份日报的连续几页，一个字都不丢。
+# 单个栏目自身就超预算时，再按完整标签边界切，并在续片里原样重开父标签（保留属性），
+# 因此任何上限配置下都不会丢内容、也不会出现半截标签导致的整页排版崩坏。
+
+def _opening_tag_name(open_tag):
+    """从完整开标签原文里取标签名（小写）；解析失败返回空串。"""
+    m = re.match(r"<\s*([a-zA-Z][a-zA-Z0-9]*)", open_tag or "")
+    return m.group(1).lower() if m else ""
+
+
+def _scan_open_tags(html, limit):
+    """扫描 html 前 limit 字符内的完整标签，返回可安全切点列表。
+
+    元素为 (标签结束位置, 未闭合开标签原文列表)；开标签保留原始属性，
+    续片据此原样重开父容器，样式不会丢。
+    """
+    stack = []
+    candidates = []
+    for m in _TAG_RE.finditer(html):
+        if m.end() > limit:
+            break
+        tag, closing = m.group("tag").lower(), bool(m.group("close"))
+        if tag not in _VOID_TAGS:
+            if closing:
+                if stack and _opening_tag_name(stack[-1]) == tag:
+                    stack.pop()
+                # 不匹配时保持栈不变：由逆序补闭合保证结果合法
+            else:
+                stack.append(m.group(0))
+        candidates.append((m.end(), list(stack)))
+    return candidates
+
+
+def _closers_for(stack):
+    """按逆序为未闭合标签栈生成闭合标签串。"""
+    return "".join(f"</{_opening_tag_name(t)}>" for t in reversed(stack))
+
+
+def _split_long_fragment(fragment, budget):
+    """把单个超长片段切成若干「各自标签平衡」的片段；续片原样重开被切断的父标签。
+
+    返回片段列表（至少 1 个）。切不动时（budget 连一个标签都放不下）原样返回，
+    由调用方决定回退策略——绝不静默丢内容。
+    """
+    if budget <= 0 or len(fragment) <= budget:
+        return [fragment]
+    pieces = []
+    rest = fragment
+    for _ in range(PUSHPLUS_MAX_PARTS * 8):     # 防御性上限，正常远远用不到
+        if len(rest) <= budget:
+            break
+        picked = None
+        for end, stack in reversed(_scan_open_tags(rest, budget)):
+            closers = _closers_for(stack)
+            if end + len(closers) <= budget and end > 0:
+                picked = (end, stack, closers)
+                break
+        if picked is None:
+            break                               # 无法在预算内找到合法切点
+        end, stack, closers = picked
+        reopened = "".join(stack)               # 续片要原样重开的父标签（含原始属性）
+        if end <= len(reopened):
+            # 切点还没跨过被重开的标签：这一刀没有实质进展（正文是一整段无标签长文本），
+            # 继续切只会原地打转 → 交回调用方走截断兜底，绝不发出半截标签。
+            break
+        pieces.append(rest[:end] + closers)
+        rest = reopened + rest[end:]
+        if not rest:
+            break
+    pieces.append(rest)
+    return [p for p in pieces if p]
+
+
+def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False):
+    """分条推送的条序横幅：告诉读者这是第几条 / 共几条，以及为什么要分条。
+
+    tail_cut=True 用于「条数已达 PUSHPLUS_MAX_PARTS 上限」的收尾条：
+    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文。
+    """
+    limit = limit or PUSHPLUS_MAX_CONTENT_CHARS
+    if tail_cut:
+        text = (f"📄 第 {index}/{total} 条 · 已达单次推送条数上限"
+                f"（PUSHPLUS_MAX_PARTS={total}），本条之后的内容见文末完整日报链接")
+    else:
+        text = (f"📄 第 {index}/{total} 条 · 完整日报共 {total} 条"
+                f"（单条上限 {limit // 10000 or 1} 万字，按栏目拆分，内容不缺失）")
+        if index < total:
+            text += f" · 接下条 {index + 1}/{total}"
+    if theme == "pixel":
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
+                f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
+                f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
+    return (f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
+            f'bgcolor="{GZ_INK}" style="width:100%!important;border-collapse:collapse;'
+            f'table-layout:fixed;background:{GZ_INK};margin:0 0 8px;">'
+            f'<tr><td align="left" valign="top" style="padding:10px 16px;">'
+            f'<div style="font-size:{GZ_FS_META + 1}px;color:{GZ_PAPER};'
+            f'font-weight:{GZ_W_BOLD};line-height:1.6;font-family:{GZ_SANS};">'
+            f'{text}</div></td></tr></table>')
+
+
+def _report_theme(html):
+    """从日报 HTML 里读出渲染主题（供分条横幅配色）；读不出来按默认主题处理。"""
+    m = re.search(r'name="octopus-theme"\s+content="([^"]+)"', html or "")
+    theme = (m.group(1) if m else "").strip().lower()
+    return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
+
+
+def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
+    """把超过单条上限的日报 HTML 拆成 N 条「各自完整可渲染」的消息；返回 list[str]。
+
+    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 原文档页脚与闭合标签，
+    因此每条都是独立、标签平衡、样式一致的 HTML，微信端排版与单条推送完全相同。
+    全部内容按原文顺序送达，不做任何删减。
+
+    返回 None 表示无法安全拆分（旧版文件没有分条标记 / 外壳本身就超上限 /
+    需要的条数超过 max_parts），调用方应回退到 _truncate_html_for_push。
+    """
+    # 上限与条数上限都在调用时解析（而不是写进默认参数），环境变量与测试都能覆盖
+    limit = limit if limit is not None else PUSHPLUS_MAX_CONTENT_CHARS
+    max_parts = max_parts if max_parts is not None else PUSHPLUS_MAX_PARTS
+    if limit <= 0 or len(html) <= limit:
+        return [html] if html else None
+
+    first_break = html.find(PART_BREAK_MARK)
+    foot_at = html.find(DOC_FOOT_MARK)
+    if first_break < 0 or foot_at < 0 or foot_at <= first_break:
+        print("  ⚠️ 该 HTML 没有分条锚点（旧版日报文件？），无法按栏目拆分")
+        return None
+
+    shell = html[:first_break]                   # doctype/head/body/刊头 + 未闭合的外层容器
+    tail = html[foot_at + len(DOC_FOOT_MARK):]   # 页脚 + 全部闭合标签
+    body = html[first_break + len(PART_BREAK_MARK):foot_at]
+    sections = [s for s in body.split(PART_BREAK_MARK) if s.strip()]
+    if not sections:
+        return None
+
+    theme = _report_theme(html)
+    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字预留）+ 安全余量
+    banner_w = max(len(_build_part_banner(i, max(max_parts, len(sections)), theme, limit))
+                   for i in (1, max(max_parts, len(sections))))
+    overhead = len(shell) + len(tail) + banner_w + 64
+    budget = limit - overhead
+    if budget < 2000:
+        print(f"  ⚠️ 单条上限 {limit:,} 字太小：刊头+页脚+横幅已占 {overhead:,} 字，"
+              f"正文只剩 {budget:,} 字，拆分没有意义")
+        return None
+
+    # 装箱：优先整栏装进一条；单栏超预算时再按标签边界细分（内容不丢）
+    chunks, current, current_len = [], [], 0
+    for section in sections:
+        for piece in _split_long_fragment(section, budget):
+            if current and current_len + len(piece) > budget:
+                chunks.append("".join(current))
+                current, current_len = [], 0
+            current.append(piece)
+            current_len += len(piece)
+    if current:
+        chunks.append("".join(current))
+    if not chunks:
+        return None
+
+    # 条数超过安全上限（只会在把单条上限调得极小时发生）：前 max_parts-1 条完整推送，
+    # 最后一条装到上限为止并附「完整日报」链接——比退回单条截断多送达十几倍内容，
+    # 且如实告知未推完，绝不假装全文已送达。
+    tail_cut = len(chunks) > max_parts
+    if tail_cut:
+        keep = max(max_parts - 1, 1)
+        print(f"  ⚠️ 完整推送需要 {len(chunks)} 条，超过 PUSHPLUS_MAX_PARTS={max_parts}："
+              f"前 {keep} 条完整推送，其余内容压进第 {keep + 1} 条并附完整日报链接"
+              f"（如需全部送达，请调高 PUSHPLUS_MAX_PARTS 或 PUSHPLUS_MAX_CONTENT_CHARS）")
+        chunks = chunks[:keep] + ["".join(chunks[keep:])]
+
+    total = len(chunks)
+    title_re = re.compile(r"(<title>)(.*?)(</title>)", re.S)
+    parts = []
+    for index, chunk in enumerate(chunks, 1):
+        last_cut = tail_cut and index == total
+        banner = _build_part_banner(index, total, theme, limit, tail_cut=last_cut)
+        head = shell
+        if total > 1:
+            # 让每条的浏览器/微信标题也带上条序，正文横幅之外再多一层提示
+            head = title_re.sub(
+                lambda m: f"{m.group(1)}{m.group(2)}（第 {index}/{total} 条）{m.group(3)}",
+                shell, count=1)
+        part = head + banner + chunk + tail
+        if len(part) > limit:
+            if not last_cut:
+                # 只可能是「一整段没有标签边界的超长正文」切不开：宁可回退到截断，
+                # 也绝不发出超过平台上限的内容（平台自己截断会切在标签中间，整页排版崩坏）
+                print(f"  ⚠️ 第 {index}/{total} 条装不进 {limit:,} 字且无法在标签边界切开"
+                      f"（正文存在超长无标签文本），本次不做分条")
+                return None
+            part, _ = _truncate_html_for_push(part, limit, report_name)
+        parts.append(part)
+    return parts
+
+
 def push_to_wechat(title, content_html, token=None, template="html", report_name=None,
                    topic=None):
     """通过 PushPlus 推送消息到微信；返回 True/False，调用方必须据此决定退出码。
 
     - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
       或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
+    - 日报 HTML 超过单条上限（PUSHPLUS_MAX_CONTENT_CHARS，默认 10 万字）时**不丢内容**：
+      按栏目边界拆成多条消息依次推送（标题追加 1/N、2/N…），全部内容都会送达；
+      拆分不可用时（旧版文件没有分条标记）才回退到「按标签边界截断 + 完整版链接」；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
-      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次）；
+      按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次），多条推送时每条各自享有重试；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
@@ -6173,12 +7133,53 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
-    if template == "html":
+    if template == "html" and len(content_html) > PUSHPLUS_MAX_CONTENT_CHARS:
+        parts = _split_html_for_push(content_html, PUSHPLUS_MAX_CONTENT_CHARS,
+                                     report_name) if PUSHPLUS_MULTIPART else None
+        if parts:
+            print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
+                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
+                  f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
+            return _push_html_parts(title, parts, token=token, topic=topic)
+        if PUSHPLUS_MULTIPART:
+            print("  ↩️ 已回退到旧的单条推送：按完整标签边界截断 + 末尾附完整日报链接")
         content_html, was_truncated = _truncate_html_for_push(
             content_html, PUSHPLUS_MAX_CONTENT_CHARS, report_name)
         if was_truncated:
             print(f"  ⚠️ 日报 HTML 超过 PushPlus 上限 {PUSHPLUS_MAX_CONTENT_CHARS} 字符，"
                   f"已按完整标签边界截断后推送（磁盘上的完整版不受影响）")
+    return _push_one_message(title, content_html, token=token, template=template,
+                             topic=topic)
+
+
+def _push_html_parts(title, parts, token=None, topic=None):
+    """按顺序推送拆分后的多条正文；全部成功才返回 True。
+
+    - 每条标题追加「(i/N)」，微信消息列表里一眼能看出条序，也避免标题完全重复被去重；
+    - 条与条之间等待 PUSHPLUS_PART_DELAY 秒，降低触发「发送频繁」的概率；
+    - 任意一条最终失败即停止后续条并返回 False（调用方会发失败告警、以退出码 1 结束），
+      日志里明确写出「已送达 i-1 条 / 共 N 条」，不掩盖部分送达的事实。
+    """
+    total = len(parts)
+    for index, part in enumerate(parts, 1):
+        if index > 1 and PUSHPLUS_PART_DELAY > 0:
+            print(f"  ⏳ 等待 {PUSHPLUS_PART_DELAY:g}s 后推送第 {index}/{total} 条"
+                  f"（避开 PushPlus 频率限制）...")
+            time.sleep(PUSHPLUS_PART_DELAY)
+        print(f"  📄 第 {index}/{total} 条（{len(part):,} 字）...")
+        if not _push_one_message(f"{title} ({index}/{total})", part, token=token,
+                                 template="html", topic=topic):
+            print(f"  ❌ 第 {index}/{total} 条推送失败：已送达 {index - 1} 条，"
+                  f"剩余 {total - index + 1} 条未发送（完整日报未全部送达）")
+            return False
+    print(f"  ✅ 完整日报已全部送达（共 {total} 条消息）")
+    return True
+
+
+def _push_one_message(title, content_html, token=None, template="html", topic=None):
+    """发送单条 PushPlus 消息（含退避重试）；返回 True/False。"""
+    token = token or PUSHPLUS_TOKEN
+    topic = topic if topic is not None else PUSHPLUS_TOPIC
     payload = {
         "token": token,
         "title": title,
@@ -6297,6 +7298,8 @@ def build_push_failure_alert_text(reason, data=None, report_path=None):
         "或在 PushPlus 升级套餐后更新 Secrets；",
         "· 若提示 token 无效 / 已失效：到 pushplus.plus 重新获取，"
         "并更新仓库 Settings → Secrets → PUSHPLUS_TOKEN；",
+        "· 若日报被拆成多条推送（标题带 1/N、2/N…）：任意一条失败就会停止后续条，"
+        "微信里只有前几条；重跑一次即可重新完整推送（Actions 手动运行或 manual_push.sh）；",
         "· 手动重新推送：Actions → 🐙 章鱼AI · 手动抓取推送 → Run workflow，"
         "或本地 ./output/manual_push.sh --force。",
         f"报告文件：{os.path.basename(report_path) if report_path else '—'}",
@@ -6577,6 +7580,35 @@ def quant_only_report(*, enable_stocks=True):
     return 0
 
 
+def calendar_only_report(days=None):
+    """只抓「未来 N 天影响经济时间点」并打印（研究 / 排障用：不生成日报、不推送）。
+
+    用途：本地或 Actions 里单独验证东财财经日历接口是否可读、筛选口径是否合适，
+    不必跑完整条采集链路。
+    """
+    print("🐙 " + "=" * 48)
+    print("   章鱼 AI · 未来影响经济时间点（研究模式）")
+    print("🐙 " + "=" * 48)
+    res = fetch_econ_calendar(days=days)
+    if res.get("status") != "success":
+        print(f"❌ 财经日历暂缺：{res.get('error')}")
+        return 1
+    digest = _cal_digest(res)
+    print(f"\n【窗口】{res.get('window')}")
+    for label, value in digest.get("pairs") or []:
+        print(f"【{label}】{value}")
+    print(f"\n【逐日时间点】共 {len(res.get('items') or [])} 条（北京时间）")
+    for _date, label, t_plus, items in digest.get("days") or []:
+        when = _cal_countdown(t_plus)
+        print(f"\n  {label}" + (f" · {when}" if when else ""))
+        for it in items:
+            city = str(it.get("city") or "")
+            print(f"    {it.get('time') or '--:--'}  {'★' * int(it.get('imp') or 1):<3} "
+                  f"{city:<6}{_cal_item_text(it)}")
+    print("\n✅ 财经日历运行完成（研究模式不推送）")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="🐙 章鱼AI · 每日财经日报流水线（当天检验后推送）",
@@ -6594,6 +7626,8 @@ def main():
   python3 output/pipeline.py --list                 # 列出日报
   python3 output/pipeline.py --no-quant             # 跳过港股量化引擎（运行更快）
   python3 output/pipeline.py --quant-only           # 只跑量化引擎并打印概率/流动性/回测
+  python3 output/pipeline.py --calendar-only        # 只抓未来30天影响经济时间点并打印
+  python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
         """
     )
@@ -6622,6 +7656,9 @@ def main():
                        help="跳过港股量化引擎（只出常规栏目，运行更快）")
     parser.add_argument("--quant-only", action="store_true",
                        help="只跑港股量化引擎并打印结果（研究模式：不生成日报、不推送）")
+    parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
+                       help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
+                            "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
 
     args = parser.parse_args()
 
@@ -6636,6 +7673,10 @@ def main():
     # --quant-only 模式：只跑量化引擎，把概率 / 流动性 / 回测打到控制台
     if args.quant_only:
         return quant_only_report(enable_stocks=HK_QUANT_STOCKS)
+
+    # --calendar-only 模式：只抓未来 N 天影响经济时间点，验证接口与筛选口径
+    if args.calendar_only is not None:
+        return calendar_only_report(days=None if args.calendar_only < 1 else args.calendar_only)
 
     # --push-only 模式：推送已有文件，同样执行「当天检验」
     if args.push_only:

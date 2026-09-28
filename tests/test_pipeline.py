@@ -1,4 +1,5 @@
 """无需网络的日报新鲜度回归测试。"""
+import datetime as dt
 import importlib.util
 import os
 import re
@@ -616,7 +617,7 @@ class GuizangThemeTests(unittest.TestCase):
         # 图片 = 每个栏目标题 1 枚极大图标 + 刊头 128px 章鱼 + 刊头栏目图标列（去重后的全部栏目图标）
         self.assertEqual(len(images), html.count("<h2 ") + 1 + len(pipeline.KOBOYO_MASTHEAD_ICONS))
         for image in images:
-            self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z]+\.svg"')
+            self.assertRegex(image, r'src="https://koboyo\.com/icons/svg/[a-z-]+\.svg"')
             self.assertIn('alt=""', image)
             self.assertIn('aria-hidden="true"', image)
             self.assertRegex(image, r'width="(?:72|96|128)"')
@@ -940,6 +941,330 @@ class PushTruncationTests(unittest.TestCase):
         out, truncated = pipeline._truncate_html_for_push(html)
         self.assertFalse(truncated)
         self.assertEqual(out, html)
+
+
+class PushMultipartTests(unittest.TestCase):
+    """日报超过单条上限（默认 10 万字）时分条完整推送（2026-09-28）。
+
+    旧行为在 10 万字处截断：25 万字的日报只有前四成送达微信，近六成内容每天被丢掉。
+    新行为按栏目边界把日报拆成 N 条「各自完整可渲染」的消息，全部送达：
+      · 每条都在上限内、标签自闭合、沿用同一份页面外壳（微信端排版与单条推送一致）；
+      · 所有栏目按原顺序逐字送达，可见文字零丢失；
+      · 每条标题与正文横幅都标明「第 i/N 条」，读者知道还有后续；
+      · 任意一条失败即停止并返回 False（调用方发失败告警、Actions 显红），不假装成功。
+    """
+
+    # 测试用的单条上限按主题分别取：都必须明显大于该主题的「外壳开销」
+    # （刊头 + 页脚 + 闭合标签，guizang ≈5.0k / pixel ≈11.1k），才能真实触发按栏目分条。
+    LIMIT = {"guizang": 12000, "pixel": 20000}
+    # 比单个栏目还小的上限：逼出「栏目内按标签边界细分」这条兜底路径
+    TIGHT = {"guizang": 8000, "pixel": 14000}
+    REPORT_NAME = "daily_report_20260928.html"
+
+    # ---------- 工具 ----------
+    @staticmethod
+    def _data():
+        """离线构造的样本数据：够渲染出多个栏目，不发任何网络请求。"""
+        return {
+            "Reddit": pipeline._public_site_result("Reddit", [
+                {"title": f"散户热帖 {i}",
+                 "url": "https://www.reddit.com/r/stocks/comments/s0/t0/",
+                 "detail": "100 赞 · 20 评论", "published_cst": "2026-09-28 09:00",
+                 "community": "r/stocks", "is_today": True} for i in range(5)],
+                latest="2026-09-28"),
+            "实时行情": pipeline._source_result(
+                "quote", "success", is_today=True, content_date="2026-09-28",
+                quotes={"标普500": {"price": 6123.45, "change_pct": 1.25}}),
+        }
+
+    def _report(self, theme="guizang"):
+        """用真实渲染器产出一份带分条标记的日报（两个主题都要能被拆分）。"""
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False), \
+             patch.object(pipeline, "HK_QUANT_ENABLED", False):
+            return pipeline.generate_report(self._data(), "2026年9月28日 · 周一",
+                                            "20260928", theme=theme)
+
+    @staticmethod
+    def _visible(html):
+        """去掉注释、标签与空白后的可见文字（用于「一个字都不丢」的比对）。"""
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+        return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", html))
+
+    @staticmethod
+    def _balanced(html):
+        """所有非 void 标签都成对闭合（半截标签会让微信端整页排版崩坏）。"""
+        stack = []
+        for m in pipeline._TAG_RE.finditer(html):
+            tag, closing = m.group("tag").lower(), bool(m.group("close"))
+            if tag in pipeline._VOID_TAGS:
+                continue
+            if closing:
+                if not stack or stack[-1] != tag:
+                    return False
+                stack.pop()
+            else:
+                stack.append(tag)
+        return not stack
+
+    @staticmethod
+    def _body(html):
+        """原日报的正文区（第一个分条标记 → 页脚标记之间）。"""
+        return html[html.index(pipeline.PART_BREAK_MARK) + len(pipeline.PART_BREAK_MARK):
+                    html.index(pipeline.DOC_FOOT_MARK)]
+
+    @staticmethod
+    def _sections(html):
+        return [s for s in PushMultipartTests._body(html).split(pipeline.PART_BREAK_MARK)
+                if s.strip()]
+
+    def _chunks(self, html, parts, limit):
+        """从每条消息里剥出「正文块」（去掉外壳、条序横幅与页脚），用于逐字比对。"""
+        tail = html[html.index(pipeline.DOC_FOOT_MARK) + len(pipeline.DOC_FOOT_MARK):]
+        theme = pipeline._report_theme(html)
+        chunks = []
+        for index, part in enumerate(parts, 1):
+            banner = pipeline._build_part_banner(
+                index, len(parts), theme, limit,
+                tail_cut=(index == len(parts) and "已自动截断" in part))
+            start = part.index(banner) + len(banner)
+            chunks.append(part[start:len(part) - len(tail)])
+        return chunks
+
+    # ---------- 渲染侧：标记必须存在，否则推送只能退回截断 ----------
+    def test_generated_reports_carry_split_marks_in_both_themes(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html = self._report(theme)
+                self.assertGreaterEqual(html.count(pipeline.PART_BREAK_MARK), 3)
+                self.assertEqual(html.count(pipeline.DOC_FOOT_MARK), 1)
+                self.assertIn(f'name="octopus-theme" content="{theme}"', html)
+                # 标记顺序：刊头 → 各栏目 → 页脚 → 闭合标签
+                self.assertLess(html.index(pipeline.PART_BREAK_MARK),
+                                html.index(pipeline.DOC_FOOT_MARK))
+                self.assertTrue(self._balanced(html))
+                self.assertGreaterEqual(len(self._sections(html)), 3)
+
+    def test_marks_are_invisible_comments_and_survive_table_hardening(self):
+        html = self._report()
+        for mark in (pipeline.PART_BREAK_MARK, pipeline.DOC_FOOT_MARK):
+            self.assertTrue(mark.startswith("<!--") and mark.endswith("-->"))
+        self.assertEqual(pipeline._harden_wechat_table_widths(html).count(pipeline.PART_BREAK_MARK),
+                         html.count(pipeline.PART_BREAK_MARK))
+
+    # ---------- 拆分侧：每条都合法、都不超限、内容不丢 ----------
+    def test_parts_are_within_limit_and_each_a_complete_balanced_document(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.LIMIT[theme]
+                self.assertGreater(len(html), limit)          # 确实需要分条
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+                self.assertIsNotNone(parts)
+                self.assertGreater(len(parts), 1)
+                self.assertLessEqual(len(parts), pipeline.PUSHPLUS_MAX_PARTS)
+                for index, part in enumerate(parts, 1):
+                    with self.subTest(part=index):
+                        self.assertLessEqual(len(part), limit)
+                        self.assertTrue(self._balanced(part))
+                        self.assertTrue(part.startswith("<!DOCTYPE html>"))
+                        self.assertTrue(part.rstrip().endswith("</html>"))
+                        # 每条都是独立完整的一页：页脚免责声明也在
+                        # （guizang 作「仅供参考」，pixel 作「仅供投资参考」）
+                        self.assertIn("非投资建议", part)
+                        self.assertIn('<meta name="octopus-report-date" content="20260928">', part)
+
+    def test_every_section_is_delivered_verbatim_and_in_order(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.LIMIT[theme]
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+                sections = self._sections(html)
+                stream = "".join(self._chunks(html, parts, limit))
+                cursor = 0
+                for index, section in enumerate(sections, 1):
+                    with self.subTest(section=index):
+                        at = stream.find(section, cursor)
+                        self.assertGreaterEqual(at, 0, f"第 {index} 栏没送达（内容被丢了）")
+                        cursor = at + len(section)             # 顺序也必须与原日报一致
+                # 逐字相同：拼接后的正文 == 原日报正文（只少了分条标记本身）
+                self.assertEqual(stream,
+                                 self._body(html).replace(pipeline.PART_BREAK_MARK, ""))
+
+    def test_visible_text_is_not_lost_even_when_a_section_must_be_cut(self):
+        for theme in ("guizang", "pixel"):
+            with self.subTest(theme=theme):
+                html, limit = self._report(theme), self.TIGHT[theme]
+                parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME,
+                                                      max_parts=400)
+                self.assertIsNotNone(parts)
+                self.assertTrue(all(len(p) <= limit for p in parts))
+                self.assertTrue(all(self._balanced(p) for p in parts))
+                self.assertEqual(self._visible("".join(self._chunks(html, parts, limit))),
+                                 self._visible(self._body(html)))
+
+    def test_part_banner_and_title_show_sequence(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME)
+        total = len(parts)
+        self.assertGreater(total, 1)
+        for index, part in enumerate(parts, 1):
+            with self.subTest(part=index):
+                self.assertIn(f"第 {index}/{total} 条", part)
+                self.assertIn(f"（第 {index}/{total} 条）</title>", part)
+                if index < total:
+                    self.assertIn(f"接下条 {index + 1}/{total}", part)
+                else:
+                    self.assertNotIn("接下条", part)
+
+    # ---------- 兜底：条数超上限 / 旧版文件 / 外壳过大 ----------
+    def test_part_count_cap_stays_honest_about_undelivered_tail(self):
+        html, limit = self._report(), self.TIGHT["guizang"]
+        parts = pipeline._split_html_for_push(html, limit, self.REPORT_NAME, max_parts=3)
+        self.assertIsNotNone(parts)
+        self.assertEqual(len(parts), 3)                        # 不超过条数上限
+        self.assertTrue(all(len(p) <= limit for p in parts))
+        self.assertTrue(all(self._balanced(p) for p in parts))
+        self.assertIn("已自动截断", parts[-1])                  # 收尾条如实说明被截断
+        self.assertIn("完整日报", parts[-1])                    # 并给出完整版入口
+        self.assertIn("已达单次推送条数上限", parts[-1])
+        self.assertNotIn("已自动截断", parts[0])                # 前面的条不许谎称截断
+
+    def test_html_without_marks_falls_back_to_truncation(self):
+        legacy = ("<html><body><table><tr><td>" + "<div>旧版段落</div>" * 900
+                  + "</td></tr></table></body></html>")
+        self.assertNotIn(pipeline.PART_BREAK_MARK, legacy)
+        self.assertIsNone(pipeline._split_html_for_push(legacy, 6000, "old.html"))
+        out, truncated = pipeline._truncate_html_for_push(legacy, 6000, "old.html")
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(out), 6000)
+
+    def test_shell_bigger_than_limit_returns_none(self):
+        html = self._report()
+        # 上限连刊头都装不下 → 拆了也没意义，交给截断兜底
+        self.assertIsNone(pipeline._split_html_for_push(html, 400, self.REPORT_NAME))
+
+    def test_short_html_is_returned_as_is(self):
+        html = self._report()
+        self.assertEqual(pipeline._split_html_for_push(html, len(html) + 1), [html])
+
+    # ---------- 推送侧：多条依次发送、失败即停 ----------
+    def _push(self, html, responses, limit=None, multipart=True):
+        sent, sleeps = [], []
+        it = iter(responses)
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            resp = next(it)
+            if isinstance(resp, Exception):
+                raise resp
+            return resp
+
+        fake_time = types.SimpleNamespace(sleep=lambda s: sleeps.append(s))
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", limit or self.LIMIT["guizang"]), \
+             patch.object(pipeline, "PUSHPLUS_MULTIPART", multipart), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "time", fake_time):
+            ok = pipeline.push_to_wechat("🐙 章鱼AI日报 09/28 09:00", html,
+                                         token="abc", template="html",
+                                         report_name=self.REPORT_NAME)
+        return ok, sent, sleeps
+
+    def test_push_sends_every_part_with_numbered_titles(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        ok, sent, sleeps = self._push(html, [_FakeResp(200)] * expected, limit=limit)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), expected)                  # 每条都真的发出去了
+        for index, payload in enumerate(sent, 1):
+            with self.subTest(part=index):
+                self.assertEqual(payload["title"],
+                                 f"🐙 章鱼AI日报 09/28 09:00 ({index}/{expected})")
+                self.assertLessEqual(len(payload["content"]), limit)
+                self.assertEqual(payload["template"], "html")
+                self.assertNotIn("topic", payload)             # 默认仍是一对一
+        # 条与条之间按 PUSHPLUS_PART_DELAY 间隔，降低触发频率限制的概率
+        self.assertEqual(sleeps.count(pipeline.PUSHPLUS_PART_DELAY), expected - 1)
+
+    def test_push_covers_the_whole_report_not_just_the_first_part(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        ok, sent, _ = self._push(html, [_FakeResp(200)] * expected, limit=limit)
+        self.assertTrue(ok)
+        delivered = "".join(payload["content"] for payload in sent)
+        for section in self._sections(html):
+            self.assertIn(section, delivered)                  # 每一栏都在推送流里
+        self.assertEqual(self._visible(delivered).count("散户热帖"),
+                         self._visible(html).count("散户热帖"))
+
+    def test_push_stops_at_first_failed_part_and_returns_false(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        total = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        self.assertGreaterEqual(total, 3)
+        responses = ([_FakeResp(200), _FakeResp(500, "今日发送次数已达上限")]
+                     + [_FakeResp(200)] * total)
+        ok, sent, _ = self._push(html, responses, limit=limit)
+        self.assertFalse(ok)                                   # 未全部送达 → 失败（Actions 显红）
+        self.assertEqual(len(sent), 2)                         # 第 2 条失败后不再发第 3 条
+
+    def test_part_retry_uses_backoff_then_continues(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        total = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        responses = ([_FakeResp(500, "发送太频繁，请稍后再试"), _FakeResp(200)]
+                     + [_FakeResp(200)] * (total - 1))
+        ok, sent, sleeps = self._push(html, responses, limit=limit)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), total + 1)                 # 第 1 条重试一次后成功
+        self.assertIn(pipeline.PUSH_RETRY_BACKOFF[0], sleeps)  # 走的是既有退避节奏
+
+    def test_short_report_still_pushes_as_single_message(self):
+        html = self._report()
+        ok, sent, sleeps = self._push(html, [_FakeResp(200)], limit=len(html) + 1000)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)                         # 不超限就不拆，行为不变
+        self.assertEqual(sent[0]["title"], "🐙 章鱼AI日报 09/28 09:00")
+        self.assertEqual(sent[0]["content"], html)             # 原样发送，不加横幅
+        self.assertEqual(sleeps, [])
+
+    def test_multipart_switch_off_restores_legacy_truncation(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        ok, sent, _ = self._push(html, [_FakeResp(200)], limit=limit, multipart=False)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)                         # 只发一条
+        self.assertLessEqual(len(sent[0]["content"]), limit)
+        self.assertIn("已自动截断", sent[0]["content"])         # 旧行为：截断 + 完整版链接
+
+    def test_txt_alerts_are_never_split(self):
+        sent = []
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            return _FakeResp(200)
+
+        text = "告警正文" * 5000                                # 纯文本告警即使超长也不拆
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", 6000), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)):
+            ok = pipeline.push_to_wechat("🐙 告警", text, token="abc", template="txt")
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["content"], text)
+
+    def test_group_topic_is_carried_into_every_part(self):
+        html, limit = self._report(), self.LIMIT["guizang"]
+        expected = len(pipeline._split_html_for_push(html, limit, self.REPORT_NAME))
+        sent = []
+
+        def fake_post(url, json=None, timeout=None):
+            sent.append(json)
+            return _FakeResp(200)
+
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", limit), \
+             patch.object(pipeline, "PUSHPLUS_TOPIC", "oai.1"), \
+             patch.object(pipeline, "requests", types.SimpleNamespace(post=fake_post)), \
+             patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
+            ok = pipeline.push_to_wechat("🐙 章鱼AI日报 09/28 09:00", html, token="abc",
+                                         report_name=self.REPORT_NAME)
+        self.assertTrue(ok)
+        self.assertEqual(len(sent), expected)
+        self.assertTrue(all(p["topic"] == "oai.1" for p in sent))   # 一对多同样分条送达
 
 
 class PushRetryTests(unittest.TestCase):
@@ -2559,6 +2884,317 @@ class SectionAiJudgeTests(unittest.TestCase):
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             report = pipeline.generate_report(empty, "2026年9月27日 · 周日", "20260927")
         self.assertNotIn("⌁ AI 研判", report)
+
+
+class EconCalendarTests(unittest.TestCase):
+    """「未来 N 天影响经济时间点」栏目（东方财富财经日历 RPT_CPH_FECALENDAR）。
+
+    全程离线：接口用 mock 响应替换 safe_request。重点守住四件事——
+    ① 筛选口径确定可复现（噪音必须被剔除、重要度分级稳定）；
+    ② 窗口诚实（栏目写「未来 30 天」就不能出现 T+30 之外的行）；
+    ③ 前瞻日程不得单独打开推送闸门（is_today=False + snapshot=True）；
+    ④ 版面裁剪必须如实披露被裁条数，绝不静默丢内容。
+    """
+
+    TODAY = dt.date(2026, 9, 28)
+
+    # ---------- 工具 ----------
+    @staticmethod
+    def _row(day, hm, name, city, ftype="经济数据", std="2"):
+        return {"START_DATE": f"{day} {hm}:00", "END_DATE": None, "FE_CODE": "demo",
+                "FE_NAME": name, "FE_TYPE": ftype, "STD_TYPE_CODE": std, "CITY": city}
+
+    def _day(self, offset):
+        return (self.TODAY + dt.timedelta(days=offset)).isoformat()
+
+    def _rows(self):
+        """一批覆盖三类内容 + 各类噪音的样本行。"""
+        return [
+            # 经济数据：中美核心读数（★★★）、其他主要市场（★★）
+            self._row(self._day(1), "09:30", "中国:制造业PMI(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:环比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI(报告期:2026年09月)", "中国"),
+            self._row(self._day(4), "20:30", "美国:非农就业人数(报告期:2026年09月)", "美国"),
+            self._row(self._day(21), "10:00", "欧元区:PMI(报告期:2026年10月)", "欧元区"),
+            # 事件：主要央行议息（★★★）、中国宏观决策会议（★★★）、小国央行（★★）、展会（★）
+            self._row(self._day(28), "02:00", "美联储议息会议", "华盛顿", "美联储议息会议", "1"),
+            self._row(self._day(20), "10:00", "国民经济运行情况发布会", "北京",
+                      "国民经济运行情况发布会", "1"),
+            self._row(self._day(17), "15:00", "泰国央行公布利率决议", "曼谷", "利率决议", "1"),
+            self._row(self._day(13), "09:00", "2026上海国际汽车工业展览会", "上海", "展览会", "1"),
+            # 动态：会议纪要 / 周报（★★）、一般资讯（★）
+            self._row(self._day(9), "02:00", "美联储公布货币政策会议纪要", "美国", "", "2"),
+            self._row(self._day(15), "16:00", "台积电公布月度营业额", "中国台湾", "", "2"),
+            # 噪音：个股事项 / 非保留地区 / 冗余子序列 / 「:值」结尾 / 超长条目
+            self._row(self._day(6), "09:30", "中国:新股申购:某某科技", "中国", "", "2"),
+            self._row(self._day(8), "16:00", "中国:库存:铁矿石:46港", "中国"),
+            self._row(self._day(8), "09:30", "泰国:CPI:同比(报告期:2026年09月)", "泰国"),
+            self._row(self._day(9), "09:30", "中国:GDP:现价(报告期:2026年09月)", "中国"),
+            self._row(self._day(10), "20:30", "美国:货物出口金额:值", "美国"),
+            self._row(self._day(12), "09:30", "中国:某超长条目" + "很长" * 30, "中国"),
+            # 远期口径：条目保留、误导性报告期标注丢掉
+            self._row(self._day(16), "09:30", "中国:CPI:同比(报告期:2027年07月)", "中国"),
+        ]
+
+    def _fetch(self, rows=None, count=None, pages=1):
+        """用 mock 响应跑一次抓取；pages>1 时验证翻页。"""
+        rows = self._rows() if rows is None else rows
+        total = len(rows) if count is None else count
+        calls = []
+
+        def fake_request(url, headers=None, params=None, timeout=15, is_json=True):
+            calls.append(params)
+            page = int(params["pageNumber"])
+            if page > pages:
+                return {"success": True, "result": {"count": total, "data": []}}
+            per = max(1, len(rows) // pages)
+            chunk = rows[(page - 1) * per:page * per] if page <= pages else []
+            return {"success": True, "result": {"count": total, "data": chunk}}
+
+        with patch.object(pipeline, "safe_request", fake_request), \
+             patch.object(pipeline.time, "sleep", lambda *_: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        return res, calls
+
+    def _data(self, cal=None, with_today_source=True):
+        data = {}
+        if with_today_source:
+            data["实时行情"] = pipeline._source_result(
+                "quote", "success", is_today=True, content_date=self.TODAY.isoformat(),
+                quotes={"上证指数": {"price": 3812.66, "change_pct": 0.31}})
+        if cal is not None:
+            data["财经日历"] = cal
+        return data
+
+    def _report(self, data, theme="guizang"):
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False), \
+             patch.object(pipeline, "HK_QUANT_ENABLED", False):
+            return pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
+                                            theme=theme)
+
+    # ---------- ① 筛选口径 ----------
+    def test_classify_keeps_core_readings_and_drops_noise(self):
+        kept = [it for it in (pipeline._cal_classify(r) for r in self._rows()) if it]
+        names = [it["name"] for it in kept]
+        self.assertIn("制造业PMI", names)
+        self.assertIn("非农就业人数", names)
+        # 噪音必须全部剔除
+        for noise in ("新股申购", "铁矿石", "现价", "货物出口金额", "某超长条目"):
+            self.assertNotIn(noise, "".join(names), f"{noise} 不应进正文")
+        # 非保留地区的读数不进正文（泰国 CPI），但小国央行「事件」仍保留为 ★★
+        self.assertFalse(any(it["city"] == "泰国" and it["kind"] == 0 for it in kept))
+        self.assertTrue(any("泰国央行" in it["name"] for it in kept))
+
+    def test_importance_tiers_are_stable(self):
+        kept = [it for it in (pipeline._cal_classify(r) for r in self._rows()) if it]
+        by_name = {it["name"]: it for it in kept}
+        self.assertEqual(by_name["制造业PMI"]["imp"], 3)          # 中国一级读数
+        self.assertEqual(by_name["非农就业人数"]["imp"], 3)        # 美国一级读数
+        self.assertEqual(by_name["PMI"]["imp"], 2)                # 欧元区一级读数 → ★★
+        self.assertEqual(by_name["美联储议息会议"]["imp"], 3)
+        self.assertEqual(by_name["国民经济运行情况发布会"]["imp"], 3)
+        self.assertEqual(by_name["泰国央行公布利率决议"]["imp"], 2)  # 小国央行
+        self.assertEqual(by_name["2026上海国际汽车工业展览会"]["imp"], 1)  # 展会
+        self.assertEqual(by_name["美联储公布货币政策会议纪要"]["kind"], 2)  # 动态
+        self.assertLessEqual(by_name["美联储公布货币政策会议纪要"]["imp"], 2)
+
+    def test_event_importance_reads_name_not_city_field(self):
+        """事件行的 CITY 常是城市名（华盛顿 / 法兰克福），不能拿它当国家判定。"""
+        fed = pipeline._cal_classify(self._row(self._day(5), "02:00", "美联储议息会议",
+                                               "华盛顿", "美联储议息会议", "1"))
+        self.assertEqual(fed["imp"], 3)
+        minor = pipeline._cal_classify(self._row(self._day(5), "15:00", "某国央行公布利率决议",
+                                                 "未知市", "利率决议", "1"))
+        self.assertEqual(minor["imp"], 2)
+
+    def test_far_future_period_label_dropped_but_item_kept(self):
+        item = pipeline._cal_classify(
+            self._row(self._day(16), "09:30", "中国:CPI:同比(报告期:2027年07月)", "中国"))
+        self.assertIsNotNone(item, "远期口径不应整条丢掉")
+        self.assertEqual(item["period"], "", "误导性报告期标注必须丢掉")
+        normal = pipeline._cal_classify(
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"))
+        self.assertEqual(normal["period"], "2609")
+        self.assertEqual(pipeline._cal_period_label("2609", self.TODAY), "9月")
+        self.assertEqual(pipeline._cal_period_label("2701", self.TODAY), "2027年1月")
+
+    def test_dedupe_merges_same_indicator_variants_into_one_row(self):
+        rows = [
+            self._row(self._day(11), "09:30", "中国:CPI:同比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI:环比(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:CPI(报告期:2026年09月)", "中国"),
+            self._row(self._day(11), "09:30", "中国:核心CPI:同比(报告期:2026年09月)", "中国"),
+        ]
+        items = pipeline._cal_dedupe([it for it in (pipeline._cal_classify(r) for r in rows) if it])
+        cpi = [it for it in items if pipeline._cal_base_of(it["name"]) == "CPI"]
+        self.assertEqual(len(cpi), 1, "同比 / 环比 / 裸名应合并成一行")
+        self.assertEqual(cpi[0]["kou"], ["同比", "环比"])
+        self.assertIn("CPI:同比/环比", pipeline._cal_item_text(cpi[0], self.TODAY))
+        # 核心CPI 是另一个指标，不能被合并掉
+        self.assertTrue(any("核心CPI" in it["name"] for it in items))
+
+    def test_strip_country_prefix_without_hurting_real_words(self):
+        self.assertEqual(pipeline._cal_strip_country("美国:CPI:同比", "美国"), "CPI:同比")
+        self.assertEqual(pipeline._cal_strip_country("美国EIA原油库存", "美国"), "EIA原油库存")
+        # 「中国银行间同业拆借」里的「中国」是词的一部分，不能剥
+        self.assertEqual(pipeline._cal_strip_country("中国银行间同业拆借", "中国"),
+                         "中国银行间同业拆借")
+
+    # ---------- ② 窗口诚实 ----------
+    def test_rows_outside_window_are_clamped_locally(self):
+        rows = self._rows() + [self._row(self._day(32), "19:00", "欧洲央行公布利率决议",
+                                         "法兰克福", "利率决议", "1")]
+        res, _ = self._fetch(rows=rows)
+        self.assertEqual(res["status"], "success")
+        dates = {it["date"] for it in res["items"]}
+        self.assertNotIn(self._day(32), dates, "T+32 不得出现在「未来30天」栏目里")
+        self.assertNotIn(self._day(32), res["window"])
+        self.assertTrue(all(self.TODAY.isoformat() <= d <= self._day(30) for d in dates))
+
+    def test_paging_follows_server_count(self):
+        rows = self._rows()
+        res, calls = self._fetch(rows=rows, count=len(rows) * 2, pages=2)
+        self.assertEqual(res["status"], "success")
+        self.assertGreaterEqual(len(calls), 2, "count 未取满时必须继续翻页")
+        self.assertEqual(calls[0]["reportName"], "RPT_CPH_FECALENDAR")
+        self.assertIn("START_DATE>='2026-09-28'", calls[0]["filter"])
+        self.assertIn("START_DATE<'2026-10-29'", calls[0]["filter"])
+
+    def test_failure_degrades_to_zanque_with_reason(self):
+        with patch.object(pipeline, "safe_request", lambda *a, **k: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        self.assertEqual(res["status"], "failed")
+        self.assertTrue(res.get("error"), "失败必须给出原因，不能静默")
+        self.assertEqual(res["items"], [])
+        self.assertFalse(res.get("is_today"))
+        self.assertFalse(res.get("snapshot"))
+
+    def test_empty_window_is_reported_as_failure_not_as_empty_calendar(self):
+        with patch.object(pipeline, "safe_request",
+                          lambda *a, **k: {"success": True, "result": {"count": 0, "data": []}}):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        self.assertEqual(res["status"], "failed")
+        self.assertIn("接口未返回窗口内日程", res["error"])
+
+    # ---------- ③ 推送闸门与审计口径 ----------
+    def test_calendar_alone_never_unlocks_push_gate(self):
+        """前瞻日程不是「当天内容」：只有它成功时仍不得推送（防旧内容/空报告）。"""
+        res, _ = self._fetch()
+        can_push, reason = pipeline.check_push_eligibility(self._data(res, with_today_source=False))
+        self.assertFalse(can_push)
+        self.assertIn("当天检验未通过", reason)
+        self.assertFalse(res["is_today"])
+        self.assertTrue(res["snapshot"], "应标为「今日抓取」快照，而不是当天发布")
+
+    def test_calendar_does_not_change_today_source_count(self):
+        res, _ = self._fetch()
+        base = self._report(self._data(with_today_source=True))
+        with_cal = self._report(self._data(res))
+        meta_base = pipeline._report_meta(base)
+        meta_cal = pipeline._report_meta(with_cal)
+        self.assertEqual(meta_cal["today_sources"], meta_base["today_sources"])
+        self.assertEqual(meta_cal["total_sources"], meta_base["total_sources"] + 1)
+
+    def test_absent_calendar_keeps_source_count_unchanged(self):
+        """OCTOPUS_CALENDAR=0 时不采集 → 不进审计，总源数与改动前一致（+1 只在采集时发生）。"""
+        base = pipeline._report_meta(self._report(self._data(with_today_source=True)))
+        res, _ = self._fetch()
+        with_cal = pipeline._report_meta(self._report(self._data(res)))
+        self.assertEqual(base["total_sources"], 9, "基础审计源数量不应被本次改动改变")
+        self.assertEqual(with_cal["total_sources"], base["total_sources"] + 1)
+
+    def test_failed_calendar_is_named_in_coverage_line(self):
+        with patch.object(pipeline, "safe_request", lambda *a, **k: None):
+            res = pipeline.fetch_econ_calendar(today=self.TODAY)
+        html = self._report(self._data(res))
+        self.assertNotIn("未来30天影响经济时间点", html, "抓取失败的栏目不进正文")
+        self.assertRegex(html, r"暂缺：[^<]*财经日历")
+
+    # ---------- ④ 排版与披露 ----------
+    def test_section_renders_right_after_conclusion_in_both_themes(self):
+        res, _ = self._fetch()
+        for theme, markers in (
+            ("guizang", ["今日结论</h2>", "未来30天影响经济时间点</h2>", "行情速览</h2>"]),
+            ("pixel", ["LVL 01 // CONCLUSION", "LVL 02 // ECON CALENDAR",
+                       "LVL 03 // MARKET SNAPSHOT"]),
+        ):
+            html = self._report(self._data(res), theme=theme)
+            positions = [html.find(m) for m in markers]
+            self.assertNotIn(-1, positions, f"{theme} 栏目缺失: {markers}")
+            self.assertEqual(positions, sorted(positions),
+                             f"{theme} 新栏目必须紧跟今日结论、在行情速览之前")
+
+    def test_section_body_carries_window_summary_and_star_levels(self):
+        res, _ = self._fetch()
+        html = self._report(self._data(res))
+        for text in ("窗口摘要", "时间窗口", "时间点合计", "央行议息 / 重要会议",
+                     "中国关键读数", "美国关键读数", "最密集日", "筛选口径",
+                     "逐日时间点（北京时间）", "★★★", "美联储议息会议"):
+            self.assertIn(text, html, f"摘要/正文缺少 {text}")
+        self.assertIn("未来 30 天", html)
+        # 每个列出的时间点都要能看到地区与类型标签（数据 / 事件 / 动态）
+        self.assertIn("数据", html)
+        self.assertIn("事件", html)
+
+    def test_row_cap_discloses_every_dropped_item_by_level(self):
+        rows = []
+        for i in range(70):                      # 造出远超上限的 ★★★ 条目
+            rows.append(self._row(self._day(1 + i % 29), f"{9 + i % 8}:30",
+                                  f"中国:CPI:同比{i}(报告期:2026年09月)", "中国"))
+        res, _ = self._fetch(rows=rows)
+        limit = pipeline.ECON_CALENDAR_MAX_ROWS
+        self.assertEqual(len(res["items"]), limit)
+        self.assertEqual(res["dropped"], len(rows) - limit)
+        self.assertEqual(sum(int(v) for v in res["dropped_imp"].values()), res["dropped"])
+        digest = pipeline._cal_digest(res, self.TODAY)
+        total_line = dict(digest["pairs"])["时间点合计"]
+        self.assertIn(f"版面另有 {res['dropped']} 条未列出", total_line)
+        self.assertIn("★★★", total_line, "被裁条目的重要度分布必须写清楚")
+
+    def test_low_importance_rows_are_cut_before_core_readings(self):
+        rows = self._rows() + [
+            self._row(self._day(2), "09:00", f"某展会{i}届博览会", "上海", "博览会", "1")
+            for i in range(80)
+        ]
+        with patch.object(pipeline, "ECON_CALENDAR_MAX_ROWS", 20):
+            res, _ = self._fetch(rows=rows)
+        names = "".join(it["name"] for it in res["items"])
+        self.assertIn("美联储议息会议", names, "★★★ 事件不能被 ★ 级展会挤掉")
+        self.assertIn("制造业PMI", names)
+        self.assertLessEqual(sum(1 for it in res["items"] if it["imp"] == 1), 20 - 8)
+
+    def test_digest_counts_match_items(self):
+        res, _ = self._fetch()
+        digest = pipeline._cal_digest(res, self.TODAY)
+        pairs = dict(digest["pairs"])
+        counts = pipeline._cal_imp_counts(res["items"])
+        self.assertIn(f"{len(res['items'])} 个", pairs["时间点合计"])
+        self.assertIn(f"★★★ {counts['3']}", pairs["时间点合计"])
+        day_items = sum(len(items) for _d, _l, _t, items in digest["days"])
+        self.assertEqual(day_items, len(res["items"]), "逐日展开必须与条目数一致")
+        # 摘要里点名的时间点必须真的在列表里（不得凭空生成日程）
+        for label in ("央行议息 / 重要会议", "中国关键读数", "美国关键读数"):
+            for chunk in re.split(r"[、,]", pairs[label].split(" 等 ")[0]):
+                name = chunk.split(" ", 1)[-1].strip()
+                if name and name != "窗口内暂无":
+                    self.assertIn(name[:6], "".join(it["name"] for it in res["items"]),
+                                  f"{label} 里的 {name} 不在抓取结果中")
+
+    def test_calendar_block_renders_in_both_kits_and_stays_balanced(self):
+        res, _ = self._fetch()
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            block = kit.calendar_block(res)
+            self.assertIn("窗口摘要", block)
+            self.assertEqual(block.count("<table"), block.count("</table>"),
+                             "表格必须成对闭合（微信端半截标签会整页崩版）")
+
+    def test_calendar_only_cli_mode_prints_without_pushing(self):
+        res, _ = self._fetch()
+        with patch.object(pipeline, "fetch_econ_calendar", lambda days=None: res), \
+             patch.object(pipeline, "push_to_wechat", lambda *a, **k: self.fail("研究模式不得推送")), \
+             patch.object(pipeline, "generate_report", lambda *a, **k: self.fail("研究模式不得生成日报")):
+            self.assertEqual(pipeline.calendar_only_report(), 0)
 
 
 if __name__ == "__main__":
