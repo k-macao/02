@@ -34,7 +34,10 @@ class ReportFreshnessTests(unittest.TestCase):
         # 精简排版：缺失品种不出「数据暂缺」行，来源状态压成盘点总结里的一行
         self.assertNotIn("数据暂缺", html)
         self.assertIn("盘点总结", html)
-        self.assertRegex(html, r"暂缺：[^<]*全球头条[^<]*A股资讯")
+        self.assertNotIn("暂缺：全球头条", html)
+        self.assertNotIn("暂缺：A股资讯", html)
+        # 两个来源不再作为正文缺失项提示，底层数据源审计总数保持不变。
+        self.assertEqual(pipeline._report_meta(html)["total_sources"], 9)
         self.assertNotIn("51,618 -2.19%", html)
         self.assertNotIn("3,813 +0.40%", html)
 
@@ -411,7 +414,9 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("A股成交量前五", html)
         self.assertNotIn("港股成交量前五", html)
         self.assertNotIn("美股成交量前五", html)
-        self.assertIn("美联储释放降息信号", html)
+        self.assertNotIn("全球头条</h2>", html)
+        self.assertNotIn("A股资讯</h2>", html)
+        # 原始头条可继续作为风险提示的分析证据，但不会出现原栏目标题。
         # 不再渲染 AI 总览相关元素
         self.assertNotIn("AI 总览", html)
         self.assertNotIn("栏目 AI 研判表", html)
@@ -449,7 +454,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("LVL 02 // MARKET SNAPSHOT", html)
         self.assertIn("// QUANT POLICY", html)
         self.assertIn("// QUANT STRATEGY", html)
-        self.assertIn("LVL 08 // WRAP-UP", html)  # 盘点收尾
+        self.assertIn("LVL 07 // WRAP-UP", html)  # 删除两个栏目后关卡号顺延
         self.assertIn("QUANT CORE", html)
         self.assertIn("量化主结论 // QUANT THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
@@ -731,10 +736,9 @@ class GuizangThemeTests(unittest.TestCase):
         )
 
     def test_guizang_news_lists_wrap_rows_in_table_not_bare_tr(self):
-        """全球头条 / 东财快讯 / A股资讯 的 <tr> 必须包在 <table> 里。
+        """只保留的东财快讯行必须正确包在 <table> 中，删除栏目不得渲染。
 
-        旧版把 gz_headline_row / gz_em_news_row / gz_item_row 产出的裸 <tr>
-        直接塞进章节 <div>，微信 / PushPlus 会丢掉行或把序号与标题挤成一团。
+        旧版将原始行直接塞进章节 <div>，微信 / PushPlus 会丢掉行或把序号与标题挤在一起。
         """
         data = NewLayoutRenderingTests()._rich_data()
         data["A股资讯"] = pipeline._source_result(
@@ -742,9 +746,10 @@ class GuizangThemeTests(unittest.TestCase):
             headlines=["国务院部署进一步释放消费潜力"])
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         self.assertNotRegex(html, r"<div[^>]*>\s*<tr\b")
-        self.assertIn("美联储释放降息信号", html)
+        self.assertNotIn("全球头条</h2>", html)
+        self.assertNotIn("A股资讯</h2>", html)
         self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("国务院部署进一步释放消费潜力", html)
+        self.assertNotIn("国务院部署进一步释放消费潜力", html)
         # 刊头三列禁止 break-all，避免日期被微信逐字拆开
         self.assertNotIn("word-break:break-all", html)
         # pixel 主题每行本就是独立 table，同样不能裸 tr
@@ -1953,27 +1958,27 @@ class ReportInnerDedupeTests(unittest.TestCase):
             "url": "", "published_cst": "2026-08-02 11:00", "is_today": True})
         return data
 
-    def test_pixel_risk_shown_title_renders_reference_only(self):
-        """正文已展示的风险标题：风险区仅引用定位，全文只出现一次。"""
+    def test_pixel_risk_from_removed_section_is_rendered_without_dead_link(self):
+        """已删除的资讯栏目不提供锚点；风险策略仍可展示原始标题。"""
         html = pipeline.generate_report(
             self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
-        self.assertEqual(html.count(self.RISK_TITLE), 1)  # 全文只在正文全球头条出现
-        self.assertIn("「全球头条」第02条", html)          # 风险区仅引用定位
-        self.assertIn('href="#h-gh-02"', html)             # 引用可跳回正文
-        self.assertIn('id="h-gh-02"', html)                # 正文锚点存在
-        self.assertIn("命中：", html)                      # 引用携带命中关键词（新增信息）
+        self.assertEqual(html.count(self.RISK_TITLE), 1)  # 标题仅作为风险提示出现一次
+        self.assertNotIn("「全球头条」第02条", html)
+        self.assertNotIn('href="#h-gh-02"', html)          # 不留下失效的栏目锚点
+        self.assertNotIn('id="h-gh-02"', html)
+        self.assertIn("命中：", html)                      # 风险提示保留命中关键词
         res = pipeline.build_ai_analysis(self._dedupe_data())
         risk = [r for r in res["risks"] if r["title"] == self.RISK_TITLE][0]
-        self.assertTrue(risk["shown"])
+        self.assertFalse(risk["shown"])
         self.assertIn("暴跌", risk["keywords"])
 
-    def test_guizang_risk_reference_and_tech_aggregate(self):
-        """guizang 主题同样去重：风险引用 + 动能聚合。"""
+    def test_guizang_risk_from_removed_section_and_tech_aggregate(self):
+        """guizang 主题不引用已删除的栏目锚点，保留风险详情与动能聚合。"""
         html = pipeline.generate_report(
             self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertEqual(html.count(self.RISK_TITLE), 1)
-        self.assertIn("「全球头条」第02条", html)
-        self.assertIn('href="#h-gh-02"', html)
+        self.assertNotIn("「全球头条」第02条", html)
+        self.assertNotIn('href="#h-gh-02"', html)
         self.assertIn("指数动能", html)
         self.assertIn("4 个指数", html)
         self.assertNotIn("明细数值见「行情速览」", html)
@@ -2701,9 +2706,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         "A股大盘全景复盘</h2>",
         "每日量化策略（政策因子趋势预判）</h2>",
         "每日量化策略（板块趋势跟踪）</h2>",
-        "全球头条</h2>",
         "东方财富快讯</h2>",
-        "A股资讯</h2>",
         "港股名家频道</h2>",
         "AI 新闻情绪因子</h2>",
         "盘点总结</h2>",
@@ -2725,9 +2728,8 @@ class SectionReadingOrderTests(unittest.TestCase):
             "LVL 01 // CONCLUSION",
             "LVL 02 // MARKET SNAPSHOT", "LVL 03 // A-SHARE PANORAMA",
             "LVL 04 // QUANT POLICY", "LVL 05 // QUANT STRATEGY",
-            "LVL 06 // GLOBAL HEADLINES", "LVL 07 // EASTMONEY WIRE",
-            "LVL 08 // A-SHARE DESK", "LVL 09 // HK GURU CHANNELS",
-            "LVL 10 // NEWS SENTIMENT", "LVL 11 // WRAP-UP",
+            "LVL 06 // EASTMONEY WIRE", "LVL 07 // HK GURU CHANNELS",
+            "LVL 08 // NEWS SENTIMENT", "LVL 09 // WRAP-UP",
         ]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "存在未渲染的 LVL 关卡")
@@ -2872,8 +2874,8 @@ class SectionAiJudgeTests(unittest.TestCase):
                 with self.subTest(theme=theme):
                     report = pipeline.generate_report(
                         data, "2026年9月27日 · 周日", "20260927", theme=theme)
-                    # 有数据的 3 个栏目各一条研判行
-                    self.assertEqual(report.count("⌁ AI 研判"), 3)
+                    # 全球头条已从正文删除；其余有数据的 2 个栏目各一条研判行
+                    self.assertEqual(report.count("⌁ AI 研判"), 2)
                     self.assertIn("多头", report)
                     self.assertIn("空头", report)
                     self.assertRegex(report, r"多头 \d{2}%")
