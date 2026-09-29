@@ -4467,13 +4467,24 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
     anchors = list(row_anchors or [])
     while len(anchors) < len(rows):
         anchors.append(None)
-    # 表级默认对齐取该表里最常见的对齐方式：只有「少数派」单元格才写 text-align
-    default_align = max(set(aligns), key=aligns.count)
-    # 单元格不写任何内联样式：列距由表级 border-spacing 负责，表头只写浅灰
+    # 表级默认对齐（左/右二选一）按「谁要写的单元格更少」定，表头固定左对齐也计入成本：
+    # 多数表是「首列文字 + 其余数字右对齐」，选右默认只需给首列补 left，比逐行补 right 省一半。
+    def _align_cost(default):
+        cost = 0
+        if default != "left" and headers:
+            cost += len(headers) * 18                     # 表头固定左对齐，逐格补 text-align
+        cost += sum(18 for a in aligns if a != default) * len(rows)   # 每行都要重复写
+        if default == "right" and any(a != default for a in aligns):
+            cost += 17                                    # 表级 text-align:right;
+        return cost
+    default_align = "right" if _align_cost("right") < _align_cost("left") else "left"
+
     def _cell(html, i, *, head=False, anchor=None):
         css = []
         if head:
             css.append(f"color:{GZ_FAINT}")
+            if default_align != "left":
+                css.append("text-align:left")
         elif aligns[i] != default_align:
             css.append(f"text-align:{aligns[i]}")
         attr = f' id="{_esc(anchor)}"' if anchor else ""
@@ -4488,15 +4499,14 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
         trs.append("<tr>" + "".join(
             _cell(row[i] if i < len(row) else "", i,
                   anchor=(anchors[ri] if i == 0 else None)) for i in range(n)) + "</tr>")
-    align_css = "" if default_align == "left" else f"text-align:{default_align};"
+    align_css = f"text-align:{default_align};" if default_align == "right" else ""
     cols = ('<colgroup>' + "".join(
         f'<col style="width:{widths[i]}">' if widths[i] else "<col>"
         for i in range(n)) + "</colgroup>") if any(widths) else ""
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="width:100%!important;border-collapse:separate;'
-        f'border-spacing:6px 4px;{align_css}'
-        f'font-size:{GZ_FS_TABLE}px;line-height:1.55">'
+        f'border-spacing:6px 4px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.55">'
         f'{cols}{"".join(trs)}</table>'
     )
 

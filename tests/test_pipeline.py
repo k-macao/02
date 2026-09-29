@@ -629,14 +629,26 @@ class GuizangThemeTests(unittest.TestCase):
         parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
         self.assertEqual(len(parts or []), 1)
 
-    def test_full_report_fits_single_push_message(self):
-        """一页推：常规栏目的完整日报必须在单条上限内，且拆分为恰好 1 条"""
+    def test_multipart_split_keeps_every_section_and_cell(self):
+        """超限时按栏目边界全量分条：每段不超限、栏目不重不漏、正文一格不少"""
         data = SectionReadingOrderTests()._full_data()
         data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
-        parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
-        self.assertEqual(len(parts or []), 1)
+        limit = 6000
+        parts = pipeline._split_html_for_push(html, limit)
+        self.assertIsNotNone(parts)
+        self.assertGreater(len(parts), 1)
+        for index, part in enumerate(parts, 1):
+            self.assertLessEqual(len(part), limit, f"第 {index} 条超过单条上限")
+        for title in re.findall(r"<h2[^>]*>([^<]+)</h2>", html):
+            hits = sum(1 for part in parts if f">{title}</h2>" in part)
+            self.assertEqual(hits, 1, f"栏目「{title}」在 {len(parts)} 条里出现 {hits} 次")
+        def flat(chunk):
+            return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", re.sub(r"<!--.*?-->", "", chunk, flags=re.S)))
+        joined = flat("".join(parts))
+        cells = [flat(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", html, re.S)]
+        missing = [cell for cell in cells if cell and cell not in joined]
+        self.assertEqual(missing[:3], [], f"{len(missing)} 个单元格文字在分条后丢失")
 
 
 class GuizangOnePageTests(unittest.TestCase):
@@ -644,7 +656,7 @@ class GuizangOnePageTests(unittest.TestCase):
 
     口径：全量内容（含量化三段真实引擎产物、60 条日程、五路资讯、多平台趋势线索）
     渲染后 ≤ PUSHPLUS_MAX_CONTENT_CHARS，「按栏目分条」只需 1 条 → 微信端一页推。
-    真正超限的极重日仍按栏目边界全量分条（见 PushParts* 测试），不截断、不摘要。
+    真正超限的极重日仍按栏目边界全量分条（见 test_multipart_split_keeps_every_section_and_cell），不截断、不摘要。
     """
 
     def _heavy_data(self):
