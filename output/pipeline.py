@@ -192,7 +192,8 @@ import json
 import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from html import unescape as _html_unescape
+from html import escape as _html_escape, unescape as _html_unescape
+from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlparse
 from datetime import datetime, timezone, timedelta
 
@@ -9394,6 +9395,137 @@ def _truncate_html_for_push(html, limit=PUSHPLUS_MAX_CONTENT_CHARS, report_name=
 
 
 # ------------------------------------------------------------
+# PushPlus 精简版正文：原始页面过长时去除装饰性 HTML，保留栏目、全部文字和链接
+# ------------------------------------------------------------
+class _PushTextExtractor(HTMLParser):
+    """把一个 HTML 栏目转换成轻量文本；表格单元格、行和链接边界都会保留。"""
+
+    _BLOCKS = {"div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "tr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.links = []
+        self.active_link = None
+        self.skip_heading = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "h2":
+            self.skip_heading += 1
+        if self.skip_heading:
+            return
+        href = attrs.get("href", "")
+        if tag == "a" and (urlparse(href).scheme.lower() in {"http", "https"} or href.startswith("#")):
+            self.active_link = [href, []]
+        elif tag == "td" and self.parts and not self.parts[-1].endswith(("\n", " ", "|")):
+            self.parts.append(" | ")
+        elif tag == "br" or tag in self._BLOCKS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "h2" and self.skip_heading:
+            self.skip_heading -= 1
+        if self.skip_heading:
+            return
+        if tag == "a" and self.active_link:
+            href, label = self.active_link
+            marker = f"\x01{len(self.links)}\x02"
+            self.links.append(("".join(label).strip(), href))
+            self.parts.append(marker)
+            self.active_link = None
+        elif tag == "td":
+            self.parts.append(" ")
+        elif tag == "br" or tag in self._BLOCKS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if self.skip_heading:
+            return
+        if self.active_link:
+            self.active_link[1].append(data)
+        else:
+            self.parts.append(data)
+
+    def text(self):
+        text = "".join(self.parts)
+        text = re.sub(r"[\t\f\v ]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        text = _html_escape(text, quote=False)
+        for index, (label, href) in enumerate(self.links):
+            marker = f"\x01{index}\x02"
+            safe_href = _html_escape(href, quote=True)
+            safe_label = _html_escape(label or href)
+            text = text.replace(marker, f'<a href="{safe_href}" style="color:#2563EB;text-decoration:underline;">{safe_label}</a>')
+        return text
+
+
+def _compact_html_for_push(html):
+    """生成轻量推送版，保留原文所有可见文字和超链接，移除重复装饰/复杂表格包装。
+
+    完整、原样的精美 HTML 仍保存于磁盘与 GitHub；此版本只用于在平台单条字数限制下
+    尽量减少微信消息条数。输出仍按栏目分段，因此压缩后仍超限时可以安全续拆。
+    """
+    first_break = html.find(PART_BREAK_MARK)
+    foot_at = html.find(DOC_FOOT_MARK)
+    if first_break < 0 or foot_at < first_break:
+        return None
+
+    body = html[first_break + len(PART_BREAK_MARK):foot_at]
+    sections = [section for section in body.split(PART_BREAK_MARK) if section.strip()]
+    if not sections:
+        return None
+
+    report_date = ""
+    date_match = re.search(r'<meta name="octopus-report-date" content="([^"]+)"', html)
+    if date_match:
+        report_date = date_match.group(1)
+    body_open = re.search(r"<body\b[^>]*>(.*)$", html[:first_break], re.I | re.S)
+    intro_parser = _PushTextExtractor()
+    if body_open:
+        intro_parser.feed(body_open.group(1))
+    intro = intro_parser.text()
+    footer_parser = _PushTextExtractor()
+    footer_parser.feed(html[foot_at + len(DOC_FOOT_MARK):])
+    footer = footer_parser.text()
+    shell = (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>章鱼 AI · 打氧日报（精简版）</title></head>'
+        '<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
+        'font-size:15px;line-height:1.7;color:#111;background:#fff;">'
+        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;">章鱼 AI · 打氧日报</h1>'
+        f'<div style="font-size:12px;color:#666;margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
+        f'<div style="font-size:13px;line-height:1.6;margin-bottom:12px;">{intro}</div>'
+    )
+    output = [shell]
+    for number, section in enumerate(sections, 1):
+        heading = re.search(r"<h2\b[^>]*>(.*?)</h2>", section, re.I | re.S)
+        title = ""
+        if heading:
+            title_parser = _PushTextExtractor()
+            title_parser.feed(heading.group(1))
+            title = title_parser.text().strip()
+        parser = _PushTextExtractor()
+        parser.feed(section)
+        content = parser.text()
+        if title and content.startswith(title):
+            content = content[len(title):].lstrip(" \n")
+        if not title:
+            title = f"日报栏目 {number}"
+        output.append(
+            f'{PART_BREAK_MARK}<section style="padding:10px 0 14px;border-top:1px solid #aaa;">'
+            f'<h2 style="font-size:18px;line-height:1.5;margin:0 0 6px;font-weight:700;">'
+            f'{_html_escape(title)}</h2>'
+            f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;">{content}</div>'
+            '</section>'
+        )
+    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:#555;">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
+    return "".join(output)
+
+
+# ------------------------------------------------------------
 # PushPlus 分条完整推送（2026-09-28 起）
 # ------------------------------------------------------------
 # 日报（含港股量化引擎后）常有 15~25 万字，远超单条 10 万字上限；旧做法在 10 万字处
@@ -9628,6 +9760,21 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
     if template == "html" and len(content_html) > PUSHPLUS_MAX_CONTENT_CHARS:
         parts = _split_html_for_push(content_html, PUSHPLUS_MAX_CONTENT_CHARS,
                                      report_name) if PUSHPLUS_MULTIPART else None
+        if PUSHPLUS_MULTIPART:
+            compact_html = _compact_html_for_push(content_html)
+            compact_parts = None
+            if compact_html:
+                compact_parts = (_split_html_for_push(compact_html, PUSHPLUS_MAX_CONTENT_CHARS,
+                                                      report_name)
+                                 if len(compact_html) > PUSHPLUS_MAX_CONTENT_CHARS
+                                 else [compact_html])
+            # 长报表优先用「精简排版」完整送达；仅当它确实减少消息条数时才切换，
+            # 否则保留原有精美 HTML 分条，避免为了压缩而改变短报表的阅读体验。
+            if compact_parts and (not parts or len(compact_parts) < len(parts)):
+                print(f"  📚 日报 {len(content_html):,} 字；精简排版保留全文文字与链接，"
+                      f"预计由 {len(parts) if parts else '多'} 条减少至 {len(compact_parts)} 条"
+                      f"（完整精美版仍保存在日报文件中）")
+                return _push_html_parts(title, compact_parts, token=token, topic=topic)
         if parts:
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
                   f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"

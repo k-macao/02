@@ -19,6 +19,25 @@ spec.loader.exec_module(pipeline)
 
 
 class ReportFreshnessTests(unittest.TestCase):
+    def test_compact_push_html_preserves_section_text_and_clickable_links(self):
+        original = (
+            '<!doctype html><html><head><meta name="octopus-report-date" content="20260929"></head>'
+            '<body><header>刊头</header><!--SPLIT--><section><h2>市场复盘</h2>'
+            '<table style="' + ('padding:0;margin:0;border-collapse:collapse;' * 50) + '"><tr><td>收盘</td><td>恒指 24643 点，涨幅 +1.2% '
+            '<a href="https://example.com/report?a=1&amp;b=2">查看原文</a></td></tr></table>'
+            '</section><!--FOOT--><footer>免责声明</footer></body></html>'
+        )
+        compact = pipeline._compact_html_for_push(original)
+        self.assertIsNotNone(compact)
+        self.assertLess(len(compact), len(original))
+        self.assertIn("市场复盘", compact)
+        self.assertIn("恒指 24643 点，涨幅 +1.2%", compact)
+        self.assertIn('href="https://example.com/report?a=1&amp;b=2"', compact)
+        self.assertIn("查看原文", compact)
+        self.assertIn("刊头", compact)
+        self.assertIn("免责声明", compact)
+        self.assertEqual(len(pipeline._split_html_for_push(compact, limit=10000)), 1)
+
     def test_render_uses_current_quote_and_never_the_removed_static_quote(self):
         data = {
             "实时行情": pipeline._source_result(
