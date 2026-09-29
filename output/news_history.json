@@ -2796,19 +2796,110 @@
    "section": "东财快讯",
    "ts": "2026-09-29 03:53",
    "date": "2026-09-29"
+  },
+  {
+   "title": "三重利空砸出黄金坑？深度复盘9·28大跌，谁才是震荡市中真正的“避风港”",
+   "source": "东方财富",
+   "section": "全球头条",
+   "ts": "2026-09-29 09:09",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "国内期货主力合约多数下跌 20号胶跌超3%",
+   "source": "财联社",
+   "section": "全球头条",
+   "ts": "2026-09-29 09:01",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "美国股债“双杀”！芯片、光通信板块重挫，30年期美债收益率一度触及5.57%，黄金白银大跌，",
+   "source": "金融界",
+   "section": "全球头条",
+   "ts": "2026-09-29 08:43",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "油价上涨金价银价暴跌 加息预期升温引发市场动荡",
+   "source": "中华网",
+   "section": "全球头条",
+   "ts": "2026-09-29 11:23",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "A股热点前瞻丨七部门印发新型电池产业发展规划；英伟达发布AI安全平台",
+   "source": "21财经",
+   "section": "全球头条",
+   "ts": "2026-09-29 09:12",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "恒生指数期货日盘开盘涨0.04%",
+   "source": "东方财富",
+   "section": "全球头条",
+   "ts": "2026-09-29 09:43",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "在中国遇见AI未来——海外客商在数贸会抢抓数字合作新机遇",
+   "source": "新华网",
+   "section": "全球头条",
+   "ts": "2026-09-29 10:30",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "WTI原油盘中波动 最新突破94美元/桶日内涨1.51%",
+   "source": "guandian.cn",
+   "section": "全球头条",
+   "ts": "2026-09-29 10:39",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【贵金属板块冲高】贵金属板块冲高，中金黄金、湖南白银、湖南黄金涨幅居前。",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:11",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【以色列称定点清除哈马斯一指挥官】今天（9月29日），以色列总理内塔尼亚胡与国防部长卡茨发表联合声明称，以军在28日夜间至29日凌晨期间的一次空袭行动中，定点清除了巴勒斯坦伊斯兰抵抗运动（哈马斯）加沙北部旅指挥官伊兹·丁·比克",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:11",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【中钢协：2026年8月，我国出口钢材1015.5万吨】据中钢协，2026年8月，我国出口钢材1015.5万吨，环比增长0.3%，同比增长6.8%；出口均价722.2美元/吨，环比上涨0.9%，同比上涨3.5%",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:10",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【“沪科积分贷”支持政策升级2.0版】近日，上海推出“沪科积分2.0”，在政策衔接、指标设置、申报模式、数据赋能、应用场景拓展五大维度实现全方位优化升级，在保留“沪科积分”1.0版特色指标基础上新增产业化应用、研发准备金等上海特色指标，全面",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:10",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【主力资金：广东省板块净流入超40亿】截至目前，今日主力资金净流入3.85亿；净流入广东省、小盘、低价等板块，其中广东省板块净流入40.91亿；净流出芯片概念、年度强势、半导体产业等板块，其中芯片概念板块净流出58.76亿",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:10",
+   "date": "2026-09-29"
   }
  ],
- "updated_cst": "2026-09-29 04:01:30",
+ "updated_cst": "2026-09-29 14:13:10",
  "sector_rotation_diag": {
-  "ran_at": "2026-09-29 04:01:01",
+  "ran_at": "2026-09-29 14:12:15",
   "cutoff": "2026-09-28",
   "universe": 0,
   "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
  },
  "sector_rotation_probe": {
-  "probe_at_utc": "2026-09-28T20:01:17Z",
-  "probe_at_cst": "2026-09-29 04:01:17",
-  "runner": "36476063323",
+  "probe_at_utc": "2026-09-29T06:12:35Z",
+  "probe_at_cst": "2026-09-29 14:12:35",
+  "runner": "36529727551",
   "universe": [
    {
     "label": "现行参数 pz=500",
@@ -2826,7 +2917,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1250,
+    "elapsed_ms": 1302,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2849,7 +2940,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1215,
+    "elapsed_ms": 1282,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2874,7 +2965,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1273,
+    "elapsed_ms": 2784,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2899,7 +2990,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1180,
+    "elapsed_ms": 1299,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2924,7 +3015,7 @@
     },
     "timeout": 15,
     "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m%3A90%2Bt%3A2&fields=f12%2Cf13%2Cf14%2Cf3",
-    "elapsed_ms": 1120,
+    "elapsed_ms": 1376,
     "http_status": 502,
     "error": "HTTPError 502",
     "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
@@ -2949,28 +3040,79 @@
     },
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "http_status": 200,
-    "elapsed_ms": 919,
-    "bytes": 10636,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617934,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0447\",\"market\":90,\"name\":\"互联网服务\",\"decimal\":2,\"dktotal\":6478,\"preKPrice\":30972.41,\"klines\":[\"2025-12-31,31006.35,31507.15,31624.34,30949.56,51141147\",\"2026-01-05,31585.14,32396.42,32442.32,31541.29,67017668\",\"2026",
-    "json_ok": true,
+    "elapsed_ms": 1199,
+    "error": "RemoteDisconnected: Remote end closed connection without response",
     "summary": {
-     "name": "互联网服务",
-     "code": "BK0447",
-     "klines_type": "list",
-     "klines_len": 180,
-     "first": "2025-12-31,31006.35,31507.15,31624.34,30949.56,51141147",
-     "last": "2026-09-28,28609.03,27976.68,28642.23,27783.06,27955886",
-     "keys": [
-      "code",
-      "decimal",
-      "dktotal",
-      "klines",
-      "market",
-      "name",
-      "preKPrice"
-     ]
-    }
+     "note": "data 缺失或不是对象",
+     "rc": null
+    },
+    "body_head": ""
+   },
+   {
+    "label": "0.BK0447 现行参数（前缀 0.）",
+    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+    "params": {
+     "klt": "101",
+     "fqt": "1",
+     "lmt": "180",
+     "end": "20500101",
+     "fields1": "f1,f2,f3,f4,f5,f6",
+     "fields2": "f51,f52,f53,f54,f55,f56",
+     "secid": "0.BK0447"
+    },
+    "timeout": 15,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=0.BK0447",
+    "elapsed_ms": 1588,
+    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    },
+    "body_head": ""
+   },
+   {
+    "label": "90.BK0447 fqt=0",
+    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+    "params": {
+     "klt": "101",
+     "fqt": "0",
+     "lmt": "180",
+     "end": "20500101",
+     "fields1": "f1,f2,f3,f4,f5,f6",
+     "fields2": "f51,f52,f53,f54,f55,f56",
+     "secid": "90.BK0447"
+    },
+    "timeout": 15,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=0&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
+    "elapsed_ms": 796,
+    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    },
+    "body_head": ""
+   },
+   {
+    "label": "90.BK0447 fqt=2",
+    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+    "params": {
+     "klt": "101",
+     "fqt": "2",
+     "lmt": "180",
+     "end": "20500101",
+     "fields1": "f1,f2,f3,f4,f5,f6",
+     "fields2": "f51,f52,f53,f54,f55,f56",
+     "secid": "90.BK0447"
+    },
+    "timeout": 15,
+    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=2&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
+    "elapsed_ms": 826,
+    "error": "RemoteDisconnected: Remote end closed connection without response",
+    "summary": {
+     "note": "data 缺失或不是对象",
+     "rc": null
+    },
+    "body_head": ""
    },
    {
     "label": "90.BK1044 现行参数（前缀 90.）",
@@ -2987,17 +3129,17 @@
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
     "http_status": 200,
-    "elapsed_ms": 632,
+    "elapsed_ms": 1053,
     "bytes": 9477,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617936,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK1044\",\"market\":90,\"name\":\"生物制品\",\"decimal\":2,\"dktotal\":1173,\"preKPrice\":1025.53,\"klines\":[\"2025-12-31,1027.28,1024.97,1029.32,1021.14,3680144\",\"2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388\",\"2026-01-06,1064.",
+    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617926,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK1044\",\"market\":90,\"name\":\"生物制品\",\"decimal\":2,\"dktotal\":1174,\"preKPrice\":1024.97,\"klines\":[\"2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388\",\"2026-01-06,1064.02,1067.57,1067.57,1057.11,5907473\",\"2026-01-07,1067.",
     "json_ok": true,
     "summary": {
      "name": "生物制品",
      "code": "BK1044",
      "klines_type": "list",
      "klines_len": 180,
-     "first": "2025-12-31,1027.28,1024.97,1029.32,1021.14,3680144",
-     "last": "2026-09-28,1054.71,1047.84,1061.78,1040.62,5668597",
+     "first": "2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388",
+     "last": "2026-09-29,1040.30,1045.17,1066.36,1033.64,4277580",
      "keys": [
       "code",
       "decimal",
@@ -3024,17 +3166,17 @@
     "timeout": 15,
     "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
     "http_status": 200,
-    "elapsed_ms": 572,
+    "elapsed_ms": 1028,
     "bytes": 9904,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617933,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0475\",\"market\":90,\"name\":\"银行Ⅱ\",\"decimal\":2,\"dktotal\":6478,\"preKPrice\":4149.26,\"klines\":[\"2025-12-31,4145.69,4153.32,4170.08,4140.98,27302229\",\"2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342\",\"2026-01-06,4147",
+    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":177617940,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0475\",\"market\":90,\"name\":\"银行Ⅱ\",\"decimal\":2,\"dktotal\":6479,\"preKPrice\":4153.32,\"klines\":[\"2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342\",\"2026-01-06,4147.47,4160.67,4160.90,4125.86,39569961\",\"2026-01-07,4155",
     "json_ok": true,
     "summary": {
      "name": "银行Ⅱ",
      "code": "BK0475",
      "klines_type": "list",
      "klines_len": 180,
-     "first": "2025-12-31,4145.69,4153.32,4170.08,4140.98,27302229",
-     "last": "2026-09-28,4315.72,4304.38,4346.35,4286.35,34737067",
+     "first": "2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342",
+     "last": "2026-09-29,4303.97,4328.48,4334.93,4288.81,25602241",
      "keys": [
       "code",
       "decimal",
@@ -3054,14 +3196,14 @@
     "available": false,
     "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）",
     "diag": {
-     "ran_at": "2026-09-29 04:01:28",
+     "ran_at": "2026-09-29 14:13:07",
      "cutoff": "2026-09-28",
      "universe": 0,
      "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
     },
     "scores_top5": []
    },
-   "elapsed_ms": 4877
+   "elapsed_ms": 20293
   }
  }
 }
