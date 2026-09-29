@@ -493,10 +493,10 @@ output/
 > - `kind="manual"`：需登录/平台限制，页面标注「暂缺」及原因，不伪造内容。
 > 接入新频道时只需在该列表加一项。
 
-## 📜 版权
-
-章鱼 AI，仅供参考。全网境内外检索公开行情。
-
+> AI 七日港股回归：`python3 -m unittest tests.test_hk_seven_day`（26 项，全部离线），
+> 核心同样是防自欺测试——**截断不变性**（视界 7 的因果引擎）与**先存档后结算**（满 7 个
+> 交易日才回填命中/Brier）；另覆盖大模型链路的三道硬约束（概率收敛 / 数字溯源 / 绝对化
+> 措辞回退）、无 Key 默认整栏缺席、`OCTOPUS_HK7_FALLBACK` 三档与关闭开关。
 
 ### AI 七日港股走势分析概率
 
@@ -526,3 +526,7 @@ output/
 （`output/manual_push_workflow.yml.example` 已按上面改好，可直接覆盖使用。）
 
 **配置**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）、`OCTOPUS_LLM_BASE_URL`（默认 `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、`OCTOPUS_LLM_TIMEOUT`（默认 60 秒）、`OCTOPUS_HK7_FALLBACK`（默认 `auto`）。**默认没有 Key 就没有这个栏目**：整栏缺席且不进数据覆盖审计——这是「AI 研判」栏目，没有大模型就不挂 AI 名头；配了 Key 但调用失败 / 解析失败才降级为量化基准（栏目标「量化降级」+ 原因）。`OCTOPUS_HK7_FALLBACK=1`：没有 Key 也渲染量化基准；`=0`：任何大模型不可用都整栏缺席。`OCTOPUS_HK7=0 / --no-hk7` 关闭，`--hk7-only` 研究模式单跑并打印。指数日线取不到或样本不足 → 整栏缺席，绝不补造行情。规则研究用途，非投资建议。
+
+## 📜 版权
+
+章鱼 AI，仅供参考。全网境内外检索公开行情。
