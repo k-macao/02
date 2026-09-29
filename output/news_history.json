@@ -2922,272 +2922,104 @@
    "section": "东财快讯",
    "ts": "2026-09-29 14:19",
    "date": "2026-09-29"
+  },
+  {
+   "title": "A股开盘： 沪指跌0.2%、创业板指跌0.1%，电池板块走高，房地产板块活跃，贵金属、农业板块普跌",
+   "source": "金融界",
+   "section": "全球头条",
+   "ts": "2026-09-29 09:31",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "观察｜美债收益率高悬，或引发全球金融资产重估？",
+   "source": "东方财富",
+   "section": "全球头条",
+   "ts": "2026-09-29 14:13",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【AI产业催化密集，创业板算力ETF华夏（158041）连续6天获净申购】9月29日，创业板算力ETF华夏（158041）触底反弹，截至稿大涨1.65%，成交额2.52亿元.资金流向方面，已连续6天获得净申购，最新规模7.77亿元",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:40",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【扎哈罗娃称赞中国战略眼光深远】据俄罗斯《消息报》网站9月28日报道，俄罗斯外交部发言人扎哈罗娃28日表示，中国与西方国家的区别在于具有深远的战略眼光，这使其能够面向未来谋发展，并超越短期选举周期的局限看待事物。 （参考消息）",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:40",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【法国政府拟上调相关税收，关注法国公路、机场板块个股】法国政府计划在2027年预算案中上调交通基础设施税，法国机场与公路运营企业的股票或将迎来震荡行情",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:38",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【中国气象局：预计10月还将有台风影响我国】记者从中国气象局了解到，今年在影响我国的海域范围内，台风生成和登陆个数明显偏多，强度总体偏强，长生命史台风多，陆地上滞留时间长、影响大",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:38",
+   "date": "2026-09-29"
+  },
+  {
+   "title": "【摩根大通资管维杰：债券久期估值趋于合理】摩根大通资产管理投资组合经理阿琼·维杰表示，收益率经历大幅重估之后，全球国债久期当前估值已相当合理",
+   "source": "东方财富",
+   "section": "东财快讯",
+   "ts": "2026-09-29 14:37",
+   "date": "2026-09-29"
   }
  ],
- "updated_cst": "2026-09-29 14:22:55",
+ "updated_cst": "2026-09-29 14:46:26",
  "sector_rotation_diag": {
-  "ran_at": "2026-09-29 14:22:15",
+  "ran_at": "2026-09-29 14:43:34",
   "cutoff": "2026-09-28",
-  "universe": 0,
-  "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
+  "universe": 496,
+  "fqt": "1",
+  "kline_series": 384,
+  "asof": "2026-09-28",
+  "asof_hits": 384,
+  "scored": 384,
+  "state": "built",
+  "holdings": 5
  },
- "sector_rotation_probe": {
-  "probe_at_utc": "2026-09-29T06:22:34Z",
-  "probe_at_cst": "2026-09-29 14:22:34",
-  "runner": "36530573038",
-  "universe": [
+ "sector_rotation": {
+  "month": "2026-09",
+  "rebalance_date": "2026-09-28",
+  "holdings": [
    {
-    "label": "现行参数 pz=500",
-    "url": "https://push2.eastmoney.com/api/qt/clist/get",
-    "params": {
-     "pn": "1",
-     "pz": "500",
-     "po": "1",
-     "np": "1",
-     "fltt": "2",
-     "invt": "2",
-     "fid": "f12",
-     "fs": "m:90+t:2",
-     "fields": "f12,f14"
-    },
-    "timeout": 15,
-    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 2799,
-    "http_status": 502,
-    "error": "HTTPError 502",
-    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    }
+    "code": "BK1490",
+    "name": "原材料供应链服务",
+    "score": 80.91117996606494,
+    "weight": 0.2186110360345588
    },
    {
-    "label": "pz=100 不带 fltt/invt",
-    "url": "https://push2.eastmoney.com/api/qt/clist/get",
-    "params": {
-     "pn": "1",
-     "pz": "100",
-     "po": "1",
-     "np": "1",
-     "fid": "f12",
-     "fs": "m:90+t:2",
-     "fields": "f12,f14"
-    },
-    "timeout": 15,
-    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1322,
-    "http_status": 502,
-    "error": "HTTPError 502",
-    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    }
+    "code": "BK1470",
+    "name": "房屋建设Ⅲ",
+    "score": 74.99584862245788,
+    "weight": 0.20262861291261197
    },
    {
-    "label": "pz=100",
-    "url": "https://push2.eastmoney.com/api/qt/clist/get",
-    "params": {
-     "pn": "1",
-     "pz": "100",
-     "po": "1",
-     "np": "1",
-     "fltt": "2",
-     "invt": "2",
-     "fid": "f12",
-     "fs": "m:90+t:2",
-     "fields": "f12,f14"
-    },
-    "timeout": 15,
-    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 2137,
-    "http_status": 502,
-    "error": "HTTPError 502",
-    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    }
+    "code": "BK1521",
+    "name": "摩托车",
+    "score": 72.00974571820751,
+    "weight": 0.19456056780589412
    },
    {
-    "label": "加 Referer",
-    "url": "https://push2.eastmoney.com/api/qt/clist/get",
-    "params": {
-     "pn": "1",
-     "pz": "500",
-     "po": "1",
-     "np": "1",
-     "fltt": "2",
-     "invt": "2",
-     "fid": "f12",
-     "fs": "m:90+t:2",
-     "fields": "f12,f14"
-    },
-    "timeout": 15,
-    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f12&fs=m%3A90%2Bt%3A2&fields=f12%2Cf14",
-    "elapsed_ms": 1189,
-    "http_status": 502,
-    "error": "HTTPError 502",
-    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    }
+    "code": "BK0437",
+    "name": "煤炭",
+    "score": 71.24954314713905,
+    "weight": 0.19250660354870355
    },
    {
-    "label": "fid=f3 全字段",
-    "url": "https://push2.eastmoney.com/api/qt/clist/get",
-    "params": {
-     "pn": "1",
-     "pz": "500",
-     "po": "1",
-     "np": "1",
-     "fltt": "2",
-     "invt": "2",
-     "fid": "f3",
-     "fs": "m:90+t:2",
-     "fields": "f12,f13,f14,f3"
-    },
-    "timeout": 15,
-    "request_url": "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m%3A90%2Bt%3A2&fields=f12%2Cf13%2Cf14%2Cf3",
-    "elapsed_ms": 1344,
-    "http_status": 502,
-    "error": "HTTPError 502",
-    "body_head": "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.2</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n<!-- a pa",
-    "summary": {
-     "note": "data 缺失或不是对象",
-     "rc": null
-    }
+    "code": "BK1523",
+    "name": "汽车经销商",
+    "score": 70.9484829410851,
+    "weight": 0.19169317969823152
    }
-  ],
-  "klines": [
-   {
-    "label": "90.BK0447 现行参数（前缀 90.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0447"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0447",
-    "http_status": 200,
-    "elapsed_ms": 1471,
-    "bytes": 10636,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":183636707,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0447\",\"market\":90,\"name\":\"互联网服务\",\"decimal\":2,\"dktotal\":6479,\"preKPrice\":31507.15,\"klines\":[\"2026-01-05,31585.14,32396.42,32442.32,31541.29,67017668\",\"2026-01-06,32374.41,32779.52,32781.20,32319.33,79049397\",\"2026",
-    "json_ok": true,
-    "summary": {
-     "name": "互联网服务",
-     "code": "BK0447",
-     "klines_type": "list",
-     "klines_len": 180,
-     "first": "2026-01-05,31585.14,32396.42,32442.32,31541.29,67017668",
-     "last": "2026-09-29,27932.54,28556.06,28607.07,27909.90,20191284",
-     "keys": [
-      "code",
-      "decimal",
-      "dktotal",
-      "klines",
-      "market",
-      "name",
-      "preKPrice"
-     ]
-    }
-   },
-   {
-    "label": "90.BK1044 现行参数（前缀 90.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK1044"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK1044",
-    "http_status": 200,
-    "elapsed_ms": 1105,
-    "bytes": 9477,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":183641446,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK1044\",\"market\":90,\"name\":\"生物制品\",\"decimal\":2,\"dktotal\":1174,\"preKPrice\":1024.97,\"klines\":[\"2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388\",\"2026-01-06,1064.02,1067.57,1067.57,1057.11,5907473\",\"2026-01-07,1067.",
-    "json_ok": true,
-    "summary": {
-     "name": "生物制品",
-     "code": "BK1044",
-     "klines_type": "list",
-     "klines_len": 180,
-     "first": "2026-01-05,1024.73,1062.86,1063.05,1024.09,6686388",
-     "last": "2026-09-29,1040.30,1047.84,1066.36,1033.64,4428459",
-     "keys": [
-      "code",
-      "decimal",
-      "dktotal",
-      "klines",
-      "market",
-      "name",
-      "preKPrice"
-     ]
-    }
-   },
-   {
-    "label": "90.BK0475 现行参数（前缀 90.）",
-    "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-    "params": {
-     "klt": "101",
-     "fqt": "1",
-     "lmt": "180",
-     "end": "20500101",
-     "fields1": "f1,f2,f3,f4,f5,f6",
-     "fields2": "f51,f52,f53,f54,f55,f56",
-     "secid": "90.BK0475"
-    },
-    "timeout": 15,
-    "request_url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?klt=101&fqt=1&lmt=180&end=20500101&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56&secid=90.BK0475",
-    "http_status": 200,
-    "elapsed_ms": 1990,
-    "bytes": 9904,
-    "body_head": "{\"rc\":0,\"rt\":17,\"svr\":183637529,\"lt\":2,\"full\":0,\"dlmkts\":\"\",\"dsc\":\"0\",\"data\":{\"code\":\"BK0475\",\"market\":90,\"name\":\"银行Ⅱ\",\"decimal\":2,\"dktotal\":6479,\"preKPrice\":4153.32,\"klines\":[\"2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342\",\"2026-01-06,4147.47,4160.67,4160.90,4125.86,39569961\",\"2026-01-07,4155",
-    "json_ok": true,
-    "summary": {
-     "name": "银行Ⅱ",
-     "code": "BK0475",
-     "klines_type": "list",
-     "klines_len": 180,
-     "first": "2026-01-05,4155.31,4147.72,4165.24,4122.47,37049342",
-     "last": "2026-09-29,4303.97,4323.66,4334.93,4288.81,26795774",
-     "keys": [
-      "code",
-      "decimal",
-      "dktotal",
-      "klines",
-      "market",
-      "name",
-      "preKPrice"
-     ]
-    }
-   }
-  ],
-  "module": {
-   "universe_count": 0,
-   "universe_sample": [],
-   "run": {
-    "available": false,
-    "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）",
-    "diag": {
-     "ran_at": "2026-09-29 14:22:52",
-     "cutoff": "2026-09-28",
-     "universe": 0,
-     "reason": "行业列表不完整（抓到 0 个，接口未返回完整行业板块列表）"
-    },
-    "scores_top5": []
-   },
-   "elapsed_ms": 8092
-  }
+  ]
  }
 }
