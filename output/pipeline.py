@@ -3996,11 +3996,11 @@ FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
 FONT_MONO = "'Courier New', Courier, monospace"
 
 # ============================================================
-# 归藏简洁排版（Guizang Concise）× 克莱因蓝 + 灰（2026-09-29）
+# 归藏简洁排版（Guizang Concise）× 克莱因蓝 + 深灰（2026-09-29）
 # —— 一页推送优先：结构扁平、样式全内联、去掉装饰性包装，把全量内容压进单条微信消息
 # —— 克莱因蓝 #002FA7：只用于栏目编号 / 小标题 / 强调数值，是页面上唯一的有色
-# —— 灰阶承担全部层级：正文 #222、次要 #555、更弱 #777、细分隔线 #ddd/#eee
-# —— 2026-09-29 加深灰阶（用户反馈「灰色改深灰色」）：次要 #777→#555、更弱 #aaa→#777
+# —— 灰阶承担全部层级：正文 #222、次要/辅助文字统一深灰 #333、细分隔线 #ddd/#eee
+# —— 2026-09-29 强制全局灰色字体改深灰色：所有灰色文字（次要 GZ_META、辅助 GZ_FAINT、下跌 GZ_DOWN）统一为 #333
 # —— 白底、1px 细分隔、大留白；涨跌仍用 ▲ / ▼ / ■ 表达，不依赖红绿
 # —— 纯内联样式：无 <style> / class / 外部 CSS / JS / 远程图片，兼容 PushPlus 与微信详情页
 # ============================================================
@@ -4011,8 +4011,9 @@ GZ_KLEIN_DEEP = "#00227A"   # 克莱因蓝加深：链接按下 / 强调
 GZ_KLEIN_WASH = "#F3F6FF"   # 极淡蓝：需要一点分量时的窄底纹
 GZ_INK = "#222"          # 正文灰黑（纯灰，不带蓝紫）
 GZ_INK_STRONG = "#111"   # 标题 / 最高强调
-GZ_META = "#555"         # 次要文字（标签、来源）｜2026-09-29 加深：#777 → #555
-GZ_FAINT = "#777"        # 更弱文字（时间、脚注）｜2026-09-29 加深：#aaa → #777
+GZ_DARK_GRAY = "#333"    # 强制全局深灰色字体（所有灰色字体统一深灰 #333）
+GZ_META = GZ_DARK_GRAY   # 次要文字（标签、来源、小标题）｜强制全局改深灰 #333
+GZ_FAINT = GZ_DARK_GRAY  # 辅助文字（时间、脚注、表头、摘要）｜强制全局改深灰 #333
 GZ_HAIR = "#ddd"         # 栏目分割线
 GZ_HAIR_SOFT = "#eee"    # 行间细分隔线
 GZ_INK_TINT = "#FFFFFF"
@@ -4021,9 +4022,9 @@ GZ_HAIR_W = 1               # 1px 细分隔线，不用 2px
 GZ_CREAM = GZ_INK_STRONG
 GZ_META_INK = GZ_META
 GZ_NEON = GZ_KLEIN          # AI 徽标：克莱因蓝，不再引入第二种彩色
-# 涨跌：克莱因蓝 / 深灰 / 浅灰 + ▲▼■ 双编码，完全不依赖红绿
+# 涨跌：克莱因蓝 / 深灰 + ▲▼■ 双编码，完全不依赖红绿
 GZ_UP = GZ_KLEIN
-GZ_DOWN = "#444"
+GZ_DOWN = GZ_DARK_GRAY
 GZ_FLAT = GZ_FAINT
 GZ_UP_INK = GZ_UP
 GZ_DOWN_INK = GZ_DOWN
@@ -4499,7 +4500,7 @@ def gz_trend_badge(value, compact=False):
 
 
 
-def gz_meter(value, maximum, cells=5, lit=GZ_KLEIN, off=GZ_HAIR, size=None):
+def gz_meter(value, maximum, cells=5, lit=GZ_KLEIN, off=GZ_FAINT, size=None):
     """信号格：实心 / 空心即可读数，颜色只作辅助（微信可能忽略 letter-spacing）。"""
     maximum = max(1, int(maximum or 1))
     n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
@@ -9186,6 +9187,39 @@ def _harden_wechat_table_widths(html):
     )
 
 
+_CSS_COLOR_PROP_RE = re.compile(r'(?<![-\w])(color\s*:\s*)(#[0-9A-Fa-f]{3,6})\b')
+
+
+def _is_light_or_mid_gray_hex(hex_color):
+    """判断色值是否为需强制加深的中/浅灰色（保留 #000/#111/#222/#333 与纯白 #fff/#ffffff 及彩色）。"""
+    h = (hex_color or "").lstrip("#")
+    if len(h) == 3:
+        r, g, b = (int(c * 2, 16) for c in h)
+        return r == g == b and 0x33 < r < 0xE8
+    if len(h) == 6:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        if r == g == b:
+            return 0x33 < r < 0xE8
+        return (max(r, g, b) - min(r, g, b) <= 18) and (0x33 < max(r, g, b) <= 0xA8)
+    return False
+
+
+def _enforce_dark_gray_font(html, dark_gray=GZ_DARK_GRAY):
+    """强制全局：将白底/浅底 HTML 中的所有灰色字体（color:#444~#ddd 等）统一改写为深灰色（#333）。
+
+    仅改写文字前景色 `color:...`，不触碰 `background-color`、`border-color` 或 `border:1px solid #ddd` 分割线；
+    对暗色像素主题（`octopus-theme="pixel"` 或深色底 `background:#050711`）原样返回。
+    """
+    if not html:
+        return html
+    if 'name="octopus-theme" content="pixel"' in html or "background:#050711" in html:
+        return html
+    return _CSS_COLOR_PROP_RE.sub(
+        lambda m: f"{m.group(1)}{dark_gray}" if _is_light_or_mid_gray_hex(m.group(2)) else m.group(0),
+        html,
+    )
+
+
 def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
@@ -9201,6 +9235,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
                                        sentiment_history=sentiment_history,
                                        policy_result=policy_result,
                                        news_corpus=news_corpus)
+        html = _enforce_dark_gray_font(html)
     else:
         html = generate_report_pixel(data, date_display, date_str,
                                      sentiment_history=sentiment_history,
@@ -9268,7 +9303,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 </div>
 </body>
 </html>"""
-    return html
+    return _enforce_dark_gray_font(html)
 
 
 def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
@@ -9614,7 +9649,7 @@ def _compact_html_for_push(html):
         '<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#fff;">'
         '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;">章鱼 AI · 打氧日报</h1>'
-        f'<div style="font-size:12px;color:#666;margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
+        f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
         f'<div style="font-size:13px;line-height:1.6;margin-bottom:12px;">{intro}</div>'
     )
     output = [shell]
@@ -9639,8 +9674,8 @@ def _compact_html_for_push(html):
             f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;">{content}</div>'
             '</section>'
         )
-    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:#555;">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
-    return "".join(output)
+    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:{GZ_DARK_GRAY};">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
+    return _enforce_dark_gray_font("".join(output))
 
 
 # ------------------------------------------------------------
@@ -9875,6 +9910,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
+    if template == "html":
+        content_html = _enforce_dark_gray_font(content_html)
     if template == "html" and len(content_html) <= PUSHPLUS_MAX_CONTENT_CHARS:
         # 归藏简洁排版的目标：全量内容压进单条消息（一页推）
         print(f"  📄 日报 {len(content_html):,} 字 ≤ 单条上限 "
