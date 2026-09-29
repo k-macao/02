@@ -23,18 +23,21 @@
      （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
      原始榜单数据仅作为策略研判与数据审计的信号源；
      页面只保留策略研判结果。
-  6.1 新增「全球大盘全景复盘」栏目（数据源：东方财富 push2/push2his 免费接口，
-      全球指数概览子块复用「行情速览」的 Yahoo 报价快照）：
-      ① 全球指数概览——美股（道琼斯 / 标普500 / 纳斯达克）与港股（恒生指数 /
-      恒生科技）最新价与涨跌幅，直接复用「行情速览」同一次抓取的报价，缺失品种不出行；
-      ② 指数表现（A股）——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
-      最新价、涨跌幅与成交额；② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、
-      涨跌比与情绪定调）；③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
-      ⑤ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
-      展示北向、南向成交总额与披露口径说明，绝不编造净买入；⑥ 板块热力——行业板块领涨/领跌 TOP5（附主力
-      净流入与领涨股）。子块独立降级：单个接口失败只隐藏对应子块，A股指数与宽度全缺
-      时整个栏目才缺席；规则合成，非投资建议。
-  6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（行情速览 / 全球大盘全景复盘 /
+  6.1 新增 A股大盘全景数据（数据源：东方财富 push2/push2his 免费接口；2026-09-30 起
+      与「实时行情」合并渲染进栏目【及时秋刀鱼】AI 行情复盘，见第 20 条）：
+      ① 指数表现（A股）——上证 / 深证 / 创业板 / 科创50 / 北证50 / 沪深300 / 上证50 / 中证500
+      最新价、涨跌幅与成交额（合并后与 Yahoo 报价并成栏目里的「A股指数」一张表）；
+      ② 涨跌家数——沪深京市场宽度（上涨/下跌/平盘家数、涨跌比与情绪定调）；
+      ③ 成交额——沪深京合计与上一交易日环比（日 K 补齐前值）；
+      ④ 南北向资金——港交所 2024-08-19 起停披净买入，按最近完整交易日（前一收盘）
+      展示北向、南向成交总额与披露口径说明，绝不编造净买入；
+      ⑤ 板块热力——行业板块领涨/领跌 TOP5（附主力净流入与领涨股）。
+      子块独立降级：单个接口失败只隐藏对应子块，A股指数与宽度全缺时整块才缺席；
+      规则合成，非投资建议。
+      （原「全球指数概览」子块——美股道琼斯 / 标普500 / 纳斯达克与港股恒生指数 / 恒生科技
+      最新价与涨跌幅，复用同一次抓取的 Yahoo 报价——已于 2026-09-30 随两栏合并删除：
+      它与报价块「全球与美股」「港股双指数」逐项数字完全相同，属于纯重复。）
+  6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（【及时秋刀鱼】AI 行情复盘 /
       政策因子 / 全球头条 / 东方财富快讯 / 趋势跟踪 / 港股名家频道 /
       新闻情绪）正文末尾追加一行概率化多空判断：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
@@ -83,7 +86,7 @@
      港股名家频道观点）做确定性量化合成，输出板块趋势跟踪策略（量化信号 +
      趋势分 + 置信度、板块趋势强度榜、技术速读、风险控制、量化配置）。无需大模型 API、
      可复现、不伪造内容，明确标注「非投资建议」；数据源不足时该区块自动缺席。
-     2026-09-09 起页内去重：指数动能只保留聚合（明细数值见「行情速览」），
+     2026-09-09 起页内去重：指数动能只保留聚合（明细数值见【及时秋刀鱼】AI 行情复盘），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
   10. 「新闻情绪」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
@@ -119,8 +122,8 @@
       趋势预判信号与风险预算。官方条例、规划、办法等没有方向性触发词时按中性「政策发布」纳入；
       触发词被否定修饰时跳过；窗口内零政策/宏观新闻时栏目缺席。规则合成、非投资建议。
   13. 「A股资讯」（新浪财经滚动新闻）栏目已移除（2026-09-28 按用户要求）：不再抓取、
-      不再渲染、不再进入审计与新闻语料；A股内容由「全球大盘全景复盘」（指数/宽度/成交额/
-      南北向/板块）与「东方财富快讯」承担，避免来源重复与同质化。
+      不再渲染、不再进入审计与新闻语料；A股内容由【及时秋刀鱼】AI 行情复盘
+      （指数/宽度/成交额/南北向/板块）与「东方财富快讯」承担，避免来源重复与同质化。
   14. 「趋势跟踪」升级（2026-09-28）：栏目为两段结构——「全网 20 个新闻源头 · 港股信息挖掘 + 分析」
       与「多平台信息员」社区样本。20 个源头按 香港 7 / 内地 7 / 国际 6 配置（RTHK、HKET、
       SCMP、HKEX、Now、TVB、HKFP、财联社、格隆汇、智通、证券时报、同花顺、东财策略研报、
@@ -137,8 +140,9 @@
       OCTOPUS_HK_NEWS=0 关闭新闻源段、OCTOPUS_TREND_PLATFORMS 关闭社区段、
       OCTOPUS_RSSHUB_BASE 换 RSSHub 实例、OCTOPUS_HK_NEWS_PER_SOURCE / OCTOPUS_HK_NEWS_MAX
       调条数；规则合成，非投资建议。
-  15. 栏目更名（2026-09-28 按用户要求，功能不变）：今日预判→今日预判、全球大盘全景复盘→
-      全球大盘全景复盘（同时新增「全球指数概览」子块）、AI 盘研判→策略研判、每日量化策略
+  15. 栏目更名（2026-09-28 按用户要求，功能不变）：今日预判→今日预判、A股大盘全景→
+      全球大盘全景复盘（同时新增「全球指数概览」子块；该栏已于 2026-09-30 并入
+      【及时秋刀鱼】AI 行情复盘，见第 20 条）、AI 盘研判→策略研判、每日量化策略
       趋势跟踪线索→趋势跟踪、新闻情绪→新闻情绪、总结→总结；行情速览 / 政策因子 /
       全球头条 / 东方财富快讯 / 港股名家频道 名称不变。像素主题英文关卡名同步更名
       （CONCLUSION→FORECAST、A-SHARE PANORAMA→GLOBAL PANORAMA、AI READ→STRATEGY READ、
@@ -188,6 +192,34 @@
       标题，因此自动跟随新名。「时间节点」栏目的窗口天数不再写在标题里，仍在栏目内
       「窗口摘要 · 时间窗口」如实显示（OCTOPUS_CALENDAR_DAYS 改窗口时同步变化）。
       其余栏目名称不变。
+
+  20. 栏目合并（2026-09-30 按用户要求：「行情速览」与「全球大盘全景复盘」内容重复）：
+      两栏合并为一栏 **【及时秋刀鱼】AI 行情复盘**（kicker MARKET REVIEW，标题常量
+      SECTION_TITLE_MARKET_REVIEW，两主题共用），占原「行情速览」的阅读位置
+      （每周量化走势预测之后、政策因子之前），原 GLOBAL PANORAMA 位置取消。
+      **去重（重复的数字只出一份）**：
+        · 原全景首块「全球指数概览（Yahoo 报价）」= 道指 / 标普 / 纳指 / 恒指 / 恒科，
+          与报价块「全球与美股」「港股双指数」是同一次 Yahoo 抓取的同一份快照，
+          逐项数字完全相同 → 整块删除（PANORAMA_GLOBAL_INDEX_SPECS 一并移除）；
+        · 原全景「指数表现」（东财八大宽基）与报价块「A股四指数」有四个指数重复
+          → 并成一张「A股指数」表，同名指数只出一行；
+        · guizang「成交额」子块的沪 / 深 / 京市成交额就是上证指数 / 深证成指 / 北证50
+          的同一批 f6 数字 → 指数表已带成交额列时不再重列（合计、环比、上一交易日保留）。
+      **不丢数据**：合并后仍完整呈现逐项报价（含「截至 / 滞后 / 东财回补」标注）、
+      A股八大宽基 + 成交额（东财独有的北证50 / 沪深300 / 上证50 / 中证500 一并入表）、
+      涨跌家数与涨跌比情绪、成交额合计与环比、南北向成交总额（前一收盘）、
+      板块热力领涨 / 领跌 TOP。同名指数取值按 _reconcile_market_snapshot 同一口径
+      「日期新者胜」：东财行情日比 Yahoo 的 as_of 新才用东财价并标「（东财）」，
+      无法比较日期就不动 Yahoo 的值；子块标题只在自己能支撑时写截止日期。
+      **研判不混算**：原两栏各自的「⌁ AI 研判」保留为两行——「（报价面）」与
+      「（A股全景面）」，两套口径的证据与概率算法都不变（不合成一个没有依据的概率）；
+      首屏速览把两条研判各留 48 字后用「；」接成一行（总长度与合并前两行一致）。
+      **徽标 / 副标题**：两路数据各自出状态徽标并标明「报价 / A股全景」是哪一路，
+      来源名用「 ＋ 」相接，暂缺的一路在副标题点名（如「暂缺：报价」）；任意一路成功
+      即渲染该栏，两路都失败才整栏缺席。
+      **不变的**：抓取逻辑与接口、数据源名称（实时行情 / A股大盘全景）、审计口径
+      （总源数仍为 8，两路仍分别留痕）、当天检验与推送门禁、超长日报拆分逻辑。
+      历史归档日报不改写。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -351,7 +383,7 @@ EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 # 「时间节点」栏目（原「未来 N 天影响经济时间点」）的数据口径
 # （东方财富财经日历 RPT_CPH_FECALENDAR）
 # 放在日报开头：先看清「未来 30 天哪些时点会动市场」，再读今天的盘。
-# 接口是东财数据中心公开报表（与「全球大盘全景复盘」的南北向资金同一台主机），无需密钥；
+# 接口是东财数据中心公开报表（与 A股大盘全景的南北向资金同一台主机），无需密钥；
 # START_DATE 为北京时间（形如 2026-10-28 20:30:00）。服务端只支持按日期过滤
 # （按 CITY / FE_TYPE 过滤返回空），所以一次拉全窗口（翻页）再在本地按重要度筛选。
 # 筛选口径全部写死在下面的常量里：确定性计算、可复现、不调大模型、不伪造内容；
@@ -869,7 +901,7 @@ def _source_note(item):
     return f"{item.get('source', '数据源')} 数据暂缺（{detail}）· 抓取于 {item.get('fetched_at', '—')}"
 
 
-# 行情速览的品种分组：用于「按市场标注数据截至日」与「识别某个市场整体滞后」。
+# 行情报价的品种分组：用于「按市场标注数据截至日」与「识别某个市场整体滞后」。
 # 商品期货（WTI）周日晚间就开始下一交易日的电子盘，其 K 线日期天然领先股票指数，
 # 因此不参与「整份快照属于哪一天」与「哪个市场滞后」的判断。
 MARKET_QUOTE_GROUPS = (
@@ -879,7 +911,7 @@ MARKET_QUOTE_GROUPS = (
     ("商品", ("WTI 原油",)),
 )
 MARKET_LAG_EXEMPT_GROUPS = ("商品",)
-# 东方财富独立时间基准（回补用）：港股指数 secid 代码 → 行情速览品种名
+# 东方财富独立时间基准（回补用）：港股指数 secid 代码 → 报价栏品种名
 MARKET_HK_REFERENCE_CODES = {"HSI": "恒生指数", "HSTECH": "恒生科技"}
 
 
@@ -1069,7 +1101,7 @@ _EM_MARKET_CURRENCY = {"100": "", "105": "USD", "106": "USD", "107": "USD", "102
 
 
 def _eastmoney_snapshot_quotes(pairs, quote_urls=None):
-    """行情速览的独立备用源（yahoo_chart 数据线的备用源2）：东方财富 ulist.np 一次批量取价。
+    """行情报价的独立备用源（yahoo_chart 数据线的备用源2）：东方财富 ulist.np 一次批量取价。
 
     pairs —— [(品种名, Yahoo 代码)]；只处理能映射到东财 secid 的品种。
     返回 {品种名: quote}，quote 与 _yahoo_quote_from_chart 同结构（via="eastmoney"，
@@ -1111,7 +1143,7 @@ def _eastmoney_snapshot_quotes(pairs, quote_urls=None):
 
 
 def _fetch_hk_index_reference():
-    """东方财富港股指数报价（含 f124 行情时间）——「行情速览」核对 / 回补港股行情的独立基准。"""
+    """东方财富港股指数报价（含 f124 行情时间）——报价栏核对 / 回补港股行情的独立基准。"""
     try:
         return _quant.providers.fetch_hk_index_quotes(safe_request) or {}
     except Exception as exc:                      # 参考源失败只影响回补，不影响主流程
@@ -1123,7 +1155,7 @@ def _reconcile_market_snapshot(market, pan=None, hk_ref=None):
     """用东方财富的独立时间基准核对 Yahoo 行情，回补「回退到上一个交易日」的港股 / A股指数。
 
     规则（只在东财数据日期**严格晚于** Yahoo 该品种 as_of 时替换；东财失败或日期相同不动）：
-      · A股四指数：对照「全球大盘全景复盘」同一次抓取的东财指数（quote_time 为行情时间）；
+      · A股四指数：对照 A股大盘全景同一次抓取的东财指数（quote_time 为行情时间）；
       · 恒生指数 / 恒生科技：对照东财 100.HSI / 100.HSTECH（f124 行情时间）；
         Yahoo 完全没给港股报价时也用东财补上（港股是本日报的主市场）。
     替换后的品种 via="eastmoney"，记录 yahoo_as_of 供审计；快照级 content_date /
@@ -1697,8 +1729,10 @@ def fetch_hot_stocks():
 
 
 # ============================================================
-# 数据源 5：全球大盘全景复盘
+# 数据源 5：A股大盘全景（东方财富）
 # （指数表现 + 涨跌家数 + 成交额 + 北向资金 + 板块热力）
+# 2026-09-30 起与 Yahoo 实时行情一起并入栏目【及时秋刀鱼】AI 行情复盘；
+# 抓取逻辑、审计口径与数据源名称「A股大盘全景」均不变。
 # ------------------------------------------------------------
 # 使用东方财富 push2 / push2his 免费公开接口（与「热门榜单」同源）：
 #   · 指数表现：ulist.np/get 一次返回八大宽基指数最新价、涨跌幅与成交额；
@@ -1724,12 +1758,9 @@ PANORAMA_INDEX_SPECS = [
 ]
 # 各交易所「全市场涨跌家数」的载体指数（f104/f105/f106 为该交易所股票统计）
 PANORAMA_BREADTH_SOURCES = [("1.000001", "沪"), ("0.399001", "深"), ("0.899050", "京")]
-# 「全球大盘全景复盘」首个子块：美股 / 港股指数概览。只复用「行情速览」同一次抓取的
-# Yahoo Finance Chart 报价（不重复请求、不引入新数字），缺失品种不出行。
-PANORAMA_GLOBAL_INDEX_SPECS = [
-    ("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-    ("恒生指数", 2), ("恒生科技", 2),
-]
+# 2026-09-30 起原全景首块「全球指数概览（Yahoo 报价）」已随两栏合并删除：它复用
+# 「AI 行情复盘」报价块同一次抓取的 Yahoo 快照（道指 / 标普 / 纳指 / 恒指 / 恒科），
+# 逐项数字与报价块完全相同，属于纯重复（原 PANORAMA_GLOBAL_INDEX_SPECS 已移除）。
 PANORAMA_SECTOR_TOP_N = int(os.environ.get("OCTOPUS_PANORAMA_SECTOR_TOP_N", "5"))
 PANORAMA_NORTH_POLICY_NOTE = (
     "港交所自 2024-08-19 起停止披露南北向资金实时 / 每日净买入额，仅盘后公布当日成交总额；"
@@ -2007,8 +2038,11 @@ def _panorama_breadth_mood(ratio):
 
 
 def fetch_market_panorama():
-    """抓取 全球大盘全景复盘：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。"""
-    print("📡 正在抓取 全球大盘全景复盘（指数/涨跌家数/成交额/北向/板块）...")
+    """抓取 A股大盘全景：指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力。
+
+    供栏目【及时秋刀鱼】AI 行情复盘使用（2026-09-30 起与实时行情合并展示）。
+    """
+    print("📡 正在抓取 A股大盘全景（指数/涨跌家数/成交额/北向/板块）...")
     errors = []
 
     indices, by_code, quote_time = _fetch_panorama_indices()
@@ -4192,8 +4226,7 @@ _SECTION_ICON_META = {
     "QUANT STRATEGY": ("◆", "QUANT", C_LEMON, C_AI_BG),
     "AI READ": ("◆", "AI", C_LEMON, C_AI_BG),
     "QUANT POLICY": ("◉", "QUANT", C_AMBER, C_FLAT_BG),
-    "MARKET SNAPSHOT": ("▲", "MKT", C_GREEN, C_UP_BG),
-    "GLOBAL PANORAMA": ("◍", "GLOBAL", C_CYAN, "#092836"),
+    "MARKET REVIEW": ("▲", "MKT", C_GREEN, C_UP_BG),
     "HK GURU CHANNELS": ("▶", "TV", C_MAGENTA, "#301226"),
     "GLOBAL HEADLINES": ("▤", "NEWS", C_CYAN, "#092836"),
     "EASTMONEY WIRE": ("!", "WIRE", C_AMBER, C_FLAT_BG),
@@ -4730,7 +4763,99 @@ def _market_row_label(market, label, block_date=None):
     return f"{label}（{'·'.join(suffix)}）" if suffix else label
 
 
-def gz_market_section(market):
+# ------------------------------------------------------------
+# 【及时秋刀鱼】AI 行情复盘（2026-09-30 按用户要求合并原「行情速览」+「全球大盘全景复盘」）
+#   两栏重复的数字只保留一份：
+#     · 原全景「全球指数概览（Yahoo 报价）」= 道指 / 标普 / 纳指 / 恒指 / 恒科，
+#       与报价栏「全球与美股」「港股双指数」逐项完全相同（同一次 Yahoo 抓取的同一份
+#       快照）→ 整块删除；
+#     · 原全景「指数表现」（东财八大宽基）与报价栏「A股四指数」（Yahoo，含东财回补）
+#       有四个指数重复 → 并成一张 A股指数表，同名指数只出一行。
+#   合并不丢任何数据：成交额、东财独有宽基（北证50 / 沪深300 / 上证50 / 中证500）、
+#   涨跌家数、成交额环比、南北向资金、板块热力全部保留；抓取 / 审计 / 推送门禁不变。
+# ------------------------------------------------------------
+MARKET_REVIEW_A_SHARE_SPECS = [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)]
+MARKET_REVIEW_GLOBAL_SPECS = [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
+                              ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)]
+MARKET_REVIEW_HK_SPECS = [("恒生指数", 2), ("恒生科技", 2)]
+
+
+def _market_review_pan_indices(pan):
+    """东财全景的指数行按名称索引（缺名称 / 缺价的行忽略，不编造）。"""
+    out = {}
+    for row in (pan or {}).get("indices") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if name and row.get("price") is not None:
+            out[name] = row
+    return out
+
+
+def _market_review_ashare_rows(market, pan):
+    """A股指数合并行（主题无关）：同名指数只出一行，数字取更新的一方。
+
+    返回 [{"label", "price_str", "pct", "amount", "via"}, ...]：
+      · Yahoo 报价与东财「指数表现」都有的四个指数，按 _reconcile_market_snapshot 同一
+        口径「日期新者胜」：东财行情日（content_date）比 Yahoo 的 as_of 新时用东财价并
+        标「（东财）」，否则用 Yahoo 价（保留原「滞后 / 东财回补」后缀）；
+      · Yahoo 缺某个指数时用东财同一次抓取的值补上，不出空行；
+      · 东财独有的宽基（北证50 / 沪深300 / 上证50 / 中证500）按 spec 顺序补在后面；
+      · 成交额只有东财有，取到就带上（两路都在时同一行里显示）。
+    """
+    pan_rows = _market_review_pan_indices(pan)
+    pan_date = str((pan or {}).get("content_date") or "")[:10]
+    block_date = _market_block_date(market, MARKET_REVIEW_A_SHARE_SPECS)
+    rows, seen = [], set()
+    for label, precision in MARKET_REVIEW_A_SHARE_SPECS:
+        seen.add(label)
+        quote = ((market or {}).get("quotes") or {}).get(label) or {}
+        price_str, pct = _quote_parts(market or {}, label, precision)
+        as_of = str(quote.get("as_of") or "")[:10]
+        row = pan_rows.get(label)
+        use_pan = bool(row) and (price_str is None or (pan_date and as_of and pan_date > as_of))
+        if use_pan:
+            rows.append({"label": f"{label}（东财）",
+                         "price_str": f'{float(row["price"]):,.{precision}f}',
+                         "pct": _percent_number(row.get("chg_pct")),
+                         "amount": row.get("amount"), "via": "eastmoney"})
+        elif price_str is not None:
+            rows.append({"label": _market_row_label(market, label, block_date),
+                         "price_str": price_str, "pct": pct,
+                         "amount": (row or {}).get("amount"), "via": quote.get("via")})
+        # 两路都没有 → 缺失品种不出「数据暂缺」行
+    order = {name: i for i, (_, name) in enumerate(PANORAMA_INDEX_SPECS)}
+    for name in sorted(set(pan_rows) - seen, key=lambda n: order.get(n, len(order))):
+        seen.add(name)
+        row = pan_rows[name]
+        rows.append({"label": name, "price_str": f'{float(row["price"]):,.2f}',
+                     "pct": _percent_number(row.get("chg_pct")),
+                     "amount": row.get("amount"), "via": "eastmoney"})
+    return rows
+
+
+def _market_review_ashare_caption(market, pan):
+    """A股指数子块标题：优先用报价侧的「截至 / 滞后」标注；整块都是东财口径时用东财行情日。
+
+    两路口径混在一起、而报价侧又没有日期时，标题不写日期（各行自己标「（东财）」），
+    绝不给读者一个对不上号的截止日期。
+    """
+    rows = _market_review_ashare_rows(market, pan)
+    cap = _market_block_caption(market or {}, "A股指数", MARKET_REVIEW_A_SHARE_SPECS)
+    if " · " in cap or not rows:
+        return cap
+    pan_date = str((pan or {}).get("content_date") or "")[:10]
+    if pan_date and all(r.get("via") == "eastmoney" for r in rows):
+        return f"A股指数 · 截至 {_asof_short(pan_date)}（东财）"
+    return cap
+
+
+def gz_market_section(market, pan=None):
+    """guizang 版行情报价：全球与美股 / A股指数 / 港股双指数（缺失品种不出行）。
+
+    pan（东财 A股全景，可选）：给了就把 A股指数与东财「指数表现」并成一张表——多出
+    成交额一列与四个东财独有宽基，同名指数只出一行，不再有两栏数字互相打架。
+    """
     def _block(title, specs):
         rows = []
         block_date = _market_block_date(market, specs)
@@ -4744,36 +4869,41 @@ def gz_market_section(market):
         return (gz_subsection(_esc(_market_block_caption(market, title, specs)))
                 + gz_data_table(["名称", "最新价", "涨跌"], rows))
 
+    def _ashare_block():
+        rows = _market_review_ashare_rows(market, pan)
+        if not rows:
+            return ""
+        has_amount = any(r.get("amount") for r in rows)
+        table = []
+        for r in rows:
+            badge = gz_trend_badge(r["pct"]) if r["pct"] is not None else _gz_missing()
+            cells = [_esc(r["label"]), _gz_num(r["price_str"]), badge]
+            if has_amount:
+                cells.append(_format_amount(r["amount"]) if r.get("amount") else "—")
+            table.append(cells)
+        headers = ["指数", "最新价", "涨跌"] + (["成交额"] if has_amount else [])
+        return (gz_subsection(_esc(_market_review_ashare_caption(market, pan)))
+                + gz_data_table(headers, table))
+
     return (
-        _block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-                             ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)])
-        + _block("A股四指数", [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)])
-        # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在行情速览展示；
+        _block("全球与美股", MARKET_REVIEW_GLOBAL_SPECS)
+        + _ashare_block()
+        # 2026-09-09 补缺：恒生双指数早已在抓取（Yahoo），但从未在报价栏展示；
         # 动能明细表移除后，这里是它们唯一的展示位置。
-        + _block("港股双指数", [("恒生指数", 2), ("恒生科技", 2)])
+        + _block("港股双指数", MARKET_REVIEW_HK_SPECS)
     )
 
 
-def _gz_panorama_global(market):
-    """guizang 版全球指数概览（美股 / 港股）：复用「行情速览」报价，缺失品种不出行。"""
-    rows = []
-    for label, precision in PANORAMA_GLOBAL_INDEX_SPECS:
-        price_str, pct = _quote_parts(market or {}, label, precision)
-        if price_str is None:
-            continue
-        rows.append(_gz_quote_row(label, price_str, pct))
-    if not rows:
-        return ""
-    return gz_subsection("全球指数概览（Yahoo 报价）") + gz_data_table(
-        ["名称", "最新价", "涨跌"], rows)
+def gz_panorama_block(pan, with_indices=True):
+    """guizang 版 A股全景：指数表现 / 涨跌家数 / 成交额 / 南北向 / 板块热力，均用表格。
 
-
-def gz_panorama_block(pan, market=None):
-    """guizang 版「全球大盘全景复盘」：全球指数概览 / A股指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力，均用表格。"""
-    parts = [_gz_panorama_global(market)]
+    with_indices=False（合并进「AI 行情复盘」时的用法）：指数表已由 gz_market_section
+    并入 A股指数一块，这里不再重复出一份。
+    """
+    parts = []
 
     indices = pan.get("indices") or []
-    if indices:
+    if indices and with_indices:
         rows = []
         for idx in indices:
             pct = idx.get("chg_pct")
@@ -4814,8 +4944,11 @@ def gz_panorama_block(pan, market=None):
         chg = t.get("chg_pct")
         chg_html = f' 较上一交易日 {gz_trend_badge(chg)}' if chg is not None else ""
         t_pairs = []
-        for exch, amt in (t.get("by_market") or {}).items():
-            t_pairs.append((f"{exch}市成交额", _format_amount(amt)))
+        # 沪 / 深 / 京市成交额就是上证指数 / 深证成指 / 北证50 的 f6 成交额：指数表已并入
+        # 「AI 行情复盘」的 A股指数一列时，这三行是同一批数字，不再重复出一份（只留合计与环比）。
+        if with_indices or not any(i.get("amount") for i in indices):
+            for exch, amt in (t.get("by_market") or {}).items():
+                t_pairs.append((f"{exch}市成交额", _format_amount(amt)))
         t_pairs.append(("沪深京成交额合计", _format_amount(t["total"]) + chg_html))
         if t.get("prev_total"):
             t_pairs.append(("上一交易日合计（沪深京）", _format_amount(t["prev_total"])))
@@ -4851,6 +4984,16 @@ def gz_panorama_block(pan, market=None):
                 ["板块", "涨跌", "主力净流入", "领涨股"], s_rows))
 
     return "".join(parts)
+
+
+def gz_market_review(market, pan):
+    """guizang 版【及时秋刀鱼】AI 行情复盘：逐项报价 + A股全景，重复数字只出一份。
+
+    合并前「全球指数概览」与「A股四指数 / 指数表现」在两栏各出一遍；合并后全球与港股
+    指数只在报价块出现一次，A股八大宽基（含成交额）只在 A股指数表出现一次。
+    """
+    return (gz_market_section(market, pan)
+            + gz_panorama_block(pan or {}, with_indices=False))
 
 
 def _cal_gz_cells(day_label, t_plus, item, first=False):
@@ -5155,7 +5298,12 @@ class _RenderKit:
         self.__dict__.update(kw)
 
 
-def _pixel_market_section(market):
+def _pixel_market_section(market, pan=None):
+    """pixel 版行情报价：全球与美股 / A股指数 / 港股双指数（缺失品种不出行）。
+
+    pan（东财 A股全景，可选）：给了就把 A股指数与东财「指数表现」并成一块——成交额挂在
+    指数名后面，同名指数只出一行，不再有两栏数字互相打架。
+    """
     def _block(title, specs):
         rows = []
         block_date = _market_block_date(market, specs)
@@ -5167,33 +5315,39 @@ def _pixel_market_section(market):
         return ((_subsection(_esc(_market_block_caption(market, title, specs)))
                  + _data_table(rows)) if rows else "")
 
-    return (_block("全球与美股", [("道琼斯指数", 0), ("标普500", 0), ("纳斯达克", 0),
-                                 ("WTI 原油", 2), ("微软 MSFT", 2), ("Meta META", 2)])
-            + _block("A股四指数", [("上证指数", 2), ("深证成指", 2), ("创业板指", 2), ("科创50", 2)])
-            + _block("港股双指数", [("恒生指数", 2), ("恒生科技", 2)]))
+    def _ashare_block():
+        rows = []
+        for r in _market_review_ashare_rows(market, pan):
+            pct = r["pct"]
+            color = C_GREEN if (pct or 0) > 0 else (C_RED if (pct or 0) < 0 else C_AMBER)
+            amt = (f' <span style="color:{C_FAINT};font-size:10px;">'
+                   f'成交额 {_format_amount(r["amount"])}</span>') if r.get("amount") else ""
+            left = f'<b style="color:{C_INK};">{_esc(r["label"])}</b>{amt}'
+            value = (f'<span style="display:inline-block;color:{C_INK};font-size:13px;'
+                     f'font-weight:900;font-family:{FONT_MONO};padding-right:6px;">'
+                     f'{_esc(r["price_str"])}</span>{_trend_badge(pct)}')
+            rows.append((left, value, color))
+        if not rows:
+            return ""
+        return (_subsection(_esc(_market_review_ashare_caption(market, pan)))
+                + _data_table(rows))
+
+    return (_block("全球与美股", MARKET_REVIEW_GLOBAL_SPECS)
+            + _ashare_block()
+            + _block("港股双指数", MARKET_REVIEW_HK_SPECS))
 
 
-def _panorama_global(market):
-    """全球指数概览（美股 / 港股）：复用「行情速览」报价，缺失品种不出行、不编造。"""
-    rows = []
-    for label, precision in PANORAMA_GLOBAL_INDEX_SPECS:
-        price_str, pct = _quote_parts(market or {}, label, precision)
-        if price_str is None:
-            continue
-        color = C_GREEN if (pct or 0) > 0 else (C_RED if (pct or 0) < 0 else C_AMBER)
-        rows.append((_esc(label), f'{price_str} {_trend_badge(pct)}', color))
-    if not rows:
-        return ""
-    return _subsection("全球指数概览（Yahoo 报价）") + _mini_table(rows)
+def _panorama_block(pan, with_indices=True):
+    """pixel 版 A股全景：指数表现 / 涨跌家数 / 成交额 / 南北向 / 板块热力。
 
-
-def _panorama_block(pan, market=None):
-    """pixel 版「全球大盘全景复盘」：全球指数概览 / A股指数 / 涨跌家数 / 成交额 / 南北向 / 板块热力。"""
-    parts = [_panorama_global(market)]
+    with_indices=False（合并进「AI 行情复盘」时的用法）：指数表已并入 A股指数一块，
+    这里不再重复出一份。
+    """
+    parts = []
 
     # 1) 指数表现（A股宽基）
     indices = pan.get("indices") or []
-    if indices:
+    if indices and with_indices:
         rows = []
         for idx in indices:
             pct = idx.get("chg_pct")
@@ -5280,6 +5434,12 @@ def _panorama_block(pan, market=None):
             f"数据截至 {_esc(pan['quote_time'])}（北京时间）；成交额「亿/万」为本地换算。"
             "板块按行业涨跌幅排序。规则合成，非投资建议。"))
     return "".join(parts)
+
+
+def _pixel_market_review(market, pan):
+    """pixel 版【及时秋刀鱼】AI 行情复盘：逐项报价 + A股全景，重复数字只出一份。"""
+    return (_pixel_market_section(market, pan)
+            + _panorama_block(pan or {}, with_indices=False))
 
 
 def _cal_pixel_cells(day_label, t_plus, item, first=False):
@@ -5391,6 +5551,32 @@ def _prune_report_data(data, date_str=None):
 def _short_source(item):
     """栏目副标题只留来源名，抓取时间 / 口径说明不再重复。"""
     return _esc(str((item or {}).get("source") or ""))
+
+
+def _market_review_meta(kit, market, pan):
+    """【及时秋刀鱼】AI 行情复盘的徽标与副标题：两路数据分别标状态。
+
+    合并栏目由「实时行情（Yahoo / 东财回补）」与「A股大盘全景（东财）」两路数据合成，
+    成功的各路出自己的状态徽标（并标明「报价 / A股全景」是哪一路）与来源名（「 ＋ 」
+    相接）；失败 / 暂缺的一路在副标题写明，读者不会把一路的状态误当成整栏的状态。
+    """
+    present = [(tag, src) for tag, src in (("报价", market), ("A股全景", pan))
+               if isinstance(src, dict) and src.get("status") == "success"]
+    missing = [tag for tag, src in (("报价", market), ("A股全景", pan))
+               if not (isinstance(src, dict) and src.get("status") == "success")]
+    badges, names = [], []
+    for tag, src in present:
+        badge = kit.source_badge(src)
+        if badge:
+            badges.append(f"{tag} {badge}" if len(present) > 1 else badge)
+        name = _short_source(src)
+        if name:
+            names.append(name)
+    caption = " ＋ ".join(names)
+    if missing:
+        note = "暂缺：" + "、".join(missing)
+        caption = f"{caption} · {note}" if caption else note
+    return " · ".join(badges), caption
 
 
 def _trend_clue_item_row(item, pick_no, base, color, kit, title_limit=235):
@@ -5693,26 +5879,28 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 
 
 # ------------------------------------------------------------
-# 栏目标题（2026-09-29 按用户要求改名，只改标题文字，栏目内容 / 顺序 / 抓取 /
+# 栏目标题（2026-09-29 起按用户要求改名，只改标题文字，栏目内容 / 顺序 / 抓取 /
 # 推送门禁 / 拆分逻辑一律不变）。两个主题（guizang / pixel）共用同一份标题，
 # 首屏速览引用各栏目时也自动带上新名字。
 #   AI 全篇速览            → 【爪爪八爪鱼】AI 全篇速览
 #   今日预判               → 【回游金枪鱼】今日预判
 #   未来30天影响经济时间点  → 【探照安康鱼】时间节点（窗口天数仍在栏目「窗口摘要 · 时间窗口」里）
 #   量化预测总览           → 【蜉蝣天地水母】量化预测总览
+#   行情速览 + 全球大盘全景复盘（2026-09-30 合并去重）→ 【及时秋刀鱼】AI 行情复盘
 # ------------------------------------------------------------
 SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
+SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
 
-# 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情 / 全景 / 政策 / 研判依据）
+# 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情复盘 / 政策 / 研判依据）
 #           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
 REPORT_SECTION_ORDER = (
     "FORECAST",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "MARKET SNAPSHOT", "GLOBAL PANORAMA", "POLICY SHOCK",
+    "MARKET REVIEW", "POLICY SHOCK",
     "FED TREND", "GEO TREND", "STRATEGY READ", "HK 7D PROB",
     "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
@@ -5932,7 +6120,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
     """
     notes = {}
 
-    # ① 行情速览：涨跌家数 + 最强/最弱 → 方向定调
+    # ① 报价面（实时行情；渲染在【及时秋刀鱼】AI 行情复盘）：涨跌家数 + 最强/最弱 → 方向定调
     market = data.get("实时行情") or {}
     if market.get("status") == "success":
         rows = []
@@ -6139,12 +6327,39 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
     return notes
 
 
-def _ai_judge_row(note, kit):
-    """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。"""
+# 合并栏目【及时秋刀鱼】AI 行情复盘保留原两栏各自的研判口径：
+#   报价面   = 原「行情速览」证据（逐项涨跌方向 + 最强/最弱）；
+#   A股全景面 = 原「全球大盘全景复盘」证据（涨跌家数 / 成交额 / 板块热力投票）。
+# 两套口径的证据与算法不同，各出一行研判，不合成一个没有依据的概率；
+# notes 的键名保持不变（MARKET SNAPSHOT / GLOBAL PANORAMA），只是渲染到同一栏。
+MERGED_SECTION_NOTES = {
+    "MARKET REVIEW": (("报价面", "MARKET SNAPSHOT"), ("A股全景面", "GLOBAL PANORAMA")),
+}
+
+
+def _section_note_keys(kicker):
+    """栏目 → 需要追加的研判行 [(标签, notes 键), ...]；未合并的栏目就是它自己。"""
+    return MERGED_SECTION_NOTES.get(kicker) or (("", kicker),)
+
+
+def _section_note_texts(notes, kicker):
+    """某栏目的研判文字（合并栏目按顺序返回两条），供首屏速览拼接。"""
+    return [str((notes.get(key) or {}).get("text") or "")
+            for _, key in _section_note_keys(kicker)
+            if isinstance(notes.get(key), dict) and notes[key].get("text")]
+
+
+def _ai_judge_row(note, kit, aspect=""):
+    """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。
+
+    aspect：合并栏目（【及时秋刀鱼】AI 行情复盘）里标明这一行是哪一路证据
+    （报价面 / A股全景面），两套口径各自出概率，不混算成一个数。
+    """
     bull_c, bear_c, flat_c = kit.ok_color, kit.bad_color, kit.warn_color
     lc = (bull_c if note["label"] == "偏多"
           else bear_c if note["label"] == "偏空" else flat_c)
-    head = (f'<span style="color:{lc};font-weight:900;">⌁ AI 研判 {note["mark"]} {note["label"]}</span>'
+    title = f"⌁ AI 研判（{aspect}）" if aspect else "⌁ AI 研判"
+    head = (f'<span style="color:{lc};font-weight:900;">{title} {note["mark"]} {note["label"]}</span>'
             f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
             f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
     return kit.item_row("⌁", f"{head} — {note['text']}")
@@ -6353,7 +6568,7 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
     if not lead:
         lead = "当前信息不足以形成综合方向判断，请先关注已获取内容与数据覆盖。"
     groups = [
-        ("市场与资金", {"MARKET SNAPSHOT", "GLOBAL PANORAMA", "LIQUIDITY FLOW"}),
+        ("市场与资金", {"MARKET REVIEW", "LIQUIDITY FLOW"}),
         ("量化与策略", {"QUANT FORECAST", "HK PROBABILITY", "WEEKLY FORECAST",
                        "STRATEGY READ", "HK 7D PROB"}),
         ("政策与日程", {"ECON CALENDAR", "POLICY SHOCK", "FED TREND", "GEO TREND"}),
@@ -6367,8 +6582,10 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
         for kick, title, content, badge, caption in sections:
             if kick not in keys:
                 continue
-            note = notes.get(kick) or {}
-            text = brief(note.get("text") or content, 48)
+            # 合并栏目（AI 行情复盘）有两条研判：报价面 + A股全景面，各留 48 字后用「；」
+            # 接起来（合并前是两栏各占一行速览，总长度与那时一致，不因合并丢掉一路结论）。
+            texts = _section_note_texts(notes, kick)
+            text = "；".join(brief(t, 48) for t in texts) if texts else brief(content, 48)
             if text:
                 bits.append(f"{_esc(title)}：{_esc(text)}")
                 covered.add(kick)
@@ -6514,20 +6731,19 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 kit.source_badge(cal), _short_source(cal),
             )
 
-    # ① 行情速览（逐项行情的唯一展示位置；缺失的品种不出行）
-    if market.get("status") == "success":
-        market_html = kit.market_section(market)
-        if market_html:
-            blocks["MARKET SNAPSHOT"] = (
-                "MARKET SNAPSHOT", "行情速览", market_html,
-                kit.source_badge(market), _short_source(market),
-            )
-
-    # ② 全球大盘全景复盘
-    if pan.get("status") == "success":
-        blocks["GLOBAL PANORAMA"] = (
-            "GLOBAL PANORAMA", "全球大盘全景复盘", kit.panorama_block(pan, market),
-            kit.source_badge(pan), _short_source(pan),
+    # ① 【及时秋刀鱼】AI 行情复盘（2026-09-30 合并原「行情速览」+「全球大盘全景复盘」）
+    #    逐项报价（Yahoo / 东财回补）+ A股全景（东财）；重复数字只出一份，缺失品种不出行。
+    #    两路数据任意一路成功即渲染，徽标与副标题分别标出各自状态。
+    market_ok = market.get("status") == "success"
+    pan_ok = pan.get("status") == "success"
+    review_html = (kit.market_review(market if market_ok else {}, pan if pan_ok else {})
+                   if (market_ok or pan_ok) else "")
+    if review_html:
+        review_badge, review_caption = _market_review_meta(
+            kit, market if market_ok else None, pan if pan_ok else None)
+        blocks["MARKET REVIEW"] = (
+            "MARKET REVIEW", SECTION_TITLE_MARKET_REVIEW, review_html,
+            review_badge, review_caption,
         )
 
     # ③ 政策因子（PSI 量化趋势预判）
@@ -6627,9 +6843,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     if judge_notes:
         new_sections = []
         for kick, title, content, badge, caption in sections:
-            note = judge_notes.get(kick)
-            if note:
-                content = content + _ai_judge_row(note, kit)
+            # 合并栏目（AI 行情复盘）追加两行：报价面 + A股全景面，口径各自独立。
+            for aspect, note_key in _section_note_keys(kick):
+                note = judge_notes.get(note_key)
+                if note:
+                    content = content + _ai_judge_row(note, kit, aspect)
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
@@ -7000,9 +7218,9 @@ def build_daily_quant_strategy(data):
             quant_signal = f"防御为主·规避 {bottom['name']}（{bottom['trend']}）"
 
     # —— 4. 技术速读（指数动能聚合；2026-09-09 起不再逐条复述行情数值）——
-    # 行情明细数字的唯一展示位置是「行情速览」；此处只保留聚合（涨跌家数、
+    # 行情明细数字的唯一展示位置是【及时秋刀鱼】AI 行情复盘；此处只保留聚合（涨跌家数、
     # 平均涨跌、最强/最弱点名）与 AI 解读，避免同一数字在页内出现三次
-    # （旧版：行情速览 + 指数动能明细表 + 多因子矩阵雅虎明细行）。
+    # （旧版：行情报价 + 指数动能明细表 + 多因子矩阵雅虎明细行）。
     # tech_rows 保留（兼容既有调用），渲染侧改用 tech_stats。
     tech_rows = []
     tech_moves = []  # (label, pct, band)，供聚合与最强/最弱点名
@@ -7198,7 +7416,7 @@ def _ai_analysis_block(res):
                         f'font-family:{FONT_MONO};">■ NO SECTOR SIGNAL</div>')
         sectors_html = _pixel_panel("SECTOR TREND // 板块趋势跟踪", sectors_body, C_CYAN, "✚")
 
-    # 指数动能聚合：明细数值只在「行情速览」展示，此处仅保留聚合与解读（2026-09-09 去重）。
+    # 指数动能聚合：明细数值只在【及时秋刀鱼】AI 行情复盘展示，此处仅保留聚合与解读（2026-09-09 去重）。
     tech_stats = res.get("tech_stats") or {}
     if tech_stats.get("count"):
         _band_color = {"强势": C_GREEN, "偏强": C_GREEN, "震荡": C_AMBER,
@@ -9081,6 +9299,7 @@ def _pixel_trend_summary(topic, icon, color, res):
 
 PIXEL_KIT = _RenderKit(
     market_section=_pixel_market_section,
+    market_review=_pixel_market_review,
     channel_block=_channel_block,
     headline_row=_headline_row,
     em_news_row=_em_news_row,
@@ -9150,6 +9369,7 @@ def gz_trend_topic_block(res):
 
 GUIZANG_KIT = _RenderKit(
     market_section=gz_market_section,
+    market_review=gz_market_review,
     channel_block=gz_channel_block,
     headline_row=gz_headline_row,
     em_news_row=gz_em_news_row,

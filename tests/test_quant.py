@@ -647,7 +647,7 @@ class RenderIntegrationTests(unittest.TestCase):
         self.assertLess(kickers.index("HK PROBABILITY"),
                         kickers.index("LIQUIDITY FLOW"))
         self.assertLess(kickers.index("QUANT FORECAST"),
-                        kickers.index("MARKET SNAPSHOT"))
+                        kickers.index("MARKET REVIEW"))
 
     def test_generated_html_has_quant_sections(self):
         with tempfile.TemporaryDirectory() as tmp:

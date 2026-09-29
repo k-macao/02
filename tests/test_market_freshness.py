@@ -7,7 +7,7 @@
 
 三道防线各自可测：
   ① 数据层：providers.session_bar_from_meta 用 meta 最新报价补出缺失的已收盘日线
-     （量化引擎 / 周度预测 / 行情速览共用）；
+     （量化引擎 / 周度预测 /【及时秋刀鱼】AI 行情复盘共用）；
   ② 核对层：pipeline._reconcile_market_snapshot 用东方财富行情时间做独立基准回补；
   ③ 呈现层：每个品种记录 as_of，按市场标注「截至 MM-DD」，滞后品种标明并不计入均值。
 """

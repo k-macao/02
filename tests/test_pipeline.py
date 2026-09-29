@@ -465,7 +465,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("OCTOPUS_OS v3.0", html)
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
         self.assertIn("LVL 01 // FORECAST", html)  # 结论先行
-        self.assertIn("LVL 02 // MARKET SNAPSHOT", html)
+        self.assertIn("LVL 02 // MARKET REVIEW", html)
         self.assertIn("// POLICY SHOCK", html)
         self.assertIn("// STRATEGY READ", html)
         self.assertIn("LVL 08 // SUMMARY", html)  # 盘点收尾
@@ -473,13 +473,13 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("量化主结论 // QUANT THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
-        self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（行情速览：明细数字唯一出处）
+        self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（AI 行情复盘：明细数字唯一出处）
         # 2026-09-09 页内去重：TECH READ 不再逐条复述 compact 徽标，只保留聚合
         self.assertIn("指数动能聚合", html)
-        self.assertNotIn("明细数值见「行情速览」", html)  # 说明性脚注已移除
+        self.assertNotIn("明细数值见「AI 行情复盘」", html)  # 说明性脚注已移除
         # 逐指数 compact 徽标已从动能区移除；只在页首「今日预判」摘要出现一次
         self.assertEqual(html.count("▼ -2.50%"), 1)
-        self.assertLess(html.find("▼ -2.50%"), html.find("LVL 02 // MARKET SNAPSHOT"))
+        self.assertLess(html.find("▼ -2.50%"), html.find("LVL 02 // MARKET REVIEW"))
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
@@ -780,10 +780,11 @@ class GuizangOnePageTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929")
         titles = [s[1] for s in pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT)["sections"]]
         # 2026-09-29 起四个栏目改名（只改标题文字）：AI 全篇速览 / 今日预判 /
-        # 未来30天影响经济时间点 / 量化预测总览 分别加上鱼名前缀
+        # 未来30天影响经济时间点 / 量化预测总览 分别加上鱼名前缀；
+        # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」
         for title in ("【爪爪八爪鱼】AI 全篇速览", "【回游金枪鱼】今日预判",
                       "【探照安康鱼】时间节点", "【蜉蝣天地水母】量化预测总览",
-                      "港股概率走势分析", "资金流动性分析", "行情速览", "全球大盘全景复盘",
+                      "港股概率走势分析", "资金流动性分析", "【及时秋刀鱼】AI 行情复盘",
                       "政策因子", "策略研判", "趋势跟踪", "全球头条", "东方财富快讯",
                       "港股名家频道", "新闻情绪", "总结"):
             self.assertIn(title, titles)
@@ -946,7 +947,11 @@ class CleanOldReportsTests(unittest.TestCase):
 
 
 class MarketPanoramaTests(unittest.TestCase):
-    """2026-09-08 新增：全球大盘全景复盘（指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力）。
+    """2026-09-08 新增：A股大盘全景（指数表现 / 涨跌家数 / 成交额 / 北向资金 / 板块热力）。
+
+    2026-09-30 起该数据与「实时行情」合并渲染进同一栏【及时秋刀鱼】AI 行情复盘：
+    重复的数字只出一份（全球指数概览整块删除、A股指数表并入报价栏、沪深京分市场
+    成交额与指数成交额同值不再重列），其余子块内容与口径完全不变。
 
     全部用 fake safe_request 按 URL 分发，不发真实网络请求。
     """
@@ -1184,10 +1189,21 @@ class MarketPanoramaTests(unittest.TestCase):
         data = NewLayoutRenderingTests()._rich_data()
         data["A股大盘全景"] = self._panorama_payload()
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
-        self.assertIn("全球大盘全景复盘", html)
-        self.assertIn("指数表现", html)
+        self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
+        self.assertNotIn("全球大盘全景复盘", html)   # 旧栏目名随合并消失
+        # 指数表并入「A股指数」一块：fixture 的 Yahoo 报价没有 as_of，按
+        # _reconcile_market_snapshot 同一口径「无法比较日期就不动 Yahoo 的值」，
+        # 上证指数用报价数字；东财独有的深证成指补进来并标「（东财）」；成交额来自东财 f6。
+        self.assertIn("A股指数", html)
+        self.assertNotIn("指数表现", html)
         self.assertIn("上证指数", html)
-        self.assertIn("3,123.45", html)
+        self.assertIn("3,813.50", html)
+        self.assertIn("深证成指（东财）", html)
+        self.assertIn("10,456.78", html)
+        # 沪深京分市场成交额与指数「成交额」列同值 → 只出一份
+        self.assertEqual(html.count("5100.00亿"), 1)
+        self.assertEqual(html.count("6200.00亿"), 1)
+        self.assertIn("沪深京成交额合计", html)
         self.assertIn("涨跌家数", html)
         self.assertIn("4,050 家", html)
         self.assertIn("沪深京合计", html)
@@ -1213,8 +1229,11 @@ class MarketPanoramaTests(unittest.TestCase):
         data = NewLayoutRenderingTests()._rich_data()
         data["A股大盘全景"] = self._panorama_payload()
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908", theme="pixel")
-        self.assertIn("全球大盘全景复盘", html)
-        self.assertIn("指数表现", html)
+        self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
+        self.assertNotIn("全球大盘全景复盘", html)
+        self.assertIn("A股指数", html)
+        self.assertNotIn("指数表现", html)
+        self.assertIn("成交额 6200.00亿", html)     # pixel 把成交额挂在指数名后
         self.assertIn("涨跌家数", html)
         self.assertIn("▲ 上涨 4,050 家", html)
         self.assertIn("普涨强势", html)
@@ -1226,17 +1245,19 @@ class MarketPanoramaTests(unittest.TestCase):
         self.assertIn("板块热力", html)
         self.assertIn("领涨板块甲", html)
 
-    def test_panorama_global_overview_renders_in_both_themes(self):
-        """全球大盘全景复盘首个子块：美股（道指/标普/纳指）+ 港股（恒指/恒科）指数概览。
+    def test_global_indices_render_once_after_merge(self):
+        """合并去重（2026-09-30）：美股 / 港股指数在整份日报里只出现一次。
 
-        只复用「行情速览」同一次抓取的 Yahoo 报价快照；报价缺失时子块整体缺席，不编造数字。
+        原「全球大盘全景复盘」的首个子块「全球指数概览（Yahoo 报价）」复用的就是
+        「行情速览」同一次抓取的 Yahoo 快照（道指 / 标普 / 纳指 / 恒指 / 恒科），逐项数字
+        完全相同 → 合并后整块删除，报价块成为这些指数的唯一出处。
         """
         quotes = {
-            "道琼斯指数": {"price": 44000.0, "change_pct": 0.60},
-            "标普500": {"price": 6123.45, "change_pct": 1.25},
-            "纳斯达克": {"price": 19500.0, "change_pct": -0.40},
-            "恒生指数": {"price": 25000.0, "change_pct": 0.80},
-            "恒生科技": {"price": 5600.0, "change_pct": -1.10},
+            "道琼斯指数": {"price": 44000.0, "change_pct": 0.60, "as_of": "2026-09-08"},
+            "标普500": {"price": 6123.45, "change_pct": 1.25, "as_of": "2026-09-08"},
+            "纳斯达克": {"price": 19500.0, "change_pct": -0.40, "as_of": "2026-09-08"},
+            "恒生指数": {"price": 25000.0, "change_pct": 0.80, "as_of": "2026-09-08"},
+            "恒生科技": {"price": 5600.0, "change_pct": -1.10, "as_of": "2026-09-08"},
         }
         for theme in ("guizang", "pixel"):
             with self.subTest(theme=theme):
@@ -1247,24 +1268,37 @@ class MarketPanoramaTests(unittest.TestCase):
                     content_date="2026-09-08", quotes=quotes)
                 html = pipeline.generate_report(
                     data, "2026年9月8日 · 周二", "20260908", theme=theme)
-                self.assertIn("全球大盘全景复盘", html)
-                self.assertIn("全球指数概览", html)
+                self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
+                self.assertNotIn("全球指数概览", html)      # 重复子块已删
+                self.assertNotIn("指数表现", html)          # 已并入「A股指数」
+                self.assertEqual(html.count("全球与美股"), 1)
+                self.assertEqual(html.count("港股双指数"), 1)
+                self.assertEqual(html.count("A股指数"), 1)
                 for label, price in (("道琼斯指数", "44,000"), ("标普500", "6,123"),
                                      ("纳斯达克", "19,500"), ("恒生指数", "25,000.00"),
                                      ("恒生科技", "5,600.00")):
                     self.assertIn(label, html, f"{theme} 缺少 {label}")
-                    self.assertIn(price, html, f"{theme} 缺少 {label} 报价")
-                # 全球子块排在 A股 指数表现之前
-                self.assertLess(html.find("全球指数概览"), html.find("指数表现"))
+                    # 每个指数的价格全文只出现一次（合并前报价块 + 概览块各一次）
+                    self.assertEqual(html.count(price), 1, f"{theme} {label} 报价重复")
+                # 阅读顺序：全球与美股 → A股指数 → 港股双指数 → 全景各子块
+                self.assertLess(html.find("全球与美股"), html.find("A股指数"))
+                self.assertLess(html.find("A股指数"), html.find("港股双指数"))
+                self.assertLess(html.find("港股双指数"), html.find("涨跌家数"))
 
-        # 行情快照不可用 → 全球子块不渲染，其余子块与栏目标题照常
+        # 报价快照不可用 → 合并栏只出东财那半边：全球 / 港股块缺席，A股指数整块走东财口径
         data = NewLayoutRenderingTests()._rich_data()
         data["A股大盘全景"] = self._panorama_payload()
         data["实时行情"] = pipeline._source_result(
             "Yahoo Finance Chart", "unavailable", quotes={}, error="offline")
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
-        self.assertIn("全球大盘全景复盘", html)
-        self.assertNotIn("全球指数概览", html)
+        self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
+        self.assertNotIn("全球与美股", html)
+        self.assertNotIn("港股双指数", html)
+        self.assertIn("A股指数 · 截至 09-08（东财）", html)   # 整块东财口径 → 标东财行情日
+        self.assertIn("上证指数（东财）", html)
+        self.assertIn("3,123.45", html)
+        self.assertIn("暂缺：报价", html)                     # 副标题写明缺哪一路
+        self.assertIn("涨跌家数", html)                       # 其余子块照常
 
     def test_panorama_section_absent_and_audited_when_unavailable(self):
         data = NewLayoutRenderingTests()._rich_data()
@@ -1276,7 +1310,12 @@ class MarketPanoramaTests(unittest.TestCase):
                    "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": "offline"},
             sectors={"leading": [], "lagging": []}, quote_time=None, error="offline")
         html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
-        self.assertNotIn("全球大盘全景复盘", html)   # 栏目标题不渲染
+        self.assertNotIn("全球大盘全景复盘", html)   # 旧栏目名不再出现
+        # 东财全景暂缺 → 合并栏只出报价那半边：全景子块全部缺席，栏目本身照常渲染
+        self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
+        for gone in ("涨跌家数", "板块热力", "南北向资金（前一收盘）"):
+            self.assertNotIn(gone, html)
+        self.assertIn("暂缺：A股全景", html)         # 副标题写明缺哪一路
         self.assertIn("A股大盘全景", html)           # 数据审计栏仍留痕
         self.assertIn("暂缺", html)
         meta = pipeline._report_meta(html)
@@ -1339,7 +1378,7 @@ class ReportInnerDedupeTests(unittest.TestCase):
         self.assertIn('href="#h-gh-02"', html)
         self.assertIn("指数动能", html)
         self.assertIn("4 个指数", html)
-        self.assertNotIn("明细数值见「行情速览」", html)
+        self.assertNotIn("明细数值见「AI 行情复盘」", html)
 
     def test_tech_aggregate_counts_match_quotes(self):
         """动能聚合的涨跌家数与输入行情一致（3 涨 / 1 跌 / 0 平）。"""
@@ -1355,7 +1394,7 @@ class ReportInnerDedupeTests(unittest.TestCase):
             (3, 1, 0))
 
     def test_market_section_shows_hk_indices_in_both_themes(self):
-        """恒生指数补缺：双主题行情速览都有港股双指数小节。"""
+        """恒生指数补缺：双主题【及时秋刀鱼】AI 行情复盘都有港股双指数小节。"""
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
@@ -1363,12 +1402,12 @@ class ReportInnerDedupeTests(unittest.TestCase):
             self.assertIn("恒生指数", html)
 
     def test_multi_factor_matrix_does_not_repeat_quotes(self):
-        """多因子矩阵不再复述报价数字：价格只在行情速览出现一次。"""
+        """多因子矩阵不再复述报价数字：价格只在【及时秋刀鱼】AI 行情复盘出现一次。"""
         for theme in ("pixel", "guizang"):
             html = pipeline.generate_report(
                 self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
             self.assertEqual(html.count("12,345.67"), 1, f"theme={theme}")  # 千分位价格仅出现一次
-            # 涨跌幅：行情速览明细 + 页首「今日预判」摘要各一次
+            # 涨跌幅：AI 行情复盘明细 + 页首「今日预判」摘要各一次
             self.assertLessEqual(html.count("-2.50%"), 2, f"theme={theme}")
 
     def test_unshown_channel_risk_keeps_full_title(self):
@@ -2042,9 +2081,11 @@ class NationalPolicySourceTests(unittest.TestCase):
 class SectionReadingOrderTests(unittest.TestCase):
     """2026-09-27：按人类阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
 
-    结论先行 → 分栏展开（行情速览 → 全球大盘全景 → 政策因子 → 策略研判 →
+    结论先行 → 分栏展开（AI 行情复盘 → 政策因子 → 策略研判 →
     资讯：全球头条 → 东财快讯 → 港股名家频道 → 新闻情绪）→
     总结收尾。无数据栏目缺席但不打乱其余顺序。
+    2026-09-30 起「行情速览」与「全球大盘全景复盘」合并成一栏「【及时秋刀鱼】AI 行情复盘」，
+    原来两个位置合成一个（MARKET REVIEW），其余栏目顺序与编号顺次前移。
     """
 
     def _full_data(self):
@@ -2059,8 +2100,7 @@ class SectionReadingOrderTests(unittest.TestCase):
     # 策略研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
         "【回游金枪鱼】今日预判</h2>",
-        "行情速览</h2>",
-        "全球大盘全景复盘</h2>",
+        "【及时秋刀鱼】AI 行情复盘</h2>",
         "政策因子</h2>",
         "策略研判</h2>",
         "全球头条</h2>",
@@ -2084,11 +2124,11 @@ class SectionReadingOrderTests(unittest.TestCase):
             self._full_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
         order = [
             "LVL 01 // FORECAST",
-            "LVL 02 // MARKET SNAPSHOT", "LVL 03 // GLOBAL PANORAMA",
-            "LVL 04 // POLICY SHOCK", "LVL 05 // STRATEGY READ",
-            "LVL 06 // GLOBAL HEADLINES", "LVL 07 // EASTMONEY WIRE",
-            "LVL 08 // HK GURU CHANNELS",
-            "LVL 09 // NEWS SENTIMENT", "LVL 10 // SUMMARY",
+            "LVL 02 // MARKET REVIEW",
+            "LVL 03 // POLICY SHOCK", "LVL 04 // STRATEGY READ",
+            "LVL 05 // GLOBAL HEADLINES", "LVL 06 // EASTMONEY WIRE",
+            "LVL 07 // HK GURU CHANNELS",
+            "LVL 08 // NEWS SENTIMENT", "LVL 09 // SUMMARY",
         ]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "存在未渲染的 LVL 关卡")
@@ -2106,9 +2146,8 @@ class SectionReadingOrderTests(unittest.TestCase):
             "东方财富热门榜", "unavailable", markets={}, error="offline")
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
-        order = ["LVL 01 // FORECAST", "LVL 02 // MARKET SNAPSHOT",
-                 "LVL 03 // GLOBAL PANORAMA", "LVL 04 // STRATEGY READ",
-                 "LVL 05 // SUMMARY"]
+        order = ["LVL 01 // FORECAST", "LVL 02 // MARKET REVIEW",
+                 "LVL 03 // STRATEGY READ", "LVL 04 // SUMMARY"]
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
@@ -2131,7 +2170,8 @@ class ConciseLayoutTests(unittest.TestCase):
 
     def test_conclusion_first_and_summary_last(self):
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
-        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"), html.find("行情速览</h2>"))
+        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"),
+                        html.find("【及时秋刀鱼】AI 行情复盘</h2>"))
         self.assertIn("市场倾向", html)
         self.assertIn("核心判断", html)
         self.assertGreater(html.find("总结</h2>"), html.find("新闻情绪</h2>"))
@@ -2747,15 +2787,15 @@ class EconCalendarTests(unittest.TestCase):
         res, _ = self._fetch()
         for theme, markers in (
             ("guizang", ["【回游金枪鱼】今日预判</h2>", "【探照安康鱼】时间节点</h2>",
-                         "行情速览</h2>"]),
+                         "【及时秋刀鱼】AI 行情复盘</h2>"]),
             ("pixel", ["LVL 01 // FORECAST", "LVL 02 // ECON CALENDAR",
-                       "LVL 03 // MARKET SNAPSHOT"]),
+                       "LVL 03 // MARKET REVIEW"]),
         ):
             html = self._report(self._data(res), theme=theme)
             positions = [html.find(m) for m in markers]
             self.assertNotIn(-1, positions, f"{theme} 栏目缺失: {markers}")
             self.assertEqual(positions, sorted(positions),
-                             f"{theme} 新栏目必须紧跟今日预判、在行情速览之前")
+                             f"{theme} 新栏目必须紧跟今日预判、在 AI 行情复盘之前")
 
     def test_section_body_carries_window_summary_and_star_levels(self):
         res, _ = self._fetch()
@@ -2848,15 +2888,17 @@ class OpeningDigestTests(unittest.TestCase):
         sections = [(k, k, "<b>原始内容</b>", "", "")
                     for k in pipeline.REPORT_SECTION_ORDER]
         sections.append(("NEW", "新栏目", "新增证据", "", ""))
+        # 合并栏目「AI 行情复盘」的两条研判（报价面 / A股全景面）在首屏用「；」接成一句
         result = pipeline._opening_digest(
-            sections, {"MARKET SNAPSHOT": {"text": "重点 &lt;script&gt;"}},
+            sections, {"MARKET SNAPSHOT": {"text": "报价重点"},
+                       "GLOBAL PANORAMA": {"text": "全景重点 &lt;script&gt;"}},
             [("核心判断", "<b>谨慎观察</b>")], 2, 8, pipeline.GUIZANG_KIT)
         text = result[2]
         for kick in pipeline.REPORT_SECTION_ORDER:
             if kick not in {"FORECAST", "SUMMARY"}:
                 self.assertIn(kick, text)
         self.assertIn("新增证据", text)
-        self.assertIn("重点 &lt;script&gt;", text)
+        self.assertIn("报价重点；全景重点 &lt;script&gt;", text)
         self.assertNotIn("<script>", text)
         self.assertIn("当天来源 2/8", text)
 
@@ -2926,3 +2968,257 @@ class SectionRenameTests(unittest.TestCase):
         self.assertEqual(digest[1], self.EXPECTED["AI DIGEST"])
         self.assertIn(f"{self.EXPECTED['ECON CALENDAR']}：", digest[2])
         self.assertIn(f"{self.EXPECTED['QUANT FORECAST']}：", digest[2])
+
+
+class MarketReviewMergeTests(unittest.TestCase):
+    """2026-09-30 栏目合并：「行情速览」+「全球大盘全景复盘」→【及时秋刀鱼】AI 行情复盘。
+
+    用户指出两栏内容重复，合并去重（重复的数字只出一份，独有数据一律保留）：
+      · 全景「全球指数概览（Yahoo 报价）」= 报价栏「全球与美股」+「港股双指数」同一次
+        Yahoo 抓取的同一份快照（道指 / 标普 / 纳指 / 恒指 / 恒科）→ 整块删除；
+      · 全景「指数表现」（东财八大宽基）与报价栏「A股四指数」四个指数重复 → 并成一张
+        「A股指数」表：同名指数只出一行，成交额与东财独有宽基（北证50 / 沪深300 /
+        上证50 / 中证500）全部保留；
+      · guizang「成交额」子块的沪 / 深 / 京市成交额就是上证指数 / 深证成指 / 北证50 的
+        同一批 f6 数字 → 指数表已带成交额列时不再重列（合计、环比、上一交易日保留）。
+    抓取逻辑、数据源名称（实时行情 / A股大盘全景）、审计口径与推送门禁一律不变。
+    """
+
+    QUOTES = {
+        "道琼斯指数": {"price": 44000.0, "change_pct": 0.60, "as_of": "2026-09-29"},
+        "标普500": {"price": 6123.45, "change_pct": 1.25, "as_of": "2026-09-29"},
+        "上证指数": {"price": 3813.50, "change_pct": 0.40, "as_of": "2026-09-29"},
+        "恒生指数": {"price": 25000.0, "change_pct": 0.80, "as_of": "2026-09-29"},
+    }
+
+    def _market(self, quotes=None, status="success"):
+        return pipeline._source_result(
+            "Yahoo Finance Chart", status, is_today=(status == "success"),
+            content_date="2026-09-29" if status == "success" else None,
+            quotes=self.QUOTES if quotes is None else quotes,
+            **({} if status == "success" else {"error": "offline"}))
+
+    def _pan(self, indices=None, content_date="2026-09-29", with_amount=True, status="success"):
+        if indices is None:
+            indices = [
+                {"code": "000001", "name": "上证指数", "price": 3820.00, "chg_pct": 0.58,
+                 "amount": 5.1e11 if with_amount else None},
+                {"code": "399001", "name": "深证成指", "price": 12800.00, "chg_pct": -0.30,
+                 "amount": 6.2e11 if with_amount else None},
+                {"code": "899050", "name": "北证50", "price": 1024.00, "chg_pct": 1.10,
+                 "amount": 8.0e9 if with_amount else None},
+            ]
+        return pipeline._source_result(
+            "东方财富·A股全景", status, is_today=(status == "success"), content_date=content_date,
+            indices=indices,
+            breadth={"up": 3000, "down": 2000, "flat": 100, "ratio": 1.50, "mood": "涨跌互现",
+                     "partial": False, "markets": {"沪": {"up": 1500, "down": 900, "flat": 50}}},
+            turnover={"total": 1.138e12, "sh_sz": 1.13e12, "prev_total": 1.087e12, "chg_pct": 4.69,
+                      "by_market": {"沪": 5.1e11, "深": 6.2e11, "京": 8.0e9}, "partial": False},
+            north={"available": True, "amount_yi": 1350.25, "date": "2026-09-29",
+                   "south_available": False, "south_amount_yi": None, "south_date": None,
+                   "policy_note": pipeline.PANORAMA_NORTH_POLICY_NOTE, "error": None},
+            sectors={"leading": [{"code": "BK100", "name": "领涨板块甲", "chg_pct": 3.50,
+                                  "main_inflow": 1.5e9, "lead_stock": "领涨牛股",
+                                  "lead_stock_pct": 9.9}],
+                     "lagging": []},
+            quote_time="2026-09-29 15:00:00",
+            **({} if status == "success" else {"error": "offline"}))
+
+    def _data(self, market=None, pan=None, rich=True):
+        data = NewLayoutRenderingTests()._rich_data() if rich else {}
+        data["实时行情"] = self._market() if market is None else market
+        data["A股大盘全景"] = self._pan() if pan is None else pan
+        return data
+
+    def _section(self, data, kit):
+        for s in pipeline._collect_report_parts(data, kit)["sections"]:
+            if s[0] == "MARKET REVIEW":
+                return s
+        return None
+
+    # ------------------------------------------------------------------
+    # 栏目本身：一个位置、一个新名字、旧名不回潮
+    # ------------------------------------------------------------------
+    def test_one_section_replaces_two_in_order_and_titles(self):
+        order = pipeline.REPORT_SECTION_ORDER
+        self.assertIn("MARKET REVIEW", order)
+        self.assertNotIn("MARKET SNAPSHOT", order)
+        self.assertNotIn("GLOBAL PANORAMA", order)
+        self.assertEqual(pipeline.SECTION_TITLE_MARKET_REVIEW, "【及时秋刀鱼】AI 行情复盘")
+        # 合并后占原来「行情速览」的位置：每周预测之后、政策因子之前
+        self.assertLess(order.index("WEEKLY FORECAST"), order.index("MARKET REVIEW"))
+        self.assertLess(order.index("MARKET REVIEW"), order.index("POLICY SHOCK"))
+
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            kicks = [s[0] for s in pipeline._collect_report_parts(self._data(), kit)["sections"]]
+            self.assertEqual(kicks.count("MARKET REVIEW"), 1)
+            self.assertNotIn("MARKET SNAPSHOT", kicks)
+            self.assertNotIn("GLOBAL PANORAMA", kicks)
+        for theme in ("guizang", "pixel"):
+            html = pipeline.generate_report(self._data(), "2026年9月29日 · 周二", "20260929",
+                                            theme=theme)
+            # 栏目头只有一个（首屏速览也会引用一次栏目标题，因此按栏目头计数）
+            head = (f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>" if theme == "guizang"
+                    else "// MARKET REVIEW")
+            self.assertEqual(html.count(head), 1, theme)
+            self.assertNotIn("行情速览", html, theme)
+            self.assertNotIn("全球大盘全景复盘", html, theme)
+
+    def test_section_absent_only_when_both_sources_fail(self):
+        gone = self._data(market=self._market(status="unavailable"),
+                          pan=self._pan(status="unavailable"), rich=False)
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            self.assertIsNone(self._section(gone, kit))
+        # 任意一路成功即渲染（合并前也是「有哪路出哪路」，不因合并丢内容）
+        for data in (self._data(market=self._market(status="unavailable"), rich=False),
+                     self._data(pan=self._pan(status="unavailable"), rich=False)):
+            for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+                self.assertIsNotNone(self._section(data, kit))
+
+    # ------------------------------------------------------------------
+    # A股指数合并规则：同名指数只出一行，日期新者胜
+    # ------------------------------------------------------------------
+    def test_ashare_rows_merge_by_fresher_date_and_keep_unique_data(self):
+        rows = {r["label"]: r for r in pipeline._market_review_ashare_rows(
+            self._market(), self._pan(content_date="2026-09-30"))}
+        # 东财行情日更新 → 用东财价并标「（东财）」，成交额一并带上
+        self.assertIn("3,820.00", rows["上证指数（东财）"]["price_str"])
+        self.assertEqual(rows["上证指数（东财）"]["amount"], 5.1e11)
+        self.assertEqual(rows["上证指数（东财）"]["via"], "eastmoney")
+        # 东财独有的宽基补在后面（Yahoo 侧没有对应品种），不因为合并而丢失
+        self.assertIn("北证50", rows)
+        self.assertEqual(rows["北证50"]["amount"], 8.0e9)
+        # 同名指数只出一行
+        self.assertEqual(len([k for k in rows if k.startswith("上证指数")]), 1)
+
+        # 东财不比 Yahoo 新 → 保留 Yahoo 值（滞后标注照旧），成交额仍来自东财
+        rows = {r["label"]: r for r in pipeline._market_review_ashare_rows(
+            self._market(), self._pan(content_date="2026-09-29"))}
+        self.assertIn("3,813.50", rows["上证指数"]["price_str"])
+        self.assertEqual(rows["上证指数"]["amount"], 5.1e11)
+
+        # Yahoo 缺某个指数 → 用东财同一次抓取的值补上，不出空行
+        market = self._market(quotes={"标普500": self.QUOTES["标普500"]})
+        rows = {r["label"]: r for r in pipeline._market_review_ashare_rows(market, self._pan())}
+        self.assertIn("上证指数（东财）", rows)
+        self.assertNotIn("道琼斯指数", rows)
+
+        # 两路都没有的品种不出「数据暂缺」行；两路都空 → 整块缺席
+        self.assertEqual(pipeline._market_review_ashare_rows(self._market(quotes={}), {}), [])
+
+    def test_ashare_caption_never_claims_a_date_it_cannot_support(self):
+        # 报价侧有日期 → 用报价侧「截至」（含滞后口径）
+        self.assertIn("截至", pipeline._market_review_ashare_caption(self._market(), self._pan()))
+        # 整块都是东财口径 → 标东财行情日
+        self.assertEqual(
+            pipeline._market_review_ashare_caption(self._market(quotes={}), self._pan()),
+            "A股指数 · 截至 09-29（东财）")
+        # 两路口径混在一起而报价侧没有日期 → 标题不写日期（各行自己标「（东财）」）
+        no_date = self._market(quotes={"上证指数": {"price": 3813.50, "change_pct": 0.40}})
+        self.assertEqual(pipeline._market_review_ashare_caption(no_date, self._pan()), "A股指数")
+
+    # ------------------------------------------------------------------
+    # 去重：重复数字全文只出现一次，独有数据一个不少
+    # ------------------------------------------------------------------
+    def test_duplicate_numbers_gone_and_unique_data_kept_in_both_themes(self):
+        for theme, kit in (("guizang", pipeline.GUIZANG_KIT), ("pixel", pipeline.PIXEL_KIT)):
+            with self.subTest(theme=theme):
+                sec = self._section(self._data(), kit)
+                html = pipeline.generate_report(self._data(), "2026年9月29日 · 周二", "20260929",
+                                                theme=theme)
+                body = sec[2]
+                self.assertNotIn("全球指数概览", body)     # 与报价块完全重复 → 删除
+                self.assertNotIn("指数表现", body)         # 并入「A股指数」
+                self.assertEqual(body.count("全球与美股"), 1)
+                self.assertEqual(body.count("A股指数"), 1)
+                self.assertEqual(body.count("港股双指数"), 1)
+                # 每个指数的价格全文只出现一次（合并前报价块 + 概览块各一次）
+                for price in ("44,000", "6,123", "25,000.00"):
+                    self.assertEqual(html.count(price), 1, f"{theme} {price} 重复")
+                # 沪 / 深市成交额 = 上证指数 / 深证成指 成交额，指数表已带 → 不再重列
+                self.assertNotIn("沪市成交额", body)
+                self.assertNotIn("深市成交额", body)
+                self.assertEqual(body.count("5100.00亿"), 1, theme)
+                # 独有数据一个不少：合计与环比、宽度、南北向、板块热力
+                for kept in ("沪深京成交额合计", "上一交易日合计（沪深京）", "涨跌家数",
+                             "1.50", "涨跌互现", "北向成交总额（2026-09-29）", "1,350.25 亿元",
+                             "领涨板块甲", "领涨牛股"):
+                    self.assertIn(kept, body, f"{theme} 缺少 {kept}")
+
+    def test_turnover_by_market_kept_when_index_amounts_missing(self):
+        """指数表拿不到成交额时，分市场成交额照旧展示（去重不能变成丢数据）。"""
+        pan = self._pan(with_amount=False)
+        body = pipeline.gz_market_review(self._market(), pan)
+        self.assertIn("沪市成交额", body)
+        self.assertNotIn("成交额", body.split("涨跌家数")[0].split("A股指数")[-1])  # 指数表无成交额列
+        # 直接调用全景块（未合并）时行为不变：指数表 + 分市场成交额都在
+        solo = pipeline.gz_panorama_block(pan)
+        self.assertIn("指数表现", solo)
+        self.assertIn("沪市成交额", solo)
+
+    def test_market_only_renders_quotes_without_panorama_blocks(self):
+        sec = self._section(self._data(pan=self._pan(status="unavailable"), rich=False),
+                            pipeline.GUIZANG_KIT)
+        self.assertIsNotNone(sec)
+        self.assertIn("全球与美股", sec[2])
+        for gone in ("涨跌家数", "板块热力", "南北向资金"):
+            self.assertNotIn(gone, sec[2])
+        self.assertNotIn("成交额", sec[2])          # 没有东财成交额 → 不出这一列
+        self.assertIn("暂缺：A股全景", sec[4])
+
+    # ------------------------------------------------------------------
+    # 徽标 / 副标题 / 研判：两路数据各自表态，不混算
+    # ------------------------------------------------------------------
+    def test_badge_and_caption_report_each_source_separately(self):
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            badge, caption = pipeline._market_review_meta(kit, self._market(), self._pan())
+            self.assertIn("报价", badge)
+            self.assertIn("A股全景", badge)
+            self.assertEqual(caption, "Yahoo Finance Chart ＋ 东方财富·A股全景")
+
+            badge, caption = pipeline._market_review_meta(kit, None, self._pan())
+            self.assertNotIn("报价", badge)
+            self.assertEqual(caption, "东方财富·A股全景 · 暂缺：报价")
+
+            badge, caption = pipeline._market_review_meta(kit, self._market(), None)
+            self.assertEqual(caption, "Yahoo Finance Chart · 暂缺：A股全景")
+
+            badge, caption = pipeline._market_review_meta(kit, None, None)
+            self.assertEqual(badge, "")
+            self.assertEqual(caption, "暂缺：报价、A股全景")
+
+    def test_two_judge_rows_keep_their_own_methodology(self):
+        """合并栏保留两行研判（报价面 / A股全景面），不把两套口径混算成一个概率。"""
+        for theme, kit in (("guizang", pipeline.GUIZANG_KIT), ("pixel", pipeline.PIXEL_KIT)):
+            with self.subTest(theme=theme):
+                body = self._section(self._data(), kit)[2]
+                self.assertEqual(body.count("AI 研判（报价面）"), 1)
+                self.assertEqual(body.count("AI 研判（A股全景面）"), 1)
+                self.assertLess(body.find("AI 研判（报价面）"), body.find("AI 研判（A股全景面）"))
+                self.assertIn("项报价", body)        # 报价面证据
+                self.assertIn("宽度", body)          # 全景面证据
+        # notes 的键名不变（仍是两路证据各自的键），只是渲染进同一栏
+        notes = pipeline.build_section_ai_notes(self._data())
+        self.assertIn("MARKET SNAPSHOT", notes)
+        self.assertIn("GLOBAL PANORAMA", notes)
+        self.assertEqual(pipeline._section_note_keys("MARKET REVIEW"),
+                         (("报价面", "MARKET SNAPSHOT"), ("A股全景面", "GLOBAL PANORAMA")))
+        self.assertEqual(pipeline._section_note_keys("POLICY SHOCK"), (("", "POLICY SHOCK"),))
+
+    def test_digest_joins_both_judge_texts(self):
+        digest = pipeline._opening_digest(
+            [("MARKET REVIEW", pipeline.SECTION_TITLE_MARKET_REVIEW, "正文", "", "")],
+            {"MARKET SNAPSHOT": {"text": "报价面偏多"}, "GLOBAL PANORAMA": {"text": "宽度偏空"}},
+            [("核心判断", "谨慎观察")], 1, 3, pipeline.GUIZANG_KIT)
+        self.assertIn(f"{pipeline.SECTION_TITLE_MARKET_REVIEW}：报价面偏多；宽度偏空", digest[2])
+
+    def test_audit_sources_unchanged_by_merge(self):
+        """合并的是栏目，不是数据线：两路来源仍各自留痕，审计源数与门禁不变。"""
+        html = pipeline.generate_report(self._data(), "2026年9月29日 · 周二", "20260929")
+        # 栏目副标题同时给出两路来源名（合并前分别在两个栏目里各写一次）
+        self.assertIn("Yahoo Finance Chart ＋ 东方财富·A股全景", html)
+        meta = pipeline._report_meta(html)
+        self.assertEqual(meta["total_sources"], 8)
+        ok, _ = pipeline.check_push_eligibility(self._data())
+        self.assertTrue(ok)
