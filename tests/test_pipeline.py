@@ -3075,10 +3075,10 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         data = self._data()
         parts = pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT, date_str="20260802")
         footer = pipeline._status_footer([("全球头条", data["全球头条"]),
-                                          ("每周量化走势预测（恒指·5交易日）",
+                                          ("每周量化走势预测（恒指·7交易日）",
                                            data["每周走势预测"])])
         self.assertIn("全球头条", footer)
-        self.assertIn("每周量化走势预测（恒指·5交易日）", footer)
+        self.assertIn("每周量化走势预测（恒指·7交易日）", footer)
         self.assertGreater(parts["total"], 0)
 
     def test_pixel_kickers_and_icon_labels_unchanged(self):
@@ -3093,10 +3093,10 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         self.assertEqual(pipeline._section_visual("WEEKLY FORECAST")[1], "WEEK-FX")
 
     def test_weekly_window_disclosure_survives_shortened_title(self):
-        """新标题不再带「每周」，周度口径仍须在栏目内如实披露。"""
+        """新标题不再带「每周」，七日视界口径仍须在栏目内如实披露（2026-09-29 起 5→7 个交易日）。"""
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("个交易日", html)
-        self.assertIn("P(周涨)", html)
+        self.assertIn("P(7日涨)", html)
         self.assertIn("先存档后结算", html)
 
     def test_risk_reference_uses_new_headline_title(self):

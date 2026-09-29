@@ -265,7 +265,7 @@ def _ren_liquidity(ctx):
 
 
 def _ren_weekly(ctx):
-    """每周量化走势预测：一句话周报。"""
+    """【贪吃大白鲨】量化走势预测：把未来 7 个交易日的逐日表格讲成一句人话。"""
     weekly = ctx.get("weekly") or {}
     entry = weekly.get("entry") or {}
     if not (weekly.get("available") and entry.get("p_up") is not None):
@@ -273,11 +273,24 @@ def _ren_weekly(ctx):
     seed = f"{ctx.get('date_str') or ''}|WEEKLY"
     p = float(entry["p_up"]) * 100
     dir_txt = {"up": "看涨", "down": "看跌"}.get(str(entry.get("direction") or ""), "中性观望")
-    n = int(entry.get("target_sessions") or 5)
+    n = int(entry.get("target_sessions") or 7)
     p_txt = _pct(entry["p_up"])
-    return (f"未来 {n} 个交易日，模型态度：{dir_txt}，周涨概率 {p_txt}"
-            f"（{_coin_tone(p, seed)}）。"
-            "翻译：周度预测像导航的「预计到达时间」，是参考不是精确时刻表，当氛围组就好。")
+    text = (f"未来 {n} 个交易日，模型态度：{dir_txt}，整段累计上涨概率 {p_txt}"
+            f"（{_coin_tone(p, seed)}）。")
+    # 逐日表格：把最乐观 / 最谨慎的一天点出来，数字全部来自当次 daily rows（同源，不另算）
+    rows = [r for r in (weekly.get("daily") or {}).get("rows") or []
+            if isinstance(r, dict) and r.get("p_up") is not None]
+    if rows:
+        ups = sum(1 for r in rows if r.get("direction") == "up")
+        downs = sum(1 for r in rows if r.get("direction") == "down")
+        best = max(rows, key=lambda r: float(r.get("p_up") or 0))
+        worst = min(rows, key=lambda r: float(r.get("p_up") or 0))
+        text += (f"逐日看：{ups} 天偏涨 / {downs} 天偏跌，"
+                 f"最乐观 T+{int(best.get('k') or 0)}（{_pct(best.get('p_up'))}）、"
+                 f"最谨慎 T+{int(worst.get('k') or 0)}（{_pct(worst.get('p_up'))}）。")
+    text += ("翻译：逐日表格像导航的分段路况，越往后越不准；仓位和止损都按「留一手」来，"
+             "别看见一天看涨就一把梭。")
+    return text
 
 
 def _ren_market_review(ctx):

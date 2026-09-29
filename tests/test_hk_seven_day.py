@@ -425,6 +425,7 @@ class PipelineWiringTests(unittest.TestCase):
                                                       pipeline.GUIZANG_KIT), "")
 
     def test_report_contains_section_and_coverage_line(self):
+        """2026-09-30 合并：hk7 由独立栏目并入【贪吃大白鲨】量化走势预测的栏内子块。"""
         bars = synthetic_bars()
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(pipeline, "REPORT_DIR", tmp), \
@@ -435,12 +436,23 @@ class PipelineWiringTests(unittest.TestCase):
         html = pipeline.generate_report_guizang(
             {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
             "2026年9月29日", "20260929")
+        # 子块标题与三指数内容仍在（并入 WEEKLY FORECAST 栏目，栏目头用合并后的标题）
         self.assertIn("AI 七日港股走势分析概率", html)
-        self.assertIn("HK 7D PROB", html)
         self.assertIn("恒生科技", html)
-        # 栏目顺序：策略研判之后、趋势跟踪之前
-        self.assertLess(html.index("HK 7D PROB"),
+        self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, html)
+        # 独立栏目已取消：英文 kicker 不再单列
+        self.assertNotIn("HK 7D PROB", html)
+        # 顺序：合并后随 WEEKLY FORECAST，仍在趋势跟踪之前
+        self.assertLess(html.index(pipeline.SECTION_TITLE_WEEKLY_FORECAST),
                         html.index("TREND TRACKING") if "TREND TRACKING" in html else len(html))
+
+    def test_hk7_column_merged_into_weekly_section(self):
+        """独立栏目取消：kicker 退出顺序表与图标砖；抓取 / 渲染 / 数据源键名 / 审计全保留。"""
+        self.assertNotIn("HK 7D PROB", pipeline.REPORT_SECTION_ORDER)
+        self.assertNotIn("HK 7D PROB", pipeline._SECTION_ICON_META)
+        self.assertTrue(hasattr(pipeline, "_hk_seven_day_block"))   # 渲染函数保留（作子块）
+        self.assertTrue(hasattr(pipeline, "fetch_hk_seven_day"))    # 抓取保留（数据源仍进审计）
+        self.assertEqual(pipeline.HK7_SOURCE_NAME, "AI 七日港股走势分析概率")
 
     def test_report_without_key_hides_column_and_audit_entry(self):
         """无 Key（默认）→ 栏目整栏缺席：正文与数据覆盖审计里都不出现。"""
