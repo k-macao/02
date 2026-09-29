@@ -76,8 +76,12 @@
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 策略研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
-  8. 超长日报按栏目边界全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
-     完整栏目拆为多条独立 HTML 消息依次发送，全部明细不丢；磁盘 / GitHub 始终保留一份完整日报。
+  8. 超长日报「尽量合并」后全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
+     把每条都填到单条上限为止——整栏放得下就整栏装，放不下就在完整标签边界切开、
+     续片重开栏目头并在横幅标注「承接上条（续）」——因此条数就是「总字数 ÷ 单条上限」的
+     理论下限（旧版整栏装箱会浪费 30%+ 空间、白多推几条）。全部明细不丢，
+     磁盘 / GitHub 始终保留一份完整日报；发请求前还按平台频率限制（默认 1 分钟 5 次）
+     主动排队，条数多也一条不丢；见 _pack_section_units / _split_html_for_push / _wait_push_rate_limit。
   9. 「策略研判」栏目：基于当日多源信号（实时行情、A股板块热力、热门榜单、全球/东财头条与
      港股名家频道观点）做确定性量化合成，输出板块趋势跟踪策略（量化信号 +
      趋势分 + 置信度、板块趋势强度榜、技术速读、风险控制、量化配置）。无需大模型 API、
@@ -191,6 +195,7 @@ import glob
 import json
 import threading
 import xml.etree.ElementTree as ET
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from html import unescape as _html_unescape
 from urllib.parse import quote, urljoin, urlparse
@@ -253,14 +258,23 @@ PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "1
 PUSHPLUS_MULTIPART = str(os.environ.get("PUSHPLUS_MULTIPART", "1")).strip().lower() not in ("0", "false", "no")
 # 多条推送之间的间隔秒数，避免触发 PushPlus「发送频繁」频率限制（每条仍各自退避重试）。
 PUSHPLUS_PART_DELAY = float(os.environ.get("PUSHPLUS_PART_DELAY", "2"))
-# 渲染时插入的两个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
-#   PART_BREAK_MARK —— 每个栏目之前，拆分时切在这里，保证每条消息都从完整栏目开始；
-#   DOC_FOOT_MARK   —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
-# 有了这两个标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
-# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 页脚 + 闭合标签，
+# PushPlus 频率限制：同一 token「1 分钟内接收 5 次请求，超出的请求将不再推送」。
+# 分条推送时按这个窗口主动排队（而不是等被平台丢弃后再退避重试），保证每条都能送达。
+PUSHPLUS_RATE_WINDOW = float(os.environ.get("PUSHPLUS_RATE_WINDOW", "60"))
+PUSHPLUS_RATE_MAX = int(os.environ.get("PUSHPLUS_RATE_MAX", "5"))   # 0 = 关闭排队
+# 渲染时插入的三个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
+#   PART_BREAK_MARK   —— 每个栏目之前，拆分时优先切在这里，让每条消息尽量从完整栏目开始；
+#   SECTION_BODY_MARK —— 栏目头与栏目正文之间，栏目被切开时续片据此重开栏目头（读者一眼看出在续哪一栏）；
+#   DOC_FOOT_MARK     —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
+# 有了这些标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
+# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目（可能含一栏的续片）+ 页脚 + 闭合标签，
 # 微信端排版与单条推送完全一致，且全部内容按原顺序送达。
 PART_BREAK_MARK = "<!--SPLIT-->"
+SECTION_BODY_MARK = "<!--BODY-->"
 DOC_FOOT_MARK = "<!--FOOT-->"
+# 分条时的「栏目内续接」阈值：当前条剩余空间不足这么多字的正文时，不切开栏目，
+# 整栏挪到下一条，避免出现「横幅 + 栏目头 + 一两行字」的碎片条。
+PUSHPLUS_SPLIT_MIN_BODY = int(os.environ.get("PUSHPLUS_SPLIT_MIN_BODY", "1500"))
 # 单份日报最多拆成多少条（防御性上限：正常 25 万字日报约 3 条）
 PUSHPLUS_MAX_PARTS = int(os.environ.get("PUSHPLUS_MAX_PARTS", "12"))
 
@@ -4411,7 +4425,7 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 </tr>
 </table>
 {caption_html}
-{content}
+{SECTION_BODY_MARK}{content}
 </div>'''
 
 
@@ -4944,7 +4958,9 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
         f'{title_html}{cap}{badge}</div>',
         bg="#FFFFFF", pad="0 0 12px")
     body = gz_shell(content, bg="#FFFFFF", pad="0 0 32px")
-    return head + body
+    # 栏目标记：栏目头与正文之间留一个不可见锚点，供「超长日报按栏目装箱合并推送」时
+    # 在栏目内部续接（续片重开栏目头，读者一眼看出在续哪一栏）。
+    return head + SECTION_BODY_MARK + body
 
 
 def gz_ai_analysis_block(res):
@@ -9411,17 +9427,23 @@ def _opening_tag_name(open_tag):
     return m.group(1).lower() if m else ""
 
 
-def _scan_open_tags(html, limit):
-    """扫描 html 前 limit 字符内的完整标签，返回可安全切点列表。
+def _scan_cut_points(html, limit):
+    """扫描 html 前 limit 字符内的完整标签，返回 (标签区间列表, 可切点列表)。
 
-    元素为 (标签结束位置, 未闭合开标签原文列表)；开标签保留原始属性，
-    续片据此原样重开父容器，样式不会丢。
+    标签区间元素为 (起, 止)，供「正文中间切点」判断某个位置是否落在标签里
+    （含跨过 limit 的那半个标签，否则正文切点可能切进标签内部）；
+    可切点元素为 (标签结束位置, 该位置之后的未闭合开标签原文列表)，
+    开标签保留原始属性，续片据此原样重开父容器，样式不会丢。
     """
     stack = []
+    spans = []
     candidates = []
     for m in _TAG_RE.finditer(html):
-        if m.end() > limit:
+        if m.start() >= limit:
             break
+        spans.append((m.start(), m.end()))
+        if m.end() > limit:
+            continue        # 跨过扫描边界的标签只用于「是否在标签里」，不作为切点
         tag, closing = m.group("tag").lower(), bool(m.group("close"))
         if tag not in _VOID_TAGS:
             if closing:
@@ -9431,7 +9453,47 @@ def _scan_open_tags(html, limit):
             else:
                 stack.append(m.group(0))
         candidates.append((m.end(), list(stack)))
-    return candidates
+    return spans, candidates
+
+
+# 正文中间切点的优先落点：切在这些字符「之后」看起来像自然断行（空白与中英标点）。
+_TEXT_CUT_AFTER = " \t\u3000，。、；：！？,.;:!?、）)】」》›…—·-"
+
+
+def _inside_entity(text, position, lookback=34):
+    """position 是否落在未结束的 HTML 实体（如 ``&amp;``）中间。"""
+    return bool(re.search(r"&[#0-9a-zA-Z]*$", text[max(0, position - lookback):position]))
+
+
+def _find_text_cut(fragment, floor, limit, spans):
+    """在一段没有标签边界的正文里找切点：不在标签里、不在 HTML 实体里。
+
+    优先切在空白 / 标点之后（读者看到的是自然断行），找不到就取预算内最后一个
+    合法位置；返回切点下标，找不到返回 None。
+    """
+    limit = min(limit, len(fragment))
+    if limit <= floor:
+        return None
+    # 标签区间之外的正文区间（从后往前找第一个可用的）
+    gaps, previous = [], floor
+    for start, end in spans:
+        if start > previous:
+            gaps.append((previous, start))
+        previous = max(previous, end)
+    if limit > previous:
+        gaps.append((previous, limit))
+    fallback = None
+    for start, end in reversed(gaps):
+        for position in range(end, start, -1):
+            if position <= floor:
+                break
+            if _inside_entity(fragment, position):
+                continue
+            if fragment[position - 1] in _TEXT_CUT_AFTER:
+                return position
+            if fallback is None:
+                fallback = position
+    return fallback
 
 
 def _closers_for(stack):
@@ -9439,56 +9501,63 @@ def _closers_for(stack):
     return "".join(f"</{_opening_tag_name(t)}>" for t in reversed(stack))
 
 
-def _split_long_fragment(fragment, budget):
-    """把单个超长片段切成若干「各自标签平衡」的片段；续片原样重开被切断的父标签。
+def _split_fragment_once(fragment, budget, after=0):
+    """把 fragment 切一刀：返回 (前半段, 续片)；切不动返回 None。
 
-    返回片段列表（至少 1 个）。切不动时（budget 连一个标签都放不下）原样返回，
-    由调用方决定回退策略——绝不静默丢内容。
+    前半段标签自闭合且长度 ≤ budget；续片原样重开被切断的父标签（保留原始属性），
+    因此两段都能独立渲染，拼起来仍是原文。``after`` 是「不能切开的前缀长度」
+    （栏目内续接时就是栏目头长度）：切点必须在它之后，且续片要比 after 之后的
+    正文更短——否则这一刀没有实质进展（切在栏目头里），换刀只会原地打转。
+    找不到合格切点时返回 None，由调用方决定整段挪到下一条，还是走截断兜底。
     """
     if budget <= 0 or len(fragment) <= budget:
-        return [fragment]
-    pieces = []
-    rest = fragment
-    for _ in range(PUSHPLUS_MAX_PARTS * 8):     # 防御性上限，正常远远用不到
-        if len(rest) <= budget:
-            break
-        picked = None
-        for end, stack in reversed(_scan_open_tags(rest, budget)):
-            closers = _closers_for(stack)
-            if end + len(closers) <= budget and end > 0:
-                picked = (end, stack, closers)
-                break
-        if picked is None:
-            break                               # 无法在预算内找到合法切点
-        end, stack, closers = picked
+        return None
+    wanted = len(fragment) - after
+    spans, candidates = _scan_cut_points(fragment, budget)
+    # 1) 优先切在完整标签边界（最靠后的那个可用切点，条数最少）
+    for end, stack in reversed(candidates):
+        if end <= after:
+            continue
+        closers = _closers_for(stack)
+        if end + len(closers) > budget:
+            continue
         reopened = "".join(stack)               # 续片要原样重开的父标签（含原始属性）
-        if end <= len(reopened):
-            # 切点还没跨过被重开的标签：这一刀没有实质进展（正文是一整段无标签长文本），
-            # 继续切只会原地打转 → 交回调用方走截断兜底，绝不发出半截标签。
-            break
-        pieces.append(rest[:end] + closers)
-        rest = reopened + rest[end:]
-        if not rest:
-            break
-    pieces.append(rest)
-    return [p for p in pieces if p]
+        rest = reopened + fragment[end:]
+        if len(rest) < wanted:
+            return fragment[:end] + closers, rest
+    # 2) 标签边界切不动（正文是一整段没有标签的长文本）→ 退一步切在正文中间，
+    #    同样补全未闭合标签；两段拼起来仍是原文，一个字不丢。
+    last_end, last_stack = candidates[-1] if candidates else (0, [])
+    closers = _closers_for(last_stack)
+    position = _find_text_cut(fragment, max(last_end, after), budget - len(closers), spans)
+    if position is not None:
+        rest = "".join(last_stack) + fragment[position:]
+        if len(rest) < wanted:
+            return fragment[:position] + closers, rest
+    return None
 
 
-def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False):
+def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
+                       continuation="", unfinished=False):
     """分条推送的条序横幅：告诉读者这是第几条 / 共几条，以及为什么要分条。
 
     tail_cut=True 用于「条数已达 PUSHPLUS_MAX_PARTS 上限」的收尾条：
-    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文。
+    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文；
+    continuation=栏目名 表示本条开头是上一栏的续片（栏目被切开了），
+    unfinished=True 表示本条在栏目内没写完、下一条仍是同一栏的续片。
     """
     limit = limit or PUSHPLUS_MAX_CONTENT_CHARS
     if tail_cut:
         text = (f"📄 第 {index}/{total} 条 · 已达单次推送条数上限"
                 f"（PUSHPLUS_MAX_PARTS={total}），本条之后的内容见文末完整日报链接")
     else:
-        text = (f"📄 第 {index}/{total} 条 · 完整日报共 {total} 条"
-                f"（单条上限 {limit // 10000 or 1} 万字，按栏目拆分，内容不缺失）")
+        text = f"📄 第 {index}/{total} 条"
+        if continuation:
+            text += f" · 承接上条「{continuation}」（续）"
+        text += (f" · 单条上限 {limit // 10000 or 1} 万字，已尽量合并推送"
+                 f"（内容不缺失）")
         if index < total:
-            text += f" · 接下条 {index + 1}/{total}"
+            text += " · 本条未完，接下条" if unfinished else f" · 接下条 {index + 1}/{total}"
     if theme == "pixel":
         return (f'<table width="100%" cellpadding="0" cellspacing="0" '
                 f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
@@ -9510,15 +9579,114 @@ def _report_theme(html):
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
 
 
+def _section_title_text(header_html, max_len=28):
+    """从栏目头 HTML 里取出栏目名，供「承接上条（续）」横幅使用；取不到返回空串。
+
+    两个主题的栏目头结构固定：guizang 用 ``<h2>标题</h2>``，pixel 用带
+    ``padding-top:4px;line-height:1.35`` 的标题 div。取到的文字已是 HTML 转义过的，
+    直接放进横幅即可（不再二次转义，否则 ``&amp;`` 会变成 ``&amp;amp;``）。
+    """
+    for pattern in (r"<h2[^>]*>(.*?)</h2>",
+                    r"padding-top:4px;line-height:1\.35[^>]*>(.*?)<span"):
+        m = re.search(pattern, header_html or "", re.S)
+        if not m:
+            continue
+        text = " ".join(re.sub(r"<[^>]+>", "", m.group(1)).split())
+        if text:
+            return text[:max_len] + ("…" if len(text) > max_len else "")
+    return ""
+
+
+def _split_section_units(sections):
+    """把栏目 HTML 拆成 (栏目头, 栏目名, 正文)；没有栏目头锚点时整段算正文。"""
+    units = []
+    for section in sections:
+        header, separator, content = section.partition(SECTION_BODY_MARK)
+        if not separator:
+            header, content = "", section
+        units.append((header, _section_title_text(header), content))
+    return units
+
+
+def _pack_section_units(units, budget, min_split=None):
+    """顺序装箱：把栏目装进「每条正文 ≤ budget 字」的消息里，条数取最小。
+
+    规则（尽量合并，但绝不丢内容、绝不发出半截标签）：
+      1. 整栏放得下 → 整栏装进当前条（读者看到的每条都尽量从完整栏目开始）；
+      2. 整栏放不下、且当前条还能再放 min_split 字正文 → 在完整标签边界把该栏切开，
+         用当前条的剩余空间装前半段（栏目头 + 正文前半 + 闭合标签），填满这一条；
+      3. 剩余空间太小 → 整栏挪到下一条，当前条照样发出（不硬塞碎片）。
+    续片在下一条开头重新带上栏目头（``SECTION_BODY_MARK`` 之前的部分），
+    横幅标注「承接上条「栏目名」（续）」，因此切开栏目也不会让读者迷路。
+
+    返回 (每条正文列表, 每条开头的「承接栏目名」列表)；两条列表一一对应，
+    承接栏目名为空串表示该条从新栏目开始。
+    """
+    if min_split is None:
+        min_split = PUSHPLUS_SPLIT_MIN_BODY
+    pending = deque((header, title, content, False) for header, title, content in units)
+    chunks, titles = [], []
+    current, current_len, current_cont = [], 0, ""
+
+    def flush():
+        nonlocal current, current_len, current_cont
+        if current:
+            chunks.append("".join(current))
+            titles.append(current_cont)
+            current, current_len, current_cont = [], 0, ""
+
+    while pending:
+        header, title, content, is_continuation = pending.popleft()
+        full = header + content
+        room = budget - current_len
+        if len(full) <= room:
+            if is_continuation and not current:
+                current_cont = title
+            current.append(full)
+            current_len += len(full)
+            continue
+        # 整栏（或整段续片）放不下：先把当前条填满，剩下的留到下一条
+        # （room 是当前条还能装的字数；head_room 是切给正文的部分，栏目头必须另有位置）
+        head_room = room - len(header)
+        if head_room >= min_split:
+            # after=栏目头长度：切点必须跨过栏目头，续片只装正文，不会原地打转
+            cut = _split_fragment_once(full, room, after=len(header))
+            if cut is not None:
+                head_piece, rest = cut
+                if is_continuation and not current:
+                    current_cont = title
+                current.append(head_piece)
+                current_len += len(head_piece)
+                flush()
+                pending.appendleft((header, title, rest, True))
+                continue
+        if current:
+            # 剩余空间太小（或这一栏切不开）：整栏挪到下一条，当前条不硬塞半截内容
+            pending.appendleft((header, title, content, is_continuation))
+            flush()
+            continue
+        # 当前条是空的却还放不下，且找不到任何合法切点（正文是一整段无标签长文本）：
+        # 原样放入本条，交给上层做「装不进单条上限」的兜底处理
+        current.append(full)
+        current_len += len(full)
+    flush()
+    return chunks, titles
+
+
 def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
     """把超过单条上限的日报 HTML 拆成 N 条「各自完整可渲染」的消息；返回 list[str]。
 
-    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 原文档页脚与闭合标签，
-    因此每条都是独立、标签平衡、样式一致的 HTML，微信端排版与单条推送完全相同。
-    全部内容按原文顺序送达，不做任何删减。
+    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目（末条可能是一栏的续片）
+    + 原文档页脚与闭合标签，因此每条都是独立、标签平衡、样式一致的 HTML，
+    微信端排版与单条推送完全相同。全部内容按原文顺序送达，不做任何删减。
+
+    **尽量合并**：顺序装箱时把每条都填到单条上限为止——整栏放得下就整栏装，
+    放不下就在完整标签边界把这栏切开、用剩余空间装前半段；只有剩余空间小到会
+    产生碎片条时才整栏挪到下一条。因此条数就是「总字数 ÷ 单条可用字数」的理论下限，
+    不会为了保持栏目完整而白白多推几条（旧版整栏为单位的装箱会浪费 30%+ 的空间）。
 
     返回 None 表示无法安全拆分（旧版文件没有分条标记 / 外壳本身就超上限 /
-    需要的条数超过 max_parts），调用方应回退到 _truncate_html_for_push。
+    正文存在切不开的超长无标签文本），调用方应回退到 _truncate_html_for_push。
     """
     # 上限与条数上限都在调用时解析（而不是写进默认参数），环境变量与测试都能覆盖
     limit = limit if limit is not None else PUSHPLUS_MAX_CONTENT_CHARS
@@ -9540,9 +9708,13 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
         return None
 
     theme = _report_theme(html)
-    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字预留）+ 安全余量
-    banner_w = max(len(_build_part_banner(i, max(max_parts, len(sections)), theme, limit))
-                   for i in (1, max(max_parts, len(sections))))
+    units = _split_section_units(sections)
+    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字与最长栏目名预留）+ 安全余量
+    longest_title = max((unit[1] for unit in units), key=len, default="")
+    cap = max(max_parts, len(units))
+    banner_w = max(len(_build_part_banner(
+                       index, cap, theme, limit, continuation=longest_title, unfinished=True))
+                   for index in (1, cap))
     overhead = len(shell) + len(tail) + banner_w + 64
     budget = limit - overhead
     if budget < 2000:
@@ -9550,17 +9722,7 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
               f"正文只剩 {budget:,} 字，拆分没有意义")
         return None
 
-    # 装箱：优先整栏装进一条；单栏超预算时再按标签边界细分（内容不丢）
-    chunks, current, current_len = [], [], 0
-    for section in sections:
-        for piece in _split_long_fragment(section, budget):
-            if current and current_len + len(piece) > budget:
-                chunks.append("".join(current))
-                current, current_len = [], 0
-            current.append(piece)
-            current_len += len(piece)
-    if current:
-        chunks.append("".join(current))
+    chunks, chunk_titles = _pack_section_units(units, budget)
     if not chunks:
         return None
 
@@ -9574,13 +9736,18 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
               f"前 {keep} 条完整推送，其余内容压进第 {keep + 1} 条并附完整日报链接"
               f"（如需全部送达，请调高 PUSHPLUS_MAX_PARTS 或 PUSHPLUS_MAX_CONTENT_CHARS）")
         chunks = chunks[:keep] + ["".join(chunks[keep:])]
+        chunk_titles = chunk_titles[:keep] + [chunk_titles[keep] if keep < len(chunk_titles) else ""]
 
     total = len(chunks)
     title_re = re.compile(r"(<title>)(.*?)(</title>)", re.S)
     parts = []
     for index, chunk in enumerate(chunks, 1):
         last_cut = tail_cut and index == total
-        banner = _build_part_banner(index, total, theme, limit, tail_cut=last_cut)
+        banner = _build_part_banner(
+            index, total, theme, limit, tail_cut=last_cut,
+            continuation=chunk_titles[index - 1],
+            # 下一条是同一栏的续片 → 本条末尾如实提示「本条未完」
+            unfinished=index < total and bool(chunk_titles[index]))
         head = shell
         if total > 1:
             # 让每条的浏览器/微信标题也带上条序，正文横幅之外再多一层提示
@@ -9606,11 +9773,14 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
       或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
-    - 日报 HTML 超过单条上限（默认 10 万字符）时，按栏目边界拆成多条消息完整推送，
+    - 日报 HTML 超过单条上限（默认 10 万字符）时，按栏目装箱合并成尽可能少的几条
+      （每条都填到上限，必要时在栏目内断开并标注「承接上条（续）」），
       全部明细按原顺序送达；旧版 HTML 无拆分锚点或 PUSHPLUS_MULTIPART=0 时，
       回退到「按标签边界截断 + 完整版链接」；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次），多条推送时每条各自享有重试；
+      发请求前还会按 PUSHPLUS_RATE_MAX / PUSHPLUS_RATE_WINDOW（默认 1 分钟 5 次，
+      与平台限制一致）排队，避免分条过多被平台直接丢弃；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
@@ -9630,7 +9800,7 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
                                      report_name) if PUSHPLUS_MULTIPART else None
         if parts:
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
-                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
+                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 已尽量合并为 {len(parts)} 条"
                   f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
             return _push_html_parts(title, parts, token=token, topic=topic)
         if PUSHPLUS_MULTIPART:
@@ -9644,11 +9814,51 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
                              topic=topic)
 
 
+# 已发出的推送请求时刻（time.monotonic），供 PushPlus「1 分钟 N 次请求」的频率限制排队
+_PUSH_REQUEST_TIMES = []
+
+
+def _push_rate_wait(history, now, window=None, limit=None):
+    """还差多少秒才允许再发一次请求（保证 window 秒内的请求数 < limit）。
+
+    history：已发出的请求时刻（升序，需已按 window 过滤）；now：当前时刻。
+    返回 0 表示可以立刻发。limit <= 0 或 window <= 0 表示不排队。
+    """
+    window = PUSHPLUS_RATE_WINDOW if window is None else window
+    limit = PUSHPLUS_RATE_MAX if limit is None else limit
+    if window <= 0 or limit <= 0 or len(history) < limit:
+        return 0.0
+    return max(0.0, history[len(history) - limit] + window - now)
+
+
+def _wait_push_rate_limit():
+    """按 PushPlus 频率限制主动排队，再放行一次请求。
+
+    PushPlus 对发送接口的限制是「1 分钟内接收 5 次请求，超出的请求将不再推送」。
+    分条推送（每条 1 次请求 + 失败重试）容易在几秒内打满额度，被平台直接丢弃——
+    旧做法只能等退避重试（10s→30s→60s）反复撞墙。这里改为发请求前先排队：
+    窗口内已发满就先等到最早那次请求滑出窗口，既不被丢弃也不浪费重试次数。
+    """
+    while True:
+        now = time.monotonic()
+        _PUSH_REQUEST_TIMES[:] = [t for t in _PUSH_REQUEST_TIMES
+                                  if now - t < PUSHPLUS_RATE_WINDOW]
+        wait = _push_rate_wait(_PUSH_REQUEST_TIMES, now)
+        if wait <= 0:
+            _PUSH_REQUEST_TIMES.append(now)
+            return
+        print(f"  ⏳ PushPlus 频率限制（{PUSHPLUS_RATE_WINDOW:g}s 内最多 "
+              f"{PUSHPLUS_RATE_MAX} 次请求）：等待 {wait:.0f}s 后再发下一条...")
+        time.sleep(wait)
+
+
 def _push_html_parts(title, parts, token=None, topic=None):
     """按顺序推送拆分后的多条正文；全部成功才返回 True。
 
     - 每条标题追加「(i/N)」，微信消息列表里一眼能看出条序，也避免标题完全重复被去重；
     - 条与条之间等待 PUSHPLUS_PART_DELAY 秒，降低触发「发送频繁」的概率；
+    - 发请求前按 PUSHPLUS_RATE_MAX / PUSHPLUS_RATE_WINDOW 主动排队（默认 1 分钟 5 次，
+      与 PushPlus 平台限制一致），多分条也能源源送达、不靠退避重试硬撞频率墙；
     - 任意一条最终失败即停止后续条并返回 False（调用方会发失败告警、以退出码 1 结束），
       日志里明确写出「已送达 i-1 条 / 共 N 条」，不掩盖部分送达的事实。
     """
@@ -9687,6 +9897,7 @@ def _push_one_message(title, content_html, token=None, template="html", topic=No
         if wait:
             print(f"  ⏳ 等待 {wait}s 后进行第 {attempt}/{len(attempts)} 次尝试...")
             time.sleep(wait)
+        _wait_push_rate_limit()      # 发请求前按平台频率限制排队（重试同样计入额度）
         http_status = None
         try:
             resp = requests.post(PUSHPLUS_URL, json=payload, timeout=30)
