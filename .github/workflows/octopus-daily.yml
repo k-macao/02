@@ -15,6 +15,16 @@ on:
         type: boolean
         default: false
         required: false
+      llm_check:
+        description: "只探活大模型 API（验证 Key / 端点 / 模型名，不生成日报）"
+        type: boolean
+        default: false
+        required: false
+      hk7_only:
+        description: "只跑 AI 七日港股走势分析概率（研究模式，不推送）"
+        type: boolean
+        default: false
+        required: false
 
 jobs:
   octopus-daily:
@@ -44,12 +54,38 @@ jobs:
       - name: 🐙 运行章鱼AI流水线
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          # ◧ AI 七日港股走势分析概率的大模型（默认 DeepSeek：https://api.deepseek.com + deepseek-flash）
+          # 未配置 OCTOPUS_LLM_API_KEY → 该栏目整体缺席（不进审计），日报其它栏目照常
+          # 想「没有 Key 也看量化基准」→ OCTOPUS_HK7_FALLBACK: "1"
+          OCTOPUS_LLM_API_KEY: ${{ secrets.OCTOPUS_LLM_API_KEY }}
+          # 下面三个都可以留空：留空 = https://api.deepseek.com / deepseek-flash / auto（DeepSeek 关思考）
+          OCTOPUS_LLM_BASE_URL: ${{ vars.OCTOPUS_LLM_BASE_URL }}
+          OCTOPUS_LLM_MODEL: ${{ vars.OCTOPUS_LLM_MODEL }}
+          OCTOPUS_LLM_THINKING: ${{ vars.OCTOPUS_LLM_THINKING }}
+          # OCTOPUS_LLM_MAX_TOKENS: "2048"     # JSON 被截断时调大
+          # OCTOPUS_LLM_TIMEOUT: "60"
+          # OCTOPUS_HK7_FALLBACK: "1"
         run: |
           set -euo pipefail
           # 兜底空值，兼容定时触发场景
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+          LLM_CHECK="${{ github.event.inputs.llm_check || 'false' }}"
+          HK7_ONLY="${{ github.event.inputs.hk7_only || 'false' }}"
 
-          if [ "$DRY_RUN" = "true" ]; then
+          # 只报「有没有配」，绝不回显 Key 本身
+          if [ -n "${OCTOPUS_LLM_API_KEY:-}" ]; then
+            echo "◧ 大模型：已配置 Key（${OCTOPUS_LLM_BASE_URL:-默认 https://api.deepseek.com} / ${OCTOPUS_LLM_MODEL:-默认 deepseek-flash}）"
+          else
+            echo "◧ 大模型：未配置 OCTOPUS_LLM_API_KEY → AI 七日港股走势分析概率整栏缺席"
+          fi
+
+          if [ "$LLM_CHECK" = "true" ]; then
+            echo "运行模式：大模型 API 探活（不生成日报）"
+            python3 output/pipeline.py --llm-check
+          elif [ "$HK7_ONLY" = "true" ]; then
+            echo "运行模式：只跑 AI 七日港股走势分析概率（研究模式，不推送）"
+            python3 output/pipeline.py --hk7-only
+          elif [ "$DRY_RUN" = "true" ]; then
             echo "运行模式：预览模式（不推送）"
             python3 output/pipeline.py --dry-run
           else
@@ -65,7 +101,10 @@ jobs:
           git config user.email "bot@octopus.ai"
 
           # 通配符匹配失败不报错，兼容无日报文件的场景
-          git add output/daily_report_*.html output/latest.html output/sentiment_history.json output/news_history.json output/quant_history.json 2>/dev/null || true
+          # 留痕 JSON 必须一起提交，否则「预测留痕 / 命中率」每次都会从零开始：
+          #   hk7_forecast.json    → ◧ AI 七日港股走势分析概率（满 7 个交易日结算）
+          #   weekly_forecast.json → 🗓️ 每周量化走势预测（满 5 个交易日结算）
+          git add output/daily_report_*.html output/latest.html output/sentiment_history.json output/news_history.json output/quant_history.json output/hk7_forecast.json output/weekly_forecast.json 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "无新内容，跳过提交。"
