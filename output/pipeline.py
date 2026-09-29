@@ -9691,6 +9691,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
                   f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
                   f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
+            print(f"     ℹ️ 单条上限按账号实际额度设置可减少条数"
+                  f"（PushPlus：会员 10 万 / 实名 2 万字，PUSHPLUS_MAX_CONTENT_CHARS 覆盖）")
             return _push_html_parts(title, parts, token=token, topic=topic)
         if PUSHPLUS_MULTIPART:
             print("  ↩️ 已回退到旧的单条推送：按完整标签边界截断 + 末尾附完整日报链接")
