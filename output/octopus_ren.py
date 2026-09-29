@@ -1,0 +1,614 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""🦑 鲜鲜解读 —— 日报每个栏目的「00 后接地气版」翻译层（2026-09-29 新增）。
+
+用户是入门兼职投资者，看不懂专业术语。本模块把日报里每个栏目的关键数字
+翻译成一句到三句大白话 + 网络梗，附在每个栏目末尾「🦑 鲜鲜解读」行里。
+
+设计原则（与整仓「防自欺」文化一致，写进 tests/test_ren.py 兜底）：
+  1. 纯确定性规则合成：不调大模型、可复现——同一份输入永远得到同一份解读；
+     措辞变体按 `crc32(日期 + 栏目)` 选池，隔天自动换说法，当天重跑不跳变。
+  2. 不伪造数字：解读里出现的每一个数字都来自当次渲染用的同一批实参
+     （与「⌁ AI 研判」行同源，趋势跟踪等共享统计走同一个 helper，不另算一套）。
+  3. 数据缺失 → 返回空串，该栏目自动不加解读；绝不硬编、不用旧数据充数。
+  4. 不给投资建议：只做「翻译」，方向提示一律紧跟「非投资建议」式的提醒，
+     并明确概率 ≈ 抛硬币的诚实口径（模型命中 52% 时就说它是抛硬币水平）。
+  5. 环境变量 OCTOPUS_REN=0 整体关闭（默认开启）；单栏出错只丢该行，不影响日报。
+
+ctx 约定（键全部可选，缺了就降级）：
+  date_str  报告日 YYYYMMDD（措辞变体的种子）
+  notes     build_section_ai_notes 的结果（与页面 ⌁ AI 研判行同源的方向定调）
+  market/pan/policy/ai/quant/weekly/hk7/fed/geo/senti/cal/yt/google/em
+            与 _collect_report_parts 里渲染正文用的同一批对象
+  trend     _trend_section_stats(data) 的结果（趋势跟踪共享统计）
+  coverage  {today, total, missing: [...]}（总结栏数据覆盖同源）
+"""
+from __future__ import annotations
+
+import os
+import zlib
+
+# OCTOPUS_REN=0 / false / no 关闭「鲜鲜解读」；其余值（含未设置）默认开启。
+ENABLED = str(os.environ.get("OCTOPUS_REN", "1")).strip().lower() not in ("0", "false", "no")
+
+# 每条解读行下面的小字口径（诚实标注：规则合成 + 非投资建议）。
+DISCLAIMER = "规则合成 · 大白话翻译，非投资建议"
+
+
+# ------------------------------------------------------------------
+# 基础工具：确定性选池 + 数字格式化（None → 缺席，绝不补 0）
+# ------------------------------------------------------------------
+def _pick(options, seed):
+    """按种子稳定挑一条措辞：同一天同一栏目永远同一条，隔天自动换花样。"""
+    if not options:
+        return ""
+    return options[zlib.crc32(str(seed).encode("utf-8")) % len(options)]
+
+
+def _pct(value, digits=0, sign=False):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f"{v * 100:+.{digits}f}%" if sign else f"{v * 100:.{digits}f}%"
+
+
+def _int(value):
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _f(value, digits=2):
+    try:
+        return f"{float(value):,.{digits}f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _note_label(notes, key):
+    """与页面 ⌁ AI 研判行同源的方向定调：偏多 / 中性 / 偏空（缺了给 None）。"""
+    note = (notes or {}).get(key) or {}
+    label = str(note.get("label") or "")
+    return label or None
+
+
+# 概率口语库：把「52%」这种数字翻译成人能听懂的话（按档位选池）。
+def _coin_tone(p_pct, seed):
+    """p_pct: 0~100 的上涨概率 → 一句人话点评。"""
+    if p_pct is None:
+        return ""
+    if p_pct >= 65:
+        pool = ["模型难得硬气一次，但它历史上也翻过车，别上头",
+                "偏多信号比较明显，不过概率不是保证书"]
+    elif p_pct >= 55:
+        pool = ["略偏涨，但离「稳」还差得远，手别伸太快",
+                "多头稍微占上风，别脑补成躺赢"]
+    elif p_pct > 45:
+        pool = ["基本等于抛硬币，模型自己心里也没底",
+                "跟抛硬币差不多，纯看氛围",
+                "五五开局面，神仙来了也说不准"]
+    elif p_pct > 35:
+        pool = ["略偏空，防守优先，先保住本金",
+                "空头稍微占上风，别急着抄底"]
+    else:
+        pool = ["模型在拉响小警报，这种时候少动多看",
+                "偏空信号比较明显，别逆势硬冲"]
+    return _pick(pool, seed + "|coin")
+
+
+_STATIC_TIPS = ["多看少动，攒经验值", "管住手，别急着 all in", "先看懂再动手，不亏就是赚",
+                "别浪，机会每天都有", "保持在线，别下牌桌也别重仓压注"]
+
+
+def _tip(seed):
+    return _pick(_STATIC_TIPS, seed + "|tip")
+
+
+# ------------------------------------------------------------------
+# 各栏目生成器：只读 ctx，缺数据返回 ""（栏目末尾就不加解读行）
+# ------------------------------------------------------------------
+def _ren_forecast(ctx):
+    """【回游金枪鱼】今日预判：把「概率/倾向」一行行翻译成硬币梗。"""
+    quant = ctx.get("quant") or {}
+    weekly = ctx.get("weekly") or {}
+    ai = ctx.get("ai") or {}
+    seed = f"{ctx.get('date_str') or ''}|FORECAST"
+    bits = []
+    head = quant.get("headline") or {}
+    if head.get("available") and head.get("p_up") is not None:
+        p = float(head["p_up"]) * 100
+        p_txt = _pct(head["p_up"])
+        tgt = str(quant.get("target_label") or "下一交易日")
+        bits.append(f"模型对{tgt}的上涨概率押 {p_txt}（{_coin_tone(p, seed)}）")
+    wk = weekly.get("entry") or {}
+    if wk.get("p_up") is not None:
+        wp = float(wk["p_up"]) * 100
+        wp_txt = _pct(wk["p_up"])
+        w_seed = seed + "|w"
+        bits.append(f"未来一周周涨概率 {wp_txt}（{_coin_tone(wp, w_seed)}）")
+    if ai.get("available"):
+        bits.append(f"综合倾向「{ai.get('sentiment_label') or '中性'}」"
+                    f"（信号 {int(ai.get('score') or 0):+d}）")
+    if not bits:
+        return ""
+    text = "；".join(bits) + "。"
+    text += f"翻译一下：现在没有稳赚的方向，今天的正确姿势是{_tip(seed)}。"
+    return text
+
+
+def _ren_econ_calendar(ctx):
+    """【探照安康鱼】时间节点：把日程表讲成「开盲盒预告」。"""
+    cal = ctx.get("cal") or {}
+    if cal.get("status") != "success":
+        return ""
+    items = [it for it in (cal.get("items") or []) if isinstance(it, dict)]
+    if not items:
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|ECON"
+    n3 = sum(1 for it in items if int(it.get("imp") or 0) >= 3)
+    by_day = {}
+    for it in items:
+        by_day[str(it.get("date") or "")] = by_day.get(str(it.get("date") or ""), 0) + 1
+    hot_date = sorted(by_day, key=lambda d: (-by_day[d], d))[0] if by_day else ""
+    hot_txt = f"{hot_date[5:10]}（{by_day[hot_date]} 件扎堆）" if hot_date else ""
+    fed = next((it for it in items if "美联储" in str(it.get("name") or "")
+                and "议息" in str(it.get("name") or "")), None)
+    window = str(cal.get("window") or "")
+    window_days = window.split("·")[-1].replace("未来", "").replace("天", "").strip()
+    bits = [f"未来 {window_days or '30'} 天是「开盲盒季」：{len(items)} 个重要时间点，"
+            f"{n3} 个是三星大事件"]
+    if hot_txt:
+        bits.append(f"最挤的一天是 {hot_txt}")
+    if fed is not None:
+        bits.append(f"重头戏：{str(fed.get('name'))} 排在 {str(fed.get('date'))[5:10]}")
+    text = "，".join(bits) + "。"
+    text += ("翻译：大数据和大会议前后，市场爱坐过山车——这不是让你去猜方向，"
+             "而是提醒你别在这些日子前一把押满。")
+    return text
+
+
+def _ren_quant_forecast(ctx):
+    """【蜉蝣天地水母】量化预测总览：概率 + 模型自检的诚实翻译。"""
+    quant = ctx.get("quant") or {}
+    if not quant.get("available"):
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|QUANT"
+    head = quant.get("headline") or {}
+    bits = []
+    if head.get("available") and head.get("p_up") is not None:
+        p = float(head["p_up"]) * 100
+        p_txt = _pct(head["p_up"])
+        label = str(head.get("label") or "中性")
+        bits.append(f"模型给下一交易天的定调是「{label} {p_txt}」（{_coin_tone(p, seed)}）")
+    v1 = (quant.get("validation") or {}).get(1) or {}
+    if v1.get("hit_rate") is not None:
+        hit = float(v1["hit_rate"]) * 100
+        base = float(v1.get("base_rate") or 0.5) * 100
+        honest = ("跟抛硬币差不多" if abs(hit - base) < 3 else
+                  ("比瞎猜强一点点" if hit > base else "还没瞎猜准"))
+        bits.append(f"它自己回测了过去 {_int(v1.get('n') or 0)} 天，"
+                    f"方向命中 {hit:.0f}%（{honest}，模型原话：不显著）")
+    if not bits:
+        return ""
+    return ("；".join(bits) + "。翻译：把概率当「降水概率」看——"
+            "说 52% 会下雨，不代表你出门必须带伞，更不代表它天天下对。")
+
+
+def _ren_hk_probability(ctx):
+    """港股概率走势分析：把个股概率榜讲成「种草 / 劝退名单」。"""
+    quant = ctx.get("quant") or {}
+    if not quant.get("available"):
+        return ""
+    stocks = [s for s in (quant.get("stocks") or [])
+              if isinstance(s, dict) and s.get("probs")]
+    if not stocks:
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|HKPROB"
+    scored = []
+    for s in stocks:
+        p5 = ((s.get("probs") or {}).get(5) or {}).get("p_up")
+        if p5 is not None:
+            scored.append((str(s.get("label") or ""), float(p5)))
+    if not scored:
+        return ""
+    bull = [(n, p) for n, p in scored if p >= 0.60]
+    bear = [(n, p) for n, p in scored if p <= 0.40]
+    mid = len(scored) - len(bull) - len(bear)
+    top_n, top_p = max(scored, key=lambda x: x[1])
+    bot_n, bot_p = min(scored, key=lambda x: x[1])
+    bits = [f"{len(scored)} 只港股里：{len(bull)} 只偏多、{len(bear)} 只偏空、"
+            f"{mid} 只在中间晃"]
+    bits.append(f"模型心头好是{top_n}（5 日 {top_p * 100:.0f}%），"
+                f"最不待见{bot_n}（{bot_p * 100:.0f}%）")
+    b = quant.get("breadth") or {}
+    if b.get("available") and b.get("score") is not None:
+        bits.append(f"整池宽度 {_int(b['score'])}/100——大部队基本在趴窝")
+    text = "；".join(bits) + "。"
+    text += ("翻译：行情不给你白送钱的时候，赚钱靠挑不靠冲；"
+             "而且这只是概率排名，不是荐股，明天可能就换一批。")
+    return text
+
+
+def _ren_liquidity(ctx):
+    """资金流动性分析：把「南向缩量」讲成「池子水少」。"""
+    quant = ctx.get("quant") or {}
+    liq = quant.get("liquidity") or {}
+    if not (quant.get("available") and liq.get("available")):
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|FLOW"
+    bits = []
+    score, label = liq.get("score"), str(liq.get("label") or "")
+    if score is not None:
+        bits.append(f"流动性综合分 {_f(score, 0)}/100{('（' + label + '）') if label else ''}")
+    south = liq.get("south") or {}
+    if south.get("available") and south.get("latest") is not None:
+        latest = _int(south["latest"])
+        pct60 = south.get("pct60")
+        low_txt = ""
+        if pct60 is not None:
+            low_txt = ("，处近 120 日 " + (_pct(pct60) or "") + " 分位"
+                       + ("——内地买家明显在歇" if float(pct60) <= 0.2 else ""))
+        bits.append(f"南向（内地资金）今天成交 {latest} 亿{low_txt}")
+    if not bits:
+        return ""
+    text = "；".join(bits) + "。"
+    if score is not None and float(score) < 40:
+        text += "翻译：池子水位偏浅，鱼不活跃，涨了也别急着追。"
+    elif score is not None and float(score) >= 60:
+        text += "翻译：池子水位还行，但水多也可能水花大，别把热闹当信号。"
+    else:
+        text += ("翻译：池子水多鱼才活跃，水少的时候涨了也别急着追，"
+                 f"今天的姿势是{_tip(seed)}。")
+    return text
+
+
+def _ren_weekly(ctx):
+    """每周量化走势预测：一句话周报。"""
+    weekly = ctx.get("weekly") or {}
+    entry = weekly.get("entry") or {}
+    if not (weekly.get("available") and entry.get("p_up") is not None):
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|WEEKLY"
+    p = float(entry["p_up"]) * 100
+    dir_txt = {"up": "看涨", "down": "看跌"}.get(str(entry.get("direction") or ""), "中性观望")
+    n = int(entry.get("target_sessions") or 5)
+    p_txt = _pct(entry["p_up"])
+    return (f"未来 {n} 个交易日，模型态度：{dir_txt}，周涨概率 {p_txt}"
+            f"（{_coin_tone(p, seed)}）。"
+            "翻译：周度预测像导航的「预计到达时间」，是参考不是精确时刻表，当氛围组就好。")
+
+
+def _ren_market_review(ctx):
+    """【及时秋刀鱼】AI 行情复盘：把涨跌家数 / 成交额讲成「情绪到位、资金没到位」。"""
+    pan = ctx.get("pan") or {}
+    market = ctx.get("market") or {}
+    notes = ctx.get("notes") or {}
+    seed = f"{ctx.get('date_str') or ''}|REVIEW"
+    bits = []
+    b = pan.get("breadth") or {}
+    if pan.get("status") == "success" and b:
+        up, down = int(b.get("up") or 0), int(b.get("down") or 0)
+        if up or down:
+            mood = str(b.get("mood") or "")
+            bits.append(f"A股 {_int(up)} 家涨 / {_int(down)} 家跌（{mood}）")
+    t = pan.get("turnover") or {}
+    if t.get("chg_pct") is not None:
+        chg = float(t["chg_pct"])
+        if chg <= -5:
+            bits.append(f"成交额缩了 {abs(chg):.0f}%——看热闹的多、掏钱得少，钱包捂得死死的")
+        elif chg >= 5:
+            bits.append(f"成交额放了 {chg:.0f}%——真金白银在进场，人有点多")
+    if not bits and market.get("status") == "success":
+        rows = [(lbl, (q or {}).get("change_pct"))
+                for lbl, q in (market.get("quotes") or {}).items()]
+        rows = [(l, p) for l, p in rows if p is not None]
+        if rows:
+            up_n = sum(1 for _, p in rows if p > 0)
+            bits.append(f"{len(rows)} 项主要报价：{up_n} 涨 / {len(rows) - up_n} 跌")
+    if not bits:
+        return ""
+    lead = ((pan.get("sectors") or {}).get("leading") or [{}])
+    lead = lead[0] if lead else {}
+    if lead.get("name") and lead.get("chg_pct") is not None:
+        bits.append(f"今天最靓的板块是{lead['name']}（{float(lead['chg_pct']):+.1f}%）")
+    label = _note_label(notes, "GLOBAL PANORAMA") or _note_label(notes, "MARKET SNAPSHOT")
+    text = "；".join(bits) + "。"
+    if label == "偏多":
+        text += "翻译：气氛在线，但「涨」不等于「你的票涨」，别看见红盘就上头。"
+    elif label == "偏空":
+        text += "翻译：气氛一般，防守为主，别逆势逞强。"
+    else:
+        text += f"翻译：涨跌互现的分歧局，{_tip(seed)}。"
+    return text
+
+
+def _ren_policy(ctx):
+    """政策因子：把 PSI 讲成「政策温度计」。"""
+    policy = ctx.get("policy") or {}
+    if not policy.get("available"):
+        return ""
+    score = int(policy.get("broad_score") or 0)
+    label = str(policy.get("broad_label") or "中性")
+    winners = "、".join(str(w.get("name")) for w in (policy.get("winners") or [])[:2])
+    losers = "、".join(str(w.get("name")) for w in (policy.get("losers") or [])[:2])
+    temp = ("官方最近话风偏谨慎，没有大放水信号" if score < 0 else
+            ("政策在吹暖风，明示的顺风方向可以多看两眼" if score > 0 else "不冷不热，维持现状"))
+    text = f"政策温度计 PSI {score:+d}（{label}）：{temp}。"
+    if winners:
+        text += f"被点名的顺风方向（{winners}）相对扛造；"
+    if losers:
+        text += f"承压方向（{losers}）先观望，别急着抄底。"
+    text += "翻译：政策这阵子不是行情发动机，跟车不如系好安全带。"
+    return text
+
+
+def _ren_fed(ctx):
+    """AI趋势分析（美联储）：把鹰鸽讲成「紧箍咒」。"""
+    fed = ctx.get("fed") or {}
+    if not fed.get("available"):
+        return ""
+    pos, neg, total = int(fed.get("positive_n") or 0), int(fed.get("negative_n") or 0), int(fed.get("total") or 0)
+    verdict = str(fed.get("verdict") or "")
+    if "鹰" in verdict or "紧缩" in verdict:
+        tone = ("借钱的利息下不来，全球股市容易「门可罗雀」，科技成长股最敏感——"
+                "它们的故事都靠「未来的钱」撑估值")
+    elif "鸽" in verdict or "宽松" in verdict:
+        tone = "放水预期升温，市场容易嗨，但嗨完一地瓜子皮的案例也不少"
+    else:
+        tone = "信号混杂，大家都在等下一次开会揭晓答案"
+    return (f"美联储频道：扫了 {total} 条新闻，「紧缩」词命中 {neg} 次 vs「宽松」{pos} 次，"
+            f"定调「{verdict}」。翻译：{tone}。这只「紧箍咒」一念，全球资产都得听响。")
+
+
+def _ren_geo(ctx):
+    """AI趋势分析（地缘政治）：把冲突/缓和讲成「国际大瓜」。"""
+    geo = ctx.get("geo") or {}
+    if not geo.get("available"):
+        return ""
+    pos, neg, total = int(geo.get("positive_n") or 0), int(geo.get("negative_n") or 0), int(geo.get("total") or 0)
+    verdict = str(geo.get("verdict") or "")
+    if "升温" in verdict or "对抗" in verdict:
+        tone = ("火药味 > 和气，这种氛围里黄金、原油爱当「避险显眼包」——"
+                "但它们跳得快摔得也快，新手别追着热点跑")
+    elif "缓和" in verdict:
+        tone = "气氛在缓和，市场紧绷的神经能松一扣"
+    else:
+        tone = "有来有往，属于常规吃瓜量级"
+    return (f"地缘吃瓜榜：{total} 条新闻里「升温」词命中 {neg} 次 vs「缓和」{pos} 次，"
+            f"定调「{verdict}」。翻译：{tone}。")
+
+
+def _ren_strategy(ctx):
+    """策略研判：把量化策略讲成「程序写的剧本」。"""
+    ai = ctx.get("ai") or {}
+    if not ai.get("available"):
+        return ""
+    label = str(ai.get("sentiment_label") or "中性")
+    score = int(ai.get("score") or 0)
+    confidence = str(ai.get("confidence") or "")
+    themes = str(ai.get("themes") or "").strip()
+    text = (f"策略引擎今天定调「{label}」（信号 {score:+d}，把握{confidence}）"
+            + (f"，它盯的方向：{themes}。" if themes else "。"))
+    text += ("翻译：这是程序按规则算出来的剧本，不是老师带飞——"
+             "「趋势跟踪」的意思是跟着强势方向走，弱势的别恋战。")
+    return text
+
+
+def _ren_trend(ctx):
+    """趋势跟踪：把海外论坛 / 20 家媒体讲成「吃瓜前线」。"""
+    trend = ctx.get("trend") or {}
+    if not trend:
+        return ""
+    seed = f"{ctx.get('date_str') or ''}|TREND"
+    platforms = list(trend.get("platforms") or [])
+    bits = []
+    if platforms:
+        bits.append(f"{len(platforms)} 个海外平台（{'、'.join(platforms[:3])}"
+                    f"{'等' if len(platforms) > 3 else ''}）扫了 "
+                    f"{_int(trend.get('samples') or 0)} 条热帖")
+    news_an = trend.get("news_an") or {}
+    if news_an.get("scanned"):
+        src_total = int(news_an.get("total") or 0)
+        src_n = _int(src_total) if src_total > 0 else "20"
+        bits.append(f"{src_n} 家媒体源扫了 {_int(news_an.get('scanned'))} 条，"
+                    f"港股相关的 {_int(news_an.get('hk_n'))} 条")
+    bull, bear = int(trend.get("bull") or 0), int(trend.get("bear") or 0)
+    if bull or bear:
+        mood = "评论区情绪偏空" if bear > bull else ("评论区情绪偏多" if bull > bear else "多空吵得五五开")
+        bits.append(f"多空词 {bull}:{bear}，{mood}")
+    if not bits:
+        return ""
+    themes = "、".join(str(t) for t in (news_an.get("themes") or [])[:2])
+    text = "；".join(bits) + "。"
+    if themes:
+        text += f"热议方向：{themes}。"
+    text += ("翻译：热帖和头条都是情绪放大器，不是事实核查，更不是买卖信号；"
+             f"把梗当研报，钱包会让你长记性。今天的姿势：{_tip(seed)}。")
+    return text
+
+
+def _ren_headlines(ctx):
+    """全球头条 / 东财快讯：把新闻列表讲成「热搜拼盘」。"""
+    kind = ctx.get("_wire_kind") or ""
+    src = ctx.get("google") or {} if kind == "google" else ctx.get("em") or {}
+    titles = [str((h or {}).get("title") or "") for h in (src.get("headlines") or [])
+              if isinstance(h, dict)]
+    titles = [t for t in titles if t]
+    if not titles:
+        return ""
+    notes = ctx.get("notes") or {}
+    key = "GLOBAL HEADLINES" if kind == "google" else "EASTMONEY WIRE"
+    note = notes.get(key) or {}
+    text_bits = [f"{len(titles)} 条{'大新闻' if kind == 'google' else '快讯'}"]
+    themes = "、".join(str(t) for t in (note.get("themes") or [])[:2])
+    if themes:
+        text_bits.append(f"主线是{themes}")
+    text = "，".join(text_bits) + "。"
+    if kind == "google":
+        text += ("翻译：新闻只告诉你「发生了什么」，不保证「接下来会涨」——"
+                 "看到「重磅利好」先让子弹飞一会儿。")
+    else:
+        text += ("翻译：基本是公告拼盘（回购、减持、接订单），"
+                 "属于公司日常操作，单条别脑补成大行情。")
+    return text
+
+
+def _ren_guru(ctx):
+    """港股名家频道：把大V观点讲成「听逻辑、别抄作业」。"""
+    yt = ctx.get("yt") or {}
+    channels = [ch for ch in (yt.get("channels") or []) if isinstance(ch, dict)]
+    if not channels:
+        return ""
+    active = sum(1 for ch in channels if ch.get("is_today"))
+    notes = ctx.get("notes") or {}
+    label = _note_label(notes, "HK GURU CHANNELS")
+    text = f"今天 {active} 个频道更新了内容"
+    if label:
+        text += f"，大V观点整体「{label}」"
+    text += "。翻译：大V嘴上的涨跌和真实涨跌是两回事——"
+    text += "听他们讲逻辑可以，抄作业不行；他们喊单不负责，亏了也没人赔。"
+    return text
+
+
+def _ren_sentiment(ctx):
+    """新闻情绪：把 DNS / 最暖最冷讲成「后视镜」。"""
+    senti = ctx.get("senti") or {}
+    if not (senti.get("available") and senti.get("total_matched")):
+        return ""
+    ms = senti.get("market_summary") or senti
+    dns = ms.get("overall_dns")
+    label = str(ms.get("overall_label") or "中性")
+    dns_txt = ""
+    if dns is not None:
+        if label == "中性":
+            dns_txt = f"（DNS {_f(dns)}，正负相抵后接近零就是中性）"
+        else:
+            dns_txt = (f"（DNS {_f(dns)}，"
+                       + ("正数=夸的比骂的多）" if dns > 0 else "负数=骂的比夸的多）"))
+    bits = [f"近 72 小时新闻情绪整体「{label}」" + dns_txt]
+    hot = ms.get("hottest") or {}
+    cold = ms.get("coldest") or {}
+    covered = ms.get("most_covered") or {}
+    if hot.get("name"):
+        bits.append(f"被夸得最凶：{hot['name']}")
+    if cold.get("name") and cold.get("key") != hot.get("key"):
+        bits.append(f"被骂得最惨：{cold['name']}")
+    if covered.get("name") and covered.get("total"):
+        bits.append(f"上新闻最多：{covered['name']}（{_int(covered['total'])} 条）")
+    text = "；".join(bits) + "。"
+    text += ("翻译：新闻热度是后视镜——它解释昨天，不预告明天；"
+             "热搜上得猛不代表股票会涨，别拿情绪当信号。")
+    return text
+
+
+def _ren_summary(ctx):
+    """总结：把数据覆盖讲成「本份日报的配料表」。"""
+    cov = ctx.get("coverage") or {}
+    if not cov:
+        return ""
+    today, total = int(cov.get("today") or 0), int(cov.get("total") or 0)
+    missing = [str(m) for m in (cov.get("missing") or [])]
+    text = f"本次日报的配料表：{total} 路数据里 {today} 路是当天新鲜货"
+    if missing:
+        text += f"，缺的 {len(missing)} 路（{'、'.join(missing[:3])}{'等' if len(missing) > 3 else ''}）直接点名、不装样子"
+    text += "。全篇是真实数据 + 规则计算，没有玄学。"
+    text += ("新手三件套送给你：只用闲钱、别一把梭、先看懂再下单——"
+             "市场天天开门，本金没了就得退游重练。")
+    return text
+
+
+def _ren_hk7(ctx):
+    """AI 七日港股走势分析概率：只在配置了大模型时出现。"""
+    hk7 = ctx.get("hk7") or {}
+    if not hk7.get("available"):
+        return ""
+    targets = [t for t in (hk7.get("targets") or []) if isinstance(t, dict)]
+    bits = []
+    for t in targets:
+        label = str(t.get("label") or "")
+        p = t.get("p_up")
+        if label and p is not None:
+            bits.append(f"{label} {_pct(p)}")
+    if not bits:
+        return ""
+    engine = str(hk7.get("engine") or "")
+    engine_txt = "大模型研判" if engine == "llm" else "量化基准（大模型没接上）"
+    return (f"未来 7 个交易日上涨概率：{'、'.join(bits)}（{engine_txt}）。"
+            "翻译：7 天已经算「天气预报里的中长期」了，误差会放大，"
+            "看看就好，别按这个排期打款。")
+
+
+# ------------------------------------------------------------------
+# 派发：栏目 kicker → 生成器
+# ------------------------------------------------------------------
+def _ren_global_headlines(ctx):
+    ctx = dict(ctx, _wire_kind="google")
+    return _ren_headlines(ctx)
+
+
+def _ren_eastmoney_wire(ctx):
+    ctx = dict(ctx, _wire_kind="em")
+    return _ren_headlines(ctx)
+
+
+_GENERATORS = {
+    "FORECAST": _ren_forecast,
+    "ECON CALENDAR": _ren_econ_calendar,
+    "QUANT FORECAST": _ren_quant_forecast,
+    "HK PROBABILITY": _ren_hk_probability,
+    "LIQUIDITY FLOW": _ren_liquidity,
+    "WEEKLY FORECAST": _ren_weekly,
+    "MARKET REVIEW": _ren_market_review,
+    "POLICY SHOCK": _ren_policy,
+    "FED TREND": _ren_fed,
+    "GEO TREND": _ren_geo,
+    "STRATEGY READ": _ren_strategy,
+    "TREND TRACKING": _ren_trend,
+    "GLOBAL HEADLINES": _ren_global_headlines,
+    "EASTMONEY WIRE": _ren_eastmoney_wire,
+    "HK GURU CHANNELS": _ren_guru,
+    "NEWS SENTIMENT": _ren_sentiment,
+    "HK 7D PROB": _ren_hk7,
+    "SUMMARY": _ren_summary,
+}
+
+
+def section_ren(kicker, ctx):
+    """返回某栏目的「鲜鲜解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。"""
+    gen = _GENERATORS.get(kicker)
+    if gen is None:
+        return ""
+    try:
+        return str(gen(ctx) or "")
+    except Exception as exc:            # 单栏出措不拖垮整份日报
+        print(f"  ⚠️ 鲜鲜解读（{kicker}）生成失败，本栏跳过：{exc}")
+        return ""
+
+
+def digest_ren(ctx):
+    """首屏【爪爪八爪鱼】AI 全篇速览的一句话人话（贴在速览末尾）。"""
+    notes = ctx.get("notes") or {}
+    pan = ctx.get("pan") or {}
+    quant = ctx.get("quant") or {}
+    seed = f"{ctx.get('date_str') or ''}|DIGEST"
+    labels = []
+    ai_label = _note_label(notes, "STRATEGY READ")
+    market_label = (_note_label(notes, "GLOBAL PANORAMA")
+                    or _note_label(notes, "MARKET SNAPSHOT"))
+    if market_label:
+        labels.append(f"盘面{market_label}")
+    if ai_label:
+        labels.append(f"策略{ai_label}")
+    head = quant.get("headline") or {}
+    if head.get("available") and head.get("p_up") is not None:
+        p = float(head["p_up"]) * 100
+        labels.append(f"明天模型态度：{_coin_tone(p, seed)}")
+    b = (pan.get("breadth") or {}) if pan.get("status") == "success" else {}
+    if b.get("mood"):
+        labels.append(f"A股{b['mood']}")
+    if not labels:
+        return ""
+    return ("今日画风：" + "，".join(labels) + "。"
+            f"一句话攻略：信息量再大也别慌，今天的姿势是{_tip(seed)}。")
