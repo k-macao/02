@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""🦑 人话解读 —— 日报每个栏目的「00 后接地气版」翻译层（2026-09-29 新增）。
+"""🦑 鲜鲜解读 —— 日报每个栏目的「00 后接地气版」翻译层（2026-09-29 新增）。
 
 用户是入门兼职投资者，看不懂专业术语。本模块把日报里每个栏目的关键数字
-翻译成一句到三句大白话 + 网络梗，附在每个栏目末尾「🦑 人话解读」行里。
+翻译成一句到三句大白话 + 网络梗，附在每个栏目末尾「🦑 鲜鲜解读」行里。
 
 设计原则（与整仓「防自欺」文化一致，写进 tests/test_ren.py 兜底）：
   1. 纯确定性规则合成：不调大模型、可复现——同一份输入永远得到同一份解读；
@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import zlib
 
-# OCTOPUS_REN=0 / false / no 关闭「人话解读」；其余值（含未设置）默认开启。
+# OCTOPUS_REN=0 / false / no 关闭「鲜鲜解读」；其余值（含未设置）默认开启。
 ENABLED = str(os.environ.get("OCTOPUS_REN", "1")).strip().lower() not in ("0", "false", "no")
 
 # 每条解读行下面的小字口径（诚实标注：规则合成 + 非投资建议）。
@@ -576,14 +576,14 @@ _GENERATORS = {
 
 
 def section_ren(kicker, ctx):
-    """返回某栏目的「人话解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。"""
+    """返回某栏目的「鲜鲜解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。"""
     gen = _GENERATORS.get(kicker)
     if gen is None:
         return ""
     try:
         return str(gen(ctx) or "")
     except Exception as exc:            # 单栏出措不拖垮整份日报
-        print(f"  ⚠️ 人话解读（{kicker}）生成失败，本栏跳过：{exc}")
+        print(f"  ⚠️ 鲜鲜解读（{kicker}）生成失败，本栏跳过：{exc}")
         return ""
 
 

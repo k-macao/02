@@ -1,4 +1,4 @@
-"""「🦑 人话解读」（output/octopus_ren.py）回归测试（全部离线）。
+"""「🦑 鲜鲜解读」（output/octopus_ren.py）回归测试（全部离线）。
 
 防自欺口径与整仓一致：
   · 确定性——同一份输入永远得到同一份解读（可复现，绝不随机跳变）；
@@ -215,7 +215,7 @@ class ContentTests(unittest.TestCase):
 
 
 class PipelineIntegrationTests(unittest.TestCase):
-    """走完整的 generate_report（离线合成数据），验证两主题都会挂上「人话解读」行。"""
+    """走完整的 generate_report（离线合成数据），验证两主题都会挂上「鲜鲜解读」行。"""
 
     @classmethod
     def setUpClass(cls):
@@ -258,7 +258,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             html = self.pipeline.generate_report(
                 self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
-            self.assertIn("人话解读", html, theme)
+            self.assertIn("鲜鲜解读", html, theme)
             self.assertIn("🦑", html, theme)
             self.assertIn(ren.DISCLAIMER, html, theme)
 
@@ -266,7 +266,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         with unittest.mock.patch.object(self.pipeline, "REN_ENABLED", False):
             html = self.pipeline.generate_report(
                 self._data(), "2026年9月29日 · 周二", "20260929")
-        self.assertNotIn("人话解读", html)
+        self.assertNotIn("鲜鲜解读", html)
         self.assertNotIn("🦑", html)
 
     def test_ren_numbers_match_body(self):

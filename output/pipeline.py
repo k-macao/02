@@ -294,7 +294,7 @@ HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower
 # 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
 WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
 WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
-# 「人话解读」开关（2026-09-29 新增）：每个数据栏目末尾追加一行「🦑 人话解读」，
+# 「鲜鲜解读」开关（2026-09-29 新增）：每个数据栏目末尾追加一行「🦑 鲜鲜解读」，
 # 把当栏关键数字翻译成大白话 + 网络梗，帮入门读者降低阅读门槛。
 # 纯规则合成（output/octopus_ren.py）：可复现、不伪造数字、数据不足自动缺席。
 # OCTOPUS_REN=0 / --no-ren 整体关闭。
@@ -5824,13 +5824,13 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
     return pairs
 
 
-# 正文不展示的数据源（底层仍供量化用）：总结「数据覆盖」与人话解读的
+# 正文不展示的数据源（底层仍供量化用）：总结「数据覆盖」与鲜鲜解读的
 # 「配料表」都不点名它们，避免两处口径漂移。
 _HIDDEN_REPORT_SOURCES = {"A股资讯"}
 
 
 def _missing_source_names(source_items):
-    """暂缺数据源清单（总结栏与人话解读共用同一份，绝不各算各的）。"""
+    """暂缺数据源清单（总结栏与鲜鲜解读共用同一份，绝不各算各的）。"""
     return [name for name, s in source_items
             if name not in _HIDDEN_REPORT_SOURCES and s.get("status") != "success"]
 
@@ -6127,7 +6127,7 @@ def build_geo_trend_analysis(data, exclude_titles=()):
 
 
 def _trend_section_stats(data):
-    """趋势跟踪栏目的共享统计（「⌁ AI 研判」行与「🦑 人话解读」行用同一份数字）。
+    """趋势跟踪栏目的共享统计（「⌁ AI 研判」行与「🦑 鲜鲜解读」行用同一份数字）。
 
     返回 None 表示没有可用样本（两行都不出现）；否则返回：
       live_platforms [(平台名, 源字典)] / items 样本列表 / bull / bear 多空词计数 /
@@ -6287,7 +6287,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
         notes[kick] = _judge_note(prob, f"{detail} → 预测：{outlook}")
 
     # ④ 趋势跟踪（多平台信息员）：多空词命中 + 热股提取 → 散户与交易员情绪判断
-    #    统计走 _trend_section_stats 共享 helper：「⌁ AI 研判」行与「🦑 人话解读」行
+    #    统计走 _trend_section_stats 共享 helper：「⌁ AI 研判」行与「🦑 鲜鲜解读」行
     #    引用同一批数字，不允许两处各算一套。
     trend_stats = _trend_section_stats(data)
     if trend_stats:
@@ -6337,7 +6337,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
             detail += "，热门主题 " + "、".join(_esc(t) for t in themes)
         watch = _esc(themes[0]) if themes else "后续进展"
         notes[kick] = _judge_note(prob, f"{detail} → 预测：头条情绪{label}，关注 {watch}")
-        # 主题列表随研判行一并带出：「人话解读」与 ⌁ AI 研判共用同一份，不另算一套。
+        # 主题列表随研判行一并带出：「鲜鲜解读」与 ⌁ AI 研判共用同一份，不另算一套。
         notes[kick]["themes"] = themes
 
     # ⑥ 港股名家频道：更新频道数 + 观点词命中 → 名家观点定调
@@ -6414,14 +6414,14 @@ def _ai_judge_row(note, kit, aspect=""):
 
 
 def _ren_judgment_row(text, kit):
-    """逐栏「🦑 人话解读」行（两主题共用）：大白话翻译，垫在每个栏目最后。
+    """逐栏「🦑 鲜鲜解读」行（两主题共用）：大白话翻译，垫在每个栏目最后。
 
     text 由 octopus_ren 规则合成（纯文本，这里统一转义）；
     🦑 直接写进文字头（guizang 主题的行函数不渲染图标格，两主题都要能看到）；
     副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致。
     """
     color = GZ_KLEIN if kit is GUIZANG_KIT else C_CYAN
-    head = (f'<span style="color:{color};font-weight:900;">🦑 人话解读</span>'
+    head = (f'<span style="color:{color};font-weight:900;">🦑 鲜鲜解读</span>'
             f' — {_esc(text)}')
     return kit.item_row("", head, _esc(_ren.DISCLAIMER))
 
@@ -6912,7 +6912,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
-    # ⑨ 逐栏目「🦑 人话解读」（2026-09-29 新增）：把每栏关键数字翻译成大白话 + 网络梗，
+    # ⑨ 逐栏目「🦑 鲜鲜解读」（2026-09-29 新增）：把每栏关键数字翻译成大白话 + 网络梗，
     #    帮入门读者降低阅读门槛。规则合成（octopus_ren.py）：可复现、数字全部来自本次
     #    实参（趋势跟踪与数据覆盖与正文共用同一 helper，不另算一套）；数据不足的栏目
     #    自动不加解读；OCTOPUS_REN=0 / --no-ren 整体关闭。非投资建议。
@@ -10856,7 +10856,7 @@ def main():
     parser.add_argument("--no-weekly", action="store_true",
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
     parser.add_argument("--no-ren", action="store_true",
-                       help="关闭逐栏目「🦑 人话解读」大白话翻译行（默认开启）")
+                       help="关闭逐栏目「🦑 鲜鲜解读」大白话翻译行（默认开启）")
     parser.add_argument("--no-hk7", action="store_true",
                        help="跳过 AI 七日港股走势分析概率（只出常规栏目，运行更快）")
     parser.add_argument("--hk7-only", action="store_true",
