@@ -6251,23 +6251,31 @@ def _hk_seven_day_block(res, kit):
         if t.get("lo95") and t.get("hi95"):
             bits.append(f'95%区间 {t["lo95"]:,.0f}–{t["hi95"]:,.0f}'
                         f'（历史 {horizon} 日 5%/95% 分位 n={int(t.get("var_n") or 0)}）')
-        detail = []
         fb_summary = t.get("factor_summary")
-        if fb_summary:
-            detail.append(f'因子：{esc(fb_summary)}')
         drivers = "；".join(esc(str(x)) for x in (t.get("drivers") or [])[:2])
         risks = "；".join(esc(str(x)) for x in (t.get("risks") or [])[:2])
+
+        sub_layers = []
+        if bits:
+            sub_layers.append(" · ".join(bits))
+        if fb_summary:
+            sub_layers.append(f'因子：{esc(fb_summary)}')
+        ev = []
         if drivers:
-            detail.append(f'依据：{drivers}')
+            ev.append(f'依据：{drivers}')
         if risks:
-            detail.append(f'风险：{risks}')
+            ev.append(f'风险：{risks}')
+        if ev:
+            sub_layers.append(" · ".join(ev))
         if res.get("engine") == "llm":
-            detail.append(f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%'
-                          + ('（已按基准收敛）' if t.get("converged")
-                             else f'（偏离 {float(t.get("deviation") or 0) * 100:+.0f}pp）'))
-        sub = " · ".join(bits)
-        if detail:
-            sub = (sub + "<br>" if sub else "") + " · ".join(detail)
+            q_info = f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%' + (
+                '（已按基准收敛）' if t.get("converged")
+                else f'（偏离 {float(t.get("deviation") or 0) * 100:+.0f}pp）')
+            sub_layers.append(q_info)
+
+        hair_color = GZ_HAIR_SOFT if kit is GUIZANG_KIT else C_HAIR
+        divider = f'<div style="border-top:1px solid {hair_color};margin:4px 0;"></div>'
+        sub = divider.join(sub_layers)
         rows.append(kit.item_row(icon, f'{esc(str(t.get("name") or ""))} · '
                                        f'{esc(str(t.get("label") or ""))}', sub))
 
