@@ -504,7 +504,15 @@ class RetroPixelVisualTests(unittest.TestCase):
 
 
 class GuizangThemeTests(unittest.TestCase):
-    """SaaS 极简落地页风格：真白底 #ffffff + Inter 紧排 + 单一主色 #2563eb + 线条图标"""
+    """归藏简洁排版 × 克莱因蓝 + 灰（2026-09-29 起）
+
+    设计契约：全量内容压进单条微信消息（一页推）、纯内联样式、无 <style> / class /
+    远程图片，克莱因蓝 #002FA7 是页面上唯一的有色，其余层级全部由灰阶承担。
+    """
+
+    def _html(self):
+        return pipeline.generate_report(NewLayoutRenderingTests()._rich_data(),
+                                        "2026年8月2日 · 周日", "20260802")
 
     def test_default_theme_is_guizang_and_resolves_invalid_to_default(self):
         self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "guizang")
@@ -514,106 +522,93 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
         self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
 
-    def test_font_scale_knob_shrinks_every_guizang_size_and_falls_back_safely(self):
-        # SaaS 极简：固定字号，Hero 52px 符合 48-56px 要求
-        self.assertEqual(pipeline.GZ_FS_DISPLAY, 52)
-        self.assertEqual(pipeline.GZ_FS_SECTION, 20)
-        self.assertEqual(pipeline.GZ_FS_BODY, 15)
-        self.assertEqual(pipeline.GZ_FS_META, 13)
+    def test_type_scale_is_one_page_friendly(self):
+        """字号阶梯为「一页推」整体收一档：刊头 26 / 栏目 18 / 正文 14 / 次要 12"""
+        self.assertEqual(pipeline.GZ_FS_DISPLAY, 26)
+        self.assertEqual(pipeline.GZ_FS_SECTION, 18)
+        self.assertEqual(pipeline.GZ_FS_BODY, 14)
+        self.assertEqual(pipeline.GZ_FS_META, 12)
         self.assertEqual(pipeline.DEFAULT_FONT_SCALE, 1.0)
-        self.assertEqual(pipeline._gz_fs(52), 52)
+        self.assertEqual(pipeline._gz_fs(26), 26)
         self.assertEqual(pipeline._resolve_font_scale(), 1.0)
+        html = self._html()
+        self.assertIn("font-size:26px", html)
+        self.assertIn("font-size:18px", html)
 
-    def test_saas_minimal_white_background_true_white(self):
-        """页面是白色的，真的白色。不是浅灰 #f8fafc，不是米白 #fafaf9，就是 #ffffff"""
-        data = NewLayoutRenderingTests()._rich_data()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        # 真白底
-        self.assertIn("#FFFFFF", html)
-        # 不是浅灰或米白
-        self.assertNotIn("#f8fafc", html.lower())
-        self.assertNotIn("#fafaf9", html.lower())
-        self.assertNotIn("#F8FAFC", html)
-        # 背景色统一白
+    def test_klein_blue_plus_gray_palette(self):
+        """克莱因蓝 #002FA7 + 灰阶：页面上唯一的有色只能是克莱因蓝系"""
+        self.assertEqual(pipeline.GZ_KLEIN, "#002FA7")
+        self.assertEqual(pipeline.GZ_PRIMARY, pipeline.GZ_KLEIN)
+        self.assertEqual(pipeline.GZ_UP, pipeline.GZ_KLEIN)      # 涨 = 克莱因蓝
+        self.assertEqual(pipeline.GZ_INK, "#222")                # 正文灰黑
+        self.assertEqual(pipeline.GZ_META, "#777")               # 次要灰
+        html = self._html()
+        self.assertIn(pipeline.GZ_KLEIN, html)
+        allowed = {"#002FA7", "#00227A", "#F3F6FF"}
+        for color in re.findall(r"#[0-9A-Fa-f]{6}", html):
+            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+            if r == g == b:
+                continue                                          # 灰阶白黑都允许
+            self.assertIn(color.upper(), allowed,
+                          f"除克莱因蓝系外不应出现有色 {color}")
+        for color in re.findall(r"#[0-9A-Fa-f]{3}\b", html):
+            r, g, b = (int(c * 2, 16) for c in color[1:])
+            self.assertTrue(r == g == b, f"三位色值必须是灰阶：{color}")
+            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#777",
+                                          "#aaa", "#bbb", "#ddd", "#eee", "#fff"},
+                          f"三位色值只允许既定灰阶：{color}")
+        for old_color in ("#2563EB", "#1D4ED8", "#EFF6FF", "#3b82f6",
+                          "#FF5576", "#35F29A", "#FFD166", "#FF3CAC", "#22DFFF"):
+            self.assertNotIn(old_color, html)
+
+    def test_true_white_background_and_gray_hairlines(self):
+        """真白底 #ffffff + 1px 浅灰分割线，不靠背景色块分区"""
+        html = self._html()
         self.assertIn('bgcolor="#FFFFFF"', html)
         self.assertIn("background:#FFFFFF", html)
-
-    def test_saas_minimal_divider_1px_light(self):
-        """区域分隔靠 1px 的浅色分割线，不靠背景颜色变化"""
-        data = NewLayoutRenderingTests()._rich_data()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        # 1px 浅色分割线
-        self.assertIn("1px solid #E5E7EB", html)
-        self.assertIn(pipeline.GZ_HAIR, html)
+        self.assertNotIn("#f8fafc", html.lower())
+        self.assertNotIn("#fafaf9", html.lower())
+        self.assertEqual(pipeline.GZ_HAIR, "#ddd")
         self.assertEqual(pipeline.GZ_HAIR_W, 1)
-        self.assertEqual(pipeline.GZ_HAIR, "#E5E7EB")
-        # 不靠背景颜色变化：没有灰底 #F3F4F6 作为区域背景（仅作为行分割线可用）
-        # 检查没有大面积灰底区域
-        self.assertNotIn("background:#F8FAFC", html)
-        self.assertNotIn("background:#FAFAF9", html)
+        self.assertIn("1px solid #ddd", html)
 
-    def test_saas_minimal_inter_font_hero_52px_700_tight(self):
-        """大号无衬线字体，高字重 hero 标题。Inter，48-56px、700、-0.03em 紧排"""
-        data = NewLayoutRenderingTests()._rich_data()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        # Inter 字体
-        self.assertIn("Inter", html)
-        self.assertIn(pipeline.GZ_FONT, html)
-        # Hero 48-56px
-        self.assertIn("font-size:52px", html)
-        self.assertEqual(pipeline.GZ_FS_DISPLAY, 52)
-        self.assertTrue(48 <= pipeline.GZ_FS_DISPLAY <= 56)
-        # font-weight 700
-        self.assertIn("font-weight:700", html)
-        # letter-spacing -0.03em 紧排
-        self.assertIn("-0.03em", html)
-
-    def test_saas_minimal_single_primary_button_2563eb(self):
-        """只有一个主操作按钮，颜色是唯一的「有色」区域。主色 #2563eb"""
-        data = NewLayoutRenderingTests()._rich_data()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        # 主色按钮 #2563eb
-        self.assertIn("#2563EB", html)
-        self.assertEqual(pipeline.GZ_PRIMARY, "#2563EB")
-        # 按钮是唯一的“有色”区域：检查页面其他地方基本是黑白灰
-        # 允许的主色只有 #2563EB 及其 hover #1D4ED8 和 light #EFF6FF
-        import re as _re
-        colors = _re.findall(r"#[0-9A-Fa-f]{6}", html)
-        # 过滤出非黑白灰的“有色”颜色（非灰阶）
-        colored = []
-        for c in colors:
-            r, g, b = int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
-            # 灰阶：r==g==b
-            if not (r == g == b):
-                # 允许的主色系
-                if c.upper() not in ("#2563EB", "#1D4ED8", "#EFF6FF"):
-                    # 允许的趋势色已改为黑白，此处不应有其他彩色
-                    # 但为了兼容旧逻辑，允许 #FFFFFF 黑白灰之外的只有主色
-                    if c.upper() not in ("#FFFFFF",):
-                        colored.append(c)
-        # 唯一的“有色”区域应该是主色按钮
-        # 统计主色出现次数，至少有按钮
-        self.assertGreaterEqual(html.count("#2563EB"), 1)
-        # 其他彩色不应大量出现（像素主题的彩色已移除）
-        # 这里放宽：只检查没有旧像素主题的高饱和色 #3b82f6, #FF5576 等
-        for old_saturated in ("#3b82f6", "#FF5576", "#35F29A", "#FFD166", "#FF3CAC", "#22DFFF"):
-            self.assertNotIn(old_saturated, html, f"旧高饱和色 {old_saturated} 不应出现在 SaaS 极简页面")
-
-    def test_saas_minimal_line_icons_lucide(self):
-        """图标用线条图，不用填充。Lucide 默认就是线条图标"""
-        data = NewLayoutRenderingTests()._rich_data()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        # 线条图标：stroke, fill=none, stroke-width 1.5
-        self.assertIn('fill="none"', html)
-        self.assertIn('stroke="#6B7280"', html)
-        self.assertIn('stroke-width="1.5"', html)
-        self.assertIn("stroke-linecap", html)
-        # Lucide 风格：应有 <svg> 内联，而不是 <img src="koboyo"
-        self.assertIn("<svg", html.lower())
-        # 不应再用 Koboyo 远程图标
+    def test_inline_only_and_no_remote_assets(self):
+        """微信 / PushPlus 兼容：全内联样式，无 <style> / class / 图标外链 / 图片"""
+        html = self._html()
+        self.assertNotIn("<style", html)
+        self.assertNotIn("class=", html)
+        self.assertNotIn("<img", html)
+        self.assertNotIn("<svg", html)
         self.assertNotIn("koboyo.com/icons/svg", html)
-        # 图标尺寸 12-24px，线条感
-        self.assertRegex(html, r'width="1[6-8]"')
+        self.assertNotIn("<script", html)
+        self.assertIn("<table", html)      # 多列数据仍用表格对齐
+
+    def test_data_tables_stay_inline_compact(self):
+        """一页推的核心：单元格不写内联 padding，列距由表级 border-spacing 承担"""
+        html = pipeline.gz_data_table(["名称", "最新价", "涨跌"],
+                                      [["恒生指数", "26,881.4", "▼ -0.43%"]])
+        self.assertIn("border-collapse:separate", html)
+        self.assertIn("border-spacing:", html)
+        self.assertNotIn("padding:5px 8px", html)          # 旧写法：每格 20+ 字
+        self.assertEqual(html.count("padding:"), 0)
+        self.assertIn("<td>", html)
+        self.assertNotIn("<td style=\"padding", html)
+
+    def test_section_header_is_number_kicker_and_title(self):
+        """栏目头：编号 + 克莱因蓝 kicker → <h2> 标题（无图标）"""
+        html = pipeline.gz_section("07", "WEEKLY FORECAST", "每周量化走势预测", "正文在这里")
+        self.assertIn("07 · WEEKLY FORECAST", html)
+        self.assertIn("每周量化走势预测</h2>", html)
+        self.assertIn("正文在这里", html)
+        self.assertIn(pipeline.GZ_KLEIN, html)
+        self.assertNotIn("<svg", html)
+
+    def test_market_snapshot_table_keeps_labels_and_numbers(self):
+        data = ReportFreshnessTests()._sample_data()
+        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
+        self.assertIn("6,123", html)
+        self.assertIn("名称", html)
+        self.assertIn("最新价", html)
 
     def test_minimal_news_card_leads_with_title_and_keeps_source(self):
         html = pipeline.gz_headline_row({
@@ -621,34 +616,176 @@ class GuizangThemeTests(unittest.TestCase):
         }, 1)
         self.assertLess(html.index("港股市场观察"), html.index("测试来源"))
         self.assertIn("2026-09-08 10:00", html)
+        self.assertNotIn("<table", html)   # 资讯行不再套表格壳
 
-    def test_guizang_page_style_tokens_and_vertical_layout(self):
-        data = NewLayoutRenderingTests()._rich_data()
+    def test_full_report_fits_single_push_message(self):
+        """一页推：常规栏目的完整日报必须在单条上限内，且拆分为恰好 1 条"""
+        data = SectionReadingOrderTests()._full_data()
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        import test_weekly as tw
+        data["每周走势预测"] = tw.WeeklyPipelineIntegrationTests()._source()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
-        self.assertIn(f"<title>{pipeline.REPORT_TITLE}</title>", html)
-        self.assertIn("#FFFFFF", html)
-        self.assertIn("Inter", html)
-        self.assertIn("max-width:800px", html)
-        self.assertIn("1px solid #E5E7EB", html)
-        self.assertIn("font-weight:700", html)
-        self.assertIn("font-size:52px", html)
+        self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
+        parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
+        self.assertEqual(len(parts or []), 1)
 
-    def test_koboyo_icon_mapping_and_safe_fallback(self):
-        # 现在用 Lucide 线条图标，映射仍保留但返回 inline SVG
-        for kicker, slug in pipeline.KOBOYO_SECTION_ICONS.items():
-            html = pipeline.gz_section("01", kicker, "栏目标题", "正文")
-            self.assertIn("<svg", html.lower())
-            self.assertIn('fill="none"', html)
-            without_svg = re.sub(r'<svg.*?</svg>', '', html, flags=re.S)
-            self.assertIn("栏目标题</h2>", without_svg)
-            self.assertIn("正文", without_svg)
+    def test_multipart_split_keeps_every_section_and_cell(self):
+        """超限时按栏目边界全量分条：每段不超限、栏目不重不漏、正文一格不少"""
+        data = SectionReadingOrderTests()._full_data()
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        limit = 6000
+        parts = pipeline._split_html_for_push(html, limit)
+        self.assertIsNotNone(parts)
+        self.assertGreater(len(parts), 1)
+        for index, part in enumerate(parts, 1):
+            self.assertLessEqual(len(part), limit, f"第 {index} 条超过单条上限")
+        for title in re.findall(r"<h2[^>]*>([^<]+)</h2>", html):
+            hits = sum(1 for part in parts if f">{title}</h2>" in part)
+            self.assertEqual(hits, 1, f"栏目「{title}」在 {len(parts)} 条里出现 {hits} 次")
+        def flat(chunk):
+            return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", re.sub(r"<!--.*?-->", "", chunk, flags=re.S)))
+        joined = flat("".join(parts))
+        cells = [flat(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", html, re.S)]
+        missing = [cell for cell in cells if cell and cell not in joined]
+        self.assertEqual(missing[:3], [], f"{len(missing)} 个单元格文字在分条后丢失")
 
-    def test_guizang_market_table_becomes_vertical_rowline(self):
-        data = ReportFreshnessTests()._sample_data()
-        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
-        self.assertIn("6,123", html)
-        self.assertIn("名称", html)
-        self.assertIn("最新价", html)
+
+class GuizangOnePageTests(unittest.TestCase):
+    """重日压力测试：把最能堆字数的栏目按重日体量灌满，仍要一页装得下。
+
+    口径：全量内容（含量化三段真实引擎产物、60 条日程、五路资讯、多平台趋势线索）
+    渲染后 ≤ PUSHPLUS_MAX_CONTENT_CHARS，「按栏目分条」只需 1 条 → 微信端一页推。
+    真正超限的极重日仍按栏目边界全量分条（见 test_multipart_split_keeps_every_section_and_cell），不截断、不摘要。
+    """
+
+    def _heavy_data(self):
+        from test_quant import run_engine            # 真实量化引擎（合成行情，离线）
+        data = NewsSentimentFactorTests()._senti_data()
+        data["实时行情"] = pipeline._source_result(
+            "Yahoo Finance Chart", "success", is_today=True, content_date="2026-09-29",
+            quotes={
+                "道琼斯指数": {"price": 46312.0, "change_pct": -0.67, "as_of": "2026-09-28"},
+                "标普500": {"price": 6691.2, "change_pct": -0.77, "as_of": "2026-09-29"},
+                "纳斯达克": {"price": 22871.4, "change_pct": -0.92, "as_of": "2026-09-29"},
+                "WTI 原油": {"price": 65.31, "change_pct": 1.20, "as_of": "2026-09-29"},
+                "微软 MSFT": {"price": 512.3, "change_pct": -0.4, "as_of": "2026-09-29"},
+                "Meta META": {"price": 731.5, "change_pct": 0.8, "as_of": "2026-09-29"},
+                "上证指数": {"price": 3838.31, "change_pct": 0.38, "as_of": "2026-09-29"},
+                "深证成指": {"price": 12877.4, "change_pct": 0.72, "as_of": "2026-09-29"},
+                "创业板指": {"price": 3012.9, "change_pct": 1.18, "as_of": "2026-09-29"},
+                "科创50": {"price": 1188.6, "change_pct": -0.22, "as_of": "2026-09-29"},
+                "恒生指数": {"price": 26881.4, "change_pct": -0.43, "as_of": "2026-09-29"},
+                "恒生科技": {"price": 6012.7, "change_pct": -0.91, "as_of": "2026-09-29"},
+            })
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        with tempfile.TemporaryDirectory() as tmp:
+            data["港股量化"] = pipeline._source_result(
+                "港股量化引擎", "success", is_today=True, content_date="2026-09-29",
+                result=run_engine(tmpdir=tmp, n_stocks=12))
+        data[pipeline.FED_TREND_KEY] = AiTrendAnalysisTests()._fed_data()[pipeline.FED_TREND_KEY]
+        data[pipeline.GEO_TREND_KEY] = \
+            AiTrendAnalysisTests()._both_topics_data()[pipeline.GEO_TREND_KEY]
+
+        # 五路资讯 + 舆情归因：把标题量拉到重日水平
+        data["东财快讯"]["headlines"] = [
+            {"title": f"东方财富快讯样例{i}：市场盘中异动与资金流向观察", "url": "",
+             "time": "2026-09-29 1%d:30" % (i % 10), "summary": "盘面综述与板块资金流向",
+             "is_today": True} for i in range(1, 13)]
+        data["全球头条"]["headlines"] = [
+            {"title": f"全球头条样例{i}：海外市场与政策动态观察", "source": "华尔街见闻",
+             "url": "", "published_cst": "2026-09-29 0%d:00" % (i % 10), "is_today": True}
+            for i in range(1, 9)]
+        # 政策因子需要方向性政策标题（降准/加息/地产等）才会出现
+        data["全球头条"]["headlines"].append({
+            "title": "央行宣布降准0.5个百分点释放长期资金", "source": "新华社", "url": "",
+            "published_cst": "2026-09-29 09:00", "is_today": True})
+        data["港股名家频道"]["channels"] = [
+            {"name": f"频道{c}", "desc": "港股评论", "url": f"https://example.com/{c}",
+             "is_today": True,
+             "videos": [{"title": f"频道{c}视频{v}：港股大盘技术面与板块轮动解读",
+                         "url": f"https://www.youtube.com/watch?v=c{c}v{v}",
+                         "published_cst": f"2026-09-2{9 - v} 1{v}:00", "is_today": v == 1}
+                        for v in range(1, 3)]}
+            for c in range(1, 6)]
+        for mkt in ("A股", "港股", "美股"):
+            for i in range(1, 11):
+                nm = f"{mkt}股票{(i - 1) % 10}"
+                data["全球头条"]["headlines"].append({
+                    "title": f"{nm}获机构上调目标价，主力资金净流入明显", "source": "财联社",
+                    "url": "", "published_cst": "2026-09-29 1%d:00" % (i % 10), "is_today": True})
+        data.update(self._trend_data())
+
+        # 财经日历：未来 30 天灌满（重日约 40~60 行）
+        base = dt.date(2026, 9, 30)
+        rows = []
+        for i in range(120):
+            day = base + dt.timedelta(days=i // 3)
+            if day > dt.date(2026, 10, 29):
+                break
+            rows.append({"START_DATE": f"{day.isoformat()} {8 + i % 12:02d}:30:00",
+                         "FE_NAME": "中国:CPI:同比(报告期:2026年10月)", "FE_TYPE": "经济数据",
+                         "STD_TYPE_CODE": "3" if i % 2 == 0 else "2",
+                         "CITY": "中国" if i % 2 else "美国"})
+        with patch.object(pipeline, "safe_request",
+                          lambda *a, **k: {"success": True,
+                                           "result": {"count": len(rows), "data": rows}}):
+            data["财经日历"] = pipeline.fetch_econ_calendar(today=dt.date(2026, 9, 29), days=30)
+        return data
+
+    def _trend_data(self):
+        """趋势跟踪重日体量：10 个 Reddit 板块 + 3 个平台 + 20 个新闻源头。"""
+        data = {}
+        boards = pipeline._REDDIT_BOARDS
+        reddit = [{"title": f"r/{board} 热门帖样本{i}：港股与美股资金面观察，讨论热度持续",
+                   "url": f"https://www.reddit.com/r/{board}/comments/x{i}/t{i}/",
+                   "detail": f"发布于 2026-09-2{8 - i % 2} 1{i % 10}:00（北京时间） · {100 - i} 赞 · {30 + i} 评论",
+                   "published_cst": f"2026-09-2{8 - i % 2} 1{i % 10}:00",
+                   "community": f"r/{board}", "is_today": True}
+                  for board, _ in boards for i in range(1, 6)]
+        data["Reddit"] = pipeline._public_site_result("Reddit", reddit, latest="2026-09-29")
+        for name, n in (("StockTwits", 8), ("TradingView", 10), ("Bogleheads", 10)):
+            items = [{"title": f"{name} 公开样本{i}：港股估值与长期配置的讨论",
+                      "url": f"https://{name.lower()}.example/x{i}",
+                      "detail": f"发布于 2026-09-29 0{i % 9}:10（北京时间） · 关注 {50 + i}",
+                      "community": f"{name} 榜单{i % 3}", "is_today": True}
+                     for i in range(1, n + 1)]
+            data[name] = pipeline._public_site_result(name, items, latest="2026-09-29")
+        per_source = [{"title": f"源头{i % 20 + 1}·第{i}条：港股主题资金流向与估值讨论",
+                       "url": f"https://news{i % 20}.example/a{i}",
+                       "detail": "发布于 2026-09-29 09:0%d（北京时间）" % (i % 10),
+                       "published_cst": "2026-09-29 09:0%d" % (i % 10), "is_today": True}
+                      for i in range(1, 4)]
+        data[pipeline.HK_NEWS_SOURCE_NAME] = pipeline._source_result(
+            pipeline.HK_NEWS_SOURCE_NAME, "success", is_today=True,
+            content_date="2026-09-29",
+            analysis={"total": 20, "ok_n": 20, "scanned": 400, "hk_n": 60},
+            sources=[{"name": f"新闻源头{i}", "region": "香港" if i % 2 else "国际",
+                      "url": f"https://source{i}.example/", "hosts": (f"source{i}.example",),
+                      "hk_n": 3, "items": per_source} for i in range(1, 21)])
+        return data
+
+    def test_heavy_day_report_fits_one_message(self):
+        html = pipeline.generate_report(self._heavy_data(), "2026年9月29日 · 周二", "20260929")
+        self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS,
+                        "重日日报超过单条上限，一页推失效")
+        self.assertLess(len(html), int(pipeline.PUSHPLUS_MAX_CONTENT_CHARS * 0.95),
+                        "重日日报逼近单条上限，缺少安全余量")
+        parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
+        self.assertEqual(len(parts or []), 1)
+
+    def test_heavy_day_report_keeps_every_section(self):
+        """全量：重日栏目一个都不能少，只靠排版瘦身换一页"""
+        data = self._heavy_data()
+        html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929")
+        titles = [s[1] for s in pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT)["sections"]]
+        for title in ("AI 全篇速览", "今日预判", "未来30天影响经济时间点", "量化预测总览",
+                      "港股概率走势分析", "资金流动性分析", "行情速览", "全球大盘全景复盘",
+                      "政策因子", "策略研判", "趋势跟踪", "全球头条", "东方财富快讯",
+                      "港股名家频道", "新闻情绪", "总结"):
+            self.assertIn(title, titles)
+            self.assertIn(f"{title}</h2>", html)
+
 
 class CleanOldReportsTests(unittest.TestCase):
     """2026-08-02 新增：手动/自动推送前必须清理历史 HTML 报告。

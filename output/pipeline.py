@@ -3874,161 +3874,82 @@ FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
 FONT_MONO = "'Courier New', Courier, monospace"
 
 # ============================================================
-# SAAS 极简落地页风格（SaaS Minimal · 真白底 + Inter 紧排 + 单一主色）
-# —— 页面是真的白色 #ffffff，区域分隔靠 1px 浅色分割线，不靠背景色变化
-# —— Inter 现代无衬线，hero 48-56px / 700 / -0.03em 紧排
-# —— 只有一个主操作按钮，唯一有色区域，主色 #2563eb（中等饱和度蓝）
-# —— 图标用线条图（Lucide 风格），不用填充
+# 归藏简洁排版（Guizang Concise）× 克莱因蓝 + 灰（2026-09-29）
+# —— 一页推送优先：结构扁平、样式全内联、去掉装饰性包装，把全量内容压进单条微信消息
+# —— 克莱因蓝 #002FA7：只用于栏目编号 / 小标题 / 强调数值，是页面上唯一的有色
+# —— 灰阶承担全部层级：正文 #262626、次要 #737373、更弱 #A3A3A3、细分隔线 #E5E5E5
+# —— 白底、1px 细分隔、大留白；涨跌仍用 ▲ / ▼ / ■ 表达，不依赖红绿
+# —— 纯内联样式：无 <style> / class / 外部 CSS / JS / 远程图片，兼容 PushPlus 与微信详情页
 # ============================================================
-GZ_PAPER = "#FFFFFF"        # 真白底，不是浅灰 #f8fafc，不是米白 #fafaf9，就是 #ffffff
+GZ_PAPER = "#FFFFFF"        # 真白底：不是浅灰 #f8fafc，也不是米白 #fafaf9
 GZ_PAPER_TINT = "#FFFFFF"   # 保持纯白，不用灰底
-GZ_INK = "#111827"          # 正文接近黑，SaaS 常用 gray-900
+GZ_KLEIN = "#002FA7"        # 克莱因蓝（International Klein Blue）
+GZ_KLEIN_DEEP = "#00227A"   # 克莱因蓝加深：链接按下 / 强调
+GZ_KLEIN_WASH = "#F3F6FF"   # 极淡蓝：需要一点分量时的窄底纹
+GZ_INK = "#222"          # 正文灰黑（纯灰，不带蓝紫）
+GZ_INK_STRONG = "#111"   # 标题 / 最高强调
+GZ_META = "#777"         # 次要文字（标签、来源）
+GZ_FAINT = "#aaa"        # 更弱文字（时间、脚注）
+GZ_HAIR = "#ddd"         # 栏目分割线
+GZ_HAIR_SOFT = "#eee"    # 行间细分隔线
 GZ_INK_TINT = "#FFFFFF"
-GZ_HAIR = "#E5E7EB"         # 1px 浅色分割线，gray-200
-GZ_HAIR_INK = "#E5E7EB"
-GZ_HAIR_W = 1               # 1px 分割线，不是 2px
-GZ_CREAM = "#111827"
-GZ_META = "#6B7280"         # 次要文字 gray-500
-GZ_META_INK = "#6B7280"
-GZ_NEON = "#111827"
-GZ_UP = "#111827"
-GZ_DOWN = "#111827"
-GZ_FLAT = "#6B7280"
-GZ_UP_INK = "#111827"
-GZ_DOWN_INK = "#111827"
-GZ_FLAT_INK = "#6B7280"
-GZ_WARN = "#111827"
-GZ_WARN_INK = "#111827"
-# SaaS 主色：唯一的“有色”区域，#2563eb 中等饱和度蓝，比 #3b82f6 在白底上更稳重
-GZ_PRIMARY = "#2563EB"
-GZ_PRIMARY_HOVER = "#1D4ED8"
-GZ_PRIMARY_LIGHT = "#EFF6FF"
+GZ_HAIR_INK = GZ_HAIR
+GZ_HAIR_W = 1               # 1px 细分隔线，不用 2px
+GZ_CREAM = GZ_INK_STRONG
+GZ_META_INK = GZ_META
+GZ_NEON = GZ_KLEIN          # AI 徽标：克莱因蓝，不再引入第二种彩色
+# 涨跌：克莱因蓝 / 深灰 / 浅灰 + ▲▼■ 双编码，完全不依赖红绿
+GZ_UP = GZ_KLEIN
+GZ_DOWN = "#444"
+GZ_FLAT = GZ_FAINT
+GZ_UP_INK = GZ_UP
+GZ_DOWN_INK = GZ_DOWN
+GZ_FLAT_INK = GZ_FLAT
+GZ_WARN = GZ_META           # 「非当天 / 样本不足」用灰，不喧宾夺主
+GZ_WARN_INK = GZ_WARN
+GZ_PRIMARY = GZ_KLEIN
+GZ_PRIMARY_HOVER = GZ_KLEIN_DEEP
+GZ_PRIMARY_LIGHT = GZ_KLEIN_WASH
 REPORT_TITLE = "章鱼 AI · 打氧日报"
 # 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
 REPORT_TAGLINE = "每日上水，新鲜活泼"
 # 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
 PUSH_TITLE_PREFIX = f"🐙 {REPORT_TITLE}"
-# 字体：Inter 现代无衬线，极简 SaaS 标准
-# Inter 是 SaaS 落地页最常用的字体，-apple-system 兜底，紧排 -0.03em
-GZ_FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+# 字体：系统无衬线栈（不加载远程字体）；整页只在容器上写一次，其余元素继承
+GZ_FONT = ("-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB',"
+           "'Microsoft YaHei',sans-serif")
 GZ_SERIF = GZ_FONT
 GZ_SANS = GZ_FONT
-GZ_MONO = "'JetBrains Mono', 'SF Mono', Menlo, monospace"
-GZ_W_BODY = 400            # 正文常规
+GZ_MONO = "'SF Mono',Menlo,Consolas,monospace"
+GZ_W_BODY = 400             # 正文常规
 GZ_W_MEDIUM = 500
-GZ_W_BOLD = 700            # 标题 Bold 700
-GZ_W_HERO = 700            # Hero 700 紧排
-# 字号阶梯：图标独立，刊头/栏目标题收紧，关键数字仍醒目（微信详情页可缩放）。
-GZ_ICON_MASTHEAD = 16   # 刊头章鱼：按用户要求改为最小尺寸
-GZ_ICON_SECTION = 16    # 栏目图标（落在标题上方）
-GZ_ICON_ROW = 16        # 刊头栏目图标横排
-GZ_ICON_MIN = GZ_ICON_MAX = 16  # 所有 Koboyo 装饰图标固定最小尺寸，不被调用参数放大
+GZ_W_BOLD = 700             # 标题 / 数值 / 徽标
+GZ_W_HERO = 700
+# 字号阶梯：一页推送优先，整体比 SaaS 版收一档，保证单条消息装得下全量内容
+GZ_FS_DISPLAY = 26    # 刊头标题
+GZ_FS_SECTION = 18    # 栏目标题
+GZ_FS_PRICE = 20      # 关键数字
+GZ_FS_BODY = 14       # 正文（SaaS 版为 15，一页推送收一档）
+GZ_FS_META = 12       # 次要文字
+GZ_FS_METER = 12      # 信号格
+GZ_FS_TABLE = 13      # 表格正文（比正文小一档，密而不挤）
+DEFAULT_FONT_SCALE = 1.0
+GZ_FS_FLOOR = 11      # 字号下限（任何情况下不低于 11px）
 
 
-# SaaS 极简：字体缩放固定 1.0，不缩小
 def _resolve_font_scale(value=None):
-    """归一化字号缩放系数：SaaS 风格固定 1.0，不再 0.85 缩小"""
+    """归一化字号缩放系数：归藏简洁固定 1.0（字号阶梯见 GZ_FS_*）。"""
     return 1.0
 
 
 def _gz_fs(base, scale=None):
-    """SaaS 风格直接返回基准字号，不再缩放"""
+    """字号阶梯直接返回基准值（保留函数供旧调用与测试使用）。"""
     return int(base)
 
 
-# SaaS 极简：Hero 48-56px / 700 / -0.03em，Section 20-24px / 600 / -0.02em，Body 15-16px，Meta 13px
-# 不再用 _gz_fs 缩放，直接固定为 SaaS 标准字号，保证 Hero 真正 52px
-GZ_FS_DISPLAY = 52    # Hero 标题 52px，符合 48-56px 要求，font-weight 700，letter-spacing -0.03em
-GZ_FS_SECTION = 20    # 栏目标题 20px，600，-0.02em
-GZ_FS_PRICE = 24      # 关键数字 24px
-GZ_FS_BODY = 15       # 正文 15px，SaaS 标准
-GZ_FS_META = 13       # 次要 13px
-GZ_FS_METER = 14
-DEFAULT_FONT_SCALE = 1.0
-GZ_FS_FLOOR = 12
-
-
-# Koboyo 官方图标详情页公开的 SVG 直链；不下载、不内嵌、不代理。
-# 许可：https://koboyo.com/icons/license（允许个人及商业网站使用）。
-KOBOYO_ICON_BASE = "https://koboyo.com/icons/svg/"
-KOBOYO_SECTION_ICONS = {
-    "ECON CALENDAR": "card-calendar",
-    "STRATEGY READ": "brain",
-    "POLICY SHOCK": "document",
-    "FED TREND": "chart",
-    "GEO TREND": "globe",
-    "QUANT STRATEGY": "chart",
-    "AI READ": "brain",
-    "QUANT POLICY": "document",
-    "MARKET SNAPSHOT": "chart",
-    "GLOBAL PANORAMA": "chart",
-    "HK GURU CHANNELS": "camera",
-    "GLOBAL HEADLINES": "globe",
-    "EASTMONEY WIRE": "newspaper",
-    "DATA AUDIT": "document",
-    "FORECAST": "brain",
-    "SUMMARY": "document",
-    "TREND TRACKING": "brain",
-    "QUANT FORECAST": "chart",
-    "HK PROBABILITY": "chart",
-    "LIQUIDITY FLOW": "chart",
-    "WEEKLY FORECAST": "chart",
-    "SECTOR ROTATION": "chart",
-}
-
-
-# 刊头多图标横排：全部栏目手绘图标（按栏目顺序去重）在刊头一次排开，直观预览各栏目。
-KOBOYO_MASTHEAD_ICONS = tuple(dict.fromkeys(KOBOYO_SECTION_ICONS.values()))
-
-
-def gz_icon(name, size=None, *, masthead=False, inline=False):
-    """SaaS 极简：Lucide 线条图标，不填充，stroke 1.5"""
-    LUCIDE_PATHS = {
-        "octopus": '<circle cx="12" cy="12" r="10"/><path d="M8 12a4 4 0 0 1 8 0"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/>',
-        "card-calendar": '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-        "brain": '<path d="M9.5 2A7.5 7.5 0 0 0 2 9.5c0 2.5 1.5 4.5 3.5 6v2.5a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2.5c2-1.5 3.5-3.5 3.5-6A7.5 7.5 0 0 0 14.5 2z"/>',
-        "document": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
-        "chart": '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
-        "globe": '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
-        "camera": '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
-        "newspaper": '<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Z"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>',
-    }
-    NAME_MAP = {
-        "octopus": "octopus",
-        "card-calendar": "card-calendar",
-        "brain": "brain",
-        "document": "document",
-        "chart": "chart",
-        "globe": "globe",
-        "camera": "camera",
-        "newspaper": "newspaper",
-    }
-    lucide_name = NAME_MAP.get(name, "document")
-    inner = LUCIDE_PATHS.get(lucide_name, LUCIDE_PATHS["document"])
-    if size is None:
-        size = GZ_ICON_MASTHEAD if masthead else GZ_ICON_SECTION
-    size = max(12, min(24, int(size)))
-    if masthead:
-        spacing = "display:block;margin:0 0 12px;"
-    elif inline:
-        spacing = "vertical-align:middle;margin:0 8px 2px 0;"
-    else:
-        spacing = "display:block;margin:0 0 12px;"
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
-        f'viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="1.5" '
-        f'stroke-linecap="round" stroke-linejoin="round" '
-        f'style="{spacing}width:{size}px;height:{size}px;" aria-hidden="true">'
-        f'{inner}</svg>'
-    )
-
-
-def gz_masthead_icon_row(size=None):
-    """刊头栏目图标列：多图标显示；外链失效时仅少一行装饰，刊头文字仍完整。"""
-    size = GZ_ICON_ROW if size is None else size
-    icons = "".join(gz_icon(name, size, inline=True) for name in KOBOYO_MASTHEAD_ICONS)
-    return f'<div style="padding-top:8px;line-height:1;">{icons}</div>'
-
+# 栏目编号：归藏式「01 · FORECAST」，用字型与留白区分层级，不用图标 / 图片
+GZ_SECTION_MARKS = ("01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+                    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20")
 
 def _sq(color=C_ACCENT, size=8):
     return f'<span style="color:{color};font-size:{size}px;line-height:1;font-family:{FONT_MONO};">■</span>'
@@ -4433,11 +4354,12 @@ def _quote_parts(market, label, precision=2):
     return price_str, _percent_number(quote.get("change_pct", 0))
 
 
+
 def gz_trend_badge(value, compact=False):
-    """涨跌：颜色 + 箭头 + 涨/跌/平。不用 inline-block / nowrap，避免微信挤爆。"""
+    """涨跌：克莱因蓝 / 深灰 / 浅灰 + ▲▼■ 双编码，颜色只是辅助，不依赖红绿。"""
     pct = _percent_number(value)
     if pct is None:
-        return f'<span style="color:{GZ_FLAT};font-weight:700;">■ 暂缺</span>'
+        return f'<span style="color:{GZ_FAINT}">■ 暂缺</span>'
     if pct > 0:
         color, arrow, word = GZ_UP, "▲", "涨"
     elif pct < 0:
@@ -4450,30 +4372,30 @@ def gz_trend_badge(value, compact=False):
         label = f"{arrow} {word} 0.00%"
     else:
         label = f"{arrow} {word} {pct:+.2f}%"
-    return f'<span style="color:{color};font-weight:700;">{label}</span>'
+    return f'<b style="color:{color}">{label}</b>'
 
 
-def gz_meter(value, maximum, cells=5, lit=GZ_INK, off=GZ_HAIR, size=None):
-    """信号格放大到可读字号；微信忽略 letter-spacing 也仍能看出实心/空心。"""
-    if size is None:
-        size = GZ_FS_METER
+
+def gz_meter(value, maximum, cells=5, lit=GZ_KLEIN, off=GZ_HAIR, size=None):
+    """信号格：实心 / 空心即可读数，颜色只作辅助（微信可能忽略 letter-spacing）。"""
     maximum = max(1, int(maximum or 1))
     n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
-    return (f'<span style="color:{lit};font-size:{size}px;">{ "●" * n }</span>'
-            f'<span style="color:{off};font-size:{size}px;">{ "○" * (cells - n) }</span>')
+    return (f'<b style="color:{lit}">{"●" * n}</b>'
+            f'<span style="color:{off}">{"○" * (cells - n)}</span>')
+
 
 
 def gz_badge(text, kind="ok", on_ink=False):
-    """纯文字状态，不用胶囊/nowrap。"""
-    if on_ink:
-        styles = {"ok": GZ_UP_INK, "warn": GZ_WARN_INK, "bad": GZ_DOWN_INK, "ai": GZ_NEON}
-    else:
-        styles = {"ok": GZ_UP, "warn": GZ_WARN, "bad": GZ_DOWN, "ai": GZ_INK}
-    color = styles.get(kind, GZ_INK)
-    return f'<span style="color:{color};font-weight:{GZ_W_BOLD};font-size:{GZ_FS_META}px;">{_esc(text)}</span>'
+    """纯文字状态：只用一个颜色字，不用胶囊 / 底色 / nowrap。"""
+    ink = {"ok": GZ_UP_INK, "warn": GZ_WARN_INK, "bad": GZ_DOWN_INK, "ai": GZ_NEON}
+    plain = {"ok": GZ_UP, "warn": GZ_WARN, "bad": GZ_DOWN, "ai": GZ_NEON}
+    color = (ink if on_ink else plain).get(kind, GZ_META)
+    return f'<span style="color:{color}">{_esc(text)}</span>'
+
 
 
 def gz_source_badge(item, on_ink=False):
+    """来源状态徽标：成功 / 当天 / 非当天 / 快照，色彩只用克莱因蓝与灰。"""
     if item.get("status") != "success":
         return gz_badge("暂缺", "bad", on_ink)
     if item.get("snapshot"):
@@ -4483,42 +4405,61 @@ def gz_source_badge(item, on_ink=False):
     return gz_badge(f"非当天 {item.get('content_date') or '-'}", "warn", on_ink)
 
 
+
 def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None, border_css=""):
-    """SaaS 极简：真白底 #ffffff，1px 浅色分割线 #E5E7EB，不靠背景色变化"""
-    # 强制白底，忽略传入 bg，保证真白
-    bg = "#FFFFFF"
-    bg_attr = f' bgcolor="{bg}"'
-    bg_css = f"background:{bg};"
-    hair_css = f"border-bottom:{GZ_HAIR_W}px solid {GZ_HAIR};" if hair else ""
-    anchor_attr = f' id="{_esc(anchor)}"' if anchor else ""
-    # 额外 border_css 保持 1px 分割线风格
-    return (
-        f'<table width="100%" border="0" cellpadding="0" cellspacing="0"{bg_attr}{anchor_attr} '
-        f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
-        f'<tr><td{bg_attr} align="left" valign="top" '
-        f'style="padding:{pad};{bg_css}{hair_css}{border_css}">{inner}</td></tr></table>'
-    )
+    """轻量分块包装：只输出 padding（+可选锚点 / 上边线），不再套表格外壳。
 
-
+    bg 仅为兼容旧调用保留（整页统一真白底 #FFFFFF，无需逐块再写背景色）。
+    """
+    attr = f' id="{_esc(anchor)}"' if anchor else ""
+    hair_css = f"border-top:1px solid {GZ_HAIR};" if hair else ""
+    if not pad and not hair_css and not border_css:
+        return f"<div{attr}>{inner}</div>" if attr else inner
+    return f'<div{attr} style="padding:{pad};{hair_css}{border_css}">{inner}</div>'
 
 
 
 def _gz_missing(text="■ 数据暂缺"):
-    return f'<span style="color:{GZ_FLAT};">{text}</span>'
+    return f'<span style="color:{GZ_FAINT}">{text}</span>'
+
 
 
 def _gz_num(text):
-    return f'<span style="font-family:{GZ_MONO};font-weight:700;">{text}</span>'
+    """关键数值：克莱因蓝加粗，是一眼能看到的重点。"""
+    return f'<b style="color:{GZ_KLEIN}">{text}</b>'
+
+
+
+def _gz_flow_rows(pairs):
+    """键值对逐行铺开：整组一个容器，行间用 <br>，只有「值」需要一层颜色标记。
+
+    这样一条键值只花 <br> + 一个 span 的标记，比两列表格省一半以上，手机上也不会
+    被窄标签列挤成竖排；标签统一灰色、值统一正文色，层级靠颜色而不是靠边框。
+    """
+    lines = []
+    for label, value in pairs:
+        if label in (None, ""):
+            lines.append(str(value))
+        else:
+            # 值用墨色加粗（标签沿用容器的灰）：层次照旧，比每行套 span 省一半标记
+            lines.append(f'{label} · <b style="color:{GZ_INK}">{value}</b>')
+    return (f'<div style="padding:4px 0;color:{GZ_META}">'
+            + "<br>".join(lines) + "</div>")
 
 
 def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths=None):
-    """SaaS 极简：真白底 #ffffff + 1px #E5E7EB 分割线 + Inter"""
+    """归藏简洁表：字号 / 颜色写一次在 <table> 上，单元格只写 padding 与对齐。
+
+    两列键值（kv=True）改走更省字的行式排版，长句在手机上也不会被窄列挤成竖排。
+    """
     rows = [list(r) for r in (rows or [])]
     if not rows:
         return ""
     n = len(headers) if headers else len(rows[0])
     if n <= 0:
         return ""
+    if kv and n == 2:
+        return _gz_flow_rows([(r[0] if r else "", r[1] if len(r) > 1 else "") for r in rows])
     if aligns is None:
         aligns = ["left"] + ["right"] * (n - 1) if n > 1 else ["left"]
     aligns = (list(aligns) + ["left"] * n)[:n]
@@ -4526,87 +4467,87 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
     anchors = list(row_anchors or [])
     while len(anchors) < len(rows):
         anchors.append(None)
+    # 表级默认对齐（左/右二选一）按「谁要写的单元格更少」定，表头固定左对齐也计入成本：
+    # 多数表是「首列文字 + 其余数字右对齐」，选右默认只需给首列补 left，比逐行补 right 省一半。
+    def _align_cost(default):
+        cost = 0
+        if default != "left" and headers:
+            cost += len(headers) * 18                     # 表头固定左对齐，逐格补 text-align
+        cost += sum(18 for a in aligns if a != default) * len(rows)   # 每行都要重复写
+        if default == "right" and any(a != default for a in aligns):
+            cost += 17                                    # 表级 text-align:right;
+        return cost
+    default_align = "right" if _align_cost("right") < _align_cost("left") else "left"
 
-    def _cell(html, i, *, head=False, kv_label=False, anchor=None):
-        pad_r = "0" if i == n - 1 else "16px"
+    def _cell(html, i, *, head=False, anchor=None):
+        css = []
         if head:
-            border = "border-bottom:1px solid #E5E7EB;"
-            size, color, weight = 12, "#6B7280", "600"
-        elif kv_label:
-            border = "border-bottom:1px solid #F3F4F6;"
-            size, color, weight = 13, "#6B7280", "500"
-        else:
-            border = "border-bottom:1px solid #F3F4F6;"
-            size, color, weight = 14, "#111827", "400"
-        align = aligns[i]
-        id_attr = f' id="{_esc(anchor)}"' if anchor else ""
-        width_attr = f' width="{widths[i]}"' if widths[i] else ""
-        width_css = f"width:{widths[i]};" if widths[i] else ""
-        return (
-            f'<td{id_attr}{width_attr} valign="top" align="{align}" '
-            f'style="{width_css}padding:12px {pad_r} 12px 0;{border}'
-            f'font-size:{size}px;color:{color};font-weight:{weight};'
-            f'line-height:1.5;text-align:{align};font-family:{GZ_SANS};">{html}</td>'
-        )
+            css.append(f"color:{GZ_FAINT}")
+            if default_align != "left":
+                css.append("text-align:left")
+        elif aligns[i] != default_align:
+            css.append(f"text-align:{aligns[i]}")
+        attr = f' id="{_esc(anchor)}"' if anchor else ""
+        style = f' style="{";".join(css)}"' if css else ""
+        return f"<td{attr}{style}>{html}</td>"
 
     trs = []
     if headers:
         trs.append("<tr>" + "".join(
-            _cell(_esc(h), i, head=True) for i, h in enumerate(headers)
-        ) + "</tr>")
+            _cell(_esc(h), i, head=True) for i, h in enumerate(headers)) + "</tr>")
     for ri, row in enumerate(rows):
-        tds = []
-        for i in range(n):
-            val = row[i] if i < len(row) else ""
-            tds.append(_cell(
-                val, i,
-                kv_label=(kv and i == 0),
-                anchor=(anchors[ri] if i == 0 else None),
-            ))
-        trs.append("<tr>" + "".join(tds) + "</tr>")
-    table = (
-        f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
-        f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;">'
-        f'{"".join(trs)}</table>'
+        trs.append("<tr>" + "".join(
+            _cell(row[i] if i < len(row) else "", i,
+                  anchor=(anchors[ri] if i == 0 else None)) for i in range(n)) + "</tr>")
+    align_css = f"text-align:{default_align};" if default_align == "right" else ""
+    cols = ('<colgroup>' + "".join(
+        f'<col style="width:{widths[i]}">' if widths[i] else "<col>"
+        for i in range(n)) + "</colgroup>") if any(widths) else ""
+    return (
+        f'<table width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%!important;border-collapse:separate;'
+        f'border-spacing:6px 4px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.55">'
+        f'{cols}{"".join(trs)}</table>'
     )
-    return gz_shell(table, bg=GZ_PAPER, pad="4px 0 16px")
+
 
 
 def gz_kv_table(pairs):
-    """多行键值并入一张两列表，避免一条数据一张卡。"""
+    """多行键值：逐行「灰标签 · 值」，避免一条数据一张卡。"""
     pairs = [(a, b) for a, b in (pairs or [])]
     if not pairs:
         return ""
-    return gz_data_table(None, pairs, aligns=("left", "right"), kv=True)
+    return _gz_flow_rows(pairs)
+
 
 
 def gz_note(text):
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.85;">{_esc(text)}</div>',
-        pad="16px 0")
+    """脚注：更小更浅，保持可读但不抢正文。"""
+    return (f'<div style="padding:4px 0;color:{GZ_FAINT};'
+            f'font-size:{GZ_FS_META}px">{text}</div>')
+
 
 
 def gz_subsection(text):
-    # SaaS 极简：小号灰色 kicker + 1px 分割线
-    return gz_shell(
-        f'<div style="font-size:12px;font-weight:600;color:#6B7280;font-family:{GZ_SANS};'
-        f'text-transform:uppercase;letter-spacing:0.08em;line-height:1.5;'
-        f'padding-top:16px;border-top:1px solid #E5E7EB;">{text}</div>',
-        pad="24px 0 8px")
+    """子标题：灰色小号大写 + 一条细分隔线，归藏式的「轻层级」。"""
+    return f'<div style="margin-top:12px;color:{GZ_META};font-weight:700">{text}</div>'
+
 
 
 def gz_rowline(label_html, right_html, pad="8px"):
-    """兼容旧调用：单行键值并入两列表格。"""
+    """兼容旧调用：单行键值并入行式键值排版。"""
     return gz_kv_table([(label_html, right_html)])
 
 
+
 def gz_table(rows_html):
-    """兼容旧调用：内容已是完整卡片时原样拼接。"""
+    """兼容旧调用：内容已是完整分块时原样拼接。"""
     return rows_html or ""
 
 
+
 def gz_rows(rows_html):
-    """每条已是独立满宽表，拼接即可。"""
+    """每一行都已是独立分块，拼接即可。"""
     return rows_html or ""
 
 
@@ -4786,10 +4727,10 @@ def _cal_gz_cells(day_label, t_plus, item, first=False):
     imp = max(1, min(3, int(item.get("imp") or 1)))
     day_html = ""
     if first:
-        day_html = f'<b style="color:{GZ_INK};font-family:{GZ_SANS};">{_esc(day_label)}</b>'
+        day_html = f'<b>{_esc(day_label)}</b>'
         when = _cal_countdown(t_plus)
         if when:
-            day_html += (f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};'
+            day_html += (f'<div style="color:{GZ_META};'
                          f'padding-top:2px;">{_esc(when)}</div>')
     star_style = (f"color:{GZ_INK};font-weight:{GZ_W_BOLD};" if imp >= 3
                   else (f"color:{GZ_INK};" if imp == 2 else f"color:{GZ_META};"))
@@ -4818,13 +4759,13 @@ def gz_calendar_block(res):
     return "".join(parts)
 
 
+
 def _gz_news_card(marker, title, sub="", anchor=None):
-    # Headlines lead; source and timestamp sit quietly underneath. No list-number chrome.
-    meta = (f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};line-height:1.7;padding-top:8px;">'
-            f'{_esc(sub)}</div>' if sub else "")
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;">{title}</div>{meta}',
-        pad="20px 0", hair=True, anchor=anchor)
+    """一条资讯：标题先行，来源与时间安静地跟在下面；细线分隔，不用卡片底色。"""
+    attr = f' id="{_esc(anchor)}"' if anchor else ""
+    meta = f'<br><small style="color:{GZ_FAINT}">{sub}</small>' if sub else ""
+    return (f'<div{attr} style="padding:5px 0;border-top:1px solid {GZ_HAIR_SOFT}">'
+            f'{title}{meta}</div>')
 
 
 def gz_headline_row(it, index=None):
@@ -4856,6 +4797,7 @@ def gz_item_row(icon, text, sub="", icon_color=None, row_bg=None, anchor=None):
     return _gz_news_card(marker, text, sub, anchor=anchor)
 
 
+
 def gz_channel_block(ch, ch_idx=None):
     """渲染单个港股频道；ch_idx 为正文展示序号（1-based），用于风险引用锚点。"""
     name = _esc(ch.get("name", "?"))
@@ -4864,53 +4806,50 @@ def gz_channel_block(ch, ch_idx=None):
     videos = ch.get("videos") or []
     if not videos:
         note = _esc(ch.get("note") or "暂缺")
-        return gz_shell(
-            f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_FLAT};">{name} · 暂缺</div>'
-            f'<div style="font-size:{GZ_FS_META}px;color:{GZ_META};padding-top:4px;line-height:1.6;">{desc} · {note}</div>',
-            bg=GZ_PAPER, pad="20px 0")
+        return (f'<div style="padding:8px 0">'
+                f'<span style="color:{GZ_FAINT};font-weight:700">{name} · 暂缺</span>'
+                f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;padding-top:2px;'
+                f'line-height:1.6">{desc} · {note}</div></div>')
     badge = gz_source_badge({"status": "success", "is_today": True}) if ch.get("is_today") else ""
-    name_link = f'<a href="{url}" style="color:{GZ_INK};text-decoration:none;">{name}</a>' if url else name
+    name_link = f'<a href="{url}" style="color:{GZ_KLEIN}">{name}</a>' \
+        if url else name
     rows, anchors = [], []
     for vi, v in enumerate(videos[:CHANNEL_TOP_N], 1):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
-        link = f'<a href="{_esc(v.get("url", "#"))}" style="color:{GZ_INK};text-decoration:none;">{title}</a>'
-        new_tag = (f' <span style="color:{GZ_UP};font-weight:700;">当天</span>'
-                   if v.get("is_today") else "")
+        link = (f'<a href="{_esc(v.get("url", "#"))}" '
+                f'style="color:{GZ_KLEIN}">{title}</a>')
+        new_tag = f' <span style="color:{GZ_UP}">当天</span>' if v.get("is_today") else ""
         rows.append([link + new_tag, pub])
         anchors.append(f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None)
-    head = gz_shell(
-        f'<div style="font-size:{GZ_FS_BODY}px;font-weight:700;color:{GZ_INK};font-family:{GZ_SANS};line-height:1.4;">'
-        f'{name_link}{" · " + badge if badge else ""}</div>',
-        bg=GZ_PAPER, pad="20px 0 4px")
-    return head + gz_data_table(["标题", "时间"], rows, aligns=("left", "right"), row_anchors=anchors)
+    head = (f'<div style="padding:10px 0 2px;font-weight:700;color:{GZ_INK_STRONG};'
+            f'line-height:1.5">{name_link}{" · " + badge if badge else ""}</div>')
+    return head + gz_data_table(["标题", "时间"], rows, aligns=("left", "right"),
+                                row_anchors=anchors)
+
 
 
 def gz_status_footer(sources):
+    """数据审计：来源 / 状态 / 抓取时间三列，缺失项如实点名。"""
     rows = []
     for name, s in sources:
         if s.get("status") == "success":
-            rows.append([
-                _esc(name),
-                gz_source_badge(s),
-                f'<span style="color:{GZ_META};">{_esc(s.get("fetched_at", "—"))}</span>',
-            ])
+            rows.append([_esc(name), gz_source_badge(s),
+                         f'<span style="color:{GZ_FAINT}">{_esc(s.get("fetched_at", "—"))}</span>'])
         else:
             detail = _esc(s.get("error", "暂时不可用"))
-            rows.append([
-                _esc(name),
-                gz_badge("暂缺", "bad"),
-                f'<span style="color:{GZ_META};">{detail} · {_esc(s.get("fetched_at", "—"))}</span>',
-            ])
+            rows.append([_esc(name), gz_badge("暂缺", "bad"),
+                         f'<span style="color:{GZ_FAINT}">{detail} · '
+                         f'{_esc(s.get("fetched_at", "—"))}</span>'])
     return gz_data_table(["来源", "状态", "抓取"], rows, aligns=("left", "left", "right"))
 
 
+
 def gz_alert(text, color=None):
-    c = color or GZ_INK
-    return gz_shell(
-        f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;border-left:2px solid {c};'
-        f'padding-left:12px;">{text}</div>',
-        bg=GZ_PAPER, pad="20px 0")
+    """提示块：一条克莱因蓝（或指定色）竖线，不用底色。"""
+    c = color or GZ_KLEIN
+    return (f'<div style="margin:8px 0;padding:2px 0 2px 12px;'
+            f'border-left:2px solid {c};line-height:1.8">{text}</div>')
 
 
 def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
@@ -4919,33 +4858,28 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
             f'{label} · <span style="color:{value_color};font-weight:700;">{value}</span></div>')
 
 
+
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """SaaS 极简：白底 + 1px 分割线 + Inter 紧排标题 + Lucide 线条图标"""
+    """归藏简洁栏目头：编号 + kicker（克莱因蓝）→ 标题（深灰黑）→ 徽标 / 口径。
+
+    编号取代图标：不依赖任何远程图片，也不给单条消息增加几十 KB 的 SVG。
+    """
     content = content or ""
     if content.lstrip().startswith("<tr"):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
-                   f'style="width:100%!important;border-collapse:collapse;">{content}</table>')
-    cap = (f'<div style="font-size:{GZ_FS_META}px;color:#6B7280;padding-top:8px;line-height:1.6;font-family:{GZ_SANS};">{caption}</div>'
-           if caption else "")
-    badge = (f'<div style="font-size:{GZ_FS_META}px;padding-top:8px;color:#6B7280;font-family:{GZ_SANS};">{badge_html}</div>' if badge_html else "")
-    # 图标：Lucide 线条，不填充
-    icon_html = gz_icon(KOBOYO_SECTION_ICONS.get(kicker_en, "document"), size=18)
-    # 标题：20px / 600 / -0.02em，黑 #111827
-    title_html = (
-        f'<div style="display:flex;align-items:center;gap:10px;padding:0 0 8px;">'
-        f'{icon_html}'
-        f'<span style="font-size:11px;font-weight:600;color:#6B7280;letter-spacing:0.08em;text-transform:uppercase;font-family:{GZ_SANS};">{kicker_en}</span>'
+                   f'style="width:100%!important;border-collapse:collapse;'
+                   f'font-size:{GZ_FS_TABLE}px;color:{GZ_INK}">{content}</table>')
+    meta_bits = [x for x in (badge_html, caption) if x]
+    meta = (f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;'
+            f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
+    return (
+        f'<div style="padding:28px 0 0;border-top:1px solid {GZ_HAIR}">'
+        f'<div style="padding-top:12px;color:{GZ_KLEIN};font-size:11px;'
+        f'font-weight:700;letter-spacing:0.12em">{num} · {_esc(kicker_en)}</div>'
+        f'<h2 style="margin:4px 0 0;font-size:{GZ_FS_SECTION}px;'
+        f'color:{GZ_INK_STRONG}">{_esc(title)}</h2>{meta}{content}'
         f'</div>'
-        f'<h2 style="margin:0 0 12px;font-size:{GZ_FS_SECTION}px;'
-        f'font-weight:600;color:#111827;font-family:{GZ_SANS};'
-        f'letter-spacing:-0.02em;line-height:1.3;">{_esc(title)}</h2>'
     )
-    head = gz_shell(
-        f'<div style="border-top:1px solid #E5E7EB;padding-top:20px;">'
-        f'{title_html}{cap}{badge}</div>',
-        bg="#FFFFFF", pad="0 0 12px")
-    body = gz_shell(content, bg="#FFFFFF", pad="0 0 32px")
-    return head + body
 
 
 def gz_ai_analysis_block(res):
@@ -4999,7 +4933,7 @@ def gz_ai_analysis_block(res):
         breadth = (
             f'<span style="color:{GZ_UP};font-weight:700;">▲ {tech_stats.get("ups", 0)}</span> / '
             f'<span style="color:{GZ_DOWN};font-weight:700;">▼ {tech_stats.get("downs", 0)}</span> / '
-            f'<span style="color:{GZ_FLAT};font-weight:700;">■ {tech_stats.get("flats", 0)}</span>'
+            f'<span style="color:{GZ_FAINT};font-weight:700">■ {tech_stats.get("flats", 0)}</span>'
             f' · 平均 {gz_trend_badge(tech_stats.get("avg"), compact=True)}')
         extremes = []
         for tag, info in (("最强", tech_stats.get("best") or {}),
@@ -5017,7 +4951,7 @@ def gz_ai_analysis_block(res):
         out.append(gz_subsection("指数动能 · 趋势过滤") + gz_kv_table(tech_pairs))
     if res.get("risk_note"):
         out.append(gz_subsection("风险预算") + gz_shell(
-            f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};line-height:1.85;">{_esc(res["risk_note"])}</div>',
+            f'<div style="line-height:1.85">{_esc(res["risk_note"])}</div>',
             bg=GZ_PAPER, pad="8px 0"))
     if res["risks"]:
         risk_cards = []
@@ -5037,7 +4971,7 @@ def gz_ai_analysis_block(res):
         out.append(gz_subsection("风险提示 · 趋势跟踪止损") + "".join(risk_cards))
     if res.get("themes"):
         out.append(gz_subsection("量化配置 · 趋势跟踪") + gz_shell(
-            f'<div style="font-size:{GZ_FS_BODY}px;color:{GZ_INK};font-weight:700;line-height:1.85;">'
+            f'<div style="font-weight:700;line-height:1.85">'
             f'★ 趋势跟踪配置： {_esc(res["themes"])} · 优选强势趋势板块，规避弱势/高风险板块'
             f'</div>', bg=GZ_PAPER, pad="8px 0"))
     return "".join(out)
@@ -5330,7 +5264,7 @@ def _trend_clue_item_row(item, pick_no, base, color, kit, title_limit=235):
     title = _public_text(item.get("title"), title_limit)
     if not (url and title):
         return ""
-    link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+    link = (f'<a href="{_esc(url)}" style="color:{color}">'
             f'{_esc(title)}</a>')
     return kit.item_row(f"{pick_no:02d}", link,
                         _esc(_concise_detail(_public_text(item.get("detail"), 210))))
@@ -5343,7 +5277,7 @@ def _trend_clues_block(data, kit):
     无数据的源头 / 平台不进正文；缺失来源只在总结的「数据覆盖」里点名。Reddit 按 10 个
     板块分组（每板块至多 5 条），其余平台按各自榜单 / 板块分组。
     """
-    color = GZ_INK if kit is GUIZANG_KIT else C_CYAN
+    color = GZ_KLEIN if kit is GUIZANG_KIT else C_CYAN
     rows = []
 
     # ① 全网 20 个新闻源头 · 港股挖掘（结论先行：覆盖度 + 港股相关条数）
@@ -5367,7 +5301,7 @@ def _trend_clues_block(data, kit):
             hk_n = int(rec.get("hk_n") or len(items))
             name = str(rec.get("name") or "")
             home = _news_url(rec.get("url"), rec.get("hosts") or ())
-            name_html = (f'<a href="{_esc(home)}" style="color:{color};text-decoration:underline;">'
+            name_html = (f'<a href="{_esc(home)}" style="color:{color}">'
                          f'<b>{_esc(name)}</b></a>' if home else f"<b>{_esc(name)}</b>")
             rows.append(kit.item_row(
                 "▤", f'{_esc(str(rec.get("region") or ""))} · {name_html}',
@@ -5379,7 +5313,7 @@ def _trend_clues_block(data, kit):
                 title = _public_text(item.get("title"), 235)
                 if not (url and title):
                     continue
-                link = (f'<a href="{_esc(url)}" style="color:{color};text-decoration:underline;">'
+                link = (f'<a href="{_esc(url)}" style="color:{color}">'
                         f'{_esc(title)}</a>')
                 rows.append(kit.item_row(
                     f"{shown + 1:02d}", link,
@@ -5397,7 +5331,7 @@ def _trend_clues_block(data, kit):
                                  _esc(f"{len(live)} 个平台公开样本，各自独立采集；缺失平台见总结")))
     for name, source in live:
         homepage = _public_url(PUBLIC_SITE_URLS.get(name) or "")
-        anchor_name = f'<a href="{_esc(homepage)}" style="color:{color};text-decoration:underline;"><b>{_esc(name)}</b></a>' if homepage else f"<b>{_esc(name)}</b>"
+        anchor_name = f'<a href="{_esc(homepage)}" style="color:{color}"><b>{_esc(name)}</b></a>' if homepage else f"<b>{_esc(name)}</b>"
         rows.append(kit.item_row("", f'{anchor_name} {kit.source_badge(source)}',
                                  _esc(_public_text(source.get("content_date") or "", 30))))
         if name == "Reddit":
@@ -8299,7 +8233,7 @@ def gz_sentiment_block(res):
                 s.get("best_tag", "name"), "")
             out.append(gz_subsection(
                 f'{_esc(title)} · {s["market"]} {arrow}'
-                f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};font-weight:{GZ_W_BODY};">归因：{tag_label}</span>'))
+                f' <span style="color:{GZ_META};font-weight:{GZ_W_BODY};">归因：{tag_label}</span>'))
             stock_pairs = [
                 ("AI 情绪分", _esc(s.get("comment") or "")),
                 ("原因", _esc(s.get("reason") or "")),
@@ -8313,12 +8247,12 @@ def gz_sentiment_block(res):
                 badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
                 tag_mark = ""
                 if h.get("tag") == "alias":
-                    tag_mark = f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};">[别名]</span>'
+                    tag_mark = f' <span style="color:{GZ_META}">[别名]</span>'
                 elif h.get("tag") == "sector":
-                    tag_mark = f' <span style="font-size:{GZ_FS_META}px;color:{GZ_META};">[行业]</span>'
+                    tag_mark = f' <span style="color:{GZ_META}">[行业]</span>'
                 out.append(gz_item_row(
                     "»",
-                    f'<b style="color:{GZ_INK};">{badge}</b> {_esc(h["title"][:70])}{tag_mark}',
+                    f'<b>{badge}</b> {_esc(h["title"][:70])}{tag_mark}',
                     _senti_headline_sub(h)))
     # ④ 未归因市场级情绪关键词（避免重复展示已在正文出现的标题）
     unattr_n = res.get("unattributed_n") or 0
@@ -8851,7 +8785,7 @@ def gz_policy_block(res):
                 f"影响 {inds}", _policy_source_text(h)]
         sub = " · ".join(_esc(x) for x in bits if x)
         out.append(gz_item_row(
-            "◆", f'<b style="color:{GZ_INK};">{badge} {h["net"]:+d}</b> '
+            "◆", f'<b>{badge} {h["net"]:+d}</b> '
             f'{_policy_headline_markup(h, GZ_INK)}', sub))
     return "".join(out)
 
@@ -8973,7 +8907,7 @@ def gz_trend_topic_block(res):
         sub = " · ".join(x for x in (_esc(str(ev.get("source") or "")),
                                      _esc(str(ev.get("time") or "")),
                                      f"命中：{_esc(hits)}" if hits else "") if x)
-        out.append(gz_item_row("◆", f'<b style="color:{GZ_INK};">{tag}</b> '
+        out.append(gz_item_row("◆", f'<b>{tag}</b> '
                                     f'{_esc(str(ev.get("title") or ""))}', sub))
     events = res.get("events") or []
     if events:
@@ -9075,9 +9009,10 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
     return _harden_wechat_table_widths(html)
 
 
+
 def generate_report_guizang(data, date_display, date_str, sentiment_history=None,
-                                policy_result=None, news_corpus=None):
-    """SaaS 极简落地页风格：真白底 #ffffff + Inter 紧排 + 单一主色 #2563eb + 线条图标"""
+                            policy_result=None, news_corpus=None):
+    """归藏简洁排版（克莱因蓝 + 灰）：一页推送优先，结构扁平、样式全内联。"""
     parts = _collect_report_parts(data, GUIZANG_KIT,
                                   sentiment_history=sentiment_history,
                                   date_str=date_str,
@@ -9090,15 +9025,18 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
         PART_BREAK_MARK + GUIZANG_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
         for i, (kicker, title, content, badge, caption) in enumerate(sections[1:], 1))
     generated_at = _now()
-    # Hero：48-56px / 700 / -0.03em，Inter，真白底，黑字
-    masthead_title_bar = gz_shell(
-        f'<h1 style="margin:0;background:#FFFFFF;font-size:52px;'
-        f'font-weight:700;color:#111827;font-family:{GZ_SANS};'
-        f'letter-spacing:-0.03em;line-height:1.05;">{_esc(REPORT_TITLE)}</h1>'
-        f'<div style="margin:14px 0 0;font-size:18px;font-weight:500;color:#6B7280;'
-        f'font-family:{GZ_SANS};letter-spacing:0.02em;line-height:1.5;">{_esc(REPORT_TAGLINE)}</div>',
-        bg="#FFFFFF", pad="0 0 16px")
-    # SaaS 极简：真白底 #ffffff，Inter 52px/700/-0.03em，单一主色 #2563eb，1px #E5E7EB，线条图标
+    # 刊头：一行克莱因蓝刊名 → 标题 → 一行灰meta（日期 / 当天源 / 更新时间）
+    masthead = (
+        f'<div style="padding:4px 0 0">'
+        f'<div style="color:{GZ_KLEIN};font-size:11px;font-weight:700;'
+        f'letter-spacing:0.18em;line-height:1.6">OCTOPUS QUANT</div>'
+        f'<h1 style="margin:6px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:700;'
+        f'color:{GZ_INK_STRONG};letter-spacing:-0.02em;line-height:1.3;'
+        f'background:{GZ_PAPER}">{_esc(REPORT_TITLE)}</h1>'
+        f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;line-height:1.7;'
+        f'padding-top:8px">{_esc(REPORT_TAGLINE)} · {_esc(date_display)} · '
+        f'当天源 {today_n}/{total} · 更新于 {_esc(generated_at)}</div>'
+        f'</div>')
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -9112,42 +9050,22 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="description" content="{_esc(REPORT_TAGLINE)}">
 <title>{REPORT_TITLE}</title>
 </head>
-<body bgcolor="#FFFFFF" style="margin:0;padding:0;background:#FFFFFF;font-family:'Inter', -apple-system, sans-serif;color:#111827;font-size:15px;line-height:1.6;">
-<table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%!important;border-collapse:collapse;background:#FFFFFF;">
-<tr><td align="center" style="padding:0 24px;">
-<table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;max-width:800px;margin:0 auto;border-collapse:collapse;"><tr><td>
+<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{GZ_PAPER}">
 
-<table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;border-collapse:collapse;border-bottom:1px solid #E5E7EB;">
-<tr><td style="padding:16px 0;">
-<span style="font-size:14px;font-weight:600;color:#111827;font-family:'Inter', sans-serif;">OCTOPUS QUANT</span>
-<span style="font-size:13px;color:#6B7280;float:right;font-family:'Inter', sans-serif;">{_esc(date_display)}</span>
-</td></tr>
-</table>
-
-<table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;border-collapse:collapse;">
-<tr><td style="padding:48px 0 24px;">
-<div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:0.08em;text-transform:uppercase;font-family:'Inter', sans-serif;margin-bottom:12px;">DAILY BRIEF · {today_n}/{total}</div>
-{masthead_title_bar}
-<div style="padding-top:24px;">
-<a href="#report" style="display:inline-block;background:#2563EB;color:#FFFFFF;font-size:14px;font-weight:600;font-family:'Inter', sans-serif;padding:12px 24px;border-radius:8px;text-decoration:none;">查看今日全景 →</a>
-</div>
-</td></tr>
-</table>
+{masthead}
 
 {PART_BREAK_MARK}{GUIZANG_KIT.section("00", *sections[0])}
 <div id="report"></div>
 {content_html}
 
 {DOC_FOOT_MARK}
-<table width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%!important;border-collapse:collapse;border-top:1px solid #E5E7EB;">
-<tr><td style="padding:20px 0 32px;">
-<div style="font-size:12px;color:#9CA3AF;font-family:'Inter', sans-serif;">仅供参考，非投资建议。真白底 #ffffff · 1px #E5E7EB · 主色 #2563EB · Lucide 线条图标</div>
-</td></tr>
-</table>
+<div style="margin-top:26px;border-top:1px solid {GZ_HAIR};padding:12px 0 30px;color:{GZ_FAINT};font-size:11px;line-height:1.8">
+仅供参考，非投资建议 · 归藏简洁排版 · 克莱因蓝 #002FA7 + 灰 · 涨跌用 ▲▼■ 表达，不依赖红绿<br>
+数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。
+</div>
 
-</td></tr>
-</table>
-</td></tr></table>
+</div>
 </body>
 </html>"""
     return html
@@ -9457,7 +9375,7 @@ class _PushTextExtractor(HTMLParser):
             marker = f"\x01{index}\x02"
             safe_href = _html_escape(href, quote=True)
             safe_label = _html_escape(label or href)
-            text = text.replace(marker, f'<a href="{safe_href}" style="color:#2563EB;text-decoration:underline;">{safe_label}</a>')
+            text = text.replace(marker, f'<a href="{safe_href}" style="color:{GZ_KLEIN}">{safe_label}</a>')
         return text
 
 
@@ -9631,7 +9549,7 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False):
             f'table-layout:fixed;background:{GZ_INK};margin:0 0 8px;">'
             f'<tr><td align="left" valign="top" style="padding:10px 16px;">'
             f'<div style="font-size:{GZ_FS_META + 1}px;color:{GZ_PAPER};'
-            f'font-weight:{GZ_W_BOLD};line-height:1.6;font-family:{GZ_SANS};">'
+            f'font-weight:{GZ_W_BOLD};line-height:1.6;">'
             f'{text}</div></td></tr></table>')
 
 
@@ -9757,6 +9675,10 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
+    if template == "html" and len(content_html) <= PUSHPLUS_MAX_CONTENT_CHARS:
+        # 归藏简洁排版的目标：全量内容压进单条消息（一页推）
+        print(f"  📄 日报 {len(content_html):,} 字 ≤ 单条上限 "
+              f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 一页推（单条消息，全文不拆不删）")
     if template == "html" and len(content_html) > PUSHPLUS_MAX_CONTENT_CHARS:
         parts = _split_html_for_push(content_html, PUSHPLUS_MAX_CONTENT_CHARS,
                                      report_name) if PUSHPLUS_MULTIPART else None
@@ -9779,6 +9701,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
                   f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
                   f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
+            print(f"     ℹ️ 单条上限按账号实际额度设置可减少条数"
+                  f"（PushPlus：会员 10 万 / 实名 2 万字，PUSHPLUS_MAX_CONTENT_CHARS 覆盖）")
             return _push_html_parts(title, parts, token=token, topic=topic)
         if PUSHPLUS_MULTIPART:
             print("  ↩️ 已回退到旧的单条推送：按完整标签边界截断 + 末尾附完整日报链接")
