@@ -172,8 +172,9 @@
       锚点、截断不变性自检、5%~95% 夹逼）；大模型（OpenAI 兼容 /chat/completions：
       OCTOPUS_LLM_API_KEY / OCTOPUS_LLM_BASE_URL / OCTOPUS_LLM_MODEL）只在给定数据内做
       合成研判——概率偏离量化基准 >20pp 即收敛、文案数字必须能在本次数据里溯源、
-      绝对化措辞与编造数字一律回退量化口径；无 Key / 调用失败 / 解析失败自动降级为量化基准
-      （OCTOPUS_HK7_FALLBACK=0 可改成整栏缺席）。预测先存档（output/hk7_forecast.json，
+      绝对化措辞与编造数字一律回退量化口径。OCTOPUS_HK7_FALLBACK 三档：默认 auto ——
+      未配置 Key 时整栏缺席且不进审计，已配置但调用失败才降级量化基准；=1 没有 Key 也
+      降级渲染；=0 任何大模型不可用都整栏缺席。预测先存档（output/hk7_forecast.json，
       settled=False），满 7 个交易日按真实收盘结算，样本 <10 只报样本量。
       OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
 
@@ -3256,21 +3257,23 @@ def fetch_hk_seven_day(data=None):
     """AI 七日港股走势分析概率（大模型研判 + 量化基准留痕），失败时如实降级。
 
     取代原「每日量化策略（行业轮动）」栏目：三只港股指数、未来 7 个交易日升跌概率。
-    无 Key / 调用失败 / 解析失败默认回落量化基准（栏目标注引擎与降级原因）；
-    OCTOPUS_HK7_FALLBACK=0 时改为整栏缺席。
+    返回 ``None`` = 「本次没有这个栏目」：未配置大模型 Key（且未开启降级）或本次已关闭
+    → 上层不写 data 键，既不渲染也不进数据覆盖审计。已配置 Key 但大模型不可用时按
+    OCTOPUS_HK7_FALLBACK 决定：auto 降级为量化基准（栏内标注原因）、never 整栏缺席并
+    按「暂缺」进审计（run_seven_day 返回 available=False，错误原因透传给审计）。
     """
     print("📡 正在做 AI 七日港股走势分析概率（恒指 / 恒科 / 国企 · 未来 7 个交易日）...")
     if not HK7_ENABLED:
-        print("  ⏭ 该栏目已关闭（OCTOPUS_HK7=0 / --no-hk7）")
-        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
-                              error="本次运行已关闭该栏目")
+        print("  ⏭ 该栏目已关闭（OCTOPUS_HK7=0 / --no-hk7）：整栏缺席，不进审计")
+        return None
     config = _hk7.llm_config()
+    if not config.get("enabled") and config.get("fallback") != "always":
+        print("  ⏭ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）：本栏目整体缺席（不进审计）"
+              "；如需没有 Key 也看量化基准：OCTOPUS_HK7_FALLBACK=1")
+        return None
     if not config.get("enabled"):
-        print("  ⚠️ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）"
-              + ("→ 降级为量化基准" if config.get("fallback") else "→ 整栏缺席"))
-        if not config.get("fallback"):
-            return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
-                                  error="未配置大模型 API Key 且 OCTOPUS_HK7_FALLBACK=0")
+        print("  ⚠️ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）→ OCTOPUS_HK7_FALLBACK=1："
+              "降级为量化基准")
     try:
         res = _hk7.run_seven_day(
             safe_request,
@@ -3882,15 +3885,12 @@ def collect_all_data():
     if HK_NEWS_ENABLED:
         data[HK_NEWS_SOURCE_NAME] = fetch_hk_news_sources()
 
-    # AI 七日港股走势分析概率：等当日证据（行情 / 日程 / 港股标题）齐了再研判
-    if HK7_ENABLED:
-        data[HK7_SOURCE_NAME] = fetch_hk_seven_day(data)
-        time.sleep(0.5)
-    else:
-        print("⏭ 已关闭 AI 七日港股走势分析概率（OCTOPUS_HK7=0 / --no-hk7）")
-        data[HK7_SOURCE_NAME] = _source_result(
-            HK7_SOURCE_NAME, "unavailable", result=None,
-            error="本次运行已关闭该栏目")
+    # AI 七日港股走势分析概率：等当日证据（行情 / 日程 / 港股标题）齐了再研判。
+    # 未配置 Key（且未开启降级）或本次关闭 → None：不写 data 键，栏目与审计都不出现。
+    hk7_src = fetch_hk_seven_day(data)
+    if hk7_src is not None:
+        data[HK7_SOURCE_NAME] = hk7_src
+    time.sleep(0.5)
 
     # === 新增：全栏目新鲜度检查 ===
     print("\n🕐 正在检查全栏目数据新鲜度...")
@@ -10363,6 +10363,11 @@ def hk7_only_report():
     print("   章鱼 AI · AI 七日港股走势分析概率（研究模式）")
     print("🐙 " + "=" * 48)
     res = fetch_hk_seven_day({})
+    if res is None:
+        print("⏭ 本栏目缺席：未配置大模型 API Key（OCTOPUS_LLM_API_KEY）或本次已关闭"
+              "（OCTOPUS_HK7=0 / --no-hk7）。")
+        print("   如需没有 Key 也看量化基准：OCTOPUS_HK7_FALLBACK=1")
+        return 1
     if res.get("status") != "success":
         print(f"❌ 不可用：{res.get('error')}")
         return 1

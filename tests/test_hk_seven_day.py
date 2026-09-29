@@ -7,7 +7,8 @@
     数字溯源（编造的数字 / 绝对化措辞 → 该条文案回退量化口径，绝不写进日报）；
   · 留痕：先存档（settled=False）、满 7 个交易日才结算、当次运行不可能结算当次；
   · 管线接入：fetch_hk_seven_day 的 source 结果与审计名、栏目渲染（两主题）、
-    无 Key 降级、OCTOPUS_HK7=0 关闭、原「行业轮动」栏目与模块已彻底下线。
+    无 Key 默认整栏缺席（OCTOPUS_HK7_FALLBACK=1 才降级渲染）、OCTOPUS_HK7=0 关闭、
+    原「行业轮动」栏目与模块已彻底下线。
 """
 import importlib.util
 import json
@@ -73,7 +74,7 @@ def bars_by_symbol(n=320, seed=42):
 
 def quant_config(**over):
     cfg = {"enabled": False, "key": "", "base": "https://example.invalid/v1",
-           "model": "test-model", "timeout": 10, "fallback": True}
+           "model": "test-model", "timeout": 10, "fallback": "auto"}
     cfg.update(over)
     return cfg
 
@@ -186,8 +187,11 @@ class LLMTests(unittest.TestCase):
         self.assertEqual(cfg["key"], "k")
         self.assertEqual(cfg["model"], "m1")
         self.assertEqual(cfg["timeout"], 5)          # 夹到下限 5 秒
-        cfg2 = hk7.llm_config({"OCTOPUS_LLM_API_KEY": "x", "OCTOPUS_HK7_FALLBACK": "0"})
-        self.assertFalse(cfg2["fallback"])
+        # fallback 三档：默认 auto（无 Key 即整栏缺席）· =1 always · =0 never
+        self.assertEqual(hk7.llm_config({})["fallback"], "auto")
+        self.assertEqual(hk7.llm_config({"OCTOPUS_LLM_API_KEY": "x"})["fallback"], "auto")
+        self.assertEqual(hk7.llm_config({"OCTOPUS_HK7_FALLBACK": "1"})["fallback"], "always")
+        self.assertEqual(hk7.llm_config({"OCTOPUS_HK7_FALLBACK": "0"})["fallback"], "never")
         self.assertFalse(hk7.llm_config({})["enabled"])
 
     def test_extract_json_tolerates_fences_and_noise(self):
@@ -265,6 +269,17 @@ class LLMTests(unittest.TestCase):
         self.assertEqual(res["engine"], "quant")
         self.assertIn("合法 JSON", res["llm_reason"])
 
+    def test_strict_mode_marks_unavailable_when_llm_fails(self):
+        """OCTOPUS_HK7_FALLBACK=0：配了 Key 但大模型不可用 → 整体不可用（不落量化留痕）。"""
+        def boom(url, body, headers, timeout):
+            raise RuntimeError("network down")
+        with tempfile.TemporaryDirectory() as tmp:
+            res = hk7.run_seven_day(
+                None, bars_by_symbol=bars_by_symbol(), history_path=str(Path(tmp) / "j.json"),
+                post_json=boom, config=quant_config(enabled=True, key="k", fallback="never"))
+        self.assertFalse(res["available"])
+        self.assertIn("大模型不可用", res["reason"])
+
     def test_llm_exception_degrades_and_never_raises(self):
         def boom(url, body, headers, timeout):
             raise RuntimeError("network down")
@@ -296,6 +311,13 @@ class LLMTests(unittest.TestCase):
 # ④ 管线接入：source 结果 / 审计 / 渲染 / 开关
 # ======================================================================
 class PipelineWiringTests(unittest.TestCase):
+    def _fallback_config(self, **over):
+        """OCTOPUS_HK7_FALLBACK=1：没有 Key 也降级渲染量化基准（测试用显式配置）。"""
+        cfg = {"enabled": False, "key": "", "base": "https://example.invalid/v1",
+               "model": "test-model", "timeout": 10, "fallback": "always"}
+        cfg.update(over)
+        return cfg
+
     def _fake_request(self, bars):
         def fake(url, headers=None, params=None, timeout=15, is_json=True):
             m = re.search(r"chart/([^?/]+)", url)
@@ -308,6 +330,8 @@ class PipelineWiringTests(unittest.TestCase):
         bars = synthetic_bars()
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value=self._fallback_config()), \
                 patch.object(pipeline, "safe_request", self._fake_request(bars)):
             src = pipeline.fetch_hk_seven_day({})
         self.assertEqual(src["status"], "success")
@@ -315,25 +339,79 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertEqual(src["result"]["engine"], "quant")
         self.assertEqual(src["content_date"], bars[-1]["date"])
 
-    def test_disabled_switch_marks_unavailable(self):
+    def test_disabled_switch_makes_column_absent(self):
         with patch.object(pipeline, "HK7_ENABLED", False):
             src = pipeline.fetch_hk_seven_day({})
-        self.assertEqual(src["status"], "unavailable")
-        self.assertIn("关闭", src["error"])
+        self.assertIsNone(src)              # 不写 data 键 → 栏目与审计都不出现
 
-    def test_no_key_without_fallback_is_unavailable(self):
+    def test_no_key_makes_column_absent_by_default(self):
         with patch.object(pipeline, "HK7_ENABLED", True), \
                 patch.object(pipeline._hk7, "llm_config",
-                             return_value={"enabled": False, "fallback": False,
+                             return_value={"enabled": False, "fallback": "auto",
                                            "key": "", "base": "", "model": "m",
                                            "timeout": 10}):
             src = pipeline.fetch_hk_seven_day({})
+        self.assertIsNone(src)              # 默认：没有 Key 就没有这个栏目
+
+    def test_no_key_with_fallback_renders_quant_baseline(self):
+        bars = synthetic_bars()
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value=self._fallback_config()), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+        self.assertEqual(src["status"], "success")
+        self.assertEqual(src["result"]["engine"], "quant")
+
+    def test_key_configured_but_llm_fails_is_unavailable_in_strict_mode(self):
+        bars = synthetic_bars()
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value={"enabled": True, "fallback": "never",
+                                           "key": "k", "base": "https://example.invalid/v1",
+                                           "model": "m", "timeout": 10}), \
+                patch.object(pipeline._hk7, "http_post_json",
+                             side_effect=RuntimeError("network down")), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
         self.assertEqual(src["status"], "unavailable")
+        self.assertIn("大模型不可用", src["error"])
+
+    def test_key_configured_llm_success_renders_ai_column(self):
+        """配了 Key 且大模型给出合法 JSON → engine=llm，栏目带引擎/数字溯源标注。"""
+        bars = synthetic_bars()
+        config = {"enabled": True, "fallback": "auto", "key": "k",
+                  "base": "https://example.invalid/v1", "model": "m", "timeout": 10}
+
+        def fake_post(url, payload, headers, timeout):
+            self.assertIn("chat/completions", url)
+            body = {"targets": [{"code": "^HSI", "p_up": 0.62, "summary": "偏强震荡",
+                                 "drivers": ["动能延续"], "risks": ["波动放大"],
+                                 "support": 24000, "resistance": 25000}],
+                    "cross_note": "南向资金回暖"}
+            return {"choices": [{"message": {"content": json.dumps(body, ensure_ascii=False)}}]}
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config", return_value=config), \
+                patch.object(pipeline._hk7, "http_post_json", side_effect=fake_post), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+        self.assertEqual(src["status"], "success")
+        self.assertEqual(src["result"]["engine"], "llm")
+        html = pipeline.generate_report_guizang(
+            {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
+            "2026年9月29日", "20260929")
+        self.assertIn("文案数字溯源", html)
 
     def test_block_renders_both_themes_and_hides_when_unavailable(self):
         bars = synthetic_bars()
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value=self._fallback_config()), \
                 patch.object(pipeline, "safe_request", self._fake_request(bars)):
             src = pipeline.fetch_hk_seven_day({})
         res = src["result"]
@@ -350,6 +428,8 @@ class PipelineWiringTests(unittest.TestCase):
         bars = synthetic_bars()
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value=self._fallback_config()), \
                 patch.object(pipeline, "safe_request", self._fake_request(bars)):
             src = pipeline.fetch_hk_seven_day({})
         html = pipeline.generate_report_guizang(
@@ -361,6 +441,13 @@ class PipelineWiringTests(unittest.TestCase):
         # 栏目顺序：策略研判之后、趋势跟踪之前
         self.assertLess(html.index("HK 7D PROB"),
                         html.index("TREND TRACKING") if "TREND TRACKING" in html else len(html))
+
+    def test_report_without_key_hides_column_and_audit_entry(self):
+        """无 Key（默认）→ 栏目整栏缺席：正文与数据覆盖审计里都不出现。"""
+        html = pipeline.generate_report_guizang(
+            {"_backup_info": {"events": []}}, "2026年9月29日", "20260929")
+        self.assertNotIn("AI 七日港股走势分析概率", html)
+        self.assertNotIn("HK 7D PROB", html)
 
     def test_sector_rotation_column_is_fully_removed(self):
         self.assertFalse(hasattr(pipeline, "fetch_sector_rotation"))

@@ -248,9 +248,11 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
   - **配置与降级**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` /
     `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）+ 可选 `OCTOPUS_LLM_BASE_URL`（默认
     `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、
-    `OCTOPUS_LLM_TIMEOUT`（默认 60 秒）。**无 Key / 调用失败 / 解析失败自动降级为量化基准**
-    （栏目标「量化降级」并给出原因），`OCTOPUS_HK7_FALLBACK=0` 可改成「无大模型即整栏缺席」；
-    `OCTOPUS_HK7=0 / --no-hk7` 关闭采集，`--hk7-only` 研究模式单跑。非投资建议。
+    `OCTOPUS_LLM_TIMEOUT`（默认 60 秒）。**默认（auto）没有 Key 就没有这个栏目**：整栏缺席、
+    也不进数据覆盖审计（没有大模型研判就不挂「AI」名头）；已配置 Key 但调用失败 / 解析失败
+    才降级为量化基准（栏目标「量化降级」+ 原因）。`OCTOPUS_HK7_FALLBACK=1` 可让没有 Key 时也
+    渲染量化基准，`=0` 则任何大模型不可用都整栏缺席；`OCTOPUS_HK7=0 / --no-hk7` 关闭采集，
+    `--hk7-only` 研究模式单跑。非投资建议。
 - **📐 AI趋势分析（美联储）· AI趋势分析（地缘政治）**（2026-09-28 新增，规则合成）：
   两个专题栏目各有**专门抓取**——Google News RSS **主题查询**（美联储：`美联储 OR FOMC OR 鲍威尔`；
   地缘政治：`地缘政治 OR 制裁 OR 冲突 OR 关税`），与「全球头条」（BUSINESS 头条流）互补；
@@ -327,7 +329,8 @@ OCTOPUS_QUANT_STOCKS=0 python3 output/push.py     # 只算指数与流动性，�
 OCTOPUS_WEEKLY=0 python3 output/push.py           # 关闭每周量化走势预测（同 --no-weekly）
 OCTOPUS_WEEKLY_SYMBOL='^HSTECH' python3 output/push.py  # 每周预测换标的（默认 ^HSI 恒生指数）
 OCTOPUS_HK7=0 python3 output/push.py              # 关闭 AI 七日港股走势分析概率（同 --no-hk7）
-OCTOPUS_HK7_FALLBACK=0 python3 output/push.py     # 无大模型 Key 时整栏缺席（默认降级为量化基准）
+OCTOPUS_HK7_FALLBACK=1 python3 output/push.py     # 没有 Key 也渲染量化基准（默认：无 Key 即整栏缺席）
+OCTOPUS_HK7_FALLBACK=0 python3 output/push.py     # 大模型不可用（含调用失败）一律整栏缺席
 OCTOPUS_LLM_API_KEY=sk-xxx python3 output/push.py # 启用大模型研判（OpenAI 兼容接口）
 OCTOPUS_LLM_BASE_URL=https://api.openai.com/v1 OCTOPUS_LLM_MODEL=gpt-4o-mini python3 output/push.py
 OCTOPUS_HK_UNIVERSE=0700.HK:腾讯,9988.HK:阿里      # 自定义量化个股池（默认 18 只港股蓝筹/科技龙头）
@@ -522,4 +525,4 @@ output/
 
 （`output/manual_push_workflow.yml.example` 已按上面改好，可直接覆盖使用。）
 
-**配置**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）、`OCTOPUS_LLM_BASE_URL`（默认 `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、`OCTOPUS_LLM_TIMEOUT`（默认 60 秒）、`OCTOPUS_HK7_FALLBACK`（默认 1）。**无 Key / 调用失败 / 解析失败自动降级为量化基准**（栏目标「量化降级」+ 原因）；`OCTOPUS_HK7_FALLBACK=0` 时无大模型即整栏缺席；`OCTOPUS_HK7=0 / --no-hk7` 关闭，`--hk7-only` 研究模式单跑并打印。指数日线取不到或样本不足 → 整栏缺席，绝不补造行情。规则研究用途，非投资建议。
+**配置**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）、`OCTOPUS_LLM_BASE_URL`（默认 `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、`OCTOPUS_LLM_TIMEOUT`（默认 60 秒）、`OCTOPUS_HK7_FALLBACK`（默认 `auto`）。**默认没有 Key 就没有这个栏目**：整栏缺席且不进数据覆盖审计——这是「AI 研判」栏目，没有大模型就不挂 AI 名头；配了 Key 但调用失败 / 解析失败才降级为量化基准（栏目标「量化降级」+ 原因）。`OCTOPUS_HK7_FALLBACK=1`：没有 Key 也渲染量化基准；`=0`：任何大模型不可用都整栏缺席。`OCTOPUS_HK7=0 / --no-hk7` 关闭，`--hk7-only` 研究模式单跑并打印。指数日线取不到或样本不足 → 整栏缺席，绝不补造行情。规则研究用途，非投资建议。

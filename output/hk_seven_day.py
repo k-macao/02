@@ -21,9 +21,12 @@
          文案回退为量化口径（绝不把编造的数字写进日报）；
        · 禁用「一定 / 必然 / 保证」等绝对化措辞，命中即回退。
 
-降级：无 Key / 网络失败 / 返回不是合法 JSON / 字段校验不过 → 自动回落量化基准
-（``engine="quant"``），栏目照常出；``OCTOPUS_HK7_FALLBACK=0`` 可改成「无大模型即
-整栏缺席」。数据取不到、样本不足 → ``available=False`` + 原因，由上层整栏缺席。
+降级（``OCTOPUS_HK7_FALLBACK``，三档）：默认 ``auto`` —— **未配置 Key 时本栏目整体
+缺席**（没有大模型研判就不挂「AI」栏目，上层也不把它计入数据覆盖审计）；已配置 Key
+但网络失败 / 返回不是合法 JSON / 字段校验不过 → 回落量化基准（``engine="quant"``）并
+在栏内标注原因。``=1`` 连没有 Key 也降级渲染（量化基准 + 标注）；``=0`` 任何大模型
+不可用（含调用失败）都整栏缺席。数据取不到、样本不足 → ``available=False`` + 原因，
+由上层整栏缺席。
 
 留痕与结算：每次运行把三只指数的概率写进 ``output/hk7_forecast.json``（settled=False），
 满 7 个交易日后按真实收盘回填方向命中；样本 <10 只报样本量，不下命中率结论。
@@ -222,7 +225,13 @@ def quant_probability(closes):
 # 大模型：配置 / 调用 / 严格 JSON 解析 / 校验
 # ============================================================
 def llm_config(env=None):
-    """读取大模型配置；无 Key 时 enabled=False（上层据此降级为量化基准）。"""
+    """读取大模型配置；无 Key 时 enabled=False。
+
+    ``fallback`` 三档（``OCTOPUS_HK7_FALLBACK``）：
+      · auto（默认）——未配置 Key → 上层整栏缺席；已配 Key 但大模型不可用 → 降级量化基准；
+      · always（=1）——没有 Key 也降级渲染（量化基准 + 栏内标注）；
+      · never（=0）——任何大模型不可用（含调用失败）都整栏缺席。
+    """
     env = os.environ if env is None else env
     key = ""
     for name in ENV_KEY_NAMES:
@@ -237,7 +246,13 @@ def llm_config(env=None):
         timeout = max(5, min(180, int(str(env.get("OCTOPUS_LLM_TIMEOUT") or DEFAULT_TIMEOUT))))
     except (TypeError, ValueError):
         timeout = DEFAULT_TIMEOUT
-    fallback = str(env.get("OCTOPUS_HK7_FALLBACK", "1")).strip().lower() not in ("0", "false", "no")
+    mode = str(env.get("OCTOPUS_HK7_FALLBACK", "auto")).strip().lower()
+    if mode in ("1", "true", "yes", "always"):
+        fallback = "always"
+    elif mode in ("0", "false", "no", "never"):
+        fallback = "never"
+    else:
+        fallback = "auto"
     return {"enabled": bool(key), "key": key, "base": base, "model": model,
             "timeout": timeout, "fallback": fallback}
 
@@ -774,6 +789,10 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
     llm_payload, llm_error = (None, "未配置大模型 API Key")
     if config.get("enabled"):
         llm_payload, llm_error = call_llm(config, prompt_ctx, post_json=post_json)
+    if not llm_payload and config.get("fallback") == "never":
+        # 严格模式：没有大模型结论就不出这个栏目，也不把量化口径写进预测留痕
+        return {"available": False, "llm_reason": llm_error,
+                "reason": f"大模型不可用（{llm_error}）"}
     engine = "llm" if llm_payload else "quant"
     for ctx in contexts:
         ctx["engine"] = engine
