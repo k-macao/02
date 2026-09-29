@@ -119,8 +119,8 @@ def _weekly_label(p_up):
 # ============================================================
 # 信号计算：单向前向扫描，每个 t 的输出只吃 ≤t 的输入（截断不变）
 # ============================================================
-def compute_signals(closes):
-    """逐期滚动计算每周方向信号。
+def compute_signals(closes, horizon=HORIZON):
+    """逐期滚动计算每周方向信号（horizon = 预测视界，默认 5 个交易日）。
 
     返回 {"ok", "reason", "signals", "vol_hist"}：
       signals[t] = None（样本不足）或
@@ -128,8 +128,8 @@ def compute_signals(closes):
 
     因果性（每条都被 tests/test_weekly.py 的截断不变性测试锁死）：
       · 特征只用 closes[0..t]；扩张 z 标准化的均值/方差逐期更新（非全样本统计量）；
-      · 基准率只数已结算标签：s + HORIZON ≤ t；
-      · 相似锚点同样要求 s + HORIZON ≤ t（purged/embargo 依据）；
+      · 基准率只数已结算标签：s + horizon ≤ t；
+      · 相似锚点同样要求 s + horizon ≤ t（purged/embargo 依据）；
       · 距离只在两侧各自的「当期扩张标准化」坐标里比较，未来行不参与。
     """
     closes = [float(c) for c in (closes or [])]
@@ -165,10 +165,10 @@ def compute_signals(closes):
         z_at[t] = z_t
         vol_hist.append(f["vol20"])
 
-        # t 推进后，锚点 s = t - HORIZON 的标签此刻已经结算（严格在先）
-        s = t - HORIZON
+        # t 推进后，锚点 s = t - horizon 的标签此刻已经结算（严格在先）
+        s = t - horizon
         if s >= WINDOW:
-            y = 1.0 if closes[s + HORIZON] > closes[s] else 0.0
+            y = 1.0 if closes[s + horizon] > closes[s] else 0.0
             candidates.append((z_at[s], y, s))
             resolved_ys.append(y)
 
@@ -214,7 +214,7 @@ def compute_signals(closes):
 # ------------------------------------------------------------
 # 未来函数自检：peekahead 式截断不变性（运行时执行，不过则整栏降级）
 # ------------------------------------------------------------
-def check_no_lookahead(closes, cuts=None):
+def check_no_lookahead(closes, cuts=None, horizon=HORIZON):
     """对任意截断点 k，signals[k] 必须逐位不依赖 k 之后的输入。
 
     返回 (ok, message)。ok=False 时上层必须整栏降级——这是「目标日严格在后」的
@@ -223,7 +223,7 @@ def check_no_lookahead(closes, cuts=None):
     closes = [float(c) for c in (closes or [])]
     n = len(closes)
     if cuts is None:
-        full = compute_signals(closes)
+        full = compute_signals(closes, horizon=horizon)
         if not full.get("ok"):
             return False, full.get("reason") or "信号不可计算"
         f0 = full.get("first_signal", MIN_BARS - 1)
@@ -231,13 +231,13 @@ def check_no_lookahead(closes, cuts=None):
         k_mid = k0 + max(0, (n - 1 - k0)) // 2
         cuts = sorted({k0, k_mid, n - 1})
     cuts = list(cuts)
-    full = compute_signals(closes)
+    full = compute_signals(closes, horizon=horizon)
     if not full.get("ok"):
         return False, full.get("reason") or "信号不可计算"
     for k in cuts:
         if k < MIN_BARS - 1 or k >= n:
             return False, f"切点 {k} 越界（需 {MIN_BARS - 1} ≤ k < {n}）"
-        trunc = compute_signals(closes[:k + 1])
+        trunc = compute_signals(closes[:k + 1], horizon=horizon)
         a = full["signals"][k]
         b = trunc["signals"][k] if trunc.get("ok") else None
         if a is None and b is None:
@@ -253,13 +253,13 @@ def check_no_lookahead(closes, cuts=None):
 # ============================================================
 # 滚动样本外回测（walk-forward 体检：每步只用 ≤t 的输入打分）
 # ============================================================
-def _backtest(closes, signals):
+def _backtest(closes, signals, horizon=HORIZON):
     n = len(closes)
     probs, outs = [], []
     for t, sig in enumerate(signals):
-        if not sig or t + HORIZON >= n:
+        if not sig or t + horizon >= n:
             continue
-        y = 1.0 if closes[t + HORIZON] > closes[t] else 0.0
+        y = 1.0 if closes[t + horizon] > closes[t] else 0.0
         probs.append(sig["p_up"])
         outs.append(y)
     n_bt = len(probs)

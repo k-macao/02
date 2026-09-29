@@ -230,6 +230,27 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
     滚动样本外回测 → 预测留痕（已结算次数、最近 3 条结算结果）→ 无未来函数口径行。
   - **降级原则**：日线样本不足、引擎异常、自检不过或 `OCTOPUS_WEEKLY=0 / --no-weekly` 关闭时整栏缺席
     （审计总源数按「键存在才计入」，关闸时总源数不变）；`--weekly-only` 研究模式单跑并打印结果。非投资建议。
+- **◧ AI 七日港股走势分析概率**（`output/hk_seven_day.py`，2026-09-29 新增，**取代**
+  「每日量化策略（行业轮动）」——该栏目从上线到 2026-09-28 的 58 份日报出现率 **0/58**，
+  东财行业板块两步取数在真实环境没跑通）：**恒生指数 / 恒生科技 / 国企指数**三只标的、
+  **未来 7 个交易日**（按交易日计数、假期顺延）收盘价高于当前收盘价的概率。
+  - **两条腿**：① **量化基准**（always on）复用每周预测的同一套因果引擎、只把视界改成 7
+    （扩张基准率 + 20 日特征最近邻、`s+7≤t` 已结算锚点、截断不变性自检、5%~95% 夹逼）；
+    ② **大模型研判**（可选，任何 OpenAI 兼容 `/chat/completions`）**只在给定数据内**做合成：
+    喂进去的是指数特征（现价 / 5·20·60 日收益 / RSI14 / 年化波动与分位 / 20 日高低 / 52 周区间 /
+    量化基准概率）、南向资金、未来两周 ★★★ 日程与当日港股标题。
+  - **三道硬约束（防止大模型自由发挥）**：**概率收敛**——模型概率偏离量化基准超过 **20pp**
+    即收敛到基准 ±20pp 并标注「已按基准收敛」；**数字溯源**——文案里每个数字都必须能在本次
+    给定数据里找到，编造的数字该条回退量化口径（栏目显示「文案数字溯源 x/y 条」）；
+    **禁用绝对化措辞**（一定 / 必然 / 保证 / 100%…），命中即回退。全部回退都如实标注，不静默。
+  - **留痕与结算**：预测先落盘 `output/hk7_forecast.json`（`settled=false`），满 **7 个交易日**
+    按真实收盘回填方向命中与 Brier；样本 <10 只报样本量。
+  - **配置与降级**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` /
+    `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）+ 可选 `OCTOPUS_LLM_BASE_URL`（默认
+    `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、
+    `OCTOPUS_LLM_TIMEOUT`（默认 60 秒）。**无 Key / 调用失败 / 解析失败自动降级为量化基准**
+    （栏目标「量化降级」并给出原因），`OCTOPUS_HK7_FALLBACK=0` 可改成「无大模型即整栏缺席」；
+    `OCTOPUS_HK7=0 / --no-hk7` 关闭采集，`--hk7-only` 研究模式单跑。非投资建议。
 - **📐 AI趋势分析（美联储）· AI趋势分析（地缘政治）**（2026-09-28 新增，规则合成）：
   两个专题栏目各有**专门抓取**——Google News RSS **主题查询**（美联储：`美联储 OR FOMC OR 鲍威尔`；
   地缘政治：`地缘政治 OR 制裁 OR 冲突 OR 关税`），与「全球头条」（BUSINESS 头条流）互补；
@@ -256,7 +277,7 @@ python3 output/push.py           # ①采集 → ②分析 → ③生成日报 �
   （窗口摘要 + 逐日时间点）→ 量化预测总览 → 港股概率走势分析 → 资金流动性分析 → 每周量化走势预测 → 行情速览 →
   全球大盘全景复盘 →
   政策因子 → **AI趋势分析（美联储）→ AI趋势分析（地缘政治）** →
-  策略研判（板块趋势强度 / 指数动能 / 风险预算）→ 每日量化策略（行业轮动）→ 趋势跟踪 → 全球头条 → 东方财富快讯 →
+  策略研判（板块趋势强度 / 指数动能 / 风险预算）→ AI 七日港股走势分析概率 → 趋势跟踪 → 全球头条 → 东方财富快讯 →
   港股名家频道 → 新闻情绪 → **总结**（今日盘点 / 明日关注 / 风险关注 / 数据覆盖一行）。
   - **A股资讯正文栏目已删除**（2026-09-28）；A股内容由「全球大盘全景复盘」与「东方财富快讯」承担，不再单独展示。
   - 正文不再出现口径说明、免责脚注、频道简介和逐站用途介绍；全页只保留页脚一句「非投资建议」。
@@ -296,6 +317,8 @@ python3 output/pipeline.py --quant-only           # 研究模式：只跑量化�
 python3 output/pipeline.py --no-weekly            # 跳过每周量化走势预测
 python3 output/pipeline.py --weekly-only          # 研究模式：只跑每周预测，打印方向/概率/回测/留痕，不推送
 python3 output/pipeline.py --calendar-only        # 研究模式：只抓未来30天影响经济时间点并打印，不推送
+python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
+python3 output/pipeline.py --hk7-only             # 研究模式：只跑该栏目，打印三只指数概率/依据
 python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
 OCTOPUS_CALENDAR=0 python3 output/push.py         # 关闭财经日历采集（栏目缺席，审计总源数不变）
 OCTOPUS_CALENDAR_DAYS=14 OCTOPUS_CALENDAR_ROWS=30 python3 output/push.py  # 窗口 14 天 / 正文最多 30 行
@@ -303,6 +326,10 @@ OCTOPUS_QUANT=0 python3 output/push.py            # 环境变量关闭量化引�
 OCTOPUS_QUANT_STOCKS=0 python3 output/push.py     # 只算指数与流动性，跳过逐只个股概率
 OCTOPUS_WEEKLY=0 python3 output/push.py           # 关闭每周量化走势预测（同 --no-weekly）
 OCTOPUS_WEEKLY_SYMBOL='^HSTECH' python3 output/push.py  # 每周预测换标的（默认 ^HSI 恒生指数）
+OCTOPUS_HK7=0 python3 output/push.py              # 关闭 AI 七日港股走势分析概率（同 --no-hk7）
+OCTOPUS_HK7_FALLBACK=0 python3 output/push.py     # 无大模型 Key 时整栏缺席（默认降级为量化基准）
+OCTOPUS_LLM_API_KEY=sk-xxx python3 output/push.py # 启用大模型研判（OpenAI 兼容接口）
+OCTOPUS_LLM_BASE_URL=https://api.openai.com/v1 OCTOPUS_LLM_MODEL=gpt-4o-mini python3 output/push.py
 OCTOPUS_HK_UNIVERSE=0700.HK:腾讯,9988.HK:阿里      # 自定义量化个股池（默认 18 只港股蓝筹/科技龙头）
 PUSHPLUS_TOPIC=oai.1 python3 output/push.py     # 可选：显式启用一对多群组（默认不设则一对一）
 PUSHPLUS_MULTIPART=0 python3 output/push.py     # 关闭全量分条推送，回退到截断 + 完整版链接
@@ -427,6 +454,8 @@ output/
 ├── quant_history.json     ← 🎯 预测留痕（每日预测 + 次日结算的命中/Brier）
 ├── octopus_weekly.py      ← 📅 每周量化走势预测（无未来函数：截断不变性自检 + s+5≤t 类比）
 ├── weekly_forecast.json   ← 🗓️ 周度预测留痕（先存档 settled=false → 满 5 个交易日结算）
+├── hk_seven_day.py        ← ◧ AI 七日港股走势分析概率（量化基准 + 大模型研判 + 数字溯源）
+├── hk7_forecast.json      ← 🗓️ 七日概率留痕（先存档 settled=false → 满 7 个交易日结算）
 ├── daily_report_*.html    ← 📰 每日生成的日报
 └── latest.html            ← 📎 最新一份日报的副本
 ```
@@ -466,8 +495,31 @@ output/
 章鱼 AI，仅供参考。全网境内外检索公开行情。
 
 
-### 每日量化策略（行业轮动）
+### AI 七日港股走势分析概率
 
-日报新增独立栏目：从东方财富 `m:90+t:2` 获取**完整**中国行业板块指数列表，再取各指数前复权日 K（`90.BK...`）；仅在最近完整收盘日、同一锚点上比较。近一周指最近 **5 个交易日**收益；胜率及赔率用此前 **12 个互不重叠的 5 日窗口**计算（胜率=正收益窗口/12；赔率=平均正收益/平均负收益绝对值）。零赢/零亏或样本不足的行业不评分。综合分（0–100）= `100 × [0.8 × 胜率 + 0.2 × 赔率/(1+赔率)]`；分数相同时按行业代码排序。栏目展示所有有效行业的近周收益、胜率、赔率和综合分。
+日报栏目（2026-09-29 起，取代原「每日量化策略（行业轮动）」）：对**恒生指数 / 恒生科技 / 国企指数**给出**未来 7 个交易日**（按交易日计数、假期顺延）收盘上涨概率，锚定最近一个收盘日。
 
-选择分数前五构建纯多头目标组合，权重为各自得分占前五总分比例。首次成功采集建仓，之后每月首次**成功采集**时以完整收盘信号更新目标权重；同月仅更新评分、不换仓。月度持仓嵌入现有 `output/news_history.json` 的 `sector_rotation` 字段（现有自动/手动工作流已随日报提交该文件），保证每日运行不会重新建仓。信号在收盘后产生，实际执行应在下一交易日；未计交易费用、滑点、涨跌停、指数可投资性或回测收益。列表不全、少于五个有效行业、数据过期或存档失败时整栏缺席，绝不补造行情。规则研究用途，非投资建议。
+**量化基准**（始终可用，纯确定性规则）：复用 `octopus_weekly` 的因果引擎，只把视界改成 7——历史基准率（只数已结算标签 `s+7 ≤ t`）+ 20 日特征（ret5/ret10/ret20/vol20/dd20，逐期扩张 z 标准化）最近邻（K=8）50/50 合成，夹在 5%~95%；运行时截断不变性自检不过则整栏降级，并给出滚动样本外命中率与 Brier。
+
+**大模型研判**（可选，任何 OpenAI 兼容 `/chat/completions`）：把上述量化数字、南向成交、未来两周 ★★★ 日程与当日港股标题作为**唯一可用依据**交给模型，要求返回严格 JSON（三个标的的 `p_up` + 一句结论 + 依据 + 风险 + 支撑/压力位）。三道硬约束防止自由发挥：**① 概率收敛**——与量化基准偏离 >20pp 即收敛到基准 ±20pp；**② 数字溯源**——文案里每个数字必须能在本次数据里找到，否则该条回退量化口径；**③ 绝对化措辞**（一定 / 必然 / 保证 / 100%…）命中即回退。栏目如实显示引擎、降级原因、收敛标注与「文案数字溯源 x/y 条」。
+
+**留痕与结算**：每次运行先落盘 `output/hk7_forecast.json`（`settled=false`），满 **7 个交易日**按真实收盘回填方向命中与 Brier；样本 <10 只报样本量，不下命中率结论。
+
+**在 GitHub Actions 里启用**（本会话的 GitHub App 没有 `workflows` 权限，无法自动改 `.github/workflows/*.yml`，需要手动加两处）：
+
+1. 仓库 Settings → Secrets and variables → Actions 里新增 secret **`OCTOPUS_LLM_API_KEY`**（可选：Variable `OCTOPUS_LLM_BASE_URL` / `OCTOPUS_LLM_MODEL`；不配就自动用默认 DeepSeek，不配 Key 则降级为量化基准）；
+2. 在 `manual.yml` / `octopus-daily.yml` 的运行步骤里让 Key 透传进环境，并把留痕文件纳入提交：
+
+```yaml
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          OCTOPUS_LLM_API_KEY: ${{ secrets.OCTOPUS_LLM_API_KEY }}
+          OCTOPUS_LLM_BASE_URL: ${{ vars.OCTOPUS_LLM_BASE_URL }}
+          OCTOPUS_LLM_MODEL: ${{ vars.OCTOPUS_LLM_MODEL }}
+# 提交日报那一步：
+#   git add ... output/hk7_forecast.json
+```
+
+（`output/manual_push_workflow.yml.example` 已按上面改好，可直接覆盖使用。）
+
+**配置**：`OCTOPUS_LLM_API_KEY`（兼容 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY`）、`OCTOPUS_LLM_BASE_URL`（默认 `https://api.deepseek.com/v1`）、`OCTOPUS_LLM_MODEL`（默认 `deepseek-chat`）、`OCTOPUS_LLM_TIMEOUT`（默认 60 秒）、`OCTOPUS_HK7_FALLBACK`（默认 1）。**无 Key / 调用失败 / 解析失败自动降级为量化基准**（栏目标「量化降级」+ 原因）；`OCTOPUS_HK7_FALLBACK=0` 时无大模型即整栏缺席；`OCTOPUS_HK7=0 / --no-hk7` 关闭，`--hk7-only` 研究模式单跑并打印。指数日线取不到或样本不足 → 整栏缺席，绝不补造行情。规则研究用途，非投资建议。

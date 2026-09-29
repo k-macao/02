@@ -164,6 +164,19 @@
       --weekly-only 研究模式；数据取不到、样本不足或自检不过 → 整栏缺席。规则合成，
       非投资建议。
 
+  18. 「AI 七日港股走势分析概率」（output/hk_seven_day.py，2026-09-29 起，取代原
+      「每日量化策略（行业轮动）」栏目：该栏目从上线到 09-28 的 58 份日报出现率 0/58，
+      东财行业板块两步取数在真实环境未跑通）：恒生指数 / 恒生科技 / 国企指数三只标的、
+      未来 7 个交易日（按交易日计数、假期顺延）的收盘上涨概率。量化基准复用
+      octopus_weekly 的因果引擎（视界改 7：扩张基准率 + 20 日特征最近邻、s+7≤t 已结算
+      锚点、截断不变性自检、5%~95% 夹逼）；大模型（OpenAI 兼容 /chat/completions：
+      OCTOPUS_LLM_API_KEY / OCTOPUS_LLM_BASE_URL / OCTOPUS_LLM_MODEL）只在给定数据内做
+      合成研判——概率偏离量化基准 >20pp 即收敛、文案数字必须能在本次数据里溯源、
+      绝对化措辞与编造数字一律回退量化口径；无 Key / 调用失败 / 解析失败自动降级为量化基准
+      （OCTOPUS_HK7_FALLBACK=0 可改成整栏缺席）。预测先存档（output/hk7_forecast.json，
+      settled=False），满 7 个交易日按真实收盘结算，样本 <10 只报样本量。
+      OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
+
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
   1 = 应当推送却失败，或用法错误。
@@ -223,7 +236,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
-import sector_rotation as _rotation  # noqa: E402
+import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
 import backup_sources as _backup  # noqa: E402
 import dedup as _dedup  # noqa: E402
@@ -236,6 +249,11 @@ HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower
 # 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
 WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
 WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
+# AI 七日港股走势分析概率开关：OCTOPUS_HK7=0 或 --no-hk7 可整体跳过；
+# 大模型 Key 走 OCTOPUS_LLM_API_KEY（兼容 OPENAI_API_KEY / DEEPSEEK_API_KEY 等）。
+HK7_ENABLED = str(os.environ.get("OCTOPUS_HK7", "1")).strip().lower() not in ("0", "false", "no")
+HK7_HISTORY_FILENAME = _hk7.JOURNAL_FILENAME
+HK7_SOURCE_NAME = "AI 七日港股走势分析概率"
 
 # 时区
 CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间（东八区）
@@ -3166,36 +3184,120 @@ def fetch_hk_quant():
 #   · 零写死叙事：不落任何具体日期/点位，规则合成，非投资建议。
 # 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
 # ============================================================
-def fetch_sector_rotation():
-    """独立中国行业指数轮动数据源；失败不影响其它栏目。
+def _hk7_extra_context(data):
+    """给「AI 七日港股走势分析概率」准备当日证据（只搬运本次已抓到的数据）。
 
-    失败时把具体判死原因打到日志（行业列表 / 日K 口径 / 锚点日 / 评分 / 存档
-    哪一环不过），并已在 sector_rotation 内落盘诊断，便于隔日核查。
+    flows  —— 南向成交总额（A股大盘全景）+ 流动性综合分（港股量化引擎）；
+    events —— 未来两周内 ★★★ 日程（财经日历，最多 6 条，含日期与名称）；
+    news   —— 港股相关标题（全网新闻源头 → 港股名家频道 → 全球头条港股关键词命中）。
+    任一来源缺失就不放进证据（绝不编造）；只做截断，不引入新数字。
     """
-    print("📡 正在计算中国行业指数周度评分与月度轮动...")
+    extra = {"flows": {}, "events": [], "news": []}
+    pan = (data or {}).get("A股大盘全景") or {}
+    north = pan.get("north") or {}
+    if north.get("south_available") and north.get("south_amount_yi") is not None:
+        try:
+            extra["flows"]["south_amount_yi"] = round(float(north["south_amount_yi"]), 2)
+        except (TypeError, ValueError):
+            pass
+        if north.get("south_date"):
+            extra["flows"]["south_date"] = str(north["south_date"])
+    quant = ((data or {}).get("港股量化") or {}).get("result") or {}
+    liq = quant.get("liq") or {}
+    if liq.get("score") is not None:
+        try:
+            extra["flows"]["liquidity_score"] = round(float(liq["score"]), 1)
+        except (TypeError, ValueError):
+            pass
+
+    cal = (data or {}).get("财经日历") or {}
+    if cal.get("status") == "success":
+        base = datetime.now(CST).date()
+        picked = []
+        for it in cal.get("items") or []:
+            day = _cal_date_obj(str(it.get("date") or ""))
+            if not day or not (base <= day <= base + timedelta(days=14)):
+                continue
+            if int(it.get("imp") or 0) < 3:
+                continue
+            picked.append({"date": day.isoformat(), "name": str(it.get("name") or "")[:24]})
+            if len(picked) >= 6:
+                break
+        extra["events"] = picked
+
+    titles = []
+    news_src = (data or {}).get(HK_NEWS_SOURCE_NAME) or {}
+    for rec in news_src.get("sources") or []:
+        for title in rec.get("hk_titles") or []:
+            titles.append((str(title), str(rec.get("name") or "")))
+    yt = (data or {}).get("港股名家频道") or {}
+    for ch in yt.get("channels") or []:
+        for v in (ch.get("videos") or [])[:1]:
+            titles.append((str(v.get("title") or ""), str(ch.get("name") or "")))
+    google = (data or {}).get("全球头条") or {}
+    for h in google.get("headlines") or []:
+        title = str((h or {}).get("title") or "") if isinstance(h, dict) else str(h)
+        if title and _HK_NEWS_KW_RE.search(title):
+            titles.append((title, "全球头条"))
+    seen, picked = set(), []
+    for title, source in titles:
+        title = re.sub(r"\s+", " ", title).strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        picked.append({"title": title[:120], "source": source[:24] or "公开标题"})
+        if len(picked) >= 12:
+            break
+    extra["news"] = picked
+    return extra
+
+
+def fetch_hk_seven_day(data=None):
+    """AI 七日港股走势分析概率（大模型研判 + 量化基准留痕），失败时如实降级。
+
+    取代原「每日量化策略（行业轮动）」栏目：三只港股指数、未来 7 个交易日升跌概率。
+    无 Key / 调用失败 / 解析失败默认回落量化基准（栏目标注引擎与降级原因）；
+    OCTOPUS_HK7_FALLBACK=0 时改为整栏缺席。
+    """
+    print("📡 正在做 AI 七日港股走势分析概率（恒指 / 恒科 / 国企 · 未来 7 个交易日）...")
+    if not HK7_ENABLED:
+        print("  ⏭ 该栏目已关闭（OCTOPUS_HK7=0 / --no-hk7）")
+        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
+                              error="本次运行已关闭该栏目")
+    config = _hk7.llm_config()
+    if not config.get("enabled"):
+        print("  ⚠️ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）"
+              + ("→ 降级为量化基准" if config.get("fallback") else "→ 整栏缺席"))
+        if not config.get("fallback"):
+            return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
+                                  error="未配置大模型 API Key 且 OCTOPUS_HK7_FALLBACK=0")
     try:
-        # 存档跟随日报目录（REPORT_DIR），便于离线测试隔离，不写死模块默认路径
-        result = _rotation.run(
-            safe_request, state_path=os.path.join(REPORT_DIR, NEWS_HISTORY_FILENAME))
-    except Exception as exc:
-        result = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
-    if not result.get("available"):
-        diag = result.get("diag") or {}
-        detail = " · ".join(f"{k}={diag[k]}" for k in
-                            ("universe", "fqt", "kline_series", "asof", "scored")
-                            if diag.get(k) is not None)
-        print(f"  ⚠️ 行业轮动栏目缺席：{result.get('reason')}"
-              + (f"（{detail}）" if detail else ""))
-        return _source_result("东方财富 · 中国行业板块指数日线", "unavailable",
-                              error=result.get("reason"), result=result)
-    diag = result.get("diag") or {}
-    print(f"  ✅ 行业轮动：锚点 {result['asof']} · 有效 {result['scored_count']}/"
-          f"{result['universe_count']} 个行业 · 月度持仓"
-          f"{'沿用' if diag.get('state') == 'reused' else '新建'}"
-          f"（复权口径 fqt={diag.get('fqt')}）")
-    return _source_result("东方财富 · 中国行业板块指数日线", "success",
-                          is_today=result["asof"] == datetime.now(CST).strftime("%Y-%m-%d"),
-                          content_date=result["asof"], result=result)
+        res = _hk7.run_seven_day(
+            safe_request,
+            history_path=os.path.join(REPORT_DIR, HK7_HISTORY_FILENAME),
+            extra=_hk7_extra_context(data or {}), config=config)
+    except Exception as exc:                  # 该栏目异常不影响日报其它栏目
+        print(f"  ⚠️ AI 七日港股走势分析概率异常：{exc}")
+        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None, error=str(exc))
+
+    if not res.get("available"):
+        print(f"  ⚠️ AI 七日港股走势分析概率暂不可用：{res.get('reason')}")
+        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
+                              error=str(res.get("reason") or "数据不足"))
+    print(f"  ✅ AI 七日港股：锚定 {res.get('asof')} 收盘 · {res.get('engine_label')}"
+          + (f" · 数字溯源 {res.get('grounded')}" if res.get("engine") == "llm" else ""))
+    for t in res.get("targets") or []:
+        print(f"     · {t['name']} P(7日涨) {t['p_up'] * 100:.0f}%"
+              f"（量化基准 {t['quant_p_up'] * 100:.0f}%"
+              + ("，已收敛" if t.get("converged") else "") + "）")
+    if res.get("missing"):
+        print(f"  ⚠️ {res['missing']}")
+    if res.get("engine") != "llm":
+        print(f"  ⚠️ 大模型降级原因：{res.get('llm_reason')}")
+    return _source_result(
+        HK7_SOURCE_NAME, "success", is_today=res.get("is_today", False),
+        content_date=res.get("asof"), result=res,
+        llm_error=(res.get("llm_reason") if res.get("engine") != "llm" else None))
 
 
 def fetch_weekly_forecast():
@@ -3767,7 +3869,6 @@ def collect_all_data():
     time.sleep(0.5)
 
     data["每周走势预测"] = fetch_weekly_forecast()
-    data["行业轮动"] = fetch_sector_rotation()
     time.sleep(0.5)
 
     if ECON_CALENDAR_ENABLED:
@@ -3780,6 +3881,16 @@ def collect_all_data():
     data.update(fetch_public_sites())
     if HK_NEWS_ENABLED:
         data[HK_NEWS_SOURCE_NAME] = fetch_hk_news_sources()
+
+    # AI 七日港股走势分析概率：等当日证据（行情 / 日程 / 港股标题）齐了再研判
+    if HK7_ENABLED:
+        data[HK7_SOURCE_NAME] = fetch_hk_seven_day(data)
+        time.sleep(0.5)
+    else:
+        print("⏭ 已关闭 AI 七日港股走势分析概率（OCTOPUS_HK7=0 / --no-hk7）")
+        data[HK7_SOURCE_NAME] = _source_result(
+            HK7_SOURCE_NAME, "unavailable", result=None,
+            error="本次运行已关闭该栏目")
 
     # === 新增：全栏目新鲜度检查 ===
     print("\n🕐 正在检查全栏目数据新鲜度...")
@@ -4071,7 +4182,7 @@ _SECTION_ICON_META = {
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
-    "SECTOR ROTATION": ("◧", "SECTOR", C_AMBER, C_FLAT_BG),
+    "HK 7D PROB": ("◧", "HK-7D", C_CYAN, "#092836"),
 }
 
 
@@ -5564,7 +5675,7 @@ REPORT_SECTION_ORDER = (
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
     "MARKET SNAPSHOT", "GLOBAL PANORAMA", "POLICY SHOCK",
-    "FED TREND", "GEO TREND", "STRATEGY READ", "SECTOR ROTATION",
+    "FED TREND", "GEO TREND", "STRATEGY READ", "HK 7D PROB",
     "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
     "SUMMARY",
@@ -6087,32 +6198,94 @@ def _weekly_forecast_block(res, kit):
     return kit.rows("".join(rows))
 
 
-def _sector_rotation_block(res, kit):
-    """展示全行业评分与五行业纯多头月度持仓，两主题共用。"""
-    if not res.get("available"):
-        return ""
-    state = res.get("state") or {}
-    holdings = state.get("holdings") or []
-    if len(holdings) != 5:
+def _hk_seven_day_block(res, kit):
+    """AI 七日港股走势分析概率栏目内容（两主题共用；res 见 fetch_hk_seven_day 的 result）。
+
+    三只指数各一行（概率 / 依据 / 风险 / 量化基准偏离），加留痕与口径两行；
+    引擎是大模型还是量化降级、有没有按基准收敛、数字溯源几条，都在栏内如实标出。
+    """
+    targets = res.get("targets") or []
+    if not targets:
         return ""
     esc = kit.esc
-    rows = [kit.item_row("▤", f'截至 {esc(res["asof"])} 收盘 · '
-                         f'有效 {res["scored_count"]}/{res["universe_count"]} 个行业指数',
-                         '近一周=最近5个交易日；历史12个不重叠5日窗口（不含当前周）')]
-    for rank, sec in enumerate(res["scores"], 1):
-        rows.append(kit.item_row(str(rank),
-            f'{esc(sec["name"])} ({esc(sec["code"])}) · 综合 {sec["score"]:.2f}分',
-            f'近5日 {sec["week_return"]:+.2%} · 胜率 {sec["win_rate"]:.1%} · 赔率 {sec["odds"]:.2f}'))
-    rows.append(kit.item_row("↺", f'纯多头组合 · {esc(state["month"])} 月度持仓',
-                             f'建仓/调仓锚点 {esc(state["rebalance_date"])} 收盘；当月不随每日评分换仓'))
-    for h in holdings:
-        rows.append(kit.item_row("+", f'{esc(h["name"])} ({esc(h["code"])})',
-                                 f'目标权重 {h["weight"]:.2%} · 建仓时得分 {h["score"]:.2f}'))
-    rows.append(kit.item_row("⚖", '规则：综合分=胜率×80% + [赔率/(1+赔率)]×20%（乘100）；'
-                             '胜率=正收益周占比，赔率=平均正收益/平均负收益绝对值。'
-                             '得分前五，权重=各自得分/前五总分。',
-                             '每月首次成功采集后按收盘信号确定目标权重，下一交易日执行；'
-                             '不含滑点/费用，非投资建议；历史胜率不是未来成功概率。'))
+    horizon = int(res.get("horizon") or _hk7.HORIZON)
+    rows = []
+    head_sub = (f'锚定 {esc(str(res.get("asof") or ""))} 收盘 · 未来 {horizon} 个交易日'
+                f'（按交易日计数，假期顺延） · 概率夹 5%~95% · 非投资建议')
+    if res.get("engine") == "llm":
+        head_sub += f' · 文案数字溯源 {esc(str(res.get("grounded") or "—"))} 条'
+    else:
+        head_sub += (f' · 大模型不可用（{esc(str(res.get("llm_reason") or "未配置 Key"))}）'
+                     f'→ 量化基准')
+    head_row = kit.item_row("◈", f'<b>引擎</b> · {esc(str(res.get("engine_label") or ""))}',
+                            head_sub)
+    for t in targets:
+        icon = {"up": "▲", "down": "▼"}.get(t.get("direction"), "■")
+        bits = []
+        if t.get("close") is not None:
+            bits.append(f'现价 {t["close"]:,.2f}')
+        if t.get("ret5") is not None:
+            bits.append(f'5日 {t["ret5"] * 100:+.1f}%')
+        if t.get("ret20") is not None:
+            bits.append(f'20日 {t["ret20"] * 100:+.1f}%')
+        if t.get("rsi14") is not None:
+            bits.append(f'RSI14 {t["rsi14"]:.1f}')
+        if t.get("vol20") is not None:
+            bits.append(f'年化波动 {t["vol20"] * 100:.1f}%')
+        if t.get("vol_pct") is not None:
+            bits.append(f'波动分位 {t["vol_pct"] * 100:.0f}%')
+        if t.get("lo95") and t.get("hi95"):
+            bits.append(f'95%区间 {t["lo95"]:,.0f}–{t["hi95"]:,.0f}'
+                        f'（历史 {horizon} 日 5%/95% 分位 n={int(t.get("var_n") or 0)}）')
+        detail = []
+        drivers = "；".join(esc(str(x)) for x in (t.get("drivers") or [])[:2])
+        risks = "；".join(esc(str(x)) for x in (t.get("risks") or [])[:2])
+        if drivers:
+            detail.append(f'依据：{drivers}')
+        if risks:
+            detail.append(f'风险：{risks}')
+        if res.get("engine") == "llm":
+            detail.append(f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%'
+                          + ('（已按基准收敛）' if t.get("converged")
+                             else f'（偏离 {float(t.get("deviation") or 0) * 100:+.0f}pp）'))
+        sub = " · ".join(bits)
+        if detail:
+            sub = (sub + "<br>" if sub else "") + " · ".join(detail)
+        rows.append(kit.item_row(icon, f'{esc(str(t.get("name") or ""))} · '
+                                       f'{esc(str(t.get("label") or ""))}', sub))
+
+    rows.append(head_row)          # 三只指数的概率先读，再交代引擎与口径
+
+    cross = str(res.get("cross_note") or "")
+    if cross:
+        rows.append(kit.item_row("◇", f'跨市场 · {esc(cross)}', ''))
+
+    jr = res.get("journal") or {}
+    if jr.get("hit_rate") is not None:
+        j_txt = (f'已结算 {int(jr.get("n") or 0)} 个样本 · 方向命中 {int(jr.get("hits") or 0)}'
+                 f'（{jr["hit_rate"] * 100:.0f}%）'
+                 + (f' · Brier {jr["brier"]:.3f}' if jr.get("brier") is not None else ""))
+    elif jr.get("n"):
+        j_txt = f'已结算 {int(jr["n"])} 个样本（<10，只报样本量）'
+    else:
+        j_txt = "预测已存档（settled=False），待满 7 个交易日按真实收盘结算"
+    if jr.get("standing"):
+        j_txt += f' · 在途 {int(jr["standing"])} 条'
+    recent_txt = " · ".join(
+        f'{esc(str(r.get("date") or ""))} '
+        f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
+        f'{"✓" if r.get("hit") else "✗"}'
+        for r in (jr.get("recent") or []))
+    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+
+    self_check = next((str(t.get("self_check") or "") for t in targets
+                       if t.get("self_check")), "")
+    note = (f'<b>七日口径</b> · 目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
+            f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
+            + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
+            + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
+            f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
+    rows.append(kit.item_row("⚖", note))
     return kit.rows("".join(rows))
 
 
@@ -6130,7 +6303,7 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
     groups = [
         ("市场与资金", {"MARKET SNAPSHOT", "GLOBAL PANORAMA", "LIQUIDITY FLOW"}),
         ("量化与策略", {"QUANT FORECAST", "HK PROBABILITY", "WEEKLY FORECAST",
-                       "STRATEGY READ", "SECTOR ROTATION"}),
+                       "STRATEGY READ", "HK 7D PROB"}),
         ("政策与日程", {"ECON CALENDAR", "POLICY SHOCK", "FED TREND", "GEO TREND"}),
         ("资讯与情绪", {"TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
                        "HK GURU CHANNELS", "NEWS SENTIMENT"}),
@@ -6208,11 +6381,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     for _tk in (FED_TREND_KEY, GEO_TREND_KEY):
         if isinstance(data.get(_tk), dict):
             source_items.append((_tk, data[_tk]))
-    # 每周量化走势预测 / 行业轮动：独立栏目，存在即按需进审计。
+    # 每周量化走势预测 / AI 七日港股走势分析概率：独立栏目，存在即按需进审计。
     if isinstance(data.get("每周走势预测"), dict):
         source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
-    if isinstance(data.get("行业轮动"), dict):
-        source_items.append(("每日量化策略（行业轮动）", data["行业轮动"]))
+    if isinstance(data.get(HK7_SOURCE_NAME), dict):
+        source_items.append((HK7_SOURCE_NAME, data[HK7_SOURCE_NAME]))
     # 全网 20 个新闻源头（港股挖掘）：与社区平台同为趋势跟踪，按需加入审计；
     # 外部旧调用若无该键仍维持原来的基础数据源数量。
     if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
@@ -6268,14 +6441,15 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "WEEKLY FORECAST", "每周量化走势预测", wk_html,
                 kit.badge("周度预测", "ai"), _short_source(weekly_src))
 
-    rotation_src = data.get("行业轮动") or {}
-    rotation_res = rotation_src.get("result") or {}
-    if rotation_res.get("available"):
-        rotation_html = _sector_rotation_block(rotation_res, kit)
-        if rotation_html:
-            blocks["SECTOR ROTATION"] = (
-                "SECTOR ROTATION", "每日量化策略（行业轮动）", rotation_html,
-                kit.badge("月度轮动", "ai"), _short_source(rotation_src))
+    hk7_src = data.get(HK7_SOURCE_NAME) or {}
+    hk7_res = hk7_src.get("result") or {}
+    if hk7_res.get("available"):
+        hk7_html = _hk_seven_day_block(hk7_res, kit)
+        if hk7_html:
+            blocks["HK 7D PROB"] = (
+                "HK 7D PROB", "AI 七日港股走势分析概率", hk7_html,
+                kit.badge("大模型研判" if hk7_res.get("engine") == "llm" else "量化降级", "ai"),
+                _short_source(hk7_src))
 
     # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
     cal = data.get("财经日历") or {}
@@ -10182,6 +10356,47 @@ def weekly_only_report():
     return 0
 
 
+
+def hk7_only_report():
+    """只跑 AI 七日港股走势分析概率并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    print("🐙 " + "=" * 48)
+    print("   章鱼 AI · AI 七日港股走势分析概率（研究模式）")
+    print("🐙 " + "=" * 48)
+    res = fetch_hk_seven_day({})
+    if res.get("status") != "success":
+        print(f"❌ 不可用：{res.get('error')}")
+        return 1
+    r = res.get("result") or {}
+    print(f"\n【锚定】{r.get('asof')} 收盘 · 未来 {r.get('horizon')} 个交易日"
+          f" · 引擎：{r.get('engine_label')}")
+    if r.get("engine") != "llm":
+        print(f"  大模型降级原因：{r.get('llm_reason')}")
+    for t in r.get("targets") or []:
+        print(f"\n  {t['name']}（{t['code']}） {t['label']}")
+        print(f"    现价 {t['close']:,.2f} · 5日 {t['ret5'] * 100:+.1f}%"
+              f" · 20日 {t['ret20'] * 100:+.1f}% · RSI14 {t['rsi14']:.1f}"
+              f" · 年化波动 {t['vol20'] * 100:.1f}%")
+        print(f"    95% 区间 {t['lo95']:,.0f} – {t['hi95']:,.0f}（n={t['var_n']}）"
+              f" · 量化基准 {t['quant_p_up'] * 100:.1f}%"
+              f" · 偏离 {t['deviation'] * 100:+.1f}pp"
+              + ("（已收敛）" if t.get("converged") else ""))
+        for d in t.get("drivers") or []:
+            print(f"    依据：{d}")
+        for d in t.get("risks") or []:
+            print(f"    风险：{d}")
+        bt = t.get("backtest") or {}
+        if bt.get("hit_rate") is not None:
+            print(f"    滚动样本外：{bt['n']} 期 · 命中 {bt['hit_rate'] * 100:.1f}%"
+                  f" · 恒定基准 {bt['base_rate'] * 100:.1f}% · Brier {bt['brier']:.3f}")
+        elif bt.get("note"):
+            print(f"    滚动样本外：{bt['note']}")
+    jr = r.get("journal") or {}
+    print(f"\n【预测留痕】已结算 {jr.get('n')} 个样本 · 在途 {jr.get('standing')}"
+          + (f" · 方向命中 {jr.get('hits')}（{(jr.get('hit_rate') or 0) * 100:.0f}%）"
+             if jr.get("hit_rate") is not None else "（样本 <10 只报样本量）"))
+    print("\n✅ 研究模式不推送")
+    return 0
+
 def calendar_only_report(days=None):
     """只抓「未来 N 天影响经济时间点」并打印（研究 / 排障用：不生成日报、不推送）。
 
@@ -10230,6 +10445,8 @@ def main():
   python3 output/pipeline.py --quant-only           # 只跑量化引擎并打印概率/流动性/回测
   python3 output/pipeline.py --no-weekly            # 跳过每周量化走势预测
   python3 output/pipeline.py --weekly-only          # 只跑每周预测并打印方向/概率/回测/留痕
+  python3 output/pipeline.py --hk7-only             # 只跑 AI 七日港股走势分析概率并打印
+  python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
   python3 output/pipeline.py --calendar-only        # 只抓未来30天影响经济时间点并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
@@ -10262,6 +10479,10 @@ def main():
                        help="只跑港股量化引擎并打印结果（研究模式：不生成日报、不推送）")
     parser.add_argument("--no-weekly", action="store_true",
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
+    parser.add_argument("--no-hk7", action="store_true",
+                       help="跳过 AI 七日港股走势分析概率（只出常规栏目，运行更快）")
+    parser.add_argument("--hk7-only", action="store_true",
+                       help="只跑 AI 七日港股走势分析概率并打印结果（研究模式：不生成日报、不推送）")
     parser.add_argument("--weekly-only", action="store_true",
                        help="只跑每周量化走势预测并打印结果（研究模式：不生成日报、不推送）")
     parser.add_argument("--sources", action="store_true",
@@ -10280,6 +10501,10 @@ def main():
         global WEEKLY_ENABLED
         WEEKLY_ENABLED = False
 
+    if args.no_hk7:
+        global HK7_ENABLED
+        HK7_ENABLED = False
+
     # --list 模式
     if args.list:
         return list_reports()
@@ -10296,6 +10521,10 @@ def main():
     # --weekly-only 模式：只跑每周量化走势预测，把方向 / 概率 / 回测 / 留痕打到控制台
     if args.weekly_only:
         return weekly_only_report()
+
+    # --hk7-only 模式：只跑 AI 七日港股走势分析概率，把三只指数的概率 / 依据打到控制台
+    if args.hk7_only:
+        return hk7_only_report()
 
     # --calendar-only 模式：只抓未来 N 天影响经济时间点，验证接口与筛选口径
     if args.calendar_only is not None:
@@ -10367,28 +10596,6 @@ def main():
     date_str = _today_str()
     fresh_items = _collect_headline_items(data, _today_display())
     news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
-
-    # 行业轮动栏目缺席时留一次在线诊断（落进标题存档一起提交，供隔日核查）。
-    # 触发条件：本次确实跑过该源且未取到内容、日报目录未被重定向（离线测试不触发）；
-    # 健康运行时零额外请求；OCTOPUS_ROTATION_PROBE=0 可显式关闭。
-    rotation_src = data.get("行业轮动")
-    probe_enabled = (
-        isinstance(rotation_src, dict)
-        and rotation_src.get("status") != "success"
-        and os.path.abspath(REPORT_DIR) == os.path.abspath(SCRIPT_DIR)
-        and str(os.environ.get("OCTOPUS_ROTATION_PROBE", "1")).strip().lower()
-        not in ("0", "false", "no"))
-    if probe_enabled:
-        try:
-            import probe_sector_rotation as _probe
-            news_corpus["sector_rotation_probe"] = _probe.build_report(
-                verbose=True, keep_payloads=False)
-            print("  🔎 行业轮动缺席：在线诊断已写入标题存档（键 sector_rotation_probe）")
-        except Exception as _probe_exc:
-            print(f"  ⚠️ 行业轮动在线诊断失败：{_probe_exc}")
-    elif "sector_rotation_probe" in news_corpus:
-        # 栏目恢复正常后清掉上一次的缺席诊断，避免旧快照留在存档里误导核查
-        news_corpus.pop("sector_rotation_probe")
 
     # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
