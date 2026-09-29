@@ -10395,6 +10395,7 @@ def hk7_only_report():
           f" · 引擎：{r.get('engine_label')}")
     if r.get("engine") != "llm":
         print(f"  大模型降级原因：{r.get('llm_reason')}")
+    print("─" * 60)
     for t in r.get("targets") or []:
         print(f"\n  {t['name']}（{t['code']}） {t['label']}")
         print(f"    现价 {t['close']:,.2f} · 5日 {t['ret5'] * 100:+.1f}%"
@@ -10416,10 +10417,12 @@ def hk7_only_report():
                   f" · 恒定基准 {bt['base_rate'] * 100:.1f}% · Brier {bt['brier']:.3f}")
         elif bt.get("note"):
             print(f"    滚动样本外：{bt['note']}")
+        print("─" * 60)
     jr = r.get("journal") or {}
     print(f"\n【预测留痕】已结算 {jr.get('n')} 个样本 · 在途 {jr.get('standing')}"
           + (f" · 方向命中 {jr.get('hits')}（{(jr.get('hit_rate') or 0) * 100:.0f}%）"
              if jr.get("hit_rate") is not None else "（样本 <10 只报样本量）"))
+    print("─" * 60)
     print("\n✅ 研究模式不推送")
     return 0
 
