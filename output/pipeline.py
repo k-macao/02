@@ -144,7 +144,8 @@
       全球大盘全景复盘（同时新增「全球指数概览」子块；该栏已于 2026-09-30 并入
       【及时秋刀鱼】AI 行情复盘，见第 20 条）、AI 盘研判→策略研判、每日量化策略
       趋势跟踪线索→趋势跟踪、新闻情绪→新闻情绪、总结→总结；行情速览 / 政策因子 /
-      全球头条 / 东方财富快讯 / 港股名家频道 名称不变。像素主题英文关卡名同步更名
+      全球头条 / 东方财富快讯 / 港股名家频道 名称不变（其中 政策因子 / 全球头条 已于
+      2026-09-29 再次改名，见第 21 条；行情速览见第 20 条）。像素主题英文关卡名同步更名
       （CONCLUSION→FORECAST、A-SHARE PANORAMA→GLOBAL PANORAMA、AI READ→STRATEGY READ、
       TREND CLUES→TREND TRACKING、WRAP-UP→SUMMARY），图标砖短标签同步为 STRAT / GLOBAL / SENTI。
   16. 新增「AI趋势分析（美联储）」与「AI趋势分析（地缘政治）」两栏目（2026-09-28
@@ -220,6 +221,23 @@
       **不变的**：抓取逻辑与接口、数据源名称（实时行情 / A股大盘全景）、审计口径
       （总源数仍为 8，两路仍分别留痕）、当天检验与推送门禁、超长日报拆分逻辑。
       历史归档日报不改写。
+
+  21. 第二批栏目更名（2026-09-29 按用户要求，只改标题文字，栏目内容 / 顺序 / 抓取 /
+      推送门禁与拆分逻辑完全不变）：
+        全球头条          → **【无敌帝王蟹】全球头条**
+        趋势跟踪          → **【深海大鲨鱼】趋势跟踪**
+        政策因子          → **【深海肥蓝鲸】政策因子**
+        每周量化走势预测   → **【贪吃大白鲨】量化走势预测**（按用户给的新名，标题不再带「每周」，
+                          周度口径仍在栏目内如实披露：「未来 5 个交易日」「锚定 X 收盘」）
+      四个标题集中定义为 SECTION_TITLE_GLOBAL_HEADLINES / SECTION_TITLE_TREND /
+      SECTION_TITLE_POLICY / SECTION_TITLE_WEEKLY_FORECAST，与第 19 条的四个常量并列，
+      guizang 与 pixel 两个主题共用；首屏速览按栏目标题引用，因此自动跟随新名。
+      **只改「标题文字」的边界**：数据源键名与审计标签（全球头条 / 国家政策（中国政府网）/
+      每周走势预测 / Reddit…）、freshness_checker 与 backup_sources 的源名、新闻情绪里的
+      来源归属（「全球头条1条」）、像素主题英文关卡名（GLOBAL HEADLINES / TREND TRACKING /
+      POLICY SHOCK / WEEKLY FORECAST）与图标砖短标签一律不变——它们是数据线的名字，
+      不是栏目标题。风险提示里的跨栏目引用（「『栏目名』第NN条」）指向正文栏目头，
+      因此同步用新标题，读者按名字能找到栏目。历史归档日报不改写。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -5902,12 +5920,23 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 #   未来30天影响经济时间点  → 【探照安康鱼】时间节点（窗口天数仍在栏目「窗口摘要 · 时间窗口」里）
 #   量化预测总览           → 【蜉蝣天地水母】量化预测总览
 #   行情速览 + 全球大盘全景复盘（2026-09-30 合并去重）→ 【及时秋刀鱼】AI 行情复盘
+# 第二批改名（2026-09-29 同日追加，同样只改标题文字）：
+#   每周量化走势预测        → 【贪吃大白鲨】量化走势预测
+#   政策因子               → 【深海肥蓝鲸】政策因子
+#   趋势跟踪               → 【深海大鲨鱼】趋势跟踪
+#   全球头条               → 【无敌帝王蟹】全球头条
+# 数据源键名（全球头条 / 国家政策 / 每周走势预测 …）、审计标签、抓取与门禁一律不动，
+# 因此「数据线主备」注册表与 freshness_checker 的源名保持原样。
 # ------------------------------------------------------------
 SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
+SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
+SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
+SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
+SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
 
 # 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情复盘 / 政策 / 研判依据）
 #           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
@@ -6768,7 +6797,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         wk_html = _weekly_forecast_block(weekly_res, kit)
         if wk_html:
             blocks["WEEKLY FORECAST"] = (
-                "WEEKLY FORECAST", "每周量化走势预测", wk_html,
+                "WEEKLY FORECAST", SECTION_TITLE_WEEKLY_FORECAST, wk_html,
                 kit.badge("周度预测", "ai"), _short_source(weekly_src))
 
     hk7_src = data.get(HK7_SOURCE_NAME) or {}
@@ -6810,7 +6839,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # ③ 政策因子（PSI 量化趋势预判）
     if policy.get("available"):
         blocks["POLICY SHOCK"] = (
-            "POLICY SHOCK", "政策因子", kit.policy_block(policy), kit.badge("量化策略", "ai"), "",
+            "POLICY SHOCK", SECTION_TITLE_POLICY, kit.policy_block(policy),
+            kit.badge("量化策略", "ai"), "",
         )
         blocks["QUANT POLICY"] = blocks["POLICY SHOCK"]
 
@@ -6850,14 +6880,16 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                    for n in _active_public_site_names())):
         digest = _trend_clues_block(data, kit)
         if digest:
-            blocks["TREND TRACKING"] = ("TREND TRACKING", "趋势跟踪", digest, "", "")
+            blocks["TREND TRACKING"] = (
+                "TREND TRACKING", SECTION_TITLE_TREND, digest, "", "")
 
     # ⑥ 资讯：全球头条 / 东财快讯 / 港股名家频道（A股资讯已按用户要求移除，其数据不再采集）
     if gh_headlines:
         gh_items = kit.rows("".join(kit.headline_row(it, i)
                                     for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
-        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", "全球头条", gh_items,
-                                      kit.source_badge(google), _short_source(google))
+        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", SECTION_TITLE_GLOBAL_HEADLINES,
+                                      gh_items, kit.source_badge(google),
+                                      _short_source(google))
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
                                     for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
@@ -7030,7 +7062,7 @@ def _risk_ref_label(risk):
 def _risk_ref_detail(risk):
     """引用辅助定位：正文可见的发布时间 + 命中关键词（后者为新增信息）。"""
     bits = []
-    if risk.get("section") == "全球头条" and risk.get("source"):
+    if risk.get("section") == SECTION_TITLE_GLOBAL_HEADLINES and risk.get("source"):
         bits.append(risk["source"])
     moment = risk.get("time") or ""
     if moment and moment != "—":
@@ -7110,7 +7142,8 @@ def build_daily_quant_strategy(data):
         if isinstance(it, dict):
             headlines_struct.append({
                 "title": it.get("title", ""), "source": it.get("source", ""),
-                "section": "全球头条", "index": i, "anchor": f"h-gh-{i:02d}",
+                "section": SECTION_TITLE_GLOBAL_HEADLINES,
+                "index": i, "anchor": f"h-gh-{i:02d}",
                 "shown": i <= GH_DISPLAY_N,
                 "time": it.get("published_cst") or "", "channel": "",
             })

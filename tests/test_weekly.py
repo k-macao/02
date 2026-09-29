@@ -310,14 +310,16 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         date_display = "2026年4月10日 · 周五"
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(data, date_display, "20260410", theme=theme)
-            self.assertIn("每周量化走势预测", html, theme)
+            self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, html, theme)
             self.assertIn("无未来函数口径", html, theme)
             self.assertIn("截断不变性自检通过", html, theme)
             self.assertIn("先存档后结算", html, theme)
             # 审计口径：元数据总源数含每周预测（9 个基础源 + 每周走势预测 = 10）
             self.assertIn('octopus-total-sources" content="9"', html, theme)
-            # 栏目副标题 = 来源名（_short_source）
-            self.assertGreaterEqual(html.count("每周量化走势预测"), 2, theme)
+            # 栏目副标题 = 来源名（_short_source）：数据源名不随栏目标题改名（2026-09-29）
+            self.assertIn("每周量化走势预测", html, theme)
+            self.assertGreaterEqual(
+                html.count(pipeline.SECTION_TITLE_WEEKLY_FORECAST), 1, theme)
             # 今日结论携带周度预测（页首优先级）
             self.assertIn("周度预测", html, theme)
             if theme == "pixel":
@@ -329,6 +331,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
                                 "error": "日线样本不足"}}
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410")
         self.assertNotIn("每周量化走势预测</h2>", html)
+        self.assertNotIn(f"{pipeline.SECTION_TITLE_WEEKLY_FORECAST}</h2>", html)
         self.assertNotIn("周度预测", html)
 
     def test_weekly_section_before_market_snapshot_in_html(self):
