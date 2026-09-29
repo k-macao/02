@@ -458,5 +458,120 @@ class PipelineWiringTests(unittest.TestCase):
             self.assertFalse((OUTPUT_DIR / name).exists(), name)
 
 
+# ======================================================================
+# ⑤ 预测因子与未来函数防线专项测试
+# ======================================================================
+class PredictiveFactorsAndAntiLookaheadTests(unittest.TestCase):
+    def test_assert_no_lookahead_temporal_verification(self):
+        ok, msg = hk7.assert_no_lookahead("2026-09-28", "2026-10-07")
+        self.assertTrue(ok)
+        self.assertIn("时序成立", msg)
+
+        # 目标日等于或早于基准日 -> 判定为未来函数污染
+        bad1, msg1 = hk7.assert_no_lookahead("2026-09-28", "2026-09-28")
+        self.assertFalse(bad1)
+        self.assertIn("未来函数污染", msg1)
+
+        bad2, msg2 = hk7.assert_no_lookahead("2026-09-28", "2026-09-25")
+        self.assertFalse(bad2)
+        self.assertIn("未来函数污染", msg2)
+
+    def test_next_trading_days_skips_weekends(self):
+        # 2026-09-28 是周一；向前推进 7 个工作日：
+        # 09-29(二), 09-30(三), 10-01(四), 10-02(五), [跳过周末 10-03/04], 10-05(一), 10-06(二), 10-07(三)
+        target = hk7.next_trading_days("2026-09-28", 7)
+        self.assertEqual(target, "2026-10-07")
+
+    def test_check_input_closure_rejects_future_dates(self):
+        base = "2026-09-28"
+        # 未来日期渗入
+        leaked_extra = {
+            "flows": {"south_amount_yi": 500.0, "south_date": "2026-09-30"},
+            "global_quotes": {"标普500": {"change_pct": 0.5, "as_of": "2026-09-29"}},
+        }
+        ok, warns, cleaned = hk7.check_input_closure(base, leaked_extra)
+        self.assertFalse(ok)
+        self.assertEqual(len(warns), 2)
+        self.assertNotIn("south_date", cleaned["flows"])
+        self.assertNotIn("标普500", cleaned["global_quotes"])
+
+        # 合法日期闭合
+        valid_extra = {
+            "flows": {"south_amount_yi": 500.0, "south_date": "2026-09-28"},
+            "global_quotes": {"标普500": {"change_pct": 0.5, "as_of": "2026-09-28"}},
+        }
+        ok_v, warns_v, cleaned_v = hk7.check_input_closure(base, valid_extra)
+        self.assertTrue(ok_v)
+        self.assertEqual(len(warns_v), 0)
+        self.assertEqual(cleaned_v["flows"]["south_amount_yi"], 500.0)
+
+    def test_predictive_factors_momentum_continuation_and_stretch(self):
+        # 适度动量 -> 延续
+        score_norm, desc_norm = hk7.compute_momentum_factor(0.02, sigma=0.012)
+        self.assertGreater(score_norm, 0)
+        self.assertIn("延续", desc_norm)
+
+        # 极端超涨 (>2σ) -> 均值回归反向扣减
+        score_extreme, desc_extreme = hk7.compute_momentum_factor(0.20, sigma=0.012)
+        self.assertIn("均值回归", desc_extreme)
+
+    def test_predictive_factors_rsi_oscillator(self):
+        # 超买 > 70 -> 看跌/回调
+        rev_ob, desc_ob = hk7.compute_reversal_factor(78.0, 0.0)
+        self.assertLess(rev_ob, 0)
+        self.assertIn("超买", desc_ob)
+
+        # 超卖 < 30 -> 反弹
+        rev_os, desc_os = hk7.compute_reversal_factor(22.0, -0.15)
+        self.assertGreater(rev_os, 0)
+        self.assertIn("超卖", desc_os)
+
+    def test_predictive_factors_global_carry_beta(self):
+        quotes = {
+            "标普500": {"change_pct": 1.1},
+            "纳斯达克": {"change_pct": 1.5},
+            "道琼斯指数": {"change_pct": 0.8},
+        }
+        score_tech, _ = hk7.compute_global_carry_factor("^HSTECH", quotes)
+        score_hsi, _ = hk7.compute_global_carry_factor("^HSI", quotes)
+        score_soe, _ = hk7.compute_global_carry_factor("^HSCE", quotes)
+        # 恒生科技 beta=0.75 > 恒指 0.55 > 国企 0.50
+        self.assertGreater(score_tech, score_hsi)
+        self.assertGreater(score_hsi, score_soe)
+
+    def test_predictive_factors_capital_flow(self):
+        flows = {"south_amount_yi": 650.0, "liquidity_score": 75.0}
+        score, desc = hk7.compute_capital_flow_factor(flows)
+        self.assertGreater(score, 0)
+        self.assertIn("南向", desc)
+
+    def test_volatility_shrinkage_on_extreme_vol(self):
+        shrink_high, desc_high = hk7.compute_volatility_shrinkage(0.88)
+        self.assertLess(shrink_high, 1.0)
+        self.assertIn("收缩", desc_high)
+
+        shrink_normal, _ = hk7.compute_volatility_shrinkage(0.50)
+        self.assertEqual(shrink_normal, 1.0)
+
+    def test_extra_context_extracts_global_quotes_in_pipeline(self):
+        sample_data = {
+            "实时行情": {
+                "status": "success",
+                "quotes": {
+                    "标普500": {"change_pct": 0.65, "as_of": "2026-09-28"},
+                    "纳斯达克": {"change_pct": 0.82, "as_of": "2026-09-28"},
+                    "道琼斯指数": {"change_pct": 0.40, "as_of": "2026-09-28"},
+                }
+            },
+            "A股大盘全景": {
+                "north": {"south_available": True, "south_amount_yi": 521.8, "south_date": "2026-09-28"}
+            }
+        }
+        extra = pipeline._hk7_extra_context(sample_data)
+        self.assertIn("标普500", extra.get("global_quotes", {}))
+        self.assertEqual(extra["global_quotes"]["标普500"]["change_pct"], 0.65)
+        self.assertEqual(extra["flows"]["south_amount_yi"], 521.8)
+
+
 if __name__ == "__main__":
     unittest.main()
