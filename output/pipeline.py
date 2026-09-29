@@ -3165,13 +3165,18 @@ def fetch_hk_quant():
 #   · 零写死叙事：不落任何具体日期/点位，规则合成，非投资建议。
 # 数据取不到、样本不足或自检不过 → 整栏缺席，绝不用历史文案冒充预测。
 # ============================================================
+SECTOR_ROTATION_SOURCE = "东方财富 · 申万一级行业指数日线（31 个）"
+
+
 def fetch_sector_rotation():
     """独立中国行业指数轮动数据源；失败不影响其它栏目。
 
-    失败时把具体判死原因打到日志（行业列表 / 日K 口径 / 锚点日 / 评分 / 存档
-    哪一环不过），并已在 sector_rotation 内落盘诊断，便于隔日核查。
+    股票池为 31 个申万一级行业的东财板块指数（sector_rotation.SW_L1_SECTORS 固定表），
+    不再依赖被 502 拒绝的 clist 大页列表接口；单行业在东财三主机都失败时走申万官方源。
+    失败时把具体判死原因打到日志（日K 口径 / 覆盖 / 锚点日 / 评分 / 存档哪一环不过），
+    并已在 sector_rotation 内落盘诊断，便于隔日核查。
     """
-    print("📡 正在计算中国行业指数周度评分与月度轮动...")
+    print("📡 正在计算中国行业指数周度评分与月度轮动（申万一级 31 个行业）...")
     try:
         # 存档跟随日报目录（REPORT_DIR），便于离线测试隔离，不写死模块默认路径
         result = _rotation.run(
@@ -3181,18 +3186,34 @@ def fetch_sector_rotation():
     if not result.get("available"):
         diag = result.get("diag") or {}
         detail = " · ".join(f"{k}={diag[k]}" for k in
-                            ("universe", "fqt", "kline_series", "asof", "scored")
-                            if diag.get(k) is not None)
+                            ("universe", "fqt", "kline_series", "missing", "asof",
+                             "scored", "required")
+                            if diag.get(k) not in (None, [], {}))
         print(f"  ⚠️ 行业轮动栏目缺席：{result.get('reason')}"
               + (f"（{detail}）" if detail else ""))
-        return _source_result("东方财富 · 中国行业板块指数日线", "unavailable",
+        return _source_result(SECTOR_ROTATION_SOURCE, "unavailable",
                               error=result.get("reason"), result=result)
     diag = result.get("diag") or {}
+    sources = result.get("sources") or {}
+    src_note = " / ".join(f"{k}={v}" for k, v in sorted(sources.items()))
+    # 备用源命中登记（总结「数据覆盖」一行点名）：镜像 = 备用源1，申万官方 = 备用源2
+    if diag.get("em_mirror"):
+        _note_backup_served("sw_industry_index", _rotation.KLINE_URLS[1], sw_code="")
+    if diag.get("sw_fallback"):
+        first_sw = next((sw for code, _n, sw in _rotation.SW_L1_SECTORS
+                         if code == diag["sw_fallback"][0]), "")
+        _note_backup_served("sw_industry_index",
+                            _backup.candidates("sw_industry_index", sw_code=first_sw)[2][1],
+                            sw_code=first_sw)
     print(f"  ✅ 行业轮动：锚点 {result['asof']} · 有效 {result['scored_count']}/"
           f"{result['universe_count']} 个行业 · 月度持仓"
           f"{'沿用' if diag.get('state') == 'reused' else '新建'}"
-          f"（复权口径 fqt={diag.get('fqt')}）")
-    return _source_result("东方财富 · 中国行业板块指数日线", "success",
+          f"（复权口径 fqt={diag.get('fqt')}"
+          + (f" · 日线来源 {src_note}" if src_note else "")
+          + (f" · 未取到 {','.join(result['missing'])}" if result.get("missing") else "")
+          + (f" · 名称漂移 {list(diag['renamed'])}" if diag.get("renamed") else "")
+          + "）")
+    return _source_result(SECTOR_ROTATION_SOURCE, "success",
                           is_today=result["asof"] == datetime.now(CST).strftime("%Y-%m-%d"),
                           content_date=result["asof"], result=result)
 
@@ -6152,8 +6173,21 @@ def _weekly_forecast_block(res, kit):
     return kit.rows("".join(rows))
 
 
+def _pct_text(value, digits=2, dash="—"):
+    """带正负号的百分比文本（None → 占位符），不依赖颜色。"""
+    try:
+        return f"{float(value) * 100:+.{digits}f}%" if value is not None else dash
+    except (TypeError, ValueError):
+        return dash
+
+
 def _sector_rotation_block(res, kit):
-    """展示全行业评分与五行业纯多头月度持仓，两主题共用。"""
+    """展示全行业评分与五行业纯多头月度持仓，两主题共用。
+
+    栏目结构：口径行 → 行业宽度 → 全行业评分表（综合分排序，附动量 / MA20 背景因子）→
+    月度持仓（含自执行日以来的组合表现与全行业等权基准）→ 规则行。
+    全部数字来自本次抓取的日线与存档持仓，缺失项显示「—」，绝不补造。
+    """
     if not res.get("available"):
         return ""
     state = res.get("state") or {}
@@ -6161,24 +6195,93 @@ def _sector_rotation_block(res, kit):
     if len(holdings) != 5:
         return ""
     esc = kit.esc
-    rows = [kit.item_row("▤", f'截至 {esc(res["asof"])} 收盘 · '
-                         f'有效 {res["scored_count"]}/{res["universe_count"]} 个行业指数',
-                         '近一周=最近5个交易日；历史12个不重叠5日窗口（不含当前周）')]
+    universe_label = str(res.get("universe_label") or "").strip()
+    sources = res.get("sources") or {}
+    source_bits = []
+    em_total = int(sources.get("eastmoney") or 0) + int(sources.get("eastmoney_mirror") or 0)
+    if em_total:
+        source_bits.append(f'东方财富 {em_total}'
+                           + (f'（镜像 {int(sources["eastmoney_mirror"])}）'
+                              if sources.get("eastmoney_mirror") else ""))
+    if sources.get("sw_official"):
+        source_bits.append(f'申万官方 {int(sources["sw_official"])}')
+    missing = res.get("missing") or []
+    head_sub = "近一周=最近5个交易日；历史12个不重叠5日窗口（不含当前周）"
+    if source_bits:
+        head_sub += f' · 日线来源：{" / ".join(source_bits)}'
+    if missing:
+        head_sub += f' · 未取到日线：{esc("、".join(str(m) for m in missing[:8]))}'
+        if len(missing) > 8:
+            head_sub += f' 等 {len(missing)} 个'
+    out = [kit.item_row("▤", f'截至 {esc(res["asof"])} 收盘 · '
+                        + (f'{esc(universe_label)} · ' if universe_label else "")
+                        + f'有效 {res["scored_count"]}/{res["universe_count"]} 个行业指数',
+                        head_sub)]
+
+    breadth = res.get("breadth") or {}
+    if breadth.get("total"):
+        total = int(breadth["total"])
+        bits = [f'近5日上涨 {int(breadth.get("up_week") or 0)}/{total} 个行业']
+        if breadth.get("above_ma20") is not None:
+            bits.append(f'站上 MA20 {int(breadth["above_ma20"])}/{total} 个')
+        if breadth.get("avg_week") is not None:
+            bits.append(f'全行业等权近5日 {_pct_text(breadth["avg_week"])}')
+        out.append(kit.item_row("◐", "行业宽度 · " + " · ".join(bits),
+                                "上涨行业占比与均线上方占比越高，轮动越偏普涨；反之为少数行业抱团"))
+
+    table_rows = []
     for rank, sec in enumerate(res["scores"], 1):
-        rows.append(kit.item_row(str(rank),
-            f'{esc(sec["name"])} ({esc(sec["code"])}) · 综合 {sec["score"]:.2f}分',
-            f'近5日 {sec["week_return"]:+.2%} · 胜率 {sec["win_rate"]:.1%} · 赔率 {sec["odds"]:.2f}'))
-    rows.append(kit.item_row("↺", f'纯多头组合 · {esc(state["month"])} 月度持仓',
-                             f'建仓/调仓锚点 {esc(state["rebalance_date"])} 收盘；当月不随每日评分换仓'))
+        # 名次并入行业列（8 列，与流动性表同宽度量级，手机上不挤）
+        table_rows.append([
+            f'{rank:02d} {esc(sec["name"])}<br><span style="font-size:11px;">{esc(sec["code"])}</span>',
+            f'<b>{sec["score"]:.2f}</b>',
+            _pct_text(sec.get("week_return")),
+            f'{sec["win_rate"] * 100:.1f}%',
+            f'{sec["odds"]:.2f}',
+            _pct_text(sec.get("ret20"), 1),
+            _pct_text(sec.get("ret60"), 1),
+            _pct_text(sec.get("ma20_gap"), 1),
+        ])
+    out.append(kit.sub("全行业评分（综合分降序 · 名次在前）"))
+    out.append(kit.table(["行业", "综合分", "近5日", "胜率", "赔率", "20日", "60日", "vs MA20"],
+                         table_rows,
+                         aligns=("left", "right", "right", "right", "right",
+                                 "right", "right", "right")))
+
+    tracking = res.get("tracking") or {}
+    tracked = {r["code"]: r for r in (tracking.get("holdings") or [])}
+    reb_sub = f'建仓/调仓锚点 {esc(state["rebalance_date"])} 收盘；当月不随每日评分换仓'
+    if tracking.get("exec_date"):
+        reb_sub += f' · 执行日 {esc(tracking["exec_date"])} 收盘起算表现'
+    else:
+        reb_sub += " · 待下一交易日执行"
+    hold_rows = [kit.item_row("↺", f'纯多头组合 · {esc(state["month"])} 月度持仓', reb_sub)]
     for h in holdings:
-        rows.append(kit.item_row("+", f'{esc(h["name"])} ({esc(h["code"])})',
-                                 f'目标权重 {h["weight"]:.2%} · 建仓时得分 {h["score"]:.2f}'))
-    rows.append(kit.item_row("⚖", '规则：综合分=胜率×80% + [赔率/(1+赔率)]×20%（乘100）；'
-                             '胜率=正收益周占比，赔率=平均正收益/平均负收益绝对值。'
-                             '得分前五，权重=各自得分/前五总分。',
-                             '每月首次成功采集后按收盘信号确定目标权重，下一交易日执行；'
-                             '不含滑点/费用，非投资建议；历史胜率不是未来成功概率。'))
-    return kit.rows("".join(rows))
+        sub = f'目标权重 {h["weight"]:.2%} · 建仓时得分 {h["score"]:.2f}'
+        tr = tracked.get(h["code"]) or {}
+        if tr.get("since_exec") is not None:
+            sub += f' · 执行日以来 {_pct_text(tr["since_exec"])}'
+        hold_rows.append(kit.item_row("+", f'{esc(h["name"])} ({esc(h["code"])})', sub))
+    if tracking.get("portfolio") is not None:
+        perf = f'组合执行日以来 {_pct_text(tracking["portfolio"])}'
+        if tracking.get("benchmark") is not None:
+            excess = (tracking["portfolio"] - tracking["benchmark"]) * 100
+            excess = 0.0 if abs(excess) < 0.005 else excess      # 避免 -0.00pp
+            perf += (f' · 全行业等权 {_pct_text(tracking["benchmark"])}'
+                     f'（{int(tracking.get("benchmark_n") or 0)} 个行业）· 超额 {excess:+.2f}pp')
+        hold_rows.append(kit.item_row("Σ", perf,
+                                      "权重固定为目标权重、不含调仓费用与滑点的持有期收益；"
+                                      "样本仅一个月度周期，不代表策略长期表现"))
+    elif tracking.get("pending"):
+        hold_rows.append(kit.item_row("Σ", "组合表现待执行日收盘后起算",
+                                      "信号在锚点收盘后产生，按下一交易日收盘执行，不把信号日涨跌计入组合"))
+    hold_rows.append(kit.item_row("⚖", '规则：综合分=胜率×80% + [赔率/(1+赔率)]×20%（乘100）；'
+                                  '胜率=正收益周占比，赔率=平均正收益/平均负收益绝对值。'
+                                  '得分前五，权重=各自得分/前五总分。20日/60日/vs MA20 只作背景，不参与排序。',
+                                  '每月首次成功采集后按收盘信号确定目标权重，下一交易日执行；'
+                                  '不含滑点/费用，非投资建议；历史胜率不是未来成功概率。'))
+    out.append(kit.rows("".join(hold_rows)))
+    return "".join(out)
 
 
 def _opening_digest(sections, notes, conclusion, today_n, total, kit):
