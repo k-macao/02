@@ -306,6 +306,7 @@ if SCRIPT_DIR not in sys.path:
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
+import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
 import backup_sources as _backup  # noqa: E402
@@ -322,6 +323,9 @@ WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
 # 「鲜鲜解读」开关（2026-09-29 新增）：每个数据栏目末尾追加一行「🦑 鲜鲜解读」，
 # 把当栏关键数字翻译成大白话 + 网络梗，帮入门读者降低阅读门槛。
 # 纯规则合成（output/octopus_ren.py）：可复现、不伪造数字、数据不足自动缺席。
+# 2026-09-30 起解读末尾按行情状态确定性点缀「🦐 活鲜度」标签 + 一句活鲜比喻，
+# 「⌁ AI 研判」行也按方向点缀一句短比喻——词库见 output/octopus_lexicon.py
+# （条件驱动、点缀不含数字、认不出方向就不点缀；随 OCTOPUS_REN 一并开关）。
 # OCTOPUS_REN=0 / --no-ren 整体关闭。
 REN_ENABLED = _ren.ENABLED
 # AI 七日港股走势分析概率开关：OCTOPUS_HK7=0 或 --no-hk7 可整体跳过；
@@ -6506,11 +6510,13 @@ def _section_note_texts(notes, kicker):
             if isinstance(notes.get(key), dict) and notes[key].get("text")]
 
 
-def _ai_judge_row(note, kit, aspect=""):
+def _ai_judge_row(note, kit, aspect="", seed=""):
     """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。
 
     aspect：合并栏目（【及时秋刀鱼】AI 行情复盘）里标明这一行是哪一路证据
     （报价面 / A股全景面），两套口径各自出概率，不混算成一个数。
+    seed：🦐 活鲜点缀的确定性种子（含日期 + 栏目），同一天同一栏永远同一句比喻；
+    点缀只加在渲染文字上，note["text"] 本体不动（首屏速览等读 note 的地方不受影响）。
     """
     bull_c, bear_c, flat_c = kit.ok_color, kit.bad_color, kit.warn_color
     lc = (bull_c if note["label"] == "偏多"
@@ -6519,7 +6525,13 @@ def _ai_judge_row(note, kit, aspect=""):
     head = (f'<span style="color:{lc};font-weight:900;">{title} {note["mark"]} {note["label"]}</span>'
             f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
             f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
-    return kit.item_row("⌁", f"{head} — {note['text']}")
+    try:
+        tail = _lex.garnish_judgment(note.get("label"), note.get("bull_pct"),
+                                     seed or f'{note.get("label")}|{aspect}')
+    except Exception:
+        tail = ""
+    text = f"{note['text']}（{tail}）" if tail else note["text"]
+    return kit.item_row("⌁", f"{head} — {text}")
 
 
 def _ren_judgment_row(text, kit):
@@ -7121,7 +7133,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             for aspect, note_key in _section_note_keys(kick):
                 note = judge_notes.get(note_key)
                 if note:
-                    content = content + _ai_judge_row(note, kit, aspect)
+                    content = content + _ai_judge_row(
+                        note, kit, aspect, seed=f"{date_str}|{kick}|{note_key}|{aspect}")
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
