@@ -250,7 +250,7 @@ class SentimentFactorTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_fed_trend",
                   "fetch_geo_trend", "fetch_eastmoney_news", "fetch_hot_stocks",
-                  "fetch_hk_quant", "fetch_weekly_forecast", "fetch_sector_rotation",
+                  "fetch_hk_quant", "fetch_weekly_forecast", "fetch_hk_seven_day",
                   "fetch_econ_calendar")
         platforms = {
             "Reddit": pipeline._public_site_result(
@@ -280,13 +280,13 @@ class SentimentFactorTests(unittest.TestCase):
             finally:
                 for p in reversed(mocks):
                     p.stop()
-        # 11 个基础数据源（含港股量化引擎、每周走势预测、行业轮动与未来30天财经日历；
+        # 11 个基础数据源（含港股量化引擎、每周走势预测、AI 七日港股走势分析与未来30天财经日历；
         # A股资讯已移除）+ 2 个 AI趋势分析专题源（美联储 / 地缘政治）+ 4 个趋势平台 + 全网新闻源头
         # 允许额外的新鲜度/去重/备用源元信息键（_freshness, _dedup, _backup_info）
         expected_keys = {
             "实时行情", "A股大盘全景", "国家政策", "港股名家频道", "全球头条",
             "美联储趋势", "地缘政治趋势",
-            "东财快讯", "热门榜单", "港股量化", "每周走势预测", "行业轮动",
+            "东财快讯", "热门榜单", "港股量化", "每周走势预测", pipeline.HK7_SOURCE_NAME,
             "财经日历", pipeline.HK_NEWS_SOURCE_NAME,
             "Reddit", "StockTwits", "TradingView", "Bogleheads"}
         self.assertTrue(expected_keys.issubset(set(data.keys())),
@@ -299,7 +299,7 @@ class SentimentFactorTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_fed_trend",
                   "fetch_geo_trend", "fetch_eastmoney_news", "fetch_hot_stocks",
-                  "fetch_hk_quant", "fetch_weekly_forecast", "fetch_sector_rotation",
+                  "fetch_hk_quant", "fetch_weekly_forecast", "fetch_hk_seven_day",
                   "fetch_econ_calendar")
         with patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
             mocks = [patch.object(pipeline, fn, return_value={"status": "unavailable"})

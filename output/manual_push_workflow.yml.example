@@ -41,6 +41,10 @@ jobs:
       - name: 🐙 抓取最新动态数据并推送（手动）
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          # AI 七日港股走势分析概率的大模型 Key（OpenAI 兼容；未配置自动降级为量化基准）
+          OCTOPUS_LLM_API_KEY: ${{ secrets.OCTOPUS_LLM_API_KEY }}
+          OCTOPUS_LLM_BASE_URL: ${{ vars.OCTOPUS_LLM_BASE_URL }}
+          OCTOPUS_LLM_MODEL: ${{ vars.OCTOPUS_LLM_MODEL }}
         run: |
           set -euo pipefail
           NO_PUSH="${{ github.event.inputs.no_push || 'false' }}"
@@ -69,7 +73,7 @@ jobs:
           git config user.name "octopus-bot"
           git config user.email "bot@octopus.ai"
 
-          git add output/daily_report_*.html output/latest.html 2>/dev/null || true
+          git add output/daily_report_*.html output/latest.html output/hk7_forecast.json 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "无新内容，跳过提交。"

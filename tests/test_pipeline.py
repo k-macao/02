@@ -541,7 +541,7 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline.GZ_PRIMARY, pipeline.GZ_KLEIN)
         self.assertEqual(pipeline.GZ_UP, pipeline.GZ_KLEIN)      # 涨 = 克莱因蓝
         self.assertEqual(pipeline.GZ_INK, "#222")                # 正文灰黑
-        self.assertEqual(pipeline.GZ_META, "#777")               # 次要灰
+        self.assertEqual(pipeline.GZ_META, "#555")               # 次要灰（深灰）
         html = self._html()
         self.assertIn(pipeline.GZ_KLEIN, html)
         allowed = {"#002FA7", "#00227A", "#F3F6FF"}
@@ -554,7 +554,7 @@ class GuizangThemeTests(unittest.TestCase):
         for color in re.findall(r"#[0-9A-Fa-f]{3}\b", html):
             r, g, b = (int(c * 2, 16) for c in color[1:])
             self.assertTrue(r == g == b, f"三位色值必须是灰阶：{color}")
-            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#777",
+            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#555", "#777",
                                           "#aaa", "#bbb", "#ddd", "#eee", "#fff"},
                           f"三位色值只允许既定灰阶：{color}")
         for old_color in ("#2563EB", "#1D4ED8", "#EFF6FF", "#3b82f6",

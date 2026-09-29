@@ -25,7 +25,6 @@ if str(OUTPUT_DIR) not in sys.path:
     sys.path.insert(0, str(OUTPUT_DIR))
 
 import backup_sources as bk  # noqa: E402
-import sector_rotation as sr  # noqa: E402
 from octopus_quant import providers  # noqa: E402
 
 MODULE_PATH = OUTPUT_DIR / "pipeline.py"
@@ -383,23 +382,6 @@ class FallbackChainTests(unittest.TestCase):
         out = providers.fetch_hk_index_quotes(fj)
         self.assertAlmostEqual(out["HSI"]["price"], 24642.51)
         self.assertEqual(len(urls_seen), 2)
-
-    def test_sector_rotation_chain_skips_empty_primary(self):
-        self.assertEqual(len(sr.LIST_URLS), 3)
-        self.assertEqual(len(sr.KLINE_URLS), 3)
-        seen = []
-
-        def fj(url, params=None, timeout=15, headers=None):
-            seen.append(url)
-            if url == sr.KLINE_URLS[0]:
-                return {"data": {"klines": []}}
-            if url == sr.KLINE_URLS[1]:
-                return {"data": {"klines": ["2026-09-25,1,2.5,3,0.5,10", "2026-09-26,1,2.6,3,0.5,10"]}}
-            return None
-        closes = sr.fetch_closes(fj, "BK0001")
-        self.assertEqual(closes, [("2026-09-25", 2.5), ("2026-09-26", 2.6)])
-        self.assertEqual(seen, list(sr.KLINE_URLS[:2]))
-
 
 # ======================================================================
 # ③ 可见性
