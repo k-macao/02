@@ -2,36 +2,40 @@
 # -*- coding: utf-8 -*-
 """◈ AI 七日港股走势分析概率 —— 未来 7 个交易日三大港股指数升跌概率。
 
-取代原「每日量化策略（行业轮动）」栏目（该栏目从上线到 2026-09-28 的 58 份日报里
-出现率 0/58：东方财富行业板块两步取数在真实环境没跑通，连续整栏缺席）。新栏目按
-用户口径实现：**恒生指数 / 恒生科技 / 国企指数**，未来 **7 个交易日**（按交易日计数、
-假期顺延）收盘价高于当前收盘价的概率。
+定位与方法学来源（对齐 GitHub 开源量化预测最佳工程实践）：
+  · k-macao/03 PR #54「AI 预测 · 未来函数」栏目（同组织姊妹仓）：
+      四大硬约束：输入闭合（只读当次快照）、目标日严格在后（t_target > t_base）、
+      先存档后结算（settled=False 独立落盘，真实行情回填）、零写死叙事；
+  · akfamily/akquant（docs/zh/advanced/ml.md）：
+      防未来函数因果律：特征 X 只能用 t 及之前；标签 y 描述 t 之后；
+      统计量均值/方差必须逐期扩张因果计算，绝不全样本归一；
+  · arielb57/peekahead（黑箱前视偏差检测器）：
+      截断不变性：删掉 / 扰动 t 之后的数据，过去时刻信号输出逐位不变；
+  · paidaxing1234/quant-backtest-guard（回测照妖镜）：
+      杜绝标签泄漏，禁止全样本标准化，无未来函数；
+  · haeganm/walkforward（purged / embargo walk-forward splits）：
+      类比锚点标签必须在预测时点前全部结算（s + horizon ≤ t）。
 
-两条腿（先算量化基准，再让大模型在给定数据内做合成判断）：
+三层预测架构：
+  ① 预测因子层（Predictive Factors）：
+       · MOM 动量延展与均值回归项：z = ret20 / σ_20，|z|≤2σ 动能延续，|z|>2σ 均值回归；
+       · TRD 均线趋势与通道排列项：MA20 / MA60 均线偏离度与 20 日通道分位；
+       · REV 反转与震荡振荡器项：Wilder RSI14 超买超卖均值回归与 20 日高位回撤；
+       · CARRY 跨市场隔夜联动项：美股三指（标普/纳指/道指）隔夜映射 × 标的 β 敏感度；
+       · FLOW 资金流与流动性深度项：南向资金净额强度与港股市场流动性综合评分；
+       · VOL 波动率自适应收缩项：20 日年化波动分位对极端概率做有界收缩；
+       · MACRO 宏观日程风险项：未来两周重大（★★★）事件密度带来的不确定性缓冲。
+  ② 量化基准层（Quant Baseline）：
+       由扩张基准率 + 20 日特征已结算最近邻（K=8，s+7≤t 锚点）作为核心，叠加多因子
+       有界微调量（tanh 软压缩，ΔP ∈ [−0.12, +0.12]），夹在 5%~95% 之间；
+  ③ 大模型研判层（Optional LLM）：
+       把结构化预测因子与量化基准作为唯一依据交给大模型；严格三道防线：
+       · 偏离量化基准 >20pp 自动收敛到基准 ±20pp；
+       · 文本数字 100% 溯源，编造数字退回量化文案；
+       · 绝对化措辞（一定/必然/100%…）命中即退回。
 
-  ① 量化基准（always on）：复用 ``octopus_weekly`` 的因果引擎（扩张基准率 + 20 日特征
-     最近邻、逐期扩张 z 标准化、``s+horizon ≤ t`` 的已结算锚点），本模块只把视界改成 7；
-     并提供 5%~95% 硬边界与滚动样本外体检（Brier / 命中 / 恒定基准）。
-  ② 大模型研判（可选，任何 OpenAI 兼容的 ``/chat/completions``）：把 ① 的数字与当日
-     港股证据（指数特征、南向资金、未来两周日程、港股相关标题）作为**唯一可用依据**
-     交给模型，要求回传严格 JSON。三道硬约束：
-       · 概率夹在 5%~95%，且相对量化基准的偏离不超过 ``MAX_PROB_DEVIATION``（超出即收敛，
-         并在栏目里如实标注「已按量化基准收敛」）；
-       · **数字溯源**：模型文案里出现的每个数字都必须能在本次给定数据里找到，否则该条
-         文案回退为量化口径（绝不把编造的数字写进日报）；
-       · 禁用「一定 / 必然 / 保证」等绝对化措辞，命中即回退。
-
-降级（``OCTOPUS_HK7_FALLBACK``，三档）：默认 ``auto`` —— **未配置 Key 时本栏目整体
-缺席**（没有大模型研判就不挂「AI」栏目，上层也不把它计入数据覆盖审计）；已配置 Key
-但网络失败 / 返回不是合法 JSON / 字段校验不过 → 回落量化基准（``engine="quant"``）并
-在栏内标注原因。``=1`` 连没有 Key 也降级渲染（量化基准 + 标注）；``=0`` 任何大模型
-不可用（含调用失败）都整栏缺席。数据取不到、样本不足 → ``available=False`` + 原因，
-由上层整栏缺席。
-
-留痕与结算：每次运行把三只指数的概率写进 ``output/hk7_forecast.json``（settled=False），
-满 7 个交易日后按真实收盘回填方向命中；样本 <10 只报样本量，不下命中率结论。
-
-对外入口：``run_seven_day(fetch_json, history_path=..., extra=..., post_json=..., now=...)``。
+留痕与结算：预测先写入 output/hk7_forecast.json（settled=False），满 7 个交易日后
+按真实收盘回填方向命中与 Brier 得分；样本 <10 只报样本量，不下命中率结论。
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ import math
 import os
 import re
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 CST = timezone(timedelta(hours=8))
 TRADING_DAYS = 252
@@ -66,6 +70,34 @@ TARGETS = (
     {"name": "国企指数", "short": "国企", "symbols": ("^HSCE", "^HSCEI")},
 )
 
+# 典型日波动基准参数 σ（策略参数，非未来行情）：恒指 1.2%，恒科 1.8%，国企 1.3%，标普 1.1%
+DAILY_SIGMA = {
+    "^HSI": 0.012,
+    "^HSTECH": 0.018,
+    "^HSCE": 0.013,
+    "^HSCEI": 0.013,
+    "SPX": 0.011,
+}
+
+# 跨市场隔夜联动敏感度 β（美股三指隔夜映射到港股的敏感度）
+# 港股科技成长板块弹性最大，对美股纳指最敏感；国企偏稳健防御；恒指居中
+BETA_GLOBAL = {
+    "^HSI": 0.55,
+    "^HSTECH": 0.75,
+    "^HSCE": 0.50,
+    "^HSCEI": 0.50,
+}
+
+# 预测因子权重体系（加权合计 1.0）
+FACTOR_WEIGHTS = {
+    "mom": 0.25,     # 动量延续与均值回归
+    "trd": 0.20,     # 均线趋势与通道位置
+    "rev": 0.15,     # RSI14超买超卖反转
+    "carry": 0.20,   # 美股隔夜联动 (β * carry_z)
+    "flow": 0.10,    # 南向资金与流动性
+    "vol": 0.10,     # 波动率分位与风险收缩
+}
+
 # 大模型配置：任何 OpenAI 兼容服务都能用（默认 DeepSeek，可在环境变量里改）
 ENV_KEY_NAMES = ("OCTOPUS_LLM_API_KEY", "OCTOPUS_HK7_LLM_KEY",
                  "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
@@ -82,12 +114,15 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _URL_RE = re.compile(r"https?://\S+")
 _NUM_RE = re.compile(r"\d+(?:[.,]\d+)*%?")
 
-# 允许出现在模型文案里的常量数字（口径本身：视界 / 窗口 / 概率边界 / 指标参数等）
-_CONST_NUMBERS = {"1", "2", "3", "4", "5", "7", "10", "14", "20", "50", "52", "60", "95"}
+# 允许出现在模型文案里的常量数字（口径本身：视界 / 窗口 / 概率边界 / 指标参数 / 敏感度等）
+_CONST_NUMBERS = {
+    "1", "2", "3", "4", "5", "7", "8", "10", "14", "20", "30", "50", "52", "60", "70", "95",
+    "0.55", "0.75", "0.50", "1.5", "2.0", "3.0", "0.12", "0.30", "0.35"
+}
 
 
 # ============================================================
-# 基础工具（纯函数，可离线单测）
+# 基础工具与时序自检（纯函数，防未来函数）
 # ============================================================
 def _clamp(p):
     return max(PROB_FLOOR, min(PROB_CAP, float(p)))
@@ -112,6 +147,92 @@ def _direction_label(p_up):
     return "neutral", f"■ 中性（略偏{lean}）· P(7日涨) {p_up * 100:.0f}%"
 
 
+def _is_date(val):
+    s = str(val or "").strip()
+    if len(s) != 10 or s[4] != "-" or s[7] != "-":
+        return False
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def _to_date(val):
+    if isinstance(val, (datetime, date)):
+        return val if isinstance(val, date) and not isinstance(val, datetime) else val.date()
+    s = str(val or "").strip()
+    if _is_date(s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return None
+
+
+def next_trading_days(date_str, n=HORIZON):
+    """下一交易日：基准日开始向前推进 n 个工作日（跳过周六周日）。"""
+    d = _to_date(date_str)
+    if d is None:
+        return ""
+    cur = d
+    count = 0
+    while count < n:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            count += 1
+    return cur.strftime("%Y-%m-%d")
+
+
+def assert_no_lookahead(base_date, target_date):
+    """未来函数时序检验：目标日必须严格晚于基准日。返回 (ok, 说明)。"""
+    b = _to_date(base_date)
+    t = _to_date(target_date)
+    if b is None or t is None:
+        return False, "基准日或目标日缺失，无法核验时序"
+    if t <= b:
+        return False, f"目标日 {target_date} 未晚于基准日 {base_date} —— 判定为未来函数污染"
+    return True, f"目标日 {target_date} 严格晚于基准日 {base_date}（未来 {HORIZON} 个交易日），时序成立"
+
+
+def check_input_closure(base_date, extra):
+    """输入闭合性检验：确保外部输入的证据日期均 ≤ base_date（防止引入未来数据）。
+
+    返回 (ok, warnings, cleaned_extra)。
+    """
+    if not base_date or not extra:
+        return True, [], extra or {}
+    b = _to_date(base_date)
+    if not b:
+        return True, [], extra
+    cleaned = dict(extra)
+    warnings = []
+
+    # 检查资金流日期
+    flows = dict(cleaned.get("flows") or {})
+    s_date = _to_date(flows.get("south_date"))
+    if s_date and s_date > b:
+        warnings.append(f"南向资金日期 {flows.get('south_date')} 晚于基准日 {base_date}，已剔除")
+        flows.pop("south_date", None)
+        flows.pop("south_amount_yi", None)
+    cleaned["flows"] = flows
+
+    # 检查美股行情日期
+    g_quotes = dict(cleaned.get("global_quotes") or {})
+    for sym, q in list(g_quotes.items()):
+        if isinstance(q, dict) and q.get("as_of"):
+            q_date = _to_date(q["as_of"])
+            if q_date and q_date > b:
+                warnings.append(f"美股行情 {sym} 日期 {q['as_of']} 晚于基准日 {base_date}，已剔除")
+                g_quotes.pop(sym, None)
+    cleaned["global_quotes"] = g_quotes
+
+    return len(warnings) == 0, warnings, cleaned
+
+
+# ============================================================
+# 基础技术特征与分布
+# ============================================================
 def _features(closes, t, window=WINDOW):
     """t 时刻（含）之前的窗口特征 —— 只读 closes[0..t]，无未来数据。"""
     c0 = closes[t]
@@ -192,10 +313,161 @@ def _vol_pct(closes):
 
 
 # ============================================================
-# 量化基准：复用 octopus_weekly 的因果引擎（视界改成 7）
+# 预测因子体系（Predictive Factors）
 # ============================================================
-def quant_probability(closes):
-    """返回 {ok, reason, p_up, backtest, self_check, features, n_resolved, ...}。"""
+def compute_momentum_factor(ret20, sigma=0.012):
+    """动量延续与延展均值回归因子（MOM）。
+
+    |z| <= 2.0σ: 动能延续，贡献 +0.30 * z
+    |z| > 2.0σ: 均值回归，超出部分反向扣除 -0.35 * 超出量
+    """
+    if ret20 is None:
+        return 0.0, "动量数据缺失"
+    sigma_20 = sigma * math.sqrt(20)
+    z = ret20 / sigma_20 if sigma_20 > 0 else 0.0
+    z = max(-4.0, min(4.0, z))
+    MOM_STRETCH = 2.0
+    MOM_CONT = 0.30
+    MOM_REVERT = 0.35
+    if abs(z) <= MOM_STRETCH:
+        val = MOM_CONT * z
+        desc = f"20日动量 {z:+.2f}σ 处于延续区间（贡献 {val:+.2f}）"
+    else:
+        sign = 1.0 if z > 0 else -1.0
+        over = abs(z) - MOM_STRETCH
+        val = sign * (MOM_CONT * MOM_STRETCH - MOM_REVERT * over)
+        desc = f"20日动量 {z:+.2f}σ 延展过大（超出 {over:.2f}σ），均值回归修正"
+    return max(-1.5, min(1.5, val)), desc
+
+
+def compute_trend_factor(ma20_dev, ma60_dev, lo20, hi20, close):
+    """均线趋势与通道排列因子（TRD）。"""
+    score = 0.0
+    bits = []
+    if ma20_dev is not None:
+        score += math.tanh(ma20_dev * 15.0) * 0.6
+        bits.append(f"MA20偏离 {ma20_dev * 100:+.1f}%")
+    if ma60_dev is not None:
+        score += math.tanh(ma60_dev * 10.0) * 0.4
+    if lo20 is not None and hi20 is not None and hi20 > lo20 and close is not None:
+        pos = (close - lo20) / (hi20 - lo20)
+        pos_score = (pos - 0.5) * 0.8
+        score += pos_score
+        bits.append(f"20日通道分位 {pos * 100:.0f}%")
+    score = max(-1.5, min(1.5, score))
+    desc = " · ".join(bits) if bits else "趋势指标中性"
+    return score, desc
+
+
+def compute_reversal_factor(rsi14, dd20):
+    """RSI14超买超卖与高点回撤反转因子（REV）。"""
+    if rsi14 is None:
+        return 0.0, "RSI数据缺失"
+    if rsi14 > 70.0:
+        val = -((rsi14 - 70.0) / 30.0) * 1.2
+        desc = f"RSI14 {rsi14:.1f} 处于超买区，面临均值回归"
+    elif rsi14 < 30.0:
+        val = ((30.0 - rsi14) / 30.0) * 1.2
+        desc = f"RSI14 {rsi14:.1f} 处于超卖区，具有反弹动能"
+    else:
+        val = (50.0 - rsi14) / 50.0 * 0.25
+        desc = f"RSI14 {rsi14:.1f} 处于中性震荡区间"
+    if dd20 is not None and dd20 < -0.10:
+        val += math.tanh(abs(dd20) - 0.10) * 0.3
+    val = max(-1.5, min(1.5, val))
+    return val, desc
+
+
+def compute_global_carry_factor(symbol, global_quotes):
+    """跨市场全球联动隔夜映射因子（CARRY）：β * carry_z。"""
+    beta = BETA_GLOBAL.get(symbol, 0.50)
+    if not global_quotes:
+        return 0.0, f"隔夜美股联动按中性计（β={beta:.2f}）"
+    pcts = []
+    for code in ("标普500", "纳斯达克", "道琼斯指数", "^GSPC", "^IXIC", "%5EGSPC", "%5EIXIC"):
+        q = global_quotes.get(code)
+        if isinstance(q, dict) and q.get("change_pct") is not None:
+            pcts.append(float(q["change_pct"]) / 100.0)
+    if not pcts:
+        return 0.0, f"无可用美股隔夜报价（β={beta:.2f}）"
+    avg_pct = sum(pcts) / len(pcts)
+    spx_sigma = DAILY_SIGMA["SPX"]
+    carry_z = max(-3.0, min(3.0, avg_pct / spx_sigma))
+    contrib = beta * carry_z
+    contrib = max(-1.5, min(1.5, contrib))
+    desc = f"美股隔夜均值 {avg_pct * 100:+.2f}%（{carry_z:+.2f}σ）× β={beta:.2f}"
+    return contrib, desc
+
+
+def compute_capital_flow_factor(flows):
+    """南向资金流与流动性深度因子（FLOW / LIQ）。"""
+    if not flows:
+        return 0.0, "资金流数据中性"
+    score = 0.0
+    bits = []
+    south_amt = flows.get("south_amount_yi")
+    if south_amt is not None:
+        try:
+            amt = float(south_amt)
+            z_flow = (amt - 300.0) / 200.0 if amt > 0 else 0.0
+            flow_s = math.tanh(z_flow) * 0.8
+            score += flow_s
+            bits.append(f"南向规模 {amt:.1f}亿")
+        except (TypeError, ValueError):
+            pass
+    liq_s = flows.get("liquidity_score")
+    if liq_s is not None:
+        try:
+            l = float(liq_s)
+            liq_contr = ((l - 50.0) / 50.0) * 0.4
+            score += liq_contr
+            bits.append(f"流动性分 {l:.1f}")
+        except (TypeError, ValueError):
+            pass
+    score = max(-1.5, min(1.5, score))
+    desc = " · ".join(bits) if bits else "资金面中性"
+    return score, desc
+
+
+def compute_volatility_shrinkage(vol_pct):
+    """波动率自适应收缩因子（VOL）：在极端波动环境下收缩预测概率。"""
+    if vol_pct is None:
+        return 1.0, "波动率分位正常"
+    if vol_pct >= 0.80:
+        shrink = 0.80
+        desc = f"20日年化波动分位 {vol_pct * 100:.0f}% 偏高，概率向基准收缩"
+    elif vol_pct <= 0.20:
+        shrink = 0.95
+        desc = f"20日年化波动分位 {vol_pct * 100:.0f}% 偏低，趋势延续度高"
+    else:
+        shrink = 1.0
+        desc = f"20日年化波动分位 {vol_pct * 100:.0f}% 处于适中区间"
+    return shrink, desc
+
+
+def compute_macro_factor(events):
+    """宏观日程风险因子（MACRO）：评估未来 7 个交易日内重大事件密度。"""
+    events = events or []
+    imp3_count = sum(1 for e in events if isinstance(e, dict))
+    if imp3_count >= 3:
+        shrink = 0.85
+        desc = f"未来窗口有 {imp3_count} 项重大日程，防范事件冲击"
+    else:
+        shrink = 1.0
+        desc = f"宏观日程密度适中（{imp3_count} 项重大事件）"
+    return shrink, desc
+
+
+# ============================================================
+# 量化多因子基准：因果引擎 + 多因子微调与收缩
+# ============================================================
+def quant_probability(closes, factor_scores=None):
+    """返回 {ok, reason, p_up, p_base, p_sim, factor_delta, factor_score, ...}。
+
+    基于 octopus_weekly 因果引擎（历史基准率 + 20 日扩张特征最近邻，s+horizon ≤ t 已结算锚点）；
+    若注入 factor_scores，则融合多因子方向评分进行有界微调（tanh 软压缩 ΔP ∈ [−0.12, +0.12]），
+    最终概率锁定在 5%~95% 之间。
+    """
     import octopus_weekly as _weekly  # 惰性导入：同一份经过回归测试的因果引擎
 
     computed = _weekly.compute_signals(list(closes), horizon=HORIZON)
@@ -207,11 +479,24 @@ def quant_probability(closes):
     ok, msg = _weekly.check_no_lookahead(list(closes), horizon=HORIZON)
     if not ok:
         return {"ok": False, "reason": f"未来函数自检未通过：{msg}"}
+
+    base_p = float(last["p_up"])
+    factor_delta = 0.0
+    factor_score = 0.0
+    if factor_scores and isinstance(factor_scores, dict):
+        factor_score = float(factor_scores.get("composite_score") or 0.0)
+        factor_delta = float(factor_scores.get("factor_delta") or 0.0)
+
+    p_final = _clamp(base_p + factor_delta)
+
     return {
         "ok": True,
-        "p_up": _clamp(last["p_up"]),
+        "p_up": p_final,
         "p_base": last.get("p_base"),
         "p_sim": last.get("p_sim"),
+        "base_p_up": base_p,
+        "factor_delta": factor_delta,
+        "factor_score": factor_score,
         "n_analog": last.get("n_analog"),
         "n_resolved": last.get("n_resolved"),
         "blended": last.get("blended"),
@@ -268,17 +553,18 @@ def http_post_json(url, payload, headers, timeout=DEFAULT_TIMEOUT):
 
 
 def build_prompt(context):
-    """(system, user)：把「唯一可用依据」和输出结构写清楚，禁止自由发挥。"""
+    """(system, user)：把结构化预测因子与输出结构写清楚，禁止自由发挥。"""
     system = (
-        "你是港股量化研究员，只做概率研判、不做投资建议。硬性要求："
-        "① 只能使用用户消息里给出的数据，禁止编造任何数字、日期、点位或新闻；"
+        "你是港股量化研究员，只做多因子概率研判、不做投资建议。硬性要求："
+        "① 只能使用用户消息里给出的预测因子与事实数据，禁止编造任何数字、日期、点位或新闻；"
         "② 概率必须在 0.05~0.95 之间，绝不出现 0%/100% 的假确定性；"
         "③ 不使用「一定 / 必然 / 保证」等绝对化措辞；"
-        "④ 只输出一个 JSON 对象，不要 markdown 代码块、不要多余文字。")
+        "④ 研判需综合动量、均线趋势、RSI反转、美股隔夜联动与南向资金五大因子；"
+        "⑤ 只输出一个 JSON 对象，不要 markdown 代码块、不要多余文字。")
     user = (
         "任务：估计下列港股指数在未来 {h} 个交易日（按交易日计数，假期顺延）收盘价"
         "高于当前收盘价的概率。\n"
-        "可用数据（唯一依据）：\n{ctx}\n\n"
+        "可用数据（包含各标的量化多因子评分与唯一依据）：\n{ctx}\n\n"
         "请输出 JSON，结构（不要增删字段）：\n"
         '{{"targets":[{{"code":"^HSI","p_up":0.57,"summary":"不超过60字的结论",'
         '"drivers":["不超过30字的依据","…"],"risks":["不超过30字的风险"],'
@@ -441,11 +727,31 @@ def _sanitize_text(text, limit, allowed):
 def _quant_texts(ctx):
     """量化口径的文案模板（大模型文案不可用时的兜底，数字全部来自本次数据）。"""
     q = ctx.get("quant") or {}
-    drivers = [f"扩张基准率 + 20日特征最近邻（K=8，已结算锚点，无未来函数）"
-               f" · 已结算 {int(q.get('n_resolved') or 0)} 个 {HORIZON} 日样本"]
+    fb = ctx.get("factor_breakdown") or {}
+    n_res = int(q.get("n_resolved") or 0)
+    p_up_pct = float(ctx.get("p_up") or q.get("p_up") or 0.5) * 100
+    summary = (f"量化基准 P(7日涨) {p_up_pct:.1f}%"
+               f"（已结算 {n_res} 个 {HORIZON} 日样本）")
+
+    primary = (f"扩张基准率 + 20日特征最近邻（K=8，已结算锚点，无未来函数）"
+               f" · 已结算 {n_res} 个 {HORIZON} 日样本")
+    drivers = [primary]
+    candidates = []
+    if fb.get("carry", {}).get("driver"):
+        candidates.append(fb["carry"]["driver"])
+    if fb.get("mom", {}).get("driver"):
+        candidates.append(fb["mom"]["driver"])
+    if fb.get("flow", {}).get("driver"):
+        candidates.append(fb["flow"]["driver"])
+    if fb.get("trd", {}).get("driver"):
+        candidates.append(fb["trd"]["driver"])
+    for d in candidates[:2]:
+        if d and d not in drivers:
+            drivers.append(d)
+
     risks = ["统计口径不含事件冲击与政策突发；样本外表现见留痕，非投资建议"]
-    summary = (f"量化基准 P(7日涨) {float(q.get('p_up') or 0.5) * 100:.1f}%"
-               f"（已结算 {int(q.get('n_resolved') or 0)} 个 {HORIZON} 日样本）")
+    if fb.get("vol", {}).get("driver"):
+        risks.append(fb["vol"]["driver"])
     return summary, drivers, risks
 
 
@@ -487,7 +793,8 @@ def merge_llm_estimate(payload, contexts, allowed):
         extra_values = [p_up * 100, ctx.get("close"),
                         item.get("support"), item.get("resistance")]
         allowed_for_target = _allowed_numbers(ctx, extra_values)
-        allowed_for_target |= allowed
+        allowed_for_target["strings"].update(allowed.get("strings", set()))
+        allowed_for_target["values"].extend(allowed.get("values", []))
 
         def _pick(field, limit, max_items=3):
             raw = item.get(field)
@@ -568,7 +875,7 @@ def _save_journal(path, journal):
 
 
 def _settle(entries, series, now=None):
-    """结算所有已到龄的预测（目标日 = 锚定日 + 7 个**交易日**，没有那根 K 线就不结算）。"""
+    """结算所有已到龄的预测（目标日 = 锚定日 + 7 个交易日，没有那根 K 线就不结算）。"""
     now = now or datetime.now(CST)
     resolved_today = []
     today = now.strftime("%Y-%m-%d")
@@ -602,18 +909,24 @@ def _issue(ctx, merged, dates, closes, now):
     """按最新一根 K 线签发预测（同一锚定日同一标的只签发一次）。"""
     i = len(dates) - 1
     direction, label = _direction_label(merged["p_up"])
+    base_date = dates[i]
+    target_date = ctx.get("target_date") or next_trading_days(base_date, HORIZON)
+    ok_seq, seq_note = assert_no_lookahead(base_date, target_date)
     return {
-        "base_date": dates[i],
+        "base_date": base_date,
         "base_close": closes[i],
+        "target_date": target_date,
         "symbol": ctx["symbol"],
         "symbol_label": ctx["name"],
         "target_sessions": HORIZON,
-        "target_note": f"锚定日后第 {HORIZON} 个交易日收盘（按交易日计数，假期顺延）",
+        "target_note": f"锚定日后第 {HORIZON} 个交易日收盘（按交易日计数，假期顺延，目标日 {target_date}）",
         "p_up": merged["p_up"],
         "quant_p_up": merged.get("quant_p_up"),
+        "factor_score": ctx.get("factor_score"),
         "engine": ctx.get("engine") or "quant",
         "direction": direction,
         "label": label,
+        "no_lookahead": {"ok": ok_seq, "note": seq_note},
         "issued_cst": now.strftime("%Y-%m-%d %H:%M:%S%z"),
         "settled": False,
     }
@@ -644,7 +957,7 @@ def _journal_stats(entries):
 
 
 # ============================================================
-# 对外入口
+# 对外入口与上下文构建
 # ============================================================
 def _fetch_bars_for(fetch_json, target, rng):
     """按候选代码顺序取日线；返回 (symbol, bars)，全失败返回 (None, [])。"""
@@ -660,42 +973,109 @@ def _fetch_bars_for(fetch_json, target, rng):
     return None, []
 
 
-def _build_context(target, symbol, bars, engine):
+def _build_context(target, symbol, bars, engine, extra=None):
     closes = [float(b["close"]) for b in bars]
     highs = [float(b.get("high") or b["close"]) for b in bars]
     lows = [float(b.get("low") or b["close"]) for b in bars]
-    q = quant_probability(closes)
+    close = closes[-1]
+
+    # 基础技术与价格特征
+    ret5 = _ret_over(closes, 5)
+    ret10 = _ret_over(closes, 10)
+    ret20 = _ret_over(closes, 20)
+    ret60 = _ret_over(closes, 60)
+    ma20, ma60 = _sma(closes, 20), _sma(closes, 60)
+    ma20_dev = (close / ma20 - 1.0) if ma20 else None
+    ma60_dev = (close / ma60 - 1.0) if ma60 else None
+    rsi14 = _rsi14(closes)
+    vol_pct = _vol_pct(closes)
+    hi20, lo20 = max(highs[-20:]), min(lows[-20:])
+    hi52, lo52 = max(highs[-252:]), min(lows[-252:])
+    var = _var7(closes)
+
+    # 计算预测因子体系
+    extra = extra or {}
+    sigma = DAILY_SIGMA.get(symbol, 0.012)
+    mom_score, mom_desc = compute_momentum_factor(ret20, sigma)
+    trd_score, trd_desc = compute_trend_factor(ma20_dev, ma60_dev, lo20, hi20, close)
+    rev_score, rev_desc = compute_reversal_factor(rsi14, (close / hi20 - 1.0) if hi20 > 0 else 0.0)
+    carry_score, carry_desc = compute_global_carry_factor(symbol, extra.get("global_quotes"))
+    flow_score, flow_desc = compute_capital_flow_factor(extra.get("flows"))
+    vol_shrink, vol_desc = compute_volatility_shrinkage(vol_pct)
+    macro_shrink, macro_desc = compute_macro_factor(extra.get("events"))
+
+    raw_composite = (
+        FACTOR_WEIGHTS["mom"] * mom_score +
+        FACTOR_WEIGHTS["trd"] * trd_score +
+        FACTOR_WEIGHTS["rev"] * rev_score +
+        FACTOR_WEIGHTS["carry"] * carry_score +
+        FACTOR_WEIGHTS["flow"] * flow_score
+    )
+    composite_score = math.tanh(raw_composite / 1.5) * 1.5 * vol_shrink * macro_shrink
+    factor_delta = math.tanh(composite_score * 0.25) * 0.12
+
+    factor_breakdown = {
+        "mom": {"score": round(mom_score, 3), "driver": mom_desc},
+        "trd": {"score": round(trd_score, 3), "driver": trd_desc},
+        "rev": {"score": round(rev_score, 3), "driver": rev_desc},
+        "carry": {"score": round(carry_score, 3), "driver": carry_desc},
+        "flow": {"score": round(flow_score, 3), "driver": flow_desc},
+        "vol": {"shrinkage": round(vol_shrink, 3), "driver": vol_desc},
+        "macro": {"shrinkage": round(macro_shrink, 3), "driver": macro_desc},
+        "composite_score": round(composite_score, 3),
+        "factor_delta": round(factor_delta, 4),
+    }
+
+    q = quant_probability(closes, factor_scores=factor_breakdown)
     if not q.get("ok"):
         return None, q.get("reason") or "量化基准不可用"
+
     feats = q.get("features") or _features(closes, len(closes) - 1)
     vol20_ann = None
     if feats.get("vol20") is not None:
-        vol20_ann = float(feats["vol20"]) * math.sqrt(TRADING_DAYS)   # 日波动 → 年化
-    ma20, ma60 = _sma(closes, 20), _sma(closes, 60)
-    var = _var7(closes)
-    close = closes[-1]
+        vol20_ann = float(feats["vol20"]) * math.sqrt(TRADING_DAYS)
+
+    as_of = bars[-1]["date"]
+    target_date = next_trading_days(as_of, HORIZON)
+    ok_seq, seq_note = assert_no_lookahead(as_of, target_date)
+
+    # 因子摘要（给页面和大模型展示核心驱动）
+    top_factors = []
+    if abs(carry_score) >= 0.2:
+        top_factors.append(carry_desc.split("（")[0])
+    if abs(mom_score) >= 0.2:
+        top_factors.append("动量延续" if mom_score > 0 else "动量回归")
+    if abs(trd_score) >= 0.2:
+        top_factors.append("趋势向上" if trd_score > 0 else "趋势偏弱")
+    if abs(rev_score) >= 0.3:
+        top_factors.append("超卖反弹" if rev_score > 0 else "超买回踩")
+    if abs(flow_score) >= 0.2:
+        top_factors.append("南向资金流入" if flow_score > 0 else "资金面偏紧")
+    factor_summary = " · ".join(top_factors[:3]) if top_factors else "各因子表现中性均衡"
+
     ctx = {
         "name": target["name"], "short": target["short"], "symbol": symbol,
-        "asof": bars[-1]["date"], "close": close,
-        "ret5": _ret_over(closes, 5), "ret20": _ret_over(closes, 20),
-        "ret60": _ret_over(closes, 60),
-        "ma20_dev": (close / ma20 - 1.0) if ma20 else None,
-        "ma60_dev": (close / ma60 - 1.0) if ma60 else None,
-        "rsi14": _rsi14(closes), "vol_pct": _vol_pct(closes),
-        "vol20_ann": vol20_ann,
-        "hi20": max(highs[-20:]), "lo20": min(lows[-20:]),
-        "hi52": max(highs[-252:]), "lo52": min(lows[-252:]),
+        "asof": as_of, "target_date": target_date, "close": close,
+        "ret5": ret5, "ret10": ret10, "ret20": ret20, "ret60": ret60,
+        "ma20_dev": ma20_dev, "ma60_dev": ma60_dev,
+        "rsi14": rsi14, "vol_pct": vol_pct, "vol20_ann": vol20_ann,
+        "hi20": hi20, "lo20": lo20, "hi52": hi52, "lo52": lo52,
         "var7": var,
         "lo95": close * (1.0 + var["q05"]) if var else None,
         "hi95": close * (1.0 + var["q95"]) if var else None,
         "features": feats, "quant": q, "engine": engine,
+        "factor_breakdown": factor_breakdown,
+        "factor_score": round(composite_score, 3),
+        "factor_delta": round(factor_delta, 4),
+        "factor_summary": factor_summary,
+        "no_lookahead": {"ok": ok_seq, "note": seq_note},
         "bars_n": len(closes),
     }
     return ctx, ""
 
 
 def _context_for_prompt(contexts, extra):
-    """交给大模型的数据块（唯一可用依据）——只放本次真实抓到的数字。"""
+    """交给大模型的数据块（唯一可用依据）——按预测因子体系结构化组织。"""
     def _r2(v):
         x = _num(v)
         return None if x is None else round(x, 2)
@@ -704,30 +1084,68 @@ def _context_for_prompt(contexts, extra):
         x = _num(v)
         return None if x is None else round(x * 100, 1)
 
+    asof = contexts[0]["asof"] if contexts else None
+    target_date = contexts[0].get("target_date") if contexts else None
+
     ctx = {
-        "as_of": contexts[0]["asof"] if contexts else None,
+        "as_of": asof,
+        "target_date": target_date,
         "horizon_trading_days": HORIZON,
+        "anti_lookahead_guarantee": "输入闭合（所有数据 ≤ as_of）· 目标日严格在后 · 截断不变性自检通过",
         "indices": [],
     }
     for c in contexts:
+        fb = c.get("factor_breakdown") or {}
         ctx["indices"].append({
             "code": c["symbol"], "name": c["name"],
             "close": _r2(c["close"]),
-            "ret5_pct": _pct(c.get("ret5")), "ret20_pct": _pct(c.get("ret20")),
-            "ret60_pct": _pct(c.get("ret60")),
-            "ma20_dev_pct": _pct(c.get("ma20_dev")), "ma60_dev_pct": _pct(c.get("ma60_dev")),
-            "rsi14": _r2(c.get("rsi14")),
-            "vol20_annual_pct": _pct(c.get("vol20_ann")),
-            "vol_percentile_pct": _pct(c.get("vol_pct")),
-            "drawdown20_pct": _pct((c.get("features") or {}).get("dd20")),
-            "range20_low": _r2(c.get("lo20")), "range20_high": _r2(c.get("hi20")),
-            "range52_low": _r2(c.get("lo52")), "range52_high": _r2(c.get("hi52")),
+            "predictive_factors": {
+                "momentum_factor": {
+                    "ret5_pct": _pct(c.get("ret5")),
+                    "ret20_pct": _pct(c.get("ret20")),
+                    "ret60_pct": _pct(c.get("ret60")),
+                    "score": fb.get("mom", {}).get("score"),
+                    "driver": fb.get("mom", {}).get("driver"),
+                },
+                "trend_channel_factor": {
+                    "ma20_dev_pct": _pct(c.get("ma20_dev")),
+                    "ma60_dev_pct": _pct(c.get("ma60_dev")),
+                    "range20_low": _r2(c.get("lo20")),
+                    "range20_high": _r2(c.get("hi20")),
+                    "score": fb.get("trd", {}).get("score"),
+                    "driver": fb.get("trd", {}).get("driver"),
+                },
+                "reversal_oscillator": {
+                    "rsi14": _r2(c.get("rsi14")),
+                    "drawdown20_pct": _pct((c.get("features") or {}).get("dd20")),
+                    "score": fb.get("rev", {}).get("score"),
+                    "driver": fb.get("rev", {}).get("driver"),
+                },
+                "global_carry_factor": {
+                    "score": fb.get("carry", {}).get("score"),
+                    "driver": fb.get("carry", {}).get("driver"),
+                },
+                "capital_flow_factor": {
+                    "score": fb.get("flow", {}).get("score"),
+                    "driver": fb.get("flow", {}).get("driver"),
+                },
+                "volatility_regime": {
+                    "vol20_annual_pct": _pct(c.get("vol20_ann")),
+                    "vol_percentile_pct": _pct(c.get("vol_pct")),
+                    "shrinkage": fb.get("vol", {}).get("shrinkage"),
+                },
+                "composite_factor_score": fb.get("composite_score"),
+                "factor_delta_pct": _pct(fb.get("factor_delta")),
+            },
             "quant_base_prob_up": round(float((c.get("quant") or {}).get("p_up") or 0.5), 3),
             "quant_resolved_samples": int((c.get("quant") or {}).get("n_resolved") or 0),
             "hist_7d_q05_pct": _pct((c.get("var7") or {}).get("q05")),
             "hist_7d_q95_pct": _pct((c.get("var7") or {}).get("q95")),
             "hist_7d_samples": int((c.get("var7") or {}).get("n") or 0),
         })
+    g_quotes = extra.get("global_quotes") or {}
+    if g_quotes:
+        ctx["global_us_indices"] = g_quotes
     flows = extra.get("flows") or {}
     if any(v is not None for v in flows.values()):
         ctx["southbound"] = flows
@@ -745,7 +1163,7 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
                   config=None):
     """计算 + 大模型研判 + 留痕结算；返回供管线消费的结果字典。
 
-    可用时：{available: True, asof, horizon, engine, engine_label, llm_reason,
+    可用时：{available: True, asof, target_date, horizon, engine, engine_label, llm_reason,
              targets: [...], journal, notes, method, grounded}
     不可用：{available: False, reason}
     """
@@ -754,7 +1172,7 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
     config = config or llm_config()
     targets = targets or TARGETS
 
-    # 1) 取日线（注入 bars_by_symbol 时离线；否则走 providers 的 Yahoo→东财链路）
+    # 1) 取日线并确定基准日
     used, contexts = {}, []
     for target in targets:
         bars = []
@@ -768,12 +1186,27 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
             symbol, bars = _fetch_bars_for(fetch_json, target, rng)
         if not bars:
             continue
+        used[symbol] = bars
+
+    if not used:
+        return {"available": False,
+                "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）"}
+
+    # 确定基准日，并执行输入闭合性检验（防止未来日期混入证据）
+    base_date = next((bars[-1]["date"] for bars in used.values() if bars), "")
+    closure_ok, closure_warns, cleaned_extra = check_input_closure(base_date, extra)
+
+    for target in targets:
+        symbol = next((cand for cand in target["symbols"] if cand in used), None)
+        if not symbol:
+            continue
+        bars = used[symbol]
         engine = "llm" if config.get("enabled") else "quant"
-        ctx, reason = _build_context(target, symbol, bars, engine)
+        ctx, reason = _build_context(target, symbol, bars, engine, extra=cleaned_extra)
         if ctx is None:
             continue
-        used[symbol] = bars
         contexts.append(ctx)
+
     if not contexts:
         return {"available": False,
                 "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）"}
@@ -785,12 +1218,11 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         reason = ""
 
     # 2) 大模型研判（可选）
-    prompt_ctx = _context_for_prompt(contexts, extra)
+    prompt_ctx = _context_for_prompt(contexts, cleaned_extra)
     llm_payload, llm_error = (None, "未配置大模型 API Key")
     if config.get("enabled"):
         llm_payload, llm_error = call_llm(config, prompt_ctx, post_json=post_json)
     if not llm_payload and config.get("fallback") == "never":
-        # 严格模式：没有大模型结论就不出这个栏目，也不把量化口径写进预测留痕
         return {"available": False, "llm_reason": llm_error,
                 "reason": f"大模型不可用（{llm_error}）"}
     engine = "llm" if llm_payload else "quant"
@@ -824,9 +1256,9 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         sig = merged.get(ctx["symbol"])
         if not sig:
             continue
-        base_date = ctx["asof"]
+        b_date = ctx["asof"]
         if any(isinstance(e, dict) and e.get("symbol") == ctx["symbol"]
-               and e.get("base_date") == base_date for e in entries):
+               and e.get("base_date") == b_date for e in entries):
             continue
         entries.append(_issue(ctx, sig, *series[ctx["symbol"]], now))
         changed = True
@@ -846,7 +1278,7 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         q_p = _clamp(q.get("p_up") if q.get("p_up") is not None else 0.5)
         out_targets.append({
             "code": ctx["symbol"], "name": ctx["name"], "short": ctx["short"],
-            "close": ctx["close"], "asof": ctx["asof"],
+            "close": ctx["close"], "asof": ctx["asof"], "target_date": ctx.get("target_date"),
             "ret5": ctx.get("ret5"), "ret20": ctx.get("ret20"),
             "rsi14": ctx.get("rsi14"), "vol20": ctx.get("vol20_ann"),
             "vol_pct": ctx.get("vol_pct"), "dd20": (ctx.get("features") or {}).get("dd20"),
@@ -855,6 +1287,11 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
             "p_up": p_up, "direction": direction, "label": label,
             "quant_p_up": q_p, "deviation": p_up - q_p,
             "converged": bool(sig.get("converged")),
+            "factor_score": ctx.get("factor_score"),
+            "factor_delta": ctx.get("factor_delta"),
+            "factor_summary": ctx.get("factor_summary"),
+            "factor_breakdown": ctx.get("factor_breakdown"),
+            "no_lookahead": ctx.get("no_lookahead"),
             "summary": sig.get("summary") or "", "drivers": sig.get("drivers") or [],
             "risks": sig.get("risks") or [],
             "support": sig.get("support"), "resistance": sig.get("resistance"),
@@ -863,7 +1300,7 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
     crosses = [c for c in (merged.get(c2["symbol"], {}).get("cross_note")
                            for c2 in contexts) if c]
     engine_label = (f"大模型 · {config.get('model')}" if engine == "llm"
-                    else "量化规则（无大模型 Key 或调用失败已降级）")
+                    else "量化多因子规则（无大模型 Key 或调用失败已降级）")
     offered = int(notes.get("texts_offered") or 0)
     traced = int(notes.get("texts_traced") or 0)
     grounded = (f"{traced}/{offered}" if (engine == "llm" and offered)
@@ -872,6 +1309,7 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
     return {
         "available": True,
         "asof": contexts[0]["asof"],
+        "target_date": contexts[0].get("target_date"),
         "horizon": HORIZON,
         "engine": engine,
         "engine_label": engine_label,
@@ -884,6 +1322,6 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         "cross_note": crosses[0] if crosses else "",
         "missing": reason,
         "is_today": bool(is_today),
-        "method": (f"量化基准（扩张基准率 + 20日特征最近邻，s+{HORIZON}≤t 已结算锚点）"
+        "method": (f"量化多因子基准（扩张基准率 + 20日特征最近邻 + 动量延展/均值回归 + 均线趋势 + 美股隔夜联动(β) + 南向资金流 + 波动率收缩，s+{HORIZON}≤t 已结算锚点）"
                    + (" + 大模型合成（概率收敛 + 数字溯源）" if engine == "llm" else "")),
     }

@@ -3193,7 +3193,7 @@ def _hk7_extra_context(data):
     news   —— 港股相关标题（全网新闻源头 → 港股名家频道 → 全球头条港股关键词命中）。
     任一来源缺失就不放进证据（绝不编造）；只做截断，不引入新数字。
     """
-    extra = {"flows": {}, "events": [], "news": []}
+    extra = {"flows": {}, "global_quotes": {}, "events": [], "news": []}
     pan = (data or {}).get("A股大盘全景") or {}
     north = pan.get("north") or {}
     if north.get("south_available") and north.get("south_amount_yi") is not None:
@@ -3210,6 +3210,17 @@ def _hk7_extra_context(data):
             extra["flows"]["liquidity_score"] = round(float(liq["score"]), 1)
         except (TypeError, ValueError):
             pass
+
+    # 美股隔夜行情（用于跨市场风险偏好联动 β 映射）
+    market = (data or {}).get("实时行情") or {}
+    quotes = market.get("quotes") or {}
+    for name in ("标普500", "纳斯达克", "道琼斯指数"):
+        q = quotes.get(name)
+        if isinstance(q, dict) and q.get("change_pct") is not None:
+            extra["global_quotes"][name] = {
+                "change_pct": round(float(q["change_pct"]), 2),
+                "as_of": str(q.get("as_of") or ""),
+            }
 
     cal = (data or {}).get("财经日历") or {}
     if cal.get("status") == "success":
@@ -6210,9 +6221,11 @@ def _hk_seven_day_block(res, kit):
         return ""
     esc = kit.esc
     horizon = int(res.get("horizon") or _hk7.HORIZON)
+    target_date = res.get("target_date")
+    t_str = f' · 目标日 {esc(str(target_date))}' if target_date else ''
     rows = []
     head_sub = (f'锚定 {esc(str(res.get("asof") or ""))} 收盘 · 未来 {horizon} 个交易日'
-                f'（按交易日计数，假期顺延） · 概率夹 5%~95% · 非投资建议')
+                f'（按交易日计数，假期顺延{t_str}） · 概率夹 5%~95% · 非投资建议')
     if res.get("engine") == "llm":
         head_sub += f' · 文案数字溯源 {esc(str(res.get("grounded") or "—"))} 条'
     else:
@@ -6239,6 +6252,9 @@ def _hk_seven_day_block(res, kit):
             bits.append(f'95%区间 {t["lo95"]:,.0f}–{t["hi95"]:,.0f}'
                         f'（历史 {horizon} 日 5%/95% 分位 n={int(t.get("var_n") or 0)}）')
         detail = []
+        fb_summary = t.get("factor_summary")
+        if fb_summary:
+            detail.append(f'因子：{esc(fb_summary)}')
         drivers = "；".join(esc(str(x)) for x in (t.get("drivers") or [])[:2])
         risks = "；".join(esc(str(x)) for x in (t.get("risks") or [])[:2])
         if drivers:
@@ -6284,6 +6300,7 @@ def _hk_seven_day_block(res, kit):
     note = (f'<b>七日口径</b> · 目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
             f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
             + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
+            + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
             + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
             f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
     rows.append(kit.item_row("⚖", note))
@@ -10373,7 +10390,8 @@ def hk7_only_report():
         print(f"❌ 不可用：{res.get('error')}")
         return 1
     r = res.get("result") or {}
-    print(f"\n【锚定】{r.get('asof')} 收盘 · 未来 {r.get('horizon')} 个交易日"
+    target_dt_str = f"（至目标日 {r.get('target_date')}）" if r.get('target_date') else ""
+    print(f"\n【锚定】{r.get('asof')} 收盘 · 未来 {r.get('horizon')} 个交易日{target_dt_str}"
           f" · 引擎：{r.get('engine_label')}")
     if r.get("engine") != "llm":
         print(f"  大模型降级原因：{r.get('llm_reason')}")
@@ -10382,6 +10400,8 @@ def hk7_only_report():
         print(f"    现价 {t['close']:,.2f} · 5日 {t['ret5'] * 100:+.1f}%"
               f" · 20日 {t['ret20'] * 100:+.1f}% · RSI14 {t['rsi14']:.1f}"
               f" · 年化波动 {t['vol20'] * 100:.1f}%")
+        if t.get("factor_summary"):
+            print(f"    核心因子：{t['factor_summary']}")
         print(f"    95% 区间 {t['lo95']:,.0f} – {t['hi95']:,.0f}（n={t['var_n']}）"
               f" · 量化基准 {t['quant_p_up'] * 100:.1f}%"
               f" · 偏离 {t['deviation'] * 100:+.1f}pp"
