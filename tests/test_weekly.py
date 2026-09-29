@@ -337,8 +337,9 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
                              "quotes": {"恒生指数": {"price": 24600, "change_pct": 0.38}}}}
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410")
         # 页首「AI 全篇速览」会先提到各栏目标题，因此用栏目 kicker（只在正文栏目头出现）定位顺序
-        i_wk = html.find(">WEEKLY FORECAST<")
-        i_mk = html.find(">MARKET SNAPSHOT<")
+        # 归藏简洁排版（2026-09-29 起）栏目头写作「07 · WEEKLY FORECAST」，编号在前
+        i_wk = html.find("· WEEKLY FORECAST<")
+        i_mk = html.find("· MARKET SNAPSHOT<")
         self.assertGreater(i_wk, -1)
         self.assertGreater(i_mk, -1)
         self.assertLess(i_wk, i_mk)
