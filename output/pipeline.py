@@ -40,10 +40,11 @@
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
-      （今日预判 / 策略研判 / 总结）与前瞻日程类栏目（未来30天影响经济时间点：
+      （【回游金枪鱼】今日预判 / 策略研判 / 总结）与前瞻日程类栏目（【探照安康鱼】时间节点：
       日程不含方向信息，只给「最密集日 + 事件密度提示」）不附加，栏目无数据自然缺席。
       规则合成，非投资建议。
-  6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，日报开头第一个数据栏目）：
+  6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，日报开头第一个数据栏目；
+      2026-09-29 起更名为「【探照安康鱼】时间节点」）：
       数据源为东方财富财经日历（数据中心公开报表 RPT_CPH_FECALENDAR，无需密钥，
       START_DATE 即北京时间）。服务端只支持按日期过滤，故一次拉全窗口 + 翻页，
       再在本地按写死的口径筛选：保留 数据（中美欧日英港等市场的宏观读数）/
@@ -101,7 +102,7 @@
       思维重构成六个可独立测试的层——providers(数据) → features(五因子特征) →
       probability(分桶+保序+逻辑回归校准 / 推进式回测) → liquidity(资金流动性) →
       engine(编排) → render(呈现)，外加「预测留痕 → 次日按真实收盘结算」的反馈闭环
-      （output/quant_history.json）。核心栏目三个：**量化预测总览**（概率 + 95% 区间 +
+      （output/quant_history.json）。核心栏目三个：**【蜉蝣天地水母】量化预测总览**（概率 + 95% 区间 +
       波动分位 + 模型可信度 + 预测复盘）、**港股概率走势分析**（恒指/恒科/国企指数 +
       个股池逐只概率 + 市场宽度 + 五因子拆解）、**资金流动性分析**（南向/北向成交总额
       与 z 值分位、恒指量能、Amihud 非流动性、CR5 集中度、主力资金流、流动性综合分
@@ -177,6 +178,16 @@
       降级渲染；=0 任何大模型不可用都整栏缺席。预测先存档（output/hk7_forecast.json，
       settled=False），满 7 个交易日按真实收盘结算，样本 <10 只报样本量。
       OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
+
+  19. 栏目更名（2026-09-29 按用户要求，只改标题文字，内容 / 顺序 / 抓取 / 推送门禁
+      与拆分逻辑完全不变）：AI 全篇速览→**【爪爪八爪鱼】AI 全篇速览**、
+      今日预判→**【回游金枪鱼】今日预判**、未来30天影响经济时间点→**【探照安康鱼】时间节点**、
+      量化预测总览→**【蜉蝣天地水母】量化预测总览**。四个标题集中定义为
+      SECTION_TITLE_AI_DIGEST / SECTION_TITLE_FORECAST / SECTION_TITLE_ECON_CALENDAR /
+      SECTION_TITLE_QUANT_FORECAST，guizang 与 pixel 两个主题共用；首屏速览按栏目引用
+      标题，因此自动跟随新名。「时间节点」栏目的窗口天数不再写在标题里，仍在栏目内
+      「窗口摘要 · 时间窗口」如实显示（OCTOPUS_CALENDAR_DAYS 改窗口时同步变化）。
+      其余栏目名称不变。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -337,7 +348,8 @@ GH_DISPLAY_N = 8    # 全球头条展示前 8 条
 EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 
 # ------------------------------------------------------------
-# 未来 N 天影响经济时间点（东方财富财经日历 RPT_CPH_FECALENDAR）
+# 「时间节点」栏目（原「未来 N 天影响经济时间点」）的数据口径
+# （东方财富财经日历 RPT_CPH_FECALENDAR）
 # 放在日报开头：先看清「未来 30 天哪些时点会动市场」，再读今天的盘。
 # 接口是东财数据中心公开报表（与「全球大盘全景复盘」的南北向资金同一台主机），无需密钥；
 # START_DATE 为北京时间（形如 2026-10-28 20:30:00）。服务端只支持按日期过滤
@@ -3352,7 +3364,7 @@ def fetch_weekly_forecast():
 
 
 # ============================================================
-# 未来 N 天影响经济时间点：抓取 + 筛选（东方财富财经日历）
+# 「时间节点」栏目（原「未来 N 天影响经济时间点」）：抓取 + 筛选（东方财富财经日历）
 # ------------------------------------------------------------
 # 三类内容（缺一不可）：
 #   kind 0 经济数据 —— 中/美/欧/日/英等市场的宏观读数发布（CPI、非农、LPR…）
@@ -3886,7 +3898,7 @@ def collect_all_data():
     time.sleep(0.5)
 
     if ECON_CALENDAR_ENABLED:
-        print(f"\n📅 正在抓取未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
+        print(f"\n📅 正在抓取「时间节点」· 未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
         data["财经日历"] = fetch_econ_calendar()
         time.sleep(0.5)
 
@@ -4865,7 +4877,7 @@ def _cal_gz_cells(day_label, t_plus, item, first=False):
 
 
 def gz_calendar_block(res):
-    """黑白研报版「未来 N 天影响经济时间点」：窗口摘要表 + 全窗口一张三列日历表。"""
+    """黑白研报版「时间节点」（原「未来 N 天影响经济时间点」）：窗口摘要表 + 全窗口一张三列日历表。"""
     digest, rows = _calendar_table_rows(res, _cal_gz_cells)
     parts = []
     pairs = digest.get("pairs") or []
@@ -5290,7 +5302,7 @@ def _cal_pixel_cells(day_label, t_plus, item, first=False):
 
 
 def _calendar_block(res):
-    """pixel 版「未来 N 天影响经济时间点」：窗口摘要 + 全窗口一张三列日历表。"""
+    """pixel 版「时间节点」（原「未来 N 天影响经济时间点」）：窗口摘要 + 全窗口一张三列日历表。"""
     digest, rows = _calendar_table_rows(res, _cal_pixel_cells)
     parts = []
     pairs = digest.get("pairs") or []
@@ -5680,7 +5692,21 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     return pairs
 
 
-# 阅读顺序：结论 → 前瞻日程（未来30天影响经济时间点）→ 数据（行情 / 全景 / 政策 / 研判依据）
+# ------------------------------------------------------------
+# 栏目标题（2026-09-29 按用户要求改名，只改标题文字，栏目内容 / 顺序 / 抓取 /
+# 推送门禁 / 拆分逻辑一律不变）。两个主题（guizang / pixel）共用同一份标题，
+# 首屏速览引用各栏目时也自动带上新名字。
+#   AI 全篇速览            → 【爪爪八爪鱼】AI 全篇速览
+#   今日预判               → 【回游金枪鱼】今日预判
+#   未来30天影响经济时间点  → 【探照安康鱼】时间节点（窗口天数仍在栏目「窗口摘要 · 时间窗口」里）
+#   量化预测总览           → 【蜉蝣天地水母】量化预测总览
+# ------------------------------------------------------------
+SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
+SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
+SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
+SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
+
+# 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情 / 全景 / 政策 / 研判依据）
 #           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
 REPORT_SECTION_ORDER = (
     "FORECAST",
@@ -6357,7 +6383,7 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
         "预测存在不确定性，完整依据、来源与暂缺项见下文。")))
     lead_html = (f'<div style="font-size:26px;font-weight:700;line-height:1.5;'
                  f'margin:8px 0 20px;overflow-wrap:anywhere;">{_esc(brief(lead, 110))}</div>')
-    return ("AI DIGEST", "AI 全篇速览", lead_html + kit.kv(rows), "",
+    return ("AI DIGEST", SECTION_TITLE_AI_DIGEST, lead_html + kit.kv(rows), "",
             "先看重点，再读全文 · 规则/量化合成，非大模型生成 · 非投资建议")
 
 
@@ -6399,7 +6425,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("热门榜单", hot),
         ("港股量化引擎（概率/流动性）", data.get("港股量化") or {}),
     ]
-    # 前瞻日程（未来 N 天影响经济时间点）：关掉采集时不进审计，总源数保持不变。
+    # 前瞻日程（「时间节点」栏目）：关掉采集时不进审计，总源数保持不变。
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
         source_items.append((f"财经日历（未来{ECON_CALENDAR_DAYS}天时间点）", data["财经日历"]))
@@ -6444,7 +6470,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         fc_html = _quant.render.render_forecast(quant, kit)
         if fc_html:
             blocks["QUANT FORECAST"] = (
-                "QUANT FORECAST", "量化预测总览", fc_html, quant_badge, "")
+                "QUANT FORECAST", SECTION_TITLE_QUANT_FORECAST, fc_html, quant_badge, "")
         hk_html = _quant.render.render_hk_probability(quant, kit)
         if hk_html:
             blocks["HK PROBABILITY"] = (
@@ -6477,14 +6503,14 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 kit.badge("大模型研判" if hk7_res.get("engine") == "llm" else "量化降级", "ai"),
                 _short_source(hk7_src))
 
-    # ⓪ 未来 N 天影响经济时间点（开头栏目：先看清日程窗口，再读今天的盘）
+    # ⓪ 时间节点（原「未来 N 天影响经济时间点」，2026-09-29 改名）：
+    #    开头栏目——先看清日程窗口，再读今天的盘；窗口天数仍在栏目内「窗口摘要 · 时间窗口」显示。
     cal = data.get("财经日历") or {}
     if cal.get("status") == "success":
         cal_html = kit.calendar_block(cal)
         if cal_html:
-            cal_days = int(cal.get("days") or ECON_CALENDAR_DAYS)
             blocks["ECON CALENDAR"] = (
-                "ECON CALENDAR", f"未来{cal_days}天影响经济时间点", cal_html,
+                "ECON CALENDAR", SECTION_TITLE_ECON_CALENDAR, cal_html,
                 kit.source_badge(cal), _short_source(cal),
             )
 
@@ -6583,7 +6609,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy,
                                    quant=quant, weekly=weekly_res)
     if conclusion:
-        blocks["FORECAST"] = ("FORECAST", "今日预判", kit.kv(conclusion), "", "")
+        blocks["FORECAST"] = ("FORECAST", SECTION_TITLE_FORECAST, kit.kv(conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
                              quant=quant,
                              backup_events=(data.get("_backup_info") or {}).get("events"))
@@ -10435,13 +10461,13 @@ def hk7_only_report():
     return 0
 
 def calendar_only_report(days=None):
-    """只抓「未来 N 天影响经济时间点」并打印（研究 / 排障用：不生成日报、不推送）。
+    """只抓「时间节点」（原「未来 N 天影响经济时间点」）并打印（研究 / 排障用：不生成日报、不推送）。
 
     用途：本地或 Actions 里单独验证东财财经日历接口是否可读、筛选口径是否合适，
     不必跑完整条采集链路。
     """
     print("🐙 " + "=" * 48)
-    print("   章鱼 AI · 未来影响经济时间点（研究模式）")
+    print("   章鱼 AI · 时间节点（未来影响经济时间点 · 研究模式）")
     print("🐙 " + "=" * 48)
     res = fetch_econ_calendar(days=days)
     if res.get("status") != "success":
@@ -10484,7 +10510,7 @@ def main():
   python3 output/pipeline.py --weekly-only          # 只跑每周预测并打印方向/概率/回测/留痕
   python3 output/pipeline.py --hk7-only             # 只跑 AI 七日港股走势分析概率并打印
   python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
-  python3 output/pipeline.py --calendar-only        # 只抓未来30天影响经济时间点并打印
+  python3 output/pipeline.py --calendar-only        # 只抓「时间节点」（未来30天影响经济时间点）并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
         """
@@ -10525,7 +10551,7 @@ def main():
     parser.add_argument("--sources", action="store_true",
                        help="打印全部数据线的主源 / 两个备用源清单（不联网、不生成日报）")
     parser.add_argument("--calendar-only", nargs="?", const=-1, default=None, type=int,
-                       help="只抓「未来 N 天影响经济时间点」并打印（研究模式：不生成日报、不推送；"
+                       help="只抓「时间节点」（原「未来 N 天影响经济时间点」）并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
 
     args = parser.parse_args()
@@ -10563,7 +10589,7 @@ def main():
     if args.hk7_only:
         return hk7_only_report()
 
-    # --calendar-only 模式：只抓未来 N 天影响经济时间点，验证接口与筛选口径
+    # --calendar-only 模式：只抓「时间节点」栏目的未来 N 天影响经济时间点，验证接口与筛选口径
     if args.calendar_only is not None:
         return calendar_only_report(days=None if args.calendar_only < 1 else args.calendar_only)
 

@@ -92,7 +92,7 @@ def _google_search_rss(query: str, hl: str, gl: str, ceid: str) -> str:
 DATA_LINES: Dict[str, Dict[str, Any]] = {
     "yahoo_chart": {
         "name": "实时行情 · Yahoo 日线快照",
-        "used_by": ("行情速览", "今日预判", "全球大盘全景复盘·全球指数"),
+        "used_by": ("行情速览", "【回游金枪鱼】今日预判", "全球大盘全景复盘·全球指数"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -104,7 +104,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "yahoo_bars": {
         "name": "日线序列 · 港股量化 / 每周预测",
-        "used_by": ("量化预测总览", "港股概率走势分析", "每周量化走势预测"),
+        "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析", "每周量化走势预测"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -156,7 +156,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "em_datacenter": {
         "name": "东方财富 数据中心报表（沪深港通成交 / 财经日历）",
-        "used_by": ("全球大盘全景复盘·南北向", "资金流动性分析", "未来30天影响经济时间点"),
+        "used_by": ("全球大盘全景复盘·南北向", "资金流动性分析", "【探照安康鱼】时间节点"),
         "primary": ("东方财富 datacenter-web", EM_DATACENTER_URLS[0]),
         "backups": (
             ("东方财富 datacenter（同格式镜像）", EM_DATACENTER_URLS[1], True),

@@ -381,7 +381,7 @@ class SentimentFactorTests(unittest.TestCase):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
                 # 结论先行（今日预判）→ 行情数据 → 趋势跟踪 → 资讯 → 总结收尾
                 self.assertLess(titles.index("行情速览"), titles.index("趋势跟踪"))
-                self.assertLess(titles.index("今日预判"), titles.index("行情速览"))
+                self.assertLess(titles.index("【回游金枪鱼】今日预判"), titles.index("行情速览"))
                 self.assertNotIn("每日量化策略趋势跟踪线索", titles)  # 旧栏目名不得回潮
                 self.assertEqual(titles[-1], "总结")
 

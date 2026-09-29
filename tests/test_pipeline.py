@@ -779,7 +779,10 @@ class GuizangOnePageTests(unittest.TestCase):
         data = self._heavy_data()
         html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929")
         titles = [s[1] for s in pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT)["sections"]]
-        for title in ("AI 全篇速览", "今日预判", "未来30天影响经济时间点", "量化预测总览",
+        # 2026-09-29 起四个栏目改名（只改标题文字）：AI 全篇速览 / 今日预判 /
+        # 未来30天影响经济时间点 / 量化预测总览 分别加上鱼名前缀
+        for title in ("【爪爪八爪鱼】AI 全篇速览", "【回游金枪鱼】今日预判",
+                      "【探照安康鱼】时间节点", "【蜉蝣天地水母】量化预测总览",
                       "港股概率走势分析", "资金流动性分析", "行情速览", "全球大盘全景复盘",
                       "政策因子", "策略研判", "趋势跟踪", "全球头条", "东方财富快讯",
                       "港股名家频道", "新闻情绪", "总结"):
@@ -1912,7 +1915,7 @@ class PolicyFactorTests(unittest.TestCase):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertLess(html.find("政策因子</h2>"), html.find("策略研判</h2>"))
-        self.assertLess(html.find("今日预判</h2>"), html.find("政策因子</h2>"))
+        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"), html.find("政策因子</h2>"))
         self.assertIn("PSI +2", html)
         self.assertIn("6 条（近 15 日）", html)
         self.assertIn("政策冲击强度榜", html)
@@ -2055,7 +2058,7 @@ class SectionReadingOrderTests(unittest.TestCase):
     # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
     # 策略研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
-        "今日预判</h2>",
+        "【回游金枪鱼】今日预判</h2>",
         "行情速览</h2>",
         "全球大盘全景复盘</h2>",
         "政策因子</h2>",
@@ -2128,7 +2131,7 @@ class ConciseLayoutTests(unittest.TestCase):
 
     def test_conclusion_first_and_summary_last(self):
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
-        self.assertLess(html.find("今日预判</h2>"), html.find("行情速览</h2>"))
+        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"), html.find("行情速览</h2>"))
         self.assertIn("市场倾向", html)
         self.assertIn("核心判断", html)
         self.assertGreater(html.find("总结</h2>"), html.find("新闻情绪</h2>"))
@@ -2514,7 +2517,7 @@ class SectionAiJudgeTests(unittest.TestCase):
 
 
 class EconCalendarTests(unittest.TestCase):
-    """「未来 N 天影响经济时间点」栏目（东方财富财经日历 RPT_CPH_FECALENDAR）。
+    """「时间节点」栏目（原「未来 N 天影响经济时间点」· 东方财富财经日历 RPT_CPH_FECALENDAR）。
 
     全程离线：接口用 mock 响应替换 safe_request。重点守住四件事——
     ① 筛选口径确定可复现（噪音必须被剔除、重要度分级稳定）；
@@ -2735,14 +2738,16 @@ class EconCalendarTests(unittest.TestCase):
         with patch.object(pipeline, "safe_request", lambda *a, **k: None):
             res = pipeline.fetch_econ_calendar(today=self.TODAY)
         html = self._report(self._data(res))
-        self.assertNotIn("未来30天影响经济时间点", html, "抓取失败的栏目不进正文")
+        self.assertNotIn("【探照安康鱼】时间节点", html, "抓取失败的栏目不进正文")
+        self.assertNotIn("未来30天影响经济时间点", html, "旧栏目名不得回潮")
         self.assertRegex(html, r"暂缺：[^<]*财经日历")
 
     # ---------- ④ 排版与披露 ----------
     def test_section_renders_right_after_conclusion_in_both_themes(self):
         res, _ = self._fetch()
         for theme, markers in (
-            ("guizang", ["今日预判</h2>", "未来30天影响经济时间点</h2>", "行情速览</h2>"]),
+            ("guizang", ["【回游金枪鱼】今日预判</h2>", "【探照安康鱼】时间节点</h2>",
+                         "行情速览</h2>"]),
             ("pixel", ["LVL 01 // FORECAST", "LVL 02 // ECON CALENDAR",
                        "LVL 03 // MARKET SNAPSHOT"]),
         ):
@@ -2834,8 +2839,9 @@ class OpeningDigestTests(unittest.TestCase):
             "test", "success", quotes={"标普500": {"price": 6123, "change_pct": 1.25}})}
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(data, "2026年9月28日", "20260928", theme=theme)
-            self.assertEqual(html.count("AI 全篇速览"), 1)
-            self.assertLess(html.index("AI 全篇速览"), html.index("今日预判"))
+            self.assertEqual(html.count("【爪爪八爪鱼】AI 全篇速览"), 1)
+            self.assertLess(html.index("【爪爪八爪鱼】AI 全篇速览"),
+                            html.index("【回游金枪鱼】今日预判"))
             self.assertIn("非大模型生成", html)
 
     def test_all_content_sections_covered_and_html_escaped(self):
@@ -2858,3 +2864,65 @@ class OpeningDigestTests(unittest.TestCase):
         html = pipeline.generate_report({}, "2026年9月28日", "20260928")
         self.assertIn("当前信息不足以形成综合方向判断", html)
         self.assertIn("当天来源 0/", html)
+
+
+class SectionRenameTests(unittest.TestCase):
+    """2026-09-29 栏目改名回归：只改标题文字，顺序 / 内容 / 门禁一律不变。
+
+    AI 全篇速览 → 【爪爪八爪鱼】AI 全篇速览；今日预判 → 【回游金枪鱼】今日预判；
+    未来30天影响经济时间点 → 【探照安康鱼】时间节点；量化预测总览 → 【蜉蝣天地水母】量化预测总览。
+    """
+
+    EXPECTED = {
+        "AI DIGEST": "【爪爪八爪鱼】AI 全篇速览",
+        "FORECAST": "【回游金枪鱼】今日预判",
+        "ECON CALENDAR": "【探照安康鱼】时间节点",
+        "QUANT FORECAST": "【蜉蝣天地水母】量化预测总览",
+    }
+
+    def _data(self):
+        """离线夹具：实时行情（当天）+ 财经日历（mock 东财响应）。"""
+        cal = EconCalendarTests()
+        res, _ = cal._fetch()
+        return cal._data(res)
+
+    def test_title_constants_match_requested_names(self):
+        self.assertEqual(pipeline.SECTION_TITLE_AI_DIGEST, self.EXPECTED["AI DIGEST"])
+        self.assertEqual(pipeline.SECTION_TITLE_FORECAST, self.EXPECTED["FORECAST"])
+        self.assertEqual(pipeline.SECTION_TITLE_ECON_CALENDAR, self.EXPECTED["ECON CALENDAR"])
+        self.assertEqual(pipeline.SECTION_TITLE_QUANT_FORECAST, self.EXPECTED["QUANT FORECAST"])
+
+    def test_sections_carry_new_names_in_both_themes(self):
+        data = self._data()
+        for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            titles = {s[0]: s[1]
+                      for s in pipeline._collect_report_parts(data, kit)["sections"]}
+            for kick in ("AI DIGEST", "FORECAST", "ECON CALENDAR"):
+                self.assertEqual(titles.get(kick), self.EXPECTED[kick],
+                                 f"{kick} 栏目标题应为 {self.EXPECTED[kick]}")
+        for theme in ("guizang", "pixel"):
+            html = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
+                                            theme=theme)
+            for kick in ("AI DIGEST", "FORECAST", "ECON CALENDAR"):
+                self.assertIn(self.EXPECTED[kick], html, f"{theme} 缺少新栏目标题")
+            # 旧标题不得单独回潮（新名里含旧词，因此按标题位的尖括号边界判定）
+            self.assertNotIn(">AI 全篇速览<", html)
+            self.assertNotIn(">今日预判<", html)
+            self.assertNotIn("未来30天影响经济时间点", html)
+
+    def test_calendar_window_still_disclosed_after_title_shortened(self):
+        """标题不再带天数后，窗口天数仍须在栏目「窗口摘要 · 时间窗口」里如实显示。"""
+        html = pipeline.generate_report(self._data(), "2026年9月28日 · 周一", "20260928")
+        self.assertIn("时间窗口", html)
+        self.assertIn("未来 30 天", html)
+
+    def test_digest_quotes_renamed_sections(self):
+        """首屏速览按栏目引用标题，因此必须跟着改名（否则读者对不上正文栏目）。"""
+        digest = pipeline._opening_digest(
+            [("ECON CALENDAR", pipeline.SECTION_TITLE_ECON_CALENDAR, "窗口摘要", "", ""),
+             ("QUANT FORECAST", pipeline.SECTION_TITLE_QUANT_FORECAST, "预测概括", "", "")],
+            {"ECON CALENDAR": {"text": "最密集日 10-01"}},
+            [("核心判断", "谨慎观察")], 1, 3, pipeline.GUIZANG_KIT)
+        self.assertEqual(digest[1], self.EXPECTED["AI DIGEST"])
+        self.assertIn(f"{self.EXPECTED['ECON CALENDAR']}：", digest[2])
+        self.assertIn(f"{self.EXPECTED['QUANT FORECAST']}：", digest[2])

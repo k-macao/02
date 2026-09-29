@@ -663,7 +663,7 @@ class RenderIntegrationTests(unittest.TestCase):
         }
         html = pipeline.generate_report(data, "2026年9月28日 · 周一",
                                        res["as_of"].replace("-", ""))
-        for title in ("量化预测总览", "港股概率走势分析", "资金流动性分析"):
+        for title in ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析", "资金流动性分析"):
             self.assertIn(title, html)
         self.assertIn("预测概括", html)
 
@@ -671,7 +671,7 @@ class RenderIntegrationTests(unittest.TestCase):
         data = {"实时行情": pipeline._source_result("test quote", "unavailable",
                                                 quotes={}, error="offline")}
         html = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928")
-        self.assertNotIn("量化预测总览", html)
+        self.assertNotIn("量化预测总览", html)   # 改名后仍不得出现（含鱼名前缀版本）
         self.assertIn("总结</h2>", html)  # 栏目名 2026-09-28 由「盘点总结」改为「总结」
 
 

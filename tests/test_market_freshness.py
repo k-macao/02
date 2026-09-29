@@ -370,7 +370,7 @@ class ForecastDatesRenderingTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929", theme=theme)
             text = _strip(html)
-            i = text.find("今日预判")
+            i = text.find("【回游金枪鱼】今日预判")
             self.assertGreater(i, -1)
             self.assertIn("截至 09-28", text[i:i + 1500])
             self.assertIn("恒指 ▲ +0.54%", text[i:i + 1500])
