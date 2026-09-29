@@ -542,6 +542,7 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertEqual(pipeline.GZ_UP, pipeline.GZ_KLEIN)      # 涨 = 克莱因蓝
         self.assertEqual(pipeline.GZ_INK, "#222")                # 正文灰黑
         self.assertEqual(pipeline.GZ_META, "#555")               # 次要灰（深灰）
+        self.assertEqual(pipeline.GZ_FAINT, "#666")              # 更弱灰（二轮加深后不得浅于 #666）
         html = self._html()
         self.assertIn(pipeline.GZ_KLEIN, html)
         allowed = {"#002FA7", "#00227A", "#F3F6FF"}
@@ -554,12 +555,45 @@ class GuizangThemeTests(unittest.TestCase):
         for color in re.findall(r"#[0-9A-Fa-f]{3}\b", html):
             r, g, b = (int(c * 2, 16) for c in color[1:])
             self.assertTrue(r == g == b, f"三位色值必须是灰阶：{color}")
-            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#555", "#777",
-                                          "#aaa", "#bbb", "#ddd", "#eee", "#fff"},
-                          f"三位色值只允许既定灰阶：{color}")
+            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#555", "#666",
+                                          "#ddd", "#eee", "#fff"},
+                          f"三位色值只允许既定灰阶（#777/#aaa 等浅灰已禁用）：{color}")
         for old_color in ("#2563EB", "#1D4ED8", "#EFF6FF", "#3b82f6",
                           "#FF5576", "#35F29A", "#FFD166", "#FF3CAC", "#22DFFF"):
             self.assertNotIn(old_color, html)
+
+    def test_no_washy_text_colors(self):
+        """文字可读性硬门禁：任何文字色与白底对比度 ≥ 4.5:1（WCAG AA），禁止浅灰文字回潮。
+
+        背景：用户两次反馈文字看不清（「灰色改深灰色」「浅灰色看不清」）——表头、脚注、
+        时间戳、刊头 meta 曾用 #777 / #AAA，白底对比度仅 4.48:1 / 2.32:1，手机上 11~12px
+        浅灰小字根本看不清。此门禁保证任何排版改动都回不到「浅灰文字」。
+        例外只有三种纯装饰用法：#fff（深底白字备用）、#ddd / #eee（信号格未点亮的
+        ○ 与细分隔线同色，可读性由实心格数量承担，不承载文字信息）。
+        """
+        html = self._html()
+
+        def _lum(hex_color):
+            c = hex_color.lstrip("#")
+            if len(c) == 3:
+                c = "".join(ch * 2 for ch in c)
+            r, g, b = (int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+            def _f(v):
+                return ((v + 0.055) / 1.055) ** 2.4 if v > 0.03928 else v / 12.92
+
+            return 0.2126 * _f(r) + 0.7152 * _f(g) + 0.0722 * _f(b)
+
+        decorative = {"#fff", "#ddd", "#eee"}
+        seen = set()
+        for color in re.findall(r"color:\s*(#[0-9A-Fa-f]{3,6})", html):
+            if color.lower() in decorative or color.lower() in seen:
+                continue
+            seen.add(color.lower())
+            contrast = 1.05 / (_lum(color) + 0.05)      # 与纯白底 #FFFFFF 的对比度
+            self.assertGreaterEqual(
+                contrast, 4.5,
+                f"文字色 {color} 与白底对比度仅 {contrast:.2f}:1（需 ≥ 4.5:1），浅灰看不清")
 
     def test_true_white_background_and_gray_hairlines(self):
         """真白底 #ffffff + 1px 浅灰分割线，不靠背景色块分区"""
