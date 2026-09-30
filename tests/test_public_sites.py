@@ -346,7 +346,8 @@ class SentimentFactorTests(unittest.TestCase):
             for theme in ("guizang", "pixel"):
                 with self.subTest(theme=theme):
                     report = pipeline.generate_report(data, "2026年9月27日 · 周日", "20260927", theme=theme)
-                    title_pin = "TREND TRACKING" if theme == "pixel" else "趋势跟踪</h2>"
+                    title_pin = ("TREND TRACKING" if theme == "pixel"
+                                 else f"{pipeline.SECTION_TITLE_TREND}</h2>")
                     self.assertIn(title_pin, report)  # 真实栏目标题，不是页面标题
                     self.assertNotIn("每日量化策略趋势跟踪线索", report)  # 旧栏目名不得回潮
                     self.assertNotIn("每日量化情绪因子", report)
@@ -382,7 +383,8 @@ class SentimentFactorTests(unittest.TestCase):
                 # 结论先行（今日预判）→ 行情数据 → 趋势跟踪 → 资讯 → 总结收尾
                 # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」
                 review = pipeline.SECTION_TITLE_MARKET_REVIEW
-                self.assertLess(titles.index(review), titles.index("趋势跟踪"))
+                self.assertLess(titles.index(review),
+                                titles.index(pipeline.SECTION_TITLE_TREND))
                 self.assertLess(titles.index("【回游金枪鱼】今日预判"), titles.index(review))
                 self.assertNotIn("行情速览", titles)            # 旧栏目名不得回潮
                 self.assertNotIn("全球大盘全景复盘", titles)
@@ -393,7 +395,8 @@ class SentimentFactorTests(unittest.TestCase):
         failed = {"Reddit": pipeline._public_site_result("Reddit", [], error="HTTP 403")}
         for theme in ("guizang", "pixel"):
             report = pipeline.generate_report(failed, "2026年9月27日 · 周日", "20260927", theme=theme)
-            self.assertNotIn("趋势跟踪</h2>", report)      # 整栏缺席（guizang 标题）
+            self.assertNotIn("趋势跟踪</h2>", report)      # 整栏缺席（新旧 guizang 标题都不出现）
+            self.assertNotIn(f"{pipeline.SECTION_TITLE_TREND}</h2>", report)
             self.assertNotIn("TREND TRACKING", report)      # 像素关卡名同样不出现
             self.assertNotIn("每日量化策略趋势跟踪线索", report)  # 旧栏目名不得回潮
             self.assertIn("暂缺：", report)
@@ -526,7 +529,8 @@ class SentimentFactorTests(unittest.TestCase):
             with self.subTest(theme=theme):
                 report = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
                                                   theme=theme)
-                self.assertIn("TREND TRACKING" if theme == "pixel" else "趋势跟踪</h2>", report)
+                self.assertIn("TREND TRACKING" if theme == "pixel"
+                              else f"{pipeline.SECTION_TITLE_TREND}</h2>", report)
                 self.assertIn("多平台信息员", report)
                 self.assertIn("StockTwits", report)
                 self.assertIn("TradingView", report)
@@ -719,7 +723,8 @@ class HKNewsSourceTests(unittest.TestCase):
                 with self.subTest(theme=theme):
                     report = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
                                                       theme=theme)
-                    self.assertIn("TREND TRACKING" if theme == "pixel" else "趋势跟踪</h2>", report)
+                    self.assertIn("TREND TRACKING" if theme == "pixel"
+                                  else f"{pipeline.SECTION_TITLE_TREND}</h2>", report)
                     self.assertIn("全网新闻源头 ×20", report)
                     self.assertIn("港股相关 6 条", report)      # 汇总行 4+2
                     self.assertIn("港股反弹，恒指收复25000点", report)

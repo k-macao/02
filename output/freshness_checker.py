@@ -27,7 +27,7 @@ FRESHNESS_THRESHOLDS = {
     "A股大盘全景": {"max_lag_days": 3, "type": "trading", "desc": "东财 A股全景，交易日收盘后"},
     "热门榜单": {"max_lag_days": 3, "type": "trading", "desc": "东财热门榜，交易日收盘后"},
     "港股量化引擎": {"max_lag_days": 4, "type": "trading", "desc": "港股量化，恒指日线，允许周一跑周五数据"},
-    "每周量化走势预测": {"max_lag_days": 7, "type": "trading", "desc": "周度预测，基于周线，允许一周滞后"},
+    "每周量化走势预测": {"max_lag_days": 7, "type": "trading", "desc": "七日预测，基于日线（未来 7 个交易日），允许一周滞后"},
     "每日量化策略（行业轮动）": {"max_lag_days": 5, "type": "trading", "desc": "行业轮动，基于日线"},
     
     # 新闻资讯类：要求当天或 72h 内

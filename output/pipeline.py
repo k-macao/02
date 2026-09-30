@@ -80,8 +80,12 @@
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 策略研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
-  8. 超长日报按栏目边界全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
-     完整栏目拆为多条独立 HTML 消息依次发送，全部明细不丢；磁盘 / GitHub 始终保留一份完整日报。
+  8. 超长日报「尽量合并」后全量分条推送：超过 PushPlus 单条上限（默认会员 10 万字符）时，
+     把每条都填到单条上限为止——整栏放得下就整栏装，放不下就在完整标签边界切开、
+     续片重开栏目头并在横幅标注「承接上条（续）」——因此条数就是「总字数 ÷ 单条上限」的
+     理论下限（旧版整栏装箱会浪费 30%+ 空间、白多推几条）。全部明细不丢，
+     磁盘 / GitHub 始终保留一份完整日报；发请求前还按平台频率限制（默认 1 分钟 5 次）
+     主动排队，条数多也一条不丢；见 _pack_section_units / _split_html_for_push / _wait_push_rate_limit。
   9. 「策略研判」栏目：基于当日多源信号（实时行情、A股板块热力、热门榜单、全球/东财头条与
      港股名家频道观点）做确定性量化合成，输出板块趋势跟踪策略（量化信号 +
      趋势分 + 置信度、板块趋势强度榜、技术速读、风险控制、量化配置）。无需大模型 API、
@@ -144,7 +148,8 @@
       全球大盘全景复盘（同时新增「全球指数概览」子块；该栏已于 2026-09-30 并入
       【及时秋刀鱼】AI 行情复盘，见第 20 条）、AI 盘研判→策略研判、每日量化策略
       趋势跟踪线索→趋势跟踪、新闻情绪→新闻情绪、总结→总结；行情速览 / 政策因子 /
-      全球头条 / 东方财富快讯 / 港股名家频道 名称不变。像素主题英文关卡名同步更名
+      全球头条 / 东方财富快讯 / 港股名家频道 名称不变（其中 政策因子 / 全球头条 已于
+      2026-09-29 再次改名，见第 21 条；行情速览见第 20 条）。像素主题英文关卡名同步更名
       （CONCLUSION→FORECAST、A-SHARE PANORAMA→GLOBAL PANORAMA、AI READ→STRATEGY READ、
       TREND CLUES→TREND TRACKING、WRAP-UP→SUMMARY），图标砖短标签同步为 STRAT / GLOBAL / SENTI。
   16. 新增「AI趋势分析（美联储）」与「AI趋势分析（地缘政治）」两栏目（2026-09-28
@@ -156,30 +161,37 @@
       与正文其他栏目重复的标题不重复展示、只计入分析）+ 美联储板附财经日程里的相关
       时间点（FOMC / 议息 / 非农 / CPI 等，日程缺失只隐藏该子块）+ 末尾「⌁ AI 研判」
       概率行（宽松 / 缓和记多头，紧缩 / 升温记空头）。规则合成、非投资建议。
-  17. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起）：未来一周
-      （5 个交易日）恒生指数升跌方向 + P(周涨) 概率，方法来自 GitHub 无未来函数
-      （look-ahead）量化工程实践调研：特征只用 ≤t 数据且扩张因果归一（akfamily/akquant）、
-      相似样本标签必须已结算 s+5≤t（haeganm/walkforward 的 purged/embargo 依据）、
-      运行时「截断不变性」自检（arielb57/peekahead：输出 ≤t 只依赖输入 ≤t，不过则整栏
-      降级）、预测先存档 settled=False 满 5 个交易日再按真实收盘结算（k-macao/03
-      PR #54 四条硬约束，留痕 output/weekly_forecast.json，样本 <10 只报样本量）、
-      回测体检清单（paidaxing1234/quant-backtest-guard）。预测器 = 扩张基准率 +
-      20 日特征最近邻（K=8）50/50 合成、夹 5%~95%，附滚动样本外命中率与 Brier；
-      纯标准库 + providers.fetch_bars 单一联网口。OCTOPUS_WEEKLY=0 / --no-weekly 关闭、
+  17. 「每周量化走势预测」栏目（output/octopus_weekly.py，2026-09-28 起；2026-09-29 起
+      视界由 5 个交易日升级为 **未来 7 个交易日逐日表格**，2026-09-30 起合并原「AI 七日
+      港股走势分析概率」为栏内子块）：恒生指数未来 7 个交易日（T+1…T+7，按交易日计数、
+      假期顺延）逐日给出 ① 预测（累计上涨概率 P(7日涨) + 当日环比 + 80% 预期区间）
+      ② 理由（因子证据）③ 分析 ④ AI 操作建议（操作倾向 / 建议仓位 / 止损止盈，规则合成、
+      非投资建议），外加七日整段结论。方法来自 GitHub 无未来函数（look-ahead）量化工程
+      实践调研：特征只用 ≤t 数据且扩张因果归一（akfamily/akquant）、相似样本标签必须已
+      结算 s+7≤t（haeganm/walkforward 的 purged/embargo 依据）、运行时「截断不变性」自检
+      覆盖全部 7 个视界（arielb57/peekahead：输出 ≤t 只依赖输入 ≤t，不过则整栏降级）、
+      预测先存档 settled=False 满 7 个交易日再按真实收盘结算（k-macao/03 PR #54 四条硬
+      约束，留痕 output/weekly_forecast.json，样本 <10 只报样本量；2026-09-29 前入档的
+      5 日视界旧条目仍按原 5 日口径结算，绝不篡改历史）、回测体检清单
+      （paidaxing1234/quant-backtest-guard）。预测器 = 扩张基准率 + 20 日特征最近邻
+      （K=8）50/50 合成、夹 5%~95%，逐日路径由一次因果扫描的视界 1..7 信号合成；纯标准库
+      + providers.fetch_bars 单一联网口。OCTOPUS_WEEKLY=0 / --no-weekly 关闭、
       --weekly-only 研究模式；数据取不到、样本不足或自检不过 → 整栏缺席。规则合成，
       非投资建议。
 
-  18. 「AI 七日港股走势分析概率」（output/hk_seven_day.py，2026-09-29 起，取代原
+  18. 「AI 七日港股走势分析概率」子块（output/hk_seven_day.py，2026-09-29 起，取代原
       「每日量化策略（行业轮动）」栏目：该栏目从上线到 09-28 的 58 份日报出现率 0/58，
-      东财行业板块两步取数在真实环境未跑通）：恒生指数 / 恒生科技 / 国企指数三只标的、
-      未来 7 个交易日（按交易日计数、假期顺延）的收盘上涨概率。量化基准复用
-      octopus_weekly 的因果引擎（视界改 7：扩张基准率 + 20 日特征最近邻、s+7≤t 已结算
+      东财行业板块两步取数在真实环境未跑通；2026-09-30 起由独立栏目并入第 17 节
+      【贪吃大白鲨】量化走势预测成为栏内子块，两路数据任一可用即出栏目，数据源键名 /
+      审计标签 / 留痕文件各自保留）：恒生指数 / 恒生科技 / 国企指数三只标的、未来 7 个
+      交易日（按交易日计数、假期顺延）的收盘上涨概率 + 依据 / 风险 / 三道防线。量化基准
+      复用 octopus_weekly 的因果引擎（视界 7：扩张基准率 + 20 日特征最近邻、s+7≤t 已结算
       锚点、截断不变性自检、5%~95% 夹逼）；大模型（OpenAI 兼容 /chat/completions：
       OCTOPUS_LLM_API_KEY / OCTOPUS_LLM_BASE_URL / OCTOPUS_LLM_MODEL）只在给定数据内做
       合成研判——概率偏离量化基准 >20pp 即收敛、文案数字必须能在本次数据里溯源、
       绝对化措辞与编造数字一律回退量化口径。OCTOPUS_HK7_FALLBACK 三档：默认 auto ——
-      未配置 Key 时整栏缺席且不进审计，已配置但调用失败才降级量化基准；=1 没有 Key 也
-      降级渲染；=0 任何大模型不可用都整栏缺席。预测先存档（output/hk7_forecast.json，
+      未配置 Key 时该子块缺席且不进审计，已配置但调用失败才降级量化基准；=1 没有 Key 也
+      降级渲染；=0 任何大模型不可用都整子块缺席。预测先存档（output/hk7_forecast.json，
       settled=False），满 7 个交易日按真实收盘结算，样本 <10 只报样本量。
       OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
 
@@ -221,6 +233,23 @@
       （总源数仍为 8，两路仍分别留痕）、当天检验与推送门禁、超长日报拆分逻辑。
       历史归档日报不改写。
 
+  21. 第二批栏目更名（2026-09-29 按用户要求，只改标题文字，栏目内容 / 顺序 / 抓取 /
+      推送门禁与拆分逻辑完全不变）：
+        全球头条          → **【无敌帝王蟹】全球头条**
+        趋势跟踪          → **【深海大鲨鱼】趋势跟踪**
+        政策因子          → **【深海肥蓝鲸】政策因子**
+        每周量化走势预测   → **【贪吃大白鲨】量化走势预测**（按用户给的新名，标题不再带「每周」，
+                          周度口径仍在栏目内如实披露：「未来 5 个交易日」「锚定 X 收盘」）
+      四个标题集中定义为 SECTION_TITLE_GLOBAL_HEADLINES / SECTION_TITLE_TREND /
+      SECTION_TITLE_POLICY / SECTION_TITLE_WEEKLY_FORECAST，与第 19 条的四个常量并列，
+      guizang 与 pixel 两个主题共用；首屏速览按栏目标题引用，因此自动跟随新名。
+      **只改「标题文字」的边界**：数据源键名与审计标签（全球头条 / 国家政策（中国政府网）/
+      每周走势预测 / Reddit…）、freshness_checker 与 backup_sources 的源名、新闻情绪里的
+      来源归属（「全球头条1条」）、像素主题英文关卡名（GLOBAL HEADLINES / TREND TRACKING /
+      POLICY SHOCK / WEEKLY FORECAST）与图标砖短标签一律不变——它们是数据线的名字，
+      不是栏目标题。风险提示里的跨栏目引用（「『栏目名』第NN条」）指向正文栏目头，
+      因此同步用新标题，读者按名字能找到栏目。历史归档日报不改写。
+
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
   1 = 应当推送却失败，或用法错误。
@@ -248,6 +277,7 @@ import glob
 import json
 import threading
 import xml.etree.ElementTree as ET
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from html import escape as _html_escape, unescape as _html_unescape
 from html.parser import HTMLParser
@@ -281,6 +311,7 @@ if SCRIPT_DIR not in sys.path:
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
+import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
 import backup_sources as _backup  # noqa: E402
@@ -297,6 +328,9 @@ WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
 # 「鲜鲜解读」开关（2026-09-29 新增）：每个数据栏目末尾追加一行「🦑 鲜鲜解读」，
 # 把当栏关键数字翻译成大白话 + 网络梗，帮入门读者降低阅读门槛。
 # 纯规则合成（output/octopus_ren.py）：可复现、不伪造数字、数据不足自动缺席。
+# 2026-09-30 起解读末尾按行情状态确定性点缀「🦐 活鲜度」标签 + 一句活鲜比喻，
+# 「⌁ AI 研判」行也按方向点缀一句短比喻——词库见 output/octopus_lexicon.py
+# （条件驱动、点缀不含数字、认不出方向就不点缀；随 OCTOPUS_REN 一并开关）。
 # OCTOPUS_REN=0 / --no-ren 整体关闭。
 REN_ENABLED = _ren.ENABLED
 # AI 七日港股走势分析概率开关：OCTOPUS_HK7=0 或 --no-hk7 可整体跳过；
@@ -322,14 +356,23 @@ PUSHPLUS_MAX_CONTENT_CHARS = int(os.environ.get("PUSHPLUS_MAX_CONTENT_CHARS", "1
 PUSHPLUS_MULTIPART = str(os.environ.get("PUSHPLUS_MULTIPART", "1")).strip().lower() not in ("0", "false", "no")
 # 多条推送之间的间隔秒数，避免触发 PushPlus「发送频繁」频率限制（每条仍各自退避重试）。
 PUSHPLUS_PART_DELAY = float(os.environ.get("PUSHPLUS_PART_DELAY", "2"))
-# 渲染时插入的两个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
-#   PART_BREAK_MARK —— 每个栏目之前，拆分时切在这里，保证每条消息都从完整栏目开始；
-#   DOC_FOOT_MARK   —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
-# 有了这两个标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
-# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 页脚 + 闭合标签，
+# PushPlus 频率限制：同一 token「1 分钟内接收 5 次请求，超出的请求将不再推送」。
+# 分条推送时按这个窗口主动排队（而不是等被平台丢弃后再退避重试），保证每条都能送达。
+PUSHPLUS_RATE_WINDOW = float(os.environ.get("PUSHPLUS_RATE_WINDOW", "60"))
+PUSHPLUS_RATE_MAX = int(os.environ.get("PUSHPLUS_RATE_MAX", "5"))   # 0 = 关闭排队
+# 渲染时插入的三个「分条标记」（HTML 注释，浏览器与微信端都不可见，不影响阅读）：
+#   PART_BREAK_MARK   —— 每个栏目之前，拆分时优先切在这里，让每条消息尽量从完整栏目开始；
+#   SECTION_BODY_MARK —— 栏目头与栏目正文之间，栏目被切开时续片据此重开栏目头（读者一眼看出在续哪一栏）；
+#   DOC_FOOT_MARK     —— 页脚（免责声明）之前，它到文末的部分就是「页脚 + 全部闭合标签」。
+# 有了这些标记，超长日报就能被切成 N 份「各自都是完整可渲染的 HTML 文档」：
+# 每份 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目（可能含一栏的续片）+ 页脚 + 闭合标签，
 # 微信端排版与单条推送完全一致，且全部内容按原顺序送达。
 PART_BREAK_MARK = "<!--SPLIT-->"
+SECTION_BODY_MARK = "<!--BODY-->"
 DOC_FOOT_MARK = "<!--FOOT-->"
+# 分条时的「栏目内续接」阈值：当前条剩余空间不足这么多字的正文时，不切开栏目，
+# 整栏挪到下一条，避免出现「横幅 + 栏目头 + 一两行字」的碎片条。
+PUSHPLUS_SPLIT_MIN_BODY = int(os.environ.get("PUSHPLUS_SPLIT_MIN_BODY", "1500"))
 # 单份日报最多拆成多少条（防御性上限：正常 25 万字日报约 3 条）
 PUSHPLUS_MAX_PARTS = int(os.environ.get("PUSHPLUS_MAX_PARTS", "12"))
 
@@ -3226,7 +3269,7 @@ def fetch_hk_quant():
 
 
 # ============================================================
-# 每周量化走势预测：未来一周（5 个交易日）港股升跌方向与概率
+# 每周量化走势预测：未来 7 个交易日逐日表格（恒指升跌方向 / 概率 / 理由 / 分析 / AI 操作建议）
 # ------------------------------------------------------------
 # 方法来自 GitHub 无未来函数（look-ahead）量化工程实践调研：
 #   · 输入闭合：只读本次抓取的日线快照（^HSI 2y 日线）；
@@ -3366,29 +3409,65 @@ def fetch_hk_seven_day(data=None):
         llm_error=(res.get("llm_reason") if res.get("engine") != "llm" else None))
 
 
-def fetch_weekly_forecast():
-    """运行每周量化走势预测（恒指日线 · 无未来函数），失败时如实降级。"""
-    print("📡 正在计算每周量化走势预测（恒生指数 · 未来一周 · 无未来函数）...")
+def _calendar_events_for_weekly(cal_result):
+    """把「时间节点」栏目抓到的财经日程压成逐日表格要用的事件提醒 [{date, name, imp}]。
+
+    只取 ★★ 及以上（重要度 ≥2）、日期在锚定日之后的条目；日程只用于「事件日提醒」，
+    绝不参与概率计算（日程本身不含方向信息）。日历缺席就返回空列表，逐日表格照常出。
+    """
+    if not isinstance(cal_result, dict) or cal_result.get("status") != "success":
+        return []
+    out = []
+    for it in cal_result.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        try:
+            imp = int(it.get("imp") or 0)
+        except (TypeError, ValueError):
+            imp = 0
+        date_str = str(it.get("date") or "")[:10]
+        if imp >= 2 and date_str:
+            out.append({"date": date_str, "name": str(it.get("name") or ""), "imp": imp})
+    return out
+
+
+def fetch_weekly_forecast(cal_result=None):
+    """运行【贪吃大白鲨】量化走势预测（恒指日线 · 未来 7 个交易日逐日表格 · 无未来函数）。
+
+    cal_result: 可选，本次抓到的「时间节点」财经日历结果；用来给逐日表格标注事件日
+    （★★★ 日程 → 「事件日波动可能放大」提醒），不参与任何概率计算。失败时如实降级。
+    """
+    print("📡 正在计算【贪吃大白鲨】量化走势预测（恒生指数 · 未来 7 个交易日逐日 · 无未来函数）...")
     if not WEEKLY_ENABLED:
-        print("  ⏭ 每周预测已关闭（OCTOPUS_WEEKLY=0 / --no-weekly）")
+        print("  ⏭ 量化走势预测已关闭（OCTOPUS_WEEKLY=0 / --no-weekly）")
         return _source_result("每周量化走势预测", "unavailable", result=None,
                               error="本次运行已关闭每周预测")
+    events = _calendar_events_for_weekly(cal_result)
     try:
         res = _weekly.run_weekly(
             safe_request,
-            history_path=os.path.join(REPORT_DIR, WEEKLY_HISTORY_FILENAME))
+            history_path=os.path.join(REPORT_DIR, WEEKLY_HISTORY_FILENAME),
+            events=events)
     except Exception as exc:                       # 预测异常不影响日报其它栏目
-        print(f"  ⚠️ 每周预测异常：{exc}")
+        print(f"  ⚠️ 量化走势预测异常：{exc}")
         return _source_result("每周量化走势预测", "unavailable", result=None, error=str(exc))
 
     if not res.get("available"):
-        print(f"  ⚠️ 每周预测暂不可用：{res.get('reason')}")
+        print(f"  ⚠️ 量化走势预测暂不可用：{res.get('reason')}")
         return _source_result("每周量化走势预测", "unavailable", result=None,
                               error=str(res.get("reason") or "样本不足"))
 
     entry = res.get("entry") or {}
-    print(f"  ✅ 周度预测：{entry.get('label')}（锚定 {entry.get('base_date')} 收盘"
+    daily = res.get("daily") or {}
+    print(f"  ✅ 七日整段：{entry.get('label')}（锚定 {entry.get('base_date')} 收盘"
           f" → 未来 {entry.get('target_sessions')} 个交易日）")
+    rows = daily.get("rows") or []
+    if rows:
+        ups = sum(1 for r in rows if r.get("direction") == "up")
+        downs = sum(1 for r in rows if r.get("direction") == "down")
+        print(f"  ✅ 逐日表格：{len(rows)} 行（{rows[0].get('date')} ~ {rows[-1].get('date')}）"
+              f" · 看涨 {ups} / 看跌 {downs} / 中性 {len(rows) - ups - downs}"
+              + (f" · 事件日提醒 {sum(1 for r in rows if r.get('events'))} 天" if events else ""))
     bt = res.get("backtest") or {}
     if bt.get("hit_rate") is not None:
         print(f"  ✅ 滚动样本外：{bt['n']} 期 · 命中 {bt['hit_rate'] * 100:.0f}%"
@@ -3934,13 +4013,15 @@ def collect_all_data():
     data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
 
-    data["每周走势预测"] = fetch_weekly_forecast()
-    time.sleep(0.5)
-
+    # 「时间节点」财经日历先抓：逐日表格要用窗口内的 ★★★ 日程做「事件日提醒」
+    # （日程不参与概率计算，缺席也只是少一行提醒，不影响预测）。
     if ECON_CALENDAR_ENABLED:
         print(f"\n📅 正在抓取「时间节点」· 未来 {ECON_CALENDAR_DAYS} 天影响经济时间点（东方财富财经日历）...")
         data["财经日历"] = fetch_econ_calendar()
         time.sleep(0.5)
+
+    data["每周走势预测"] = fetch_weekly_forecast(data.get("财经日历"))
+    time.sleep(0.5)
 
     print("\n📰 正在采集趋势跟踪（多平台信息员：" + " + ".join(_active_public_site_names())
           + "；另有全网 20 个新闻源头港股挖掘）...")
@@ -4248,7 +4329,6 @@ _SECTION_ICON_META = {
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
-    "HK 7D PROB": ("◧", "HK-7D", C_CYAN, "#092836"),
 }
 
 
@@ -4510,7 +4590,7 @@ def _section(num, kicker_en, title, content, badge_html="", caption=""):
 </tr>
 </table>
 {caption_html}
-{content}
+{SECTION_BODY_MARK}{content}
 </div>'''
 
 
@@ -5156,14 +5236,17 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
     meta_bits = [x for x in (badge_html, caption) if x]
     meta = (f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;'
             f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
-    return (
+    head = (
         f'<div style="padding:28px 0 0;border-top:1px solid {GZ_HAIR};color:{GZ_INK};background:{GZ_PAPER}">'
         f'<div style="padding-top:12px;color:{GZ_KLEIN};font-size:11px;'
         f'font-weight:700;letter-spacing:0.12em">{num} · {_esc(kicker_en)}</div>'
         f'<h2 style="margin:4px 0 0;font-size:{GZ_FS_SECTION}px;'
-        f'color:{GZ_INK_STRONG}">{_esc(title)}</h2>{meta}{content}'
-        f'</div>'
+        f'color:{GZ_INK_STRONG}">{_esc(title)}</h2>{meta}'
     )
+    body = f'{content}</div>'
+    # 栏目标记：栏目头与正文之间留一个不可见锚点，供「超长日报按栏目装箱合并推送」时
+    # 在栏目内部续接（续片重开栏目头，读者一眼看出在续哪一栏）。
+    return head + SECTION_BODY_MARK + body
 
 
 def gz_ai_analysis_block(res):
@@ -5585,6 +5668,42 @@ def _market_review_meta(kit, market, pan):
     return " · ".join(badges), caption
 
 
+def _weekly_merged_meta(kit, weekly_src, hk7_src):
+    """【贪吃大白鲨】量化走势预测（合并栏目）的徽标与副标题：两路数据分别标状态。
+
+    2026-09-30 起本节合并原「AI 七日港股走势分析概率」：① 恒指未来 7 个交易日逐日表格
+    （因果量化引擎）与 ② 恒指 / 恒科 / 国企三指数七日概率（大模型研判，失败降级量化基准）
+    两路任一可用即出栏目。各路出自己的状态徽标与来源名（「 ＋ 」相接）；暂缺的一路在副标题
+    写明，读者不会把一路的状态误当成整栏的状态。数据源键名 / 审计标签 / 留痕文件各自保留。
+    """
+    def _res(src):
+        return (src.get("result") or {}) if isinstance(src, dict) else {}
+
+    badges, names, missing = [], [], []
+    wk_ok = bool(_res(weekly_src).get("available"))
+    hk_ok = bool(_res(hk7_src).get("available"))
+    if wk_ok:
+        badges.append(kit.badge("七日预测", "ai"))
+        nm = _short_source(weekly_src)
+        if nm:
+            names.append(nm)
+    else:
+        missing.append("逐日表格")
+    if hk_ok:
+        eng = _res(hk7_src).get("engine")
+        badges.append(kit.badge("大模型研判" if eng == "llm" else "量化降级", "ai"))
+        nm = _short_source(hk7_src)
+        if nm:
+            names.append(nm)
+    else:
+        missing.append("AI 七日港股")
+    caption = " ＋ ".join(names)
+    if missing and (wk_ok or hk_ok):
+        note = "暂缺：" + "、".join(missing)
+        caption = f"{caption} · {note}" if caption else note
+    return " · ".join(b for b in badges if b), caption
+
+
 def _trend_clue_item_row(item, pick_no, base, color, kit, title_limit=235):
     """单条平台样本行（链接 + 元信息），非法链接 / 空标题整体剔除。"""
     url = _public_url(item.get("url"), base)
@@ -5745,7 +5864,7 @@ def _market_brief(market, labels, kit, with_date=False):
 
 
 def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
-    """页首「今日预判」：倾向 → 量化预测 → 周度预测 → 核心判断 → 各市场一句话 → 政策定调。"""
+    """页首「今日预判」：倾向 → 量化预测 → 七日预测 → 核心判断 → 各市场一句话 → 政策定调。"""
     pairs = []
     # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
     if quant and quant.get("available"):
@@ -5756,14 +5875,14 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
                           f'{_esc(head.get("label", "中性"))} '
                           f'{head.get("p_up", 0) * 100:.0f}%</b>'
                           f' · {_esc(quant.get("target_label") or "下一交易日")}'))
-    # 周度预测：未来一周（5 个交易日）港股方向与概率（独立周度视角）
+    # 七日预测：未来 7 个交易日港股累计方向与概率（逐日表格的整段结论口径）
     if weekly and weekly.get("available"):
         wk_entry = weekly.get("entry") or {}
         if wk_entry.get("label"):
-            pairs.append(("周度预测",
+            pairs.append(("七日预测",
                           f'<b>{_esc(str(wk_entry.get("label") or ""))}</b>'
                           f' · 锚定 {_esc(str(wk_entry.get("base_date") or ""))} 收盘'
-                          f' · 未来 {_esc(str(wk_entry.get("target_sessions") or _weekly.HORIZON))} 个交易日'))
+                          f' · 未来 {_esc(str(wk_entry.get("target_sessions") or _weekly.PATH_MAX))} 个交易日'))
     if ai_result and ai_result.get("available"):
         score = int(ai_result["score"])
         arrow = "▲" if score > 8 else ("▼" if score < -8 else "■")
@@ -5902,12 +6021,23 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 #   未来30天影响经济时间点  → 【探照安康鱼】时间节点（窗口天数仍在栏目「窗口摘要 · 时间窗口」里）
 #   量化预测总览           → 【蜉蝣天地水母】量化预测总览
 #   行情速览 + 全球大盘全景复盘（2026-09-30 合并去重）→ 【及时秋刀鱼】AI 行情复盘
+# 第二批改名（2026-09-29 同日追加，同样只改标题文字）：
+#   每周量化走势预测        → 【贪吃大白鲨】量化走势预测
+#   政策因子               → 【深海肥蓝鲸】政策因子
+#   趋势跟踪               → 【深海大鲨鱼】趋势跟踪
+#   全球头条               → 【无敌帝王蟹】全球头条
+# 数据源键名（全球头条 / 国家政策 / 每周走势预测 …）、审计标签、抓取与门禁一律不动，
+# 因此「数据线主备」注册表与 freshness_checker 的源名保持原样。
 # ------------------------------------------------------------
 SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
+SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
+SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
+SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
+SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
 
 # 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情复盘 / 政策 / 研判依据）
 #           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
@@ -5916,7 +6046,7 @@ REPORT_SECTION_ORDER = (
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
     "MARKET REVIEW", "POLICY SHOCK",
-    "FED TREND", "GEO TREND", "STRATEGY READ", "HK 7D PROB",
+    "FED TREND", "GEO TREND", "STRATEGY READ",
     "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
     "SUMMARY",
@@ -6397,11 +6527,13 @@ def _section_note_texts(notes, kicker):
             if isinstance(notes.get(key), dict) and notes[key].get("text")]
 
 
-def _ai_judge_row(note, kit, aspect=""):
+def _ai_judge_row(note, kit, aspect="", seed=""):
     """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。
 
     aspect：合并栏目（【及时秋刀鱼】AI 行情复盘）里标明这一行是哪一路证据
     （报价面 / A股全景面），两套口径各自出概率，不混算成一个数。
+    seed：🦐 活鲜点缀的确定性种子（含日期 + 栏目），同一天同一栏永远同一句比喻；
+    点缀只加在渲染文字上，note["text"] 本体不动（首屏速览等读 note 的地方不受影响）。
     """
     bull_c, bear_c, flat_c = kit.ok_color, kit.bad_color, kit.warn_color
     lc = (bull_c if note["label"] == "偏多"
@@ -6415,7 +6547,13 @@ def _ai_judge_row(note, kit, aspect=""):
         head = (f'<span style="color:{lc};font-weight:900;">{title} {note["mark"]} {note["label"]}</span>'
                 f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
                 f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
-    return kit.item_row("⌁", f"{head} — {note['text']}")
+    try:
+        tail = _lex.garnish_judgment(note.get("label"), note.get("bull_pct"),
+                                     seed or f'{note.get("label")}|{aspect}')
+    except Exception:
+        tail = ""
+    text = f"{note['text']}（{tail}）" if tail else note["text"]
+    return kit.item_row("⌁", f"{head} — {text}")
 
 
 def _ren_judgment_row(text, kit):
@@ -6432,38 +6570,124 @@ def _ren_judgment_row(text, kit):
     return kit.item_row("", head, _esc(_ren.DISCLAIMER))
 
 
-def _weekly_forecast_block(res, kit):
-    """每周量化走势预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
+def _weekly_daily_table(daily, kit):
+    """逐日表格（未来 7 个交易日）：一行一天，只放**扫一眼就能读**的预测数字。
 
-    结论型栏目：全部数字来自本次计算与留痕文件，零写死叙事；
-    无未来函数口径（截断不变性自检 / s+5≤t 类比 / 先存档后结算）在栏内如实披露。
+    列 = 交易日 / 预测（方向 + 累计上涨概率）/ 当日环比 / 预期区间（80% 中心）/ 建议仓位；
+    理由、分析、AI 操作建议的长文本放在下面的逐日卡里，数字不在两处重复出现。
+    """
+    rows = daily.get("rows") or []
+    if not rows:
+        return ""
+    esc = kit.esc
+    grid = []
+    for r in rows:
+        adv = r.get("advice") or {}
+        day = f'T+{int(r.get("k") or 0)} · {esc(str(r.get("date") or "")[5:])} {esc(str(r.get("weekday") or ""))}'
+        pred = esc(str(r.get("label") or ""))
+        p_day = r.get("p_day")
+        dod = "—" if p_day is None else f'{p_day * 100:.0f}%'
+        lo, hi = r.get("band_lo"), r.get("band_hi")
+        band = f'{lo:,.0f}–{hi:,.0f}' if (lo and hi) else "—"
+        pos = adv.get("position")
+        pos_txt = f'≤{int(pos)}%' if pos is not None else "—"
+        grid.append([day, pred, dod, band, pos_txt])
+    header = ["交易日", "预测（累计上涨概率）", "当日环比", "预期区间（80%）", "建议仓位"]
+    aligns = ["left", "left", "right", "right", "right"]
+    return kit.table(header, grid, aligns=aligns)
+
+
+def _weekly_daily_cards(daily, kit):
+    """逐日理由 · 分析 · AI 操作建议：一天一张卡，长文本在这里展开（不与表格重复数字）。"""
+    rows = daily.get("rows") or []
+    if not rows:
+        return ""
+    esc = kit.esc
+    cards = []
+    for r in rows:
+        adv = r.get("advice") or {}
+        icon = {"up": "▲", "down": "▼"}.get(r.get("direction"), "■")
+        head = (f'{icon} <b>{esc(str(adv.get("stance") or ""))}</b> · '
+                f'T+{int(r.get("k") or 0)} {esc(str(r.get("date") or "")[5:])} '
+                f'{esc(str(r.get("weekday") or ""))}')
+        lines = []
+        if r.get("reason"):
+            lines.append(f'<b>理由</b> · {esc(str(r["reason"]))}')
+        if r.get("analysis"):
+            lines.append(f'<b>分析</b> · {esc(str(r["analysis"]))}')
+        # AI 操作建议：仓位（表格已给）之外的止损 / 止盈 / 建仓区，都是建议专有数字
+        adv_bits = []
+        if adv.get("stop_pct") is not None:
+            stop_price = adv.get("stop_price")
+            stop_txt = f'止损 {adv["stop_pct"] * 100:.1f}%'
+            if stop_price:
+                stop_txt += f'（{stop_price:,.0f}）'
+            adv_bits.append(stop_txt)
+        if adv.get("take_profit"):
+            adv_bits.append(f'止盈参考 {adv["take_profit"]:,.0f}')
+        if adv_bits:
+            lines.append(f'<b>AI 操作建议</b> · {" · ".join(adv_bits)}')
+        if adv.get("entry_hint"):
+            lines.append(f'建仓 · {esc(str(adv["entry_hint"]))}')
+        # 提醒：跳过 notes[0]（= T+k 持有口径 · 仓位，已在表格）与末条（统一免责，栏末只写一次）
+        for extra in (adv.get("notes") or [])[1:-1]:
+            lines.append(f'⚠ {esc(str(extra))}')
+        cards.append(kit.item_row(icon, head, "<br>".join(lines)))
+    return kit.rows("".join(cards))
+
+
+def _weekly_forecast_block(res, kit):
+    """【贪吃大白鲨】量化走势预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
+
+    2026-09-29 起升级为**未来 7 个交易日逐日表格**：① 逐日表格（预测数字，一行一天）
+    → ② 逐日理由 / 分析 / AI 操作建议（长文本卡）→ ③ 七日整段结论（P(7日涨) + 因子 +
+    回测 + 留痕）→ ④ 无未来函数口径披露。结论型栏目：全部数字来自本次因果扫描与留痕文件，
+    零写死叙事；日程只做「事件日提醒」，不参与概率。
     """
     entry = res.get("entry") or {}
+    daily = res.get("daily") or {}
     if not entry or entry.get("p_up") is None:
         return ""
     esc = kit.esc
+    horizon = int(res.get("horizon") or entry.get("target_sessions") or _weekly.PATH_MAX)
+    out = []
+
+    # ── ① 逐日表格 + ② 逐日理由/分析/AI 操作建议（栏目的主体，用户要的「未来七天表格」）──
+    drows = daily.get("rows") or []
+    if drows:
+        sym = esc(str(daily.get("symbol_label") or res.get("symbol_label")
+                      or entry.get("symbol_label") or ""))
+        base_txt = (f'锚定 {esc(str(daily.get("base_date") or entry.get("base_date") or ""))}'
+                    f' 收盘 {daily.get("base_close") or 0:,.0f}（{sym}）· '
+                    f'未来 {horizon} 个交易日 · 概率夹 5%~95%')
+        out.append(kit.sub(f"未来 {horizon} 个交易日 · 逐日走势预测（{sym}）"))
+        out.append(kit.item_row("◧", f"<b>逐日表格</b>", base_txt))
+        out.append(_weekly_daily_table(daily, kit))
+        out.append(kit.sub("逐日理由 · 分析 · AI 操作建议"))
+        out.append(_weekly_daily_cards(daily, kit))
+
+    # ── ③ 七日整段结论（= 逐日表格第 7 行的累计口径，同一批数字，不另算一套）──
     p_up = float(entry["p_up"])
     icon = {"up": "▲", "down": "▼"}.get(entry.get("direction"), "■")
-    rows = [kit.item_row(
+    out.append(kit.sub(f"七日整段结论（{horizon} 个交易日累计）"))
+    concl = [kit.item_row(
         icon, f'<b>{esc(str(entry.get("label") or ""))}</b>',
-        f'锚定 {esc(str(entry.get("base_date") or ""))} 收盘'
-        f'（{esc(str(entry.get("symbol_label") or entry.get("symbol") or ""))}）'
-        f' · 未来 {int(entry.get("target_sessions") or _weekly.HORIZON)} 个交易日'
-        f' · {esc(str(entry.get("target_note") or ""))}')]
+        f'= 逐日表格第 {horizon} 行累计口径 · {esc(str(entry.get("target_note") or ""))}')]
 
-    # 概率拆解：基准率 + 相似样本 + 合成规则（不足 4 个类比则如实退化）
+    # 概率拆解：基准率 + 相似样本 + 合成规则（不足则如实退化）
     if entry.get("blended") and entry.get("p_sim") is not None:
-        prob_sub = (f'历史基准 {float(entry.get("p_base") or 0.5) * 100:.0f}%'
-                    f' · 相似样本 {float(entry["p_sim"]) * 100:.0f}%'
-                    f'（{int(entry.get("n_analog") or 0)} 个已结算近邻）'
-                    f' · 已结算 {int(entry.get("n_resolved") or 0)} 周为底 · 50/50 合成夹 5%~95%')
+        prob_sub = (f'历史基准 {float(entry.get("p_base") or 0.5) * 100:.0f}% · '
+                    f'相似样本 {float(entry["p_sim"]) * 100:.0f}%'
+                    f'（{int(entry.get("n_analog") or 0)} 个已结算近邻） · '
+                    f'已结算 {int(entry.get("n_resolved") or 0)} 个 {horizon} 日样本为底 · '
+                    f'50/50 合成夹 5%~95%')
     else:
-        prob_sub = (f'相似样本不足 {_weekly.MIN_ANALOGS} 个，退化为历史基准'
-                    f' {float(entry.get("p_base") or 0.5) * 100:.0f}%'
-                    f'（已结算 {int(entry.get("n_resolved") or 0)} 周）· 概率夹 5%~95%')
-    rows.append(kit.item_row("P", f'P(周涨) {p_up * 100:.0f}%', prob_sub))
+        prob_sub = (f'相似样本不足 {_weekly.MIN_ANALOGS} 个，退化为历史基准 '
+                    f'{float(entry.get("p_base") or 0.5) * 100:.0f}%'
+                    f'（已结算 {int(entry.get("n_resolved") or 0)} 个样本）· 概率夹 5%~95%')
+    concl.append(kit.item_row("P", f'P({horizon}日涨) {p_up * 100:.0f}%', prob_sub))
 
-    # 关键因子（20 日窗口；全部 ≤t 数据，窗口内/扩张因果归一）
+    # 关键因子（20 日窗口；全部 ≤t 数据，逐期扩张因果归一）
     f = entry.get("factors") or {}
     bits = [f'{label} {float(f[key]) * 100:+.1f}%'
             for key, label in (("ret5", "5日"), ("ret10", "10日"), ("ret20", "20日"))
@@ -6477,48 +6701,55 @@ def _weekly_forecast_block(res, kit):
     if f.get("dd20") is not None:
         sub_bits.append(f'距20日高点 {float(f["dd20"]) * 100:+.1f}%')
     if bits:
-        rows.append(kit.item_row("▤", " · ".join(bits), " · ".join(sub_bits)))
+        concl.append(kit.item_row("▤", " · ".join(bits), " · ".join(sub_bits)))
 
     # 滚动样本外体检（walk-forward；样本 <10 只报样本量）
     bt = res.get("backtest") or {}
     if bt.get("hit_rate") is not None:
-        rows.append(kit.item_row(
+        concl.append(kit.item_row(
             "↺", f'{int(bt.get("n") or 0)} 期 · 命中 {bt["hit_rate"] * 100:.0f}%'
                  f'（恒定基准 {bt["base_rate"] * 100:.0f}%）· Brier {bt["brier"]:.3f}',
-            '滚动样本外（walk-forward）：每步只用 ≤t 数据打分 · 相邻窗口重叠 5 个交易日'))
+            f'滚动样本外（walk-forward）：每步只用 ≤t 数据打分 · 相邻窗口重叠 {horizon} 个交易日'))
     else:
-        rows.append(kit.item_row(
+        concl.append(kit.item_row(
             "↺", esc(str(bt.get("note") or "回测样本不足")),
             '滚动样本外（walk-forward）体检暂无结论'))
 
-    # 预测留痕：先存档后结算；样本 <10 不下命中率结论
+    # 预测留痕：先存档后结算；样本 <10 不下命中率结论；新旧视界分开记账
     jr = res.get("journal") or {}
+    by_h = jr.get("by_horizon") or {}
     if jr.get("hit_rate") is not None:
         j_txt = (f'已结算 {int(jr.get("n") or 0)} 次 · 命中 {int(jr.get("hits") or 0)}'
                  f'（{jr["hit_rate"] * 100:.0f}%）')
     elif jr.get("n"):
-        j_txt = f'已结算 {int(jr["n"])} 次（样本 <10，只报样本量）'
+        j_txt = f'已结算 {int(jr.get("n"))} 次（样本 <10，只报样本量）'
     else:
-        j_txt = "预测已存档（settled=False），待满 5 个交易日按真实收盘结算"
+        j_txt = f'预测已存档（settled=False），待满 {horizon} 个交易日按真实收盘结算'
+    if len(by_h) > 1:
+        mix = "、".join(f'{h}日 {v["n"]} 次' + (f'（命中 {v["hit_rate"] * 100:.0f}%）'
+                        if v.get("hit_rate") is not None else "")
+                        for h, v in sorted(by_h.items()))
+        j_txt += f' · 分视界：{mix}'
     recent = jr.get("recent") or []
     recent_txt = " · ".join(
         f'{esc(str(r.get("date") or ""))} '
         f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
         f'{"✓" if r.get("hit") else "✗"}'
         for r in recent)
-    rows.append(kit.item_row(
-        "✓", "<b>预测留痕</b>",
-        f"{j_txt}<br>{recent_txt}" if recent_txt else j_txt,
-    ))
+    concl.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+    out.append(kit.rows("".join(concl)))
 
-    note_sub = (f'截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
-                f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
-                f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
-                f' · 先存档后结算（weekly_forecast.json · settled 字段）'
-                f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
-    # 口径行按 item_row 走（pixel 精简排版会丢弃 note 脚注，两主题都必须能看到口径披露）
-    rows.append(kit.item_row("⚖", "<b>无未来函数口径</b>", note_sub))
-    return kit.rows("".join(rows))
+    # ── ④ 无未来函数口径披露（截断不变性自检覆盖全部 7 个视界）──
+    note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
+            f' · 逐日表格 {horizon} 行与整段结论出自同一次因果扫描（视界 1~{horizon} 各自独立记账）'
+            f' · 特征只用 ≤t 数据（逐期扩张归一，绝无全样本统计量）'
+            f' · 相似样本标签须已结算（s+h≤t，purged/embargo 依据）'
+            f' · 预期区间为 80% 中心区间（z={_weekly.BAND_Z}，σ 取 20 日实测波动）'
+            f' · AI 操作建议为规则合成（概率档位 → 仓位，波动分位 → 降杠杆，σ√k → 止损）'
+            f' · 先存档后结算（weekly_forecast.json · settled 字段）'
+            f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
+    out.append(kit.item_row("⚖", note))
+    return "".join(out)
 
 
 def _hk_seven_day_block(res, kit):
@@ -6643,7 +6874,7 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
     groups = [
         ("市场与资金", {"MARKET REVIEW", "LIQUIDITY FLOW"}),
         ("量化与策略", {"QUANT FORECAST", "HK PROBABILITY", "WEEKLY FORECAST",
-                       "STRATEGY READ", "HK 7D PROB"}),
+                       "STRATEGY READ"}),
         ("政策与日程", {"ECON CALENDAR", "POLICY SHOCK", "FED TREND", "GEO TREND"}),
         ("资讯与情绪", {"TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
                        "HK GURU CHANNELS", "NEWS SENTIMENT"}),
@@ -6726,7 +6957,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             source_items.append((_tk, data[_tk]))
     # 每周量化走势预测 / AI 七日港股走势分析概率：独立栏目，存在即按需进审计。
     if isinstance(data.get("每周走势预测"), dict):
-        source_items.append(("每周量化走势预测（恒指·5交易日）", data["每周走势预测"]))
+        source_items.append(("每周量化走势预测（恒指·7交易日）", data["每周走势预测"]))
     if isinstance(data.get(HK7_SOURCE_NAME), dict):
         source_items.append((HK7_SOURCE_NAME, data[HK7_SOURCE_NAME]))
     # 全网 20 个新闻源头（港股挖掘）：与社区平台同为趋势跟踪，按需加入审计；
@@ -6772,27 +7003,32 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "LIQUIDITY FLOW", "资金流动性分析", lq_html,
                 kit.source_badge(quant_src), _short_source(quant_src))
 
-    # ---- 每周量化走势预测：未来一周港股方向与概率（无未来函数 · 独立周度视角）----
+    # ---- 【贪吃大白鲨】量化走势预测（2026-09-29 起：未来 7 个交易日逐日表格）----
+    #      2026-09-30 合并原「AI 七日港股走势分析概率」为栏内子块：两路数据任一可用即出栏目，
+    #      数据源键名 / 审计标签 / 留痕文件各自保留（与「行情速览 + 全景复盘」合并同一先例）。
     weekly_res = {}
     weekly_src = data.get("每周走势预测") or {}
     if isinstance(weekly_src, dict):
         weekly_res = weekly_src.get("result") or {}
-    if weekly_res.get("available") and isinstance(weekly_res.get("entry"), dict):
-        wk_html = _weekly_forecast_block(weekly_res, kit)
-        if wk_html:
-            blocks["WEEKLY FORECAST"] = (
-                "WEEKLY FORECAST", "每周量化走势预测", wk_html,
-                kit.badge("周度预测", "ai"), _short_source(weekly_src))
-
     hk7_src = data.get(HK7_SOURCE_NAME) or {}
     hk7_res = hk7_src.get("result") or {}
-    if hk7_res.get("available"):
-        hk7_html = _hk_seven_day_block(hk7_res, kit)
+
+    wk_html = ""
+    if weekly_res.get("available") and isinstance(weekly_res.get("entry"), dict):
+        wk_html = _weekly_forecast_block(weekly_res, kit) or ""
+    hk7_html = _hk_seven_day_block(hk7_res, kit) if hk7_res.get("available") else ""
+    if wk_html or hk7_html:
+        merged_html = wk_html
         if hk7_html:
-            blocks["HK 7D PROB"] = (
-                "HK 7D PROB", "AI 七日港股走势分析概率", hk7_html,
-                kit.badge("大模型研判" if hk7_res.get("engine") == "llm" else "量化降级", "ai"),
-                _short_source(hk7_src))
+            merged_html += kit.item_row(
+                "◧", "<b>AI 七日港股走势分析概率</b> · 恒指 / 恒科 / 国企",
+                "原独立栏目并入本节：三指数未来 7 个交易日概率、依据、风险与三道防线"
+                "（大模型研判，失败降级量化基准；各自留痕，规则合成参考，非投资建议）。") + hk7_html
+        wk_badge, wk_caption = _weekly_merged_meta(
+            kit, weekly_src if wk_html else None, hk7_src if hk7_html else None)
+        blocks["WEEKLY FORECAST"] = (
+            "WEEKLY FORECAST", SECTION_TITLE_WEEKLY_FORECAST, merged_html,
+            wk_badge, wk_caption)
 
     # ⓪ 时间节点（原「未来 N 天影响经济时间点」，2026-09-29 改名）：
     #    开头栏目——先看清日程窗口，再读今天的盘；窗口天数仍在栏目内「窗口摘要 · 时间窗口」显示。
@@ -6823,7 +7059,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # ③ 政策因子（PSI 量化趋势预判）
     if policy.get("available"):
         blocks["POLICY SHOCK"] = (
-            "POLICY SHOCK", "政策因子", kit.policy_block(policy), kit.badge("量化策略", "ai"), "",
+            "POLICY SHOCK", SECTION_TITLE_POLICY, kit.policy_block(policy),
+            kit.badge("量化策略", "ai"), "",
         )
         blocks["QUANT POLICY"] = blocks["POLICY SHOCK"]
 
@@ -6863,14 +7100,16 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                    for n in _active_public_site_names())):
         digest = _trend_clues_block(data, kit)
         if digest:
-            blocks["TREND TRACKING"] = ("TREND TRACKING", "趋势跟踪", digest, "", "")
+            blocks["TREND TRACKING"] = (
+                "TREND TRACKING", SECTION_TITLE_TREND, digest, "", "")
 
     # ⑥ 资讯：全球头条 / 东财快讯 / 港股名家频道（A股资讯已按用户要求移除，其数据不再采集）
     if gh_headlines:
         gh_items = kit.rows("".join(kit.headline_row(it, i)
                                     for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
-        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", "全球头条", gh_items,
-                                      kit.source_badge(google), _short_source(google))
+        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", SECTION_TITLE_GLOBAL_HEADLINES,
+                                      gh_items, kit.source_badge(google),
+                                      _short_source(google))
     if em_headlines:
         em_items = kit.rows("".join(kit.em_news_row(it, i)
                                     for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
@@ -6921,7 +7160,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             for aspect, note_key in _section_note_keys(kick):
                 note = judge_notes.get(note_key)
                 if note:
-                    content = content + _ai_judge_row(note, kit, aspect)
+                    content = content + _ai_judge_row(
+                        note, kit, aspect, seed=f"{date_str}|{kick}|{note_key}|{aspect}")
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
@@ -7043,7 +7283,7 @@ def _risk_ref_label(risk):
 def _risk_ref_detail(risk):
     """引用辅助定位：正文可见的发布时间 + 命中关键词（后者为新增信息）。"""
     bits = []
-    if risk.get("section") == "全球头条" and risk.get("source"):
+    if risk.get("section") == SECTION_TITLE_GLOBAL_HEADLINES and risk.get("source"):
         bits.append(risk["source"])
     moment = risk.get("time") or ""
     if moment and moment != "—":
@@ -7123,7 +7363,8 @@ def build_daily_quant_strategy(data):
         if isinstance(it, dict):
             headlines_struct.append({
                 "title": it.get("title", ""), "source": it.get("source", ""),
-                "section": "全球头条", "index": i, "anchor": f"h-gh-{i:02d}",
+                "section": SECTION_TITLE_GLOBAL_HEADLINES,
+                "index": i, "anchor": f"h-gh-{i:02d}",
                 "shown": i <= GH_DISPLAY_N,
                 "time": it.get("published_cst") or "", "channel": "",
             })
@@ -10069,17 +10310,23 @@ def _opening_tag_name(open_tag):
     return m.group(1).lower() if m else ""
 
 
-def _scan_open_tags(html, limit):
-    """扫描 html 前 limit 字符内的完整标签，返回可安全切点列表。
+def _scan_cut_points(html, limit):
+    """扫描 html 前 limit 字符内的完整标签，返回 (标签区间列表, 可切点列表)。
 
-    元素为 (标签结束位置, 未闭合开标签原文列表)；开标签保留原始属性，
-    续片据此原样重开父容器，样式不会丢。
+    标签区间元素为 (起, 止)，供「正文中间切点」判断某个位置是否落在标签里
+    （含跨过 limit 的那半个标签，否则正文切点可能切进标签内部）；
+    可切点元素为 (标签结束位置, 该位置之后的未闭合开标签原文列表)，
+    开标签保留原始属性，续片据此原样重开父容器，样式不会丢。
     """
     stack = []
+    spans = []
     candidates = []
     for m in _TAG_RE.finditer(html):
-        if m.end() > limit:
+        if m.start() >= limit:
             break
+        spans.append((m.start(), m.end()))
+        if m.end() > limit:
+            continue        # 跨过扫描边界的标签只用于「是否在标签里」，不作为切点
         tag, closing = m.group("tag").lower(), bool(m.group("close"))
         if tag not in _VOID_TAGS:
             if closing:
@@ -10089,7 +10336,52 @@ def _scan_open_tags(html, limit):
             else:
                 stack.append(m.group(0))
         candidates.append((m.end(), list(stack)))
-    return candidates
+    return spans, candidates
+
+
+# 正文中间切点的优先落点：切在这些字符「之后」看起来像自然断行（空白与中英标点）。
+_TEXT_CUT_AFTER = " \t\u3000，。、；：！？,.;:!?、）)】」》›…—·-"
+
+
+def _inside_entity(text, position, lookback=34):
+    """position 是否落在未结束的 HTML 实体（如 ``&amp;``）中间。"""
+    return bool(re.search(r"&[#0-9a-zA-Z]*$", text[max(0, position - lookback):position]))
+
+
+def _find_text_cut(fragment, floor, limit, spans):
+    """在一段没有标签边界的正文里找切点：不在标签里、不在 HTML 实体里。
+
+    优先切在空白 / 标点之后（读者看到的是自然断行），找不到就取预算内最后一个
+    合法位置；返回切点下标，找不到返回 None。
+    """
+    limit = min(limit, len(fragment))
+    if limit <= floor:
+        return None
+    # 标签区间之外的正文区间（从后往前找第一个可用的）。
+    # 区间一律夹到 limit 以内：spans 可能含跨过扫描边界的标签，若按原始区间取位置，
+    # 会切到 limit 之后，前面那一条就会超单条上限（被平台拒收）。
+    gaps, previous = [], floor
+    for start, end in spans:
+        start, end = min(start, limit), min(end, limit)
+        if start > previous:
+            gaps.append((previous, start))
+        previous = max(previous, end)
+        if previous >= limit:
+            break
+    if limit > previous:
+        gaps.append((previous, limit))
+    fallback = None
+    for start, end in reversed(gaps):
+        for position in range(end, start, -1):
+            if position <= floor:
+                break
+            if _inside_entity(fragment, position):
+                continue
+            if fragment[position - 1] in _TEXT_CUT_AFTER:
+                return position
+            if fallback is None:
+                fallback = position
+    return fallback
 
 
 def _closers_for(stack):
@@ -10097,56 +10389,81 @@ def _closers_for(stack):
     return "".join(f"</{_opening_tag_name(t)}>" for t in reversed(stack))
 
 
-def _split_long_fragment(fragment, budget):
-    """把单个超长片段切成若干「各自标签平衡」的片段；续片原样重开被切断的父标签。
+def _reopened_stack(fragment, after, stack):
+    """续片真正要重开的开标签：扣掉「调用方会重新带上的前缀」里已经开的那些。
 
-    返回片段列表（至少 1 个）。切不动时（budget 连一个标签都放不下）原样返回，
-    由调用方决定回退策略——绝不静默丢内容。
+    现行 guizang 栏目头自己就开着外层 ``<div>``（由正文末尾闭合）。栏目内续接时，
+    调用方会在续片前面重新拼上整段栏目头，因此 rest 不能再把栏目头里的标签开一遍，
+    否则外层 div 会叠成两层：前半段与续片都不平衡，样式也跟着错位。
+    ``after`` 就是这段前缀的长度（栏目内续接时等于栏目头长度）。
+    """
+    if after <= 0:
+        return stack
+    prefix = _scan_cut_points(fragment, after)[1]
+    base = list(prefix[-1][1]) if prefix else []
+    if base and stack[:len(base)] == base:
+        return stack[len(base):]
+    return stack
+
+
+def _split_fragment_once(fragment, budget, after=0):
+    """把 fragment 切一刀：返回 (前半段, 续片)；切不动返回 None。
+
+    前半段标签自闭合且长度 ≤ budget；续片原样重开被切断的父标签（保留原始属性），
+    因此两段都能独立渲染，拼起来仍是原文。``after`` 是「不能切开的前缀长度」
+    （栏目内续接时就是栏目头长度）：切点必须在它之后，且续片要比 after 之后的
+    正文更短——否则这一刀没有实质进展（切在栏目头里），换刀只会原地打转。
+    找不到合格切点时返回 None，由调用方决定整段挪到下一条，还是走截断兜底。
     """
     if budget <= 0 or len(fragment) <= budget:
-        return [fragment]
-    pieces = []
-    rest = fragment
-    for _ in range(PUSHPLUS_MAX_PARTS * 8):     # 防御性上限，正常远远用不到
-        if len(rest) <= budget:
-            break
-        picked = None
-        for end, stack in reversed(_scan_open_tags(rest, budget)):
-            closers = _closers_for(stack)
-            if end + len(closers) <= budget and end > 0:
-                picked = (end, stack, closers)
-                break
-        if picked is None:
-            break                               # 无法在预算内找到合法切点
-        end, stack, closers = picked
-        reopened = "".join(stack)               # 续片要原样重开的父标签（含原始属性）
-        if end <= len(reopened):
-            # 切点还没跨过被重开的标签：这一刀没有实质进展（正文是一整段无标签长文本），
-            # 继续切只会原地打转 → 交回调用方走截断兜底，绝不发出半截标签。
-            break
-        pieces.append(rest[:end] + closers)
-        rest = reopened + rest[end:]
-        if not rest:
-            break
-    pieces.append(rest)
-    return [p for p in pieces if p]
+        return None
+    wanted = len(fragment) - after
+    spans, candidates = _scan_cut_points(fragment, budget)
+    # 1) 优先切在完整标签边界（最靠后的那个可用切点，条数最少）
+    for end, stack in reversed(candidates):
+        if end <= after:
+            continue
+        closers = _closers_for(stack)
+        if end + len(closers) > budget:
+            continue
+        # 续片要原样重开的父标签（含原始属性）——不含调用方会重新带上的栏目头那部分
+        reopened = "".join(_reopened_stack(fragment, after, stack))
+        rest = reopened + fragment[end:]
+        if len(rest) < wanted:
+            return fragment[:end] + closers, rest
+    # 2) 标签边界切不动（正文是一整段没有标签的长文本）→ 退一步切在正文中间，
+    #    同样补全未闭合标签；两段拼起来仍是原文，一个字不丢。
+    last_end, last_stack = candidates[-1] if candidates else (0, [])
+    closers = _closers_for(last_stack)
+    position = _find_text_cut(fragment, max(last_end, after), budget - len(closers), spans)
+    if position is not None:
+        rest = "".join(_reopened_stack(fragment, after, last_stack)) + fragment[position:]
+        if len(rest) < wanted:
+            return fragment[:position] + closers, rest
+    return None
 
 
-def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False):
+def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
+                       continuation="", unfinished=False):
     """分条推送的条序横幅：告诉读者这是第几条 / 共几条，以及为什么要分条。
 
     tail_cut=True 用于「条数已达 PUSHPLUS_MAX_PARTS 上限」的收尾条：
-    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文。
+    此时后面还有内容没推完，横幅必须如实说明并指向完整日报，不能谎称已送达全文；
+    continuation=栏目名 表示本条开头是上一栏的续片（栏目被切开了），
+    unfinished=True 表示本条在栏目内没写完、下一条仍是同一栏的续片。
     """
     limit = limit or PUSHPLUS_MAX_CONTENT_CHARS
     if tail_cut:
         text = (f"📄 第 {index}/{total} 条 · 已达单次推送条数上限"
                 f"（PUSHPLUS_MAX_PARTS={total}），本条之后的内容见文末完整日报链接")
     else:
-        text = (f"📄 第 {index}/{total} 条 · 完整日报共 {total} 条"
-                f"（单条上限 {limit // 10000 or 1} 万字，按栏目拆分，内容不缺失）")
+        text = f"📄 第 {index}/{total} 条"
+        if continuation:
+            text += f" · 承接上条「{continuation}」（续）"
+        text += (f" · 单条上限 {limit // 10000 or 1} 万字，已尽量合并推送"
+                 f"（内容不缺失）")
         if index < total:
-            text += f" · 接下条 {index + 1}/{total}"
+            text += " · 本条未完，接下条" if unfinished else f" · 接下条 {index + 1}/{total}"
     if theme == "pixel":
         return (f'<table width="100%" cellpadding="0" cellspacing="0" '
                 f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
@@ -10168,15 +10485,114 @@ def _report_theme(html):
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
 
 
+def _section_title_text(header_html, max_len=28):
+    """从栏目头 HTML 里取出栏目名，供「承接上条（续）」横幅使用；取不到返回空串。
+
+    两个主题的栏目头结构固定：guizang 用 ``<h2>标题</h2>``，pixel 用带
+    ``padding-top:4px;line-height:1.35`` 的标题 div。取到的文字已是 HTML 转义过的，
+    直接放进横幅即可（不再二次转义，否则 ``&amp;`` 会变成 ``&amp;amp;``）。
+    """
+    for pattern in (r"<h2[^>]*>(.*?)</h2>",
+                    r"padding-top:4px;line-height:1\.35[^>]*>(.*?)<span"):
+        m = re.search(pattern, header_html or "", re.S)
+        if not m:
+            continue
+        text = " ".join(re.sub(r"<[^>]+>", "", m.group(1)).split())
+        if text:
+            return text[:max_len] + ("…" if len(text) > max_len else "")
+    return ""
+
+
+def _split_section_units(sections):
+    """把栏目 HTML 拆成 (栏目头, 栏目名, 正文)；没有栏目头锚点时整段算正文。"""
+    units = []
+    for section in sections:
+        header, separator, content = section.partition(SECTION_BODY_MARK)
+        if not separator:
+            header, content = "", section
+        units.append((header, _section_title_text(header), content))
+    return units
+
+
+def _pack_section_units(units, budget, min_split=None):
+    """顺序装箱：把栏目装进「每条正文 ≤ budget 字」的消息里，条数取最小。
+
+    规则（尽量合并，但绝不丢内容、绝不发出半截标签）：
+      1. 整栏放得下 → 整栏装进当前条（读者看到的每条都尽量从完整栏目开始）；
+      2. 整栏放不下、且当前条还能再放 min_split 字正文 → 在完整标签边界把该栏切开，
+         用当前条的剩余空间装前半段（栏目头 + 正文前半 + 闭合标签），填满这一条；
+      3. 剩余空间太小 → 整栏挪到下一条，当前条照样发出（不硬塞碎片）。
+    续片在下一条开头重新带上栏目头（``SECTION_BODY_MARK`` 之前的部分），
+    横幅标注「承接上条「栏目名」（续）」，因此切开栏目也不会让读者迷路。
+
+    返回 (每条正文列表, 每条开头的「承接栏目名」列表)；两条列表一一对应，
+    承接栏目名为空串表示该条从新栏目开始。
+    """
+    if min_split is None:
+        min_split = PUSHPLUS_SPLIT_MIN_BODY
+    pending = deque((header, title, content, False) for header, title, content in units)
+    chunks, titles = [], []
+    current, current_len, current_cont = [], 0, ""
+
+    def flush():
+        nonlocal current, current_len, current_cont
+        if current:
+            chunks.append("".join(current))
+            titles.append(current_cont)
+            current, current_len, current_cont = [], 0, ""
+
+    while pending:
+        header, title, content, is_continuation = pending.popleft()
+        full = header + content
+        room = budget - current_len
+        if len(full) <= room:
+            if is_continuation and not current:
+                current_cont = title
+            current.append(full)
+            current_len += len(full)
+            continue
+        # 整栏（或整段续片）放不下：先把当前条填满，剩下的留到下一条
+        # （room 是当前条还能装的字数；head_room 是切给正文的部分，栏目头必须另有位置）
+        head_room = room - len(header)
+        if head_room >= min_split:
+            # after=栏目头长度：切点必须跨过栏目头，续片只装正文，不会原地打转
+            cut = _split_fragment_once(full, room, after=len(header))
+            if cut is not None:
+                head_piece, rest = cut
+                if is_continuation and not current:
+                    current_cont = title
+                current.append(head_piece)
+                current_len += len(head_piece)
+                flush()
+                pending.appendleft((header, title, rest, True))
+                continue
+        if current:
+            # 剩余空间太小（或这一栏切不开）：整栏挪到下一条，当前条不硬塞半截内容
+            pending.appendleft((header, title, content, is_continuation))
+            flush()
+            continue
+        # 当前条是空的却还放不下，且找不到任何合法切点（正文是一整段无标签长文本）：
+        # 原样放入本条，交给上层做「装不进单条上限」的兜底处理
+        current.append(full)
+        current_len += len(full)
+    flush()
+    return chunks, titles
+
+
 def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
     """把超过单条上限的日报 HTML 拆成 N 条「各自完整可渲染」的消息；返回 list[str]。
 
-    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目 + 原文档页脚与闭合标签，
-    因此每条都是独立、标签平衡、样式一致的 HTML，微信端排版与单条推送完全相同。
-    全部内容按原文顺序送达，不做任何删减。
+    每条 = 原文档头部外壳（含刊头）+ 条序横幅 + 若干完整栏目（末条可能是一栏的续片）
+    + 原文档页脚与闭合标签，因此每条都是独立、标签平衡、样式一致的 HTML，
+    微信端排版与单条推送完全相同。全部内容按原文顺序送达，不做任何删减。
+
+    **尽量合并**：顺序装箱时把每条都填到单条上限为止——整栏放得下就整栏装，
+    放不下就在完整标签边界把这栏切开、用剩余空间装前半段；只有剩余空间小到会
+    产生碎片条时才整栏挪到下一条。因此条数就是「总字数 ÷ 单条可用字数」的理论下限，
+    不会为了保持栏目完整而白白多推几条（旧版整栏为单位的装箱会浪费 30%+ 的空间）。
 
     返回 None 表示无法安全拆分（旧版文件没有分条标记 / 外壳本身就超上限 /
-    需要的条数超过 max_parts），调用方应回退到 _truncate_html_for_push。
+    正文存在切不开的超长无标签文本），调用方应回退到 _truncate_html_for_push。
     """
     # 上限与条数上限都在调用时解析（而不是写进默认参数），环境变量与测试都能覆盖
     limit = limit if limit is not None else PUSHPLUS_MAX_CONTENT_CHARS
@@ -10198,9 +10614,13 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
         return None
 
     theme = _report_theme(html)
-    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字预留）+ 安全余量
-    banner_w = max(len(_build_part_banner(i, max(max_parts, len(sections)), theme, limit))
-                   for i in (1, max(max_parts, len(sections))))
+    units = _split_section_units(sections)
+    # 每条的固定开销：外壳 + 页脚 + 横幅（按最宽的条序数字与最长栏目名预留）+ 安全余量
+    longest_title = max((unit[1] for unit in units), key=len, default="")
+    cap = max(max_parts, len(units))
+    banner_w = max(len(_build_part_banner(
+                       index, cap, theme, limit, continuation=longest_title, unfinished=True))
+                   for index in (1, cap))
     overhead = len(shell) + len(tail) + banner_w + 64
     budget = limit - overhead
     if budget < 2000:
@@ -10208,17 +10628,7 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
               f"正文只剩 {budget:,} 字，拆分没有意义")
         return None
 
-    # 装箱：优先整栏装进一条；单栏超预算时再按标签边界细分（内容不丢）
-    chunks, current, current_len = [], [], 0
-    for section in sections:
-        for piece in _split_long_fragment(section, budget):
-            if current and current_len + len(piece) > budget:
-                chunks.append("".join(current))
-                current, current_len = [], 0
-            current.append(piece)
-            current_len += len(piece)
-    if current:
-        chunks.append("".join(current))
+    chunks, chunk_titles = _pack_section_units(units, budget)
     if not chunks:
         return None
 
@@ -10232,13 +10642,18 @@ def _split_html_for_push(html, limit=None, report_name=None, max_parts=None):
               f"前 {keep} 条完整推送，其余内容压进第 {keep + 1} 条并附完整日报链接"
               f"（如需全部送达，请调高 PUSHPLUS_MAX_PARTS 或 PUSHPLUS_MAX_CONTENT_CHARS）")
         chunks = chunks[:keep] + ["".join(chunks[keep:])]
+        chunk_titles = chunk_titles[:keep] + [chunk_titles[keep] if keep < len(chunk_titles) else ""]
 
     total = len(chunks)
     title_re = re.compile(r"(<title>)(.*?)(</title>)", re.S)
     parts = []
     for index, chunk in enumerate(chunks, 1):
         last_cut = tail_cut and index == total
-        banner = _build_part_banner(index, total, theme, limit, tail_cut=last_cut)
+        banner = _build_part_banner(
+            index, total, theme, limit, tail_cut=last_cut,
+            continuation=chunk_titles[index - 1],
+            # 下一条是同一栏的续片 → 本条末尾如实提示「本条未完」
+            unfinished=index < total and bool(chunk_titles[index]))
         head = shell
         if total > 1:
             # 让每条的浏览器/微信标题也带上条序，正文横幅之外再多一层提示
@@ -10264,11 +10679,14 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     - 默认「一对一」推送（不携带 topic）；只有显式设置 PUSHPLUS_TOPIC
       或传入非空 topic 时才推送到群组；传空字符串可临时回退一对一；
-    - 日报 HTML 超过单条上限（默认 10 万字符）时，按栏目边界拆成多条消息完整推送，
+    - 日报 HTML 超过单条上限（默认 10 万字符）时，按栏目装箱合并成尽可能少的几条
+      （每条都填到上限，必要时在栏目内断开并标注「承接上条（续）」），
       全部明细按原顺序送达；旧版 HTML 无拆分锚点或 PUSHPLUS_MULTIPART=0 时，
       回退到「按标签边界截断 + 完整版链接」；
     - 「发送频繁 / 稍后再试 / 服务器繁忙 / 网络异常 / HTTP 429·5xx」等可恢复错误
       按 PUSH_RETRY_BACKOFF 自动重试（最多 1+3=4 次），多条推送时每条各自享有重试；
+      发请求前还会按 PUSHPLUS_RATE_MAX / PUSHPLUS_RATE_WINDOW（默认 1 分钟 5 次，
+      与平台限制一致）排队，避免分条过多被平台直接丢弃；
     - token 失效、当日配额已达上限、内容违规等错误重试无意义，立即返回 False；
     - 每次失败都在日志里保留 PushPlus 返回的 code/msg，便于在 Actions 日志定位。
     """
@@ -10309,7 +10727,7 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
                 return _push_html_parts(title, compact_parts, token=token, topic=topic)
         if parts:
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
-                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 按栏目边界拆成 {len(parts)} 条"
+                  f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 已尽量合并为 {len(parts)} 条"
                   f"完整推送（微信会收到 {len(parts)} 条消息，磁盘上仍是一份完整日报）")
             print(f"     ℹ️ 单条上限按账号实际额度设置可减少条数"
                   f"（PushPlus：会员 10 万 / 实名 2 万字，PUSHPLUS_MAX_CONTENT_CHARS 覆盖）")
@@ -10325,11 +10743,51 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
                              topic=topic)
 
 
+# 已发出的推送请求时刻（time.monotonic），供 PushPlus「1 分钟 N 次请求」的频率限制排队
+_PUSH_REQUEST_TIMES = []
+
+
+def _push_rate_wait(history, now, window=None, limit=None):
+    """还差多少秒才允许再发一次请求（保证 window 秒内的请求数 < limit）。
+
+    history：已发出的请求时刻（升序，需已按 window 过滤）；now：当前时刻。
+    返回 0 表示可以立刻发。limit <= 0 或 window <= 0 表示不排队。
+    """
+    window = PUSHPLUS_RATE_WINDOW if window is None else window
+    limit = PUSHPLUS_RATE_MAX if limit is None else limit
+    if window <= 0 or limit <= 0 or len(history) < limit:
+        return 0.0
+    return max(0.0, history[len(history) - limit] + window - now)
+
+
+def _wait_push_rate_limit():
+    """按 PushPlus 频率限制主动排队，再放行一次请求。
+
+    PushPlus 对发送接口的限制是「1 分钟内接收 5 次请求，超出的请求将不再推送」。
+    分条推送（每条 1 次请求 + 失败重试）容易在几秒内打满额度，被平台直接丢弃——
+    旧做法只能等退避重试（10s→30s→60s）反复撞墙。这里改为发请求前先排队：
+    窗口内已发满就先等到最早那次请求滑出窗口，既不被丢弃也不浪费重试次数。
+    """
+    while True:
+        now = time.monotonic()
+        _PUSH_REQUEST_TIMES[:] = [t for t in _PUSH_REQUEST_TIMES
+                                  if now - t < PUSHPLUS_RATE_WINDOW]
+        wait = _push_rate_wait(_PUSH_REQUEST_TIMES, now)
+        if wait <= 0:
+            _PUSH_REQUEST_TIMES.append(now)
+            return
+        print(f"  ⏳ PushPlus 频率限制（{PUSHPLUS_RATE_WINDOW:g}s 内最多 "
+              f"{PUSHPLUS_RATE_MAX} 次请求）：等待 {wait:.0f}s 后再发下一条...")
+        time.sleep(wait)
+
+
 def _push_html_parts(title, parts, token=None, topic=None):
     """按顺序推送拆分后的多条正文；全部成功才返回 True。
 
     - 每条标题追加「(i/N)」，微信消息列表里一眼能看出条序，也避免标题完全重复被去重；
     - 条与条之间等待 PUSHPLUS_PART_DELAY 秒，降低触发「发送频繁」的概率；
+    - 发请求前按 PUSHPLUS_RATE_MAX / PUSHPLUS_RATE_WINDOW 主动排队（默认 1 分钟 5 次，
+      与 PushPlus 平台限制一致），多分条也能源源送达、不靠退避重试硬撞频率墙；
     - 任意一条最终失败即停止后续条并返回 False（调用方会发失败告警、以退出码 1 结束），
       日志里明确写出「已送达 i-1 条 / 共 N 条」，不掩盖部分送达的事实。
     """
@@ -10368,6 +10826,7 @@ def _push_one_message(title, content_html, token=None, template="html", topic=No
         if wait:
             print(f"  ⏳ 等待 {wait}s 后进行第 {attempt}/{len(attempts)} 次尝试...")
             time.sleep(wait)
+        _wait_push_rate_limit()      # 发请求前按平台频率限制排队（重试同样计入额度）
         http_status = None
         try:
             resp = requests.post(PUSHPLUS_URL, json=payload, timeout=30)
@@ -10754,23 +11213,49 @@ def quant_only_report(*, enable_stocks=True):
 
 
 def weekly_only_report():
-    """只跑每周量化走势预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    """只跑【贪吃大白鲨】量化走势预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
     print("🐙 " + "=" * 48)
-    print("   章鱼 AI · 每周量化走势预测（研究模式）")
+    print("   章鱼 AI · 量化走势预测（未来 7 个交易日 · 研究模式）")
     print("🐙 " + "=" * 48)
     res = fetch_weekly_forecast()
     if res.get("status") != "success":
-        print(f"❌ 每周预测不可用：{res.get('error')}")
+        print(f"❌ 量化走势预测不可用：{res.get('error')}")
         return 1
     r = res.get("result") or {}
     entry = r.get("entry") or {}
-    print(f"\n【周度预测】{entry.get('label')}")
+    daily = r.get("daily") or {}
+    drows = daily.get("rows") or []
+    if drows:
+        print(f"\n【逐日表格】未来 {len(drows)} 个交易日"
+              f"（锚定 {daily.get('base_date')} 收盘 {daily.get('base_close'):,.0f}"
+              f" · {daily.get('symbol_label')}）")
+        print(f"  {'交易日':<14}{'预测':<16}{'当日环比':>8}{'预期区间':>20}{'仓位':>7}")
+        for row in drows:
+            adv = row.get("advice") or {}
+            p_day = row.get("p_day")
+            dod = "—" if p_day is None else f"{p_day * 100:.0f}%"
+            band = f'{row.get("band_lo"):,.0f}–{row.get("band_hi"):,.0f}'
+            tag = f'T+{row.get("k")} {str(row.get("date"))[5:]} {row.get("weekday")}'
+            print(f'  {tag:<14}{row.get("label"):<16}{dod:>8}{band:>20}'
+                  f'{"≤" + str(adv.get("position")) + "%":>7}')
+        print("\n【逐日理由 / 分析 / AI 操作建议】")
+        for row in drows:
+            adv = row.get("advice") or {}
+            print(f'  T+{row.get("k")} {str(row.get("date"))[5:]} {row.get("weekday")}'
+                  f' · {adv.get("stance")}')
+            print(f'    理由：{row.get("reason")}')
+            print(f'    分析：{row.get("analysis")}')
+            print(f'    建议：仓位 ≤{adv.get("position")}% · '
+                  f'止损 {adv.get("stop_pct") * 100:.1f}%'
+                  f'（{adv.get("stop_price"):,.0f}）· 止盈参考 {adv.get("take_profit"):,.0f}'
+                  f' · {adv.get("entry_hint")}')
+    print(f"\n【七日整段结论】{entry.get('label')}")
     print(f"  锚定 {entry.get('base_date')} 收盘（{entry.get('symbol_label')}）"
           f" → 未来 {entry.get('target_sessions')} 个交易日")
-    print(f"  概率拆解：P(周涨)={entry.get('p_up'):.3f}"
+    print(f"  概率拆解：P(7日涨)={entry.get('p_up'):.3f}"
           f" · 基准 {entry.get('p_base'):.3f}"
           f" · 相似样本 {entry.get('p_sim') if entry.get('p_sim') is not None else '—'}"
-          f"（{entry.get('n_analog')} 近邻 / 已结算 {entry.get('n_resolved')} 周）")
+          f"（{entry.get('n_analog')} 近邻 / 已结算 {entry.get('n_resolved')} 个样本）")
     bt = r.get("backtest") or {}
     if bt.get("hit_rate") is not None:
         print(f"\n【滚动样本外】{bt['n']} 期 · 命中 {bt['hit_rate']*100:.1f}%"
@@ -10788,7 +11273,7 @@ def weekly_only_report():
     else:
         print("【预测留痕】暂无已结算样本")
     print(f"\n【未来函数自检】{r.get('self_check')}")
-    print("✅ 每周预测运行完成（研究模式不推送）")
+    print("✅ 量化走势预测运行完成（研究模式不推送）")
     return 0
 
 

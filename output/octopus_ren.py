@@ -265,7 +265,7 @@ def _ren_liquidity(ctx):
 
 
 def _ren_weekly(ctx):
-    """每周量化走势预测：一句话周报。"""
+    """【贪吃大白鲨】量化走势预测：把未来 7 个交易日的逐日表格讲成一句人话。"""
     weekly = ctx.get("weekly") or {}
     entry = weekly.get("entry") or {}
     if not (weekly.get("available") and entry.get("p_up") is not None):
@@ -273,11 +273,24 @@ def _ren_weekly(ctx):
     seed = f"{ctx.get('date_str') or ''}|WEEKLY"
     p = float(entry["p_up"]) * 100
     dir_txt = {"up": "看涨", "down": "看跌"}.get(str(entry.get("direction") or ""), "中性观望")
-    n = int(entry.get("target_sessions") or 5)
+    n = int(entry.get("target_sessions") or 7)
     p_txt = _pct(entry["p_up"])
-    return (f"未来 {n} 个交易日，模型态度：{dir_txt}，周涨概率 {p_txt}"
-            f"（{_coin_tone(p, seed)}）。"
-            "翻译：周度预测像导航的「预计到达时间」，是参考不是精确时刻表，当氛围组就好。")
+    text = (f"未来 {n} 个交易日，模型态度：{dir_txt}，整段累计上涨概率 {p_txt}"
+            f"（{_coin_tone(p, seed)}）。")
+    # 逐日表格：把最乐观 / 最谨慎的一天点出来，数字全部来自当次 daily rows（同源，不另算）
+    rows = [r for r in (weekly.get("daily") or {}).get("rows") or []
+            if isinstance(r, dict) and r.get("p_up") is not None]
+    if rows:
+        ups = sum(1 for r in rows if r.get("direction") == "up")
+        downs = sum(1 for r in rows if r.get("direction") == "down")
+        best = max(rows, key=lambda r: float(r.get("p_up") or 0))
+        worst = min(rows, key=lambda r: float(r.get("p_up") or 0))
+        text += (f"逐日看：{ups} 天偏涨 / {downs} 天偏跌，"
+                 f"最乐观 T+{int(best.get('k') or 0)}（{_pct(best.get('p_up'))}）、"
+                 f"最谨慎 T+{int(worst.get('k') or 0)}（{_pct(worst.get('p_up'))}）。")
+    text += ("翻译：逐日表格像导航的分段路况，越往后越不准；仓位和止损都按「留一手」来，"
+             "别看见一天看涨就一把梭。")
+    return text
 
 
 def _ren_market_review(ctx):
@@ -575,16 +588,136 @@ _GENERATORS = {
 }
 
 
+# ------------------------------------------------------------------
+# 🦐 活鲜度点缀（2026-09-30 新增）：把行情状态翻译成海鲜市场比喻
+# —— 调用 output/octopus_lexicon.py 活鲜词库；条件驱动、确定性、无数字。
+#    数据不足就不点缀（与解读本体同一套防自欺口径）；点缀出错只丢点缀，不拖垮解读。
+# ------------------------------------------------------------------
+_LEX = None
+
+
+def _lexicon():
+    """惰性导入活鲜词库（output 不在 sys.path 时自动补，保证 ren 可被独立加载）。"""
+    global _LEX
+    if _LEX is None:
+        try:
+            import octopus_lexicon as _m
+        except ImportError:
+            import os as _os
+            import sys as _sys
+            _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+            import octopus_lexicon as _m
+        _LEX = _m
+    return _LEX
+
+
+# 抓取型内容栏目：新鲜度看 is_today（内容有发布 / 收盘日）；其余为「本次现算」的
+# 分析栏目：available 即视为当天活鲜（现杀现做），无需 is_today 标记。
+_FETCHED_KICKERS = {"MARKET REVIEW", "ECON CALENDAR", "GLOBAL HEADLINES",
+                    "EASTMONEY WIRE", "HK GURU CHANNELS", "TREND TRACKING"}
+
+
+def _garnish_obj(kicker, ctx):
+    """kicker → ctx 里的主数据对象（与各栏生成器读的是同一批对象，状态一致）。"""
+    ctx = ctx or {}
+    quant = ctx.get("quant") or {}
+    table = {
+        "FORECAST": quant,
+        "ECON CALENDAR": ctx.get("cal"),
+        "QUANT FORECAST": quant,
+        "HK PROBABILITY": quant,
+        "LIQUIDITY FLOW": quant.get("liquidity"),
+        "WEEKLY FORECAST": ctx.get("weekly"),
+        "MARKET REVIEW": ctx.get("market") or ctx.get("pan"),
+        "POLICY SHOCK": ctx.get("policy"),
+        "FED TREND": ctx.get("fed"),
+        "GEO TREND": ctx.get("geo"),
+        "STRATEGY READ": ctx.get("ai"),
+        "TREND TRACKING": ctx.get("trend"),
+        "GLOBAL HEADLINES": ctx.get("google"),
+        "EASTMONEY WIRE": ctx.get("em"),
+        "HK GURU CHANNELS": ctx.get("yt"),
+        "NEWS SENTIMENT": ctx.get("senti"),
+    }
+    return table.get(kicker) or {}
+
+
+def _garnish_available(obj):
+    if not obj:
+        return False
+    if isinstance(obj, dict):
+        if "status" in obj:
+            return obj.get("status") == "success"
+        if "available" in obj:
+            return bool(obj.get("available"))
+    return bool(obj)        # trend / yt 等：有内容即算「在」
+
+
+def _garnish_is_today(kicker, obj):
+    v = obj.get("is_today") if isinstance(obj, dict) else None
+    if isinstance(v, bool):
+        return v
+    # 无显式当天标记：抓取型内容保守按「非当天」(冰鲜)，分析型按「本次现算」(活鲜)
+    return kicker not in _FETCHED_KICKERS
+
+
+def _garnish_dir(kicker, ctx, obj):
+    """方向定调 + 概率：优先用 ⌁AI研判 同源 notes，其次结论型栏目取自身 label。"""
+    notes = (ctx or {}).get("notes") or {}
+    keys = ("MARKET SNAPSHOT", "GLOBAL PANORAMA") if kicker == "MARKET REVIEW" else (kicker,)
+    for key in keys:
+        n = notes.get(key)
+        if isinstance(n, dict) and n.get("label"):
+            return n.get("label"), n.get("bull_pct")
+    if kicker == "WEEKLY FORECAST":
+        e = (obj or {}).get("entry") or {}
+        p = e.get("p_up")
+        return e.get("label"), (p * 100 if isinstance(p, (int, float)) else None)
+    if kicker in ("FORECAST", "QUANT FORECAST", "HK PROBABILITY"):
+        h = ((ctx or {}).get("quant") or {}).get("headline") or {}
+        if h.get("available"):
+            p = h.get("p_up")
+            return h.get("label"), (p * 100 if isinstance(p, (int, float)) else None)
+    return None, None
+
+
+def _seafood_garnish(kicker, ctx):
+    """返回可直接追加的「｜🦐 活鲜度：X — 比喻」串；数据不足返回 ""（不点缀）。"""
+    obj = _garnish_obj(kicker, ctx)
+    if not _garnish_available(obj):
+        return ""
+    lex = _lexicon()
+    label, p_pct = _garnish_dir(kicker, ctx, obj)
+    vol_pct = obj.get("vol_pct") if isinstance(obj, dict) else None
+    g = lex.section_garnish(
+        available=True, is_today=_garnish_is_today(kicker, obj),
+        label=label, p_pct=p_pct, vol_pct=vol_pct,
+        seed=f"{(ctx or {}).get('date_str') or ''}|{kicker}|SEAFOOD")
+    return lex.seafood_line(g)
+
+
 def section_ren(kicker, ctx):
-    """返回某栏目的「鲜鲜解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。"""
+    """返回某栏目的「鲜鲜解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。
+
+    2026-09-30 起：解读末尾按行情状态确定性点缀「🦐 活鲜度」标签 + 一句活鲜比喻
+    （octopus_lexicon 词库；条件驱动、无数字、可复现）。数据不足时整行仍缺席。
+    """
     gen = _GENERATORS.get(kicker)
     if gen is None:
         return ""
     try:
-        return str(gen(ctx) or "")
+        text = str(gen(ctx) or "")
     except Exception as exc:            # 单栏出措不拖垮整份日报
         print(f"  ⚠️ 鲜鲜解读（{kicker}）生成失败，本栏跳过：{exc}")
         return ""
+    if not text:
+        return ""
+    try:
+        garnish = _seafood_garnish(kicker, ctx)
+    except Exception as exc:            # 点缀出错只丢点缀，解读本体照常
+        print(f"  ⚠️ 活鲜点缀（{kicker}）生成失败，跳过点缀：{exc}")
+        garnish = ""
+    return text + garnish if garnish else text
 
 
 def digest_ren(ctx):

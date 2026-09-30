@@ -11,6 +11,10 @@
     · 独立数据源（same_format=False）：其它供应商的公开接口，由 pipeline / providers 里对应的
       适配器（adapter）解析成与主源相同的内部结构；
 - 只在主源失败或返回无效内容时才依次尝试备用源；启用了哪一路在日志与「数据覆盖」里写明；
+- ``used_by`` 写的是**日报栏目标题**，栏目改名时同步（2026-09-29 第二批改名：全球头条→
+  【无敌帝王蟹】全球头条、趋势跟踪→【深海大鲨鱼】趋势跟踪、政策因子→【深海肥蓝鲸】政策因子、
+  每周量化走势预测→【贪吃大白鲨】量化走势预测）；**数据源键名与新鲜度阈值键不改**
+  （freshness_checker.FRESHNESS_THRESHOLDS 仍按 全球头条 / 每周量化走势预测 等源名匹配）；
 - 绝不伪造数据：全部候选都失败就如实「暂缺」。
 
 用法：
@@ -106,7 +110,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "yahoo_bars": {
         "name": "日线序列 · 港股量化 / 每周预测",
-        "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析", "每周量化走势预测"),
+        "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析",
+                    "【贪吃大白鲨】量化走势预测"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -183,7 +188,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "google_news": {
         "name": "全球头条 · Google News 财经",
-        "used_by": ("全球头条", "新闻情绪"),
+        "used_by": ("【无敌帝王蟹】全球头条", "新闻情绪"),
         "primary": ("Google News 中文（中国大陆版）",
                     "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
         "backups": (
@@ -207,7 +212,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "gov_policy": {
         "name": "国家政策 · 中国政府网",
-        "used_by": ("政策因子",),
+        "used_by": ("【深海肥蓝鲸】政策因子",),
         "primary": ("政府网 最新政策", "https://www.gov.cn/zhengce/zuixin/"),
         "backups": (
             ("政府网 政策首页（同格式页面）", "https://www.gov.cn/zhengce/", True),
@@ -227,7 +232,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "reddit": {
         "name": "趋势跟踪 · Reddit 板块热帖",
-        "used_by": ("趋势跟踪",),
+        "used_by": ("【深海大鲨鱼】趋势跟踪",),
         "primary": ("Reddit 公开 Atom", "https://www.reddit.com/r/{community}/hot/.rss?limit={limit}"),
         "backups": (
             ("old.reddit 公开 Atom（同格式）", "https://old.reddit.com/r/{community}/hot/.rss?limit={limit}", True),
@@ -237,7 +242,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "stocktwits": {
         "name": "趋势跟踪 · StockTwits 趋势榜",
-        "used_by": ("趋势跟踪",),
+        "used_by": ("【深海大鲨鱼】趋势跟踪",),
         "primary": ("StockTwits trending/symbols", "https://api.stocktwits.com/api/2/trending/symbols.json"),
         "backups": (
             ("StockTwits trending/symbols/equities（同格式）",
@@ -249,7 +254,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "tradingview": {
         "name": "趋势跟踪 · TradingView Ideas",
-        "used_by": ("趋势跟踪",),
+        "used_by": ("【深海大鲨鱼】趋势跟踪",),
         "primary": ("TradingView Ideas RSS", "https://www.tradingview.com/feed/"),
         "backups": (
             ("TradingView Ideas RSS（stream=all）", "https://www.tradingview.com/feed/?stream=all", True),
@@ -259,7 +264,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "bogleheads": {
         "name": "趋势跟踪 · Bogleheads 论坛",
-        "used_by": ("趋势跟踪",),
+        "used_by": ("【深海大鲨鱼】趋势跟踪",),
         "primary": ("Bogleheads 论坛 RSS", "https://www.bogleheads.org/forum/feed"),
         "backups": (
             ("Bogleheads app.php/feed（phpBB 同格式）", "https://www.bogleheads.org/forum/app.php/feed", True),
@@ -269,7 +274,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "hk_news_rss": {
         "name": "港股新闻源头 · 20 家媒体 RSS",
-        "used_by": ("趋势跟踪·新闻源头",),
+        "used_by": ("【深海大鲨鱼】趋势跟踪·新闻源头",),
         "primary": ("各媒体官方 RSS / Atom", "{feed}"),
         "backups": (
             ("Bing News 站内检索 RSS（同格式 RSS，链接直达原文）",
