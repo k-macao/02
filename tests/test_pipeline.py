@@ -536,13 +536,15 @@ class GuizangThemeTests(unittest.TestCase):
         self.assertIn("font-size:18px", html)
 
     def test_klein_blue_plus_gray_palette(self):
-        """克莱因蓝 #002FA7 + 灰阶：页面上唯一的有色只能是克莱因蓝系"""
+        """克莱因蓝 #002FA7 + 灰阶：页面上唯一的有色只能是克莱因蓝系，灰色字体强制全局深灰 #333"""
         self.assertEqual(pipeline.GZ_KLEIN, "#002FA7")
         self.assertEqual(pipeline.GZ_PRIMARY, pipeline.GZ_KLEIN)
         self.assertEqual(pipeline.GZ_UP, pipeline.GZ_KLEIN)      # 涨 = 克莱因蓝
         self.assertEqual(pipeline.GZ_INK, "#222")                # 正文灰黑
-        self.assertEqual(pipeline.GZ_META, "#555")               # 次要灰（深灰）
-        self.assertEqual(pipeline.GZ_FAINT, "#666")              # 更弱灰（二轮加深后不得浅于 #666）
+        self.assertEqual(pipeline.GZ_META, "#333")               # 次要灰（强制全局深灰）
+        self.assertEqual(pipeline.GZ_FAINT, "#333")              # 辅助灰（强制全局深灰）
+        self.assertEqual(pipeline.GZ_DOWN, "#333")               # 下跌辅助灰（深灰）
+        self.assertEqual(pipeline.GZ_FLAT, "#333")               # 平盘辅助灰（深灰）
         html = self._html()
         self.assertIn(pipeline.GZ_KLEIN, html)
         allowed = {"#002FA7", "#00227A", "#F3F6FF"}
@@ -555,12 +557,71 @@ class GuizangThemeTests(unittest.TestCase):
         for color in re.findall(r"#[0-9A-Fa-f]{3}\b", html):
             r, g, b = (int(c * 2, 16) for c in color[1:])
             self.assertTrue(r == g == b, f"三位色值必须是灰阶：{color}")
-            self.assertIn(color.lower(), {"#111", "#222", "#333", "#444", "#555", "#666",
-                                          "#ddd", "#eee", "#fff"},
-                          f"三位色值只允许既定灰阶（#777/#aaa 等浅灰已禁用）：{color}")
+            self.assertIn(color.lower(), {"#111", "#222", "#333", "#ddd", "#eee", "#fff"},
+                          f"三位色值只允许深灰文字或细分隔线：{color}")
         for old_color in ("#2563EB", "#1D4ED8", "#EFF6FF", "#3b82f6",
                           "#FF5576", "#35F29A", "#FFD166", "#FF3CAC", "#22DFFF"):
             self.assertNotIn(old_color, html)
+
+    def test_global_dark_gray_font_enforced(self):
+        """强制全局：所有灰色字体（含表头、摘要、时间、来源、精简推送与落盘日报）统一为深灰 #333"""
+        html = self._html()
+        font_colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", html))
+        for c in font_colors:
+            self.assertFalse(
+                pipeline._is_light_or_mid_gray_hex(c),
+                f"页面字体颜色不应出现中/浅灰 {c}（应强制为深灰 #333）",
+            )
+        for light_gray in ("color:#444", "color:#555", "color:#666", "color:#777",
+                           "color:#888", "color:#999", "color:#aaa", "color:#bbb", "color:#ddd"):
+            self.assertNotIn(light_gray, html.lower())
+
+        sample_raw = (
+            '<div style="color:#777;border-top:1px solid #ddd">'
+            '<small style="color:#aaa">副标题</small>'
+            '<span style="color:#555">标签</span>'
+            '<span style="color:#6B6B6B">旧灰</span>'
+            '<a style="color:#002FA7">链接</a></div>'
+        )
+        enforced = pipeline._enforce_dark_gray_font(sample_raw)
+        self.assertEqual(enforced.count("color:#333"), 4)
+        self.assertIn("border-top:1px solid #ddd", enforced)
+        self.assertIn("color:#002FA7", enforced)
+
+        output_dir = Path(__file__).parents[1] / "output"
+        for name in ("latest.html", "日报排版示例.html", "daily_report_20260929.html"):
+            p = output_dir / name
+            if p.is_file():
+                disk_html = p.read_text(encoding="utf-8")
+                disk_colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", disk_html))
+                for c in disk_colors:
+                    self.assertFalse(
+                        pipeline._is_light_or_mid_gray_hex(c),
+                        f"{name} 仍含未加深的灰色字体 {c}",
+                    )
+
+    def test_kv_and_channel_rows_stack_label_and_value_on_separate_lines(self):
+        """内容表格分行：标题（标签）独占一行，具体内容换到下一行展示，不挤在同一行"""
+        kv_html = pipeline.gz_kv_table([("市场倾向", "中性 ■"), ("核心判断", "指数温和偏多")])
+        self.assertIn(f'市场倾向<br><b style="color:{pipeline.GZ_INK}">中性 ■</b>', kv_html)
+        self.assertIn(f'核心判断<br><b style="color:{pipeline.GZ_INK}">指数温和偏多</b>', kv_html)
+        self.assertNotIn("市场倾向 · <b", kv_html)
+
+        ch_html = pipeline.gz_channel_block({
+            "name": "郭思治（郭Sir）",
+            "desc": "港股评论",
+            "url": "https://example.com/kwok",
+            "is_today": True,
+            "videos": [{
+                "title": "港股收市汇报",
+                "url": "https://example.com/v1",
+                "published_cst": "2026-09-29 18:00",
+                "is_today": True,
+            }],
+        }, ch_idx=1)
+        self.assertIn('id="h-hk-01-01"', ch_html)
+        self.assertIn('<br><small style="color:#333">2026-09-29 18:00</small>', ch_html)
+        self.assertNotIn("<table", ch_html)
 
     def test_no_washy_text_colors(self):
         """文字可读性硬门禁：任何文字色与白底对比度 ≥ 4.5:1（WCAG AA），禁止浅灰文字回潮。

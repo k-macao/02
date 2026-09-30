@@ -4048,14 +4048,13 @@ FONT = ("'Courier New', Courier, 'Lucida Console', monospace, "
 FONT_MONO = "'Courier New', Courier, monospace"
 
 # ============================================================
-# 归藏简洁排版（Guizang Concise）× 克莱因蓝 + 灰（2026-09-29）
+# 归藏简洁排版（Guizang Concise）× 克莱因蓝 + 深灰（2026-09-29）
 # —— 一页推送优先：结构扁平、样式全内联、去掉装饰性包装，把全量内容压进单条微信消息
 # —— 克莱因蓝 #002FA7：只用于栏目编号 / 小标题 / 强调数值，是页面上唯一的有色
-# —— 灰阶承担全部层级：正文 #222、次要 #555、更弱 #666、细分隔线 #ddd/#eee
-# —— 2026-09-29 加深灰阶（用户反馈「灰色改深灰色」）：次要 #777→#555、更弱 #aaa→#777
-# —— 二轮加深（用户反馈「浅灰色看不清」）：更弱 #777→#666。从此文字色不得浅于 #666
-#    （白底对比度 ≥ 5.7:1，过 WCAG AA 4.5:1）；表头 / 脚注 / 时间戳同受此约束，
-#    由 tests/test_pipeline.py 的 test_no_washy_text_colors 硬门禁看守，防止回潮
+# —— 灰阶承担全部层级：正文 #222、次要/辅助文字统一深灰 #333、细分隔线 #ddd/#eee
+# —— 2026-09-29 强制全局灰色字体改深灰色：所有灰色文字（次要 GZ_META、辅助 GZ_FAINT、下跌 GZ_DOWN）统一为 #333
+#    （白底对比度 ≥ 12.6:1，过 WCAG AA 4.5:1）；表头 / 脚注 / 时间戳同受此约束，
+#    由 tests/test_pipeline.py 的 test_no_washy_text_colors 与 test_global_dark_gray_font_enforced 看守
 # —— 白底、1px 细分隔、大留白；涨跌仍用 ▲ / ▼ / ■ 表达，不依赖红绿
 # —— 纯内联样式：无 <style> / class / 外部 CSS / JS / 远程图片，兼容 PushPlus 与微信详情页
 # ============================================================
@@ -4066,8 +4065,9 @@ GZ_KLEIN_DEEP = "#00227A"   # 克莱因蓝加深：链接按下 / 强调
 GZ_KLEIN_WASH = "#F3F6FF"   # 极淡蓝：需要一点分量时的窄底纹
 GZ_INK = "#222"          # 正文灰黑（纯灰，不带蓝紫）
 GZ_INK_STRONG = "#111"   # 标题 / 最高强调
-GZ_META = "#555"         # 次要文字（标签、来源）｜2026-09-29 加深：#777 → #555
-GZ_FAINT = "#666"        # 更弱文字（时间、脚注、表头）｜二轮加深：#aaa → #777 → #666（白底 5.7:1）
+GZ_DARK_GRAY = "#333"    # 强制全局深灰色字体（所有灰色字体统一深灰 #333）
+GZ_META = GZ_DARK_GRAY   # 次要文字（标签、来源、小标题）｜强制全局改深灰 #333
+GZ_FAINT = GZ_DARK_GRAY  # 辅助文字（时间、脚注、表头、摘要）｜强制全局改深灰 #333
 GZ_HAIR = "#ddd"         # 栏目分割线
 GZ_HAIR_SOFT = "#eee"    # 行间细分隔线
 GZ_INK_TINT = "#FFFFFF"
@@ -4076,9 +4076,9 @@ GZ_HAIR_W = 1               # 1px 细分隔线，不用 2px
 GZ_CREAM = GZ_INK_STRONG
 GZ_META_INK = GZ_META
 GZ_NEON = GZ_KLEIN          # AI 徽标：克莱因蓝，不再引入第二种彩色
-# 涨跌：克莱因蓝 / 深灰 / 浅灰 + ▲▼■ 双编码，完全不依赖红绿
+# 涨跌：克莱因蓝 / 深灰 + ▲▼■ 双编码，完全不依赖红绿
 GZ_UP = GZ_KLEIN
-GZ_DOWN = "#444"
+GZ_DOWN = GZ_DARK_GRAY
 GZ_FLAT = GZ_FAINT
 GZ_UP_INK = GZ_UP
 GZ_DOWN_INK = GZ_DOWN
@@ -4553,7 +4553,7 @@ def gz_trend_badge(value, compact=False):
 
 
 
-def gz_meter(value, maximum, cells=5, lit=GZ_KLEIN, off=GZ_HAIR, size=None):
+def gz_meter(value, maximum, cells=5, lit=GZ_KLEIN, off=GZ_FAINT, size=None):
     """信号格：实心 / 空心即可读数，颜色只作辅助（微信可能忽略 letter-spacing）。"""
     maximum = max(1, int(maximum or 1))
     n = max(1, min(cells, round(float(value or 0) / maximum * cells))) if value else 0
@@ -4608,18 +4608,16 @@ def _gz_num(text):
 
 
 def _gz_flow_rows(pairs):
-    """键值对逐行铺开：整组一个容器，行间用 <br>，只有「值」需要一层颜色标记。
+    """键值对上下分行：标题（标签）独占一行，具体内容换到下一行展示。
 
-    这样一条键值只花 <br> + 一个 span 的标记，比两列表格省一半以上，手机上也不会
-    被窄标签列挤成竖排；标签统一灰色、值统一正文色，层级靠颜色而不是靠边框。
+    一条键值只花 <br> + 一层 <b> 标记，手机端标题与内容上下分行不拥挤，同时保持一页推体积。
     """
     lines = []
     for label, value in pairs:
         if label in (None, ""):
             lines.append(str(value))
         else:
-            # 值用墨色加粗（标签沿用容器的灰）：层次照旧，比每行套 span 省一半标记
-            lines.append(f'{label} · <b style="color:{GZ_INK}">{value}</b>')
+            lines.append(f'{label}<br><b style="color:{GZ_INK}">{value}</b>')
     return (f'<div style="padding:4px 0;color:{GZ_META}">'
             + "<br>".join(lines) + "</div>")
 
@@ -5100,19 +5098,18 @@ def gz_channel_block(ch, ch_idx=None):
     badge = gz_source_badge({"status": "success", "is_today": True}) if ch.get("is_today") else ""
     name_link = f'<a href="{url}" style="color:{GZ_KLEIN}">{name}</a>' \
         if url else name
-    rows, anchors = [], []
+    cards = []
     for vi, v in enumerate(videos[:CHANNEL_TOP_N], 1):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
         link = (f'<a href="{_esc(v.get("url", "#"))}" '
                 f'style="color:{GZ_KLEIN}">{title}</a>')
         new_tag = f' <span style="color:{GZ_UP}">当天</span>' if v.get("is_today") else ""
-        rows.append([link + new_tag, pub])
-        anchors.append(f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None)
+        anchor = f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None
+        cards.append(_gz_news_card("", link + new_tag, pub, anchor=anchor))
     head = (f'<div style="padding:10px 0 2px;font-weight:700;color:{GZ_INK_STRONG};'
             f'line-height:1.5">{name_link}{" · " + badge if badge else ""}</div>')
-    return head + gz_data_table(["标题", "时间"], rows, aligns=("left", "right"),
-                                row_anchors=anchors)
+    return head + "".join(cards)
 
 
 
@@ -6503,15 +6500,18 @@ def _weekly_forecast_block(res, kit):
         f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
         f'{"✓" if r.get("hit") else "✗"}'
         for r in recent)
-    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+    rows.append(kit.item_row(
+        "✓", "<b>预测留痕</b>",
+        f"{j_txt}<br>{recent_txt}" if recent_txt else j_txt,
+    ))
 
-    note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
-            f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
-            f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
-            f' · 先存档后结算（weekly_forecast.json · settled 字段）'
-            f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
+    note_sub = (f'截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
+                f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
+                f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
+                f' · 先存档后结算（weekly_forecast.json · settled 字段）'
+                f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
     # 口径行按 item_row 走（pixel 精简排版会丢弃 note 脚注，两主题都必须能看到口径披露）
-    rows.append(kit.item_row("⚖", note))
+    rows.append(kit.item_row("⚖", "<b>无未来函数口径</b>", note_sub))
     return kit.rows("".join(rows))
 
 
@@ -6536,8 +6536,11 @@ def _hk_seven_day_block(res, kit):
     else:
         head_sub += (f' · 大模型不可用（{esc(str(res.get("llm_reason") or "未配置 Key"))}）'
                      f'→ 量化基准')
-    head_row = kit.item_row("◈", f'<b>引擎</b> · {esc(str(res.get("engine_label") or ""))}',
-                            head_sub)
+    engine_label = esc(str(res.get("engine_label") or ""))
+    head_row = kit.item_row(
+        "◈", "<b>引擎</b>",
+        f"{engine_label} · {head_sub}" if engine_label else head_sub,
+    )
     for t in targets:
         icon = {"up": "▲", "down": "▼"}.get(t.get("direction"), "■")
         bits = []
@@ -6565,13 +6568,10 @@ def _hk_seven_day_block(res, kit):
             sub_layers.append(" · ".join(bits))
         if fb_summary:
             sub_layers.append(f'因子：{esc(fb_summary)}')
-        ev = []
         if drivers:
-            ev.append(f'依据：{drivers}')
+            sub_layers.append(f'依据：{drivers}')
         if risks:
-            ev.append(f'风险：{risks}')
-        if ev:
-            sub_layers.append(" · ".join(ev))
+            sub_layers.append(f'风险：{risks}')
         if res.get("engine") == "llm":
             q_info = f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%' + (
                 '（已按基准收敛）' if t.get("converged")
@@ -6588,7 +6588,7 @@ def _hk_seven_day_block(res, kit):
 
     cross = str(res.get("cross_note") or "")
     if cross:
-        rows.append(kit.item_row("◇", f'跨市场 · {esc(cross)}', ''))
+        rows.append(kit.item_row("◇", "<b>跨市场</b>", esc(cross)))
 
     jr = res.get("journal") or {}
     if jr.get("hit_rate") is not None:
@@ -6606,17 +6606,20 @@ def _hk_seven_day_block(res, kit):
         f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
         f'{"✓" if r.get("hit") else "✗"}'
         for r in (jr.get("recent") or []))
-    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+    rows.append(kit.item_row(
+        "✓", "<b>预测留痕</b>",
+        f"{j_txt}<br>{recent_txt}" if recent_txt else j_txt,
+    ))
 
     self_check = next((str(t.get("self_check") or "") for t in targets
                        if t.get("self_check")), "")
-    note = (f'<b>七日口径</b> · 目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
-            f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
-            + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
-            + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
-            + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
-            f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
-    rows.append(kit.item_row("⚖", note))
+    note_sub = (f'目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
+                f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
+                + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
+                + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
+                + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
+                f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
+    rows.append(kit.item_row("⚖", "<b>七日口径</b>", note_sub))
     return kit.rows("".join(rows))
 
 
@@ -9528,6 +9531,39 @@ def _harden_wechat_table_widths(html):
     )
 
 
+_CSS_COLOR_PROP_RE = re.compile(r'(?<![-\w])(color\s*:\s*)(#[0-9A-Fa-f]{3,6})\b')
+
+
+def _is_light_or_mid_gray_hex(hex_color):
+    """判断色值是否为需强制加深的中/浅灰色（保留 #000/#111/#222/#333 与纯白 #fff/#ffffff 及彩色）。"""
+    h = (hex_color or "").lstrip("#")
+    if len(h) == 3:
+        r, g, b = (int(c * 2, 16) for c in h)
+        return r == g == b and 0x33 < r < 0xE8
+    if len(h) == 6:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        if r == g == b:
+            return 0x33 < r < 0xE8
+        return (max(r, g, b) - min(r, g, b) <= 18) and (0x33 < max(r, g, b) <= 0xA8)
+    return False
+
+
+def _enforce_dark_gray_font(html, dark_gray=GZ_DARK_GRAY):
+    """强制全局：将白底/浅底 HTML 中的所有灰色字体（color:#444~#ddd 等）统一改写为深灰色（#333）。
+
+    仅改写文字前景色 `color:...`，不触碰 `background-color`、`border-color` 或 `border:1px solid #ddd` 分割线；
+    对暗色像素主题（`octopus-theme="pixel"` 或深色底 `background:#050711`）原样返回。
+    """
+    if not html:
+        return html
+    if 'name="octopus-theme" content="pixel"' in html or "background:#050711" in html:
+        return html
+    return _CSS_COLOR_PROP_RE.sub(
+        lambda m: f"{m.group(1)}{dark_gray}" if _is_light_or_mid_gray_hex(m.group(2)) else m.group(0),
+        html,
+    )
+
+
 def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
@@ -9543,6 +9579,7 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
                                        sentiment_history=sentiment_history,
                                        policy_result=policy_result,
                                        news_corpus=news_corpus)
+        html = _enforce_dark_gray_font(html)
     else:
         html = generate_report_pixel(data, date_display, date_str,
                                      sentiment_history=sentiment_history,
@@ -9610,7 +9647,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 </div>
 </body>
 </html>"""
-    return html
+    return _enforce_dark_gray_font(html)
 
 
 def generate_report_pixel(data, date_display, date_str, sentiment_history=None,
@@ -9956,7 +9993,7 @@ def _compact_html_for_push(html):
         '<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#fff;">'
         '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;">章鱼 AI · 打氧日报</h1>'
-        f'<div style="font-size:12px;color:#666;margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
+        f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
         f'<div style="font-size:13px;line-height:1.6;margin-bottom:12px;">{intro}</div>'
     )
     output = [shell]
@@ -9981,8 +10018,8 @@ def _compact_html_for_push(html):
             f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;">{content}</div>'
             '</section>'
         )
-    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:#555;">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
-    return "".join(output)
+    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:{GZ_DARK_GRAY};">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
+    return _enforce_dark_gray_font("".join(output))
 
 
 # ------------------------------------------------------------
@@ -10217,6 +10254,8 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
 
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
+    if template == "html":
+        content_html = _enforce_dark_gray_font(content_html)
     if template == "html" and len(content_html) <= PUSHPLUS_MAX_CONTENT_CHARS:
         # 归藏简洁排版的目标：全量内容压进单条消息（一页推）
         print(f"  📄 日报 {len(content_html):,} 字 ≤ 单条上限 "

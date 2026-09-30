@@ -26,7 +26,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             "font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;'>"
             "<div style='max-width:640px;margin:80px auto;padding:0 20px;text-align:center;'>"
             f"<div style='font-size:15px;font-weight:700;'>{message}</div>"
-            "<div style='font-size:12px;color:#7E7A6E;margin-top:12px;line-height:1.8;'>"
+            "<div style='font-size:12px;color:#333;margin-top:12px;line-height:1.8;'>"
             "请先运行 <code>python3 output/push.py --no-push</code> 生成日报，再刷新本页面。</div>"
             "</div></body></html>"
         )
