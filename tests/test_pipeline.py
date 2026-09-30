@@ -1911,13 +1911,31 @@ class NewsSentimentFactorTests(unittest.TestCase):
             theme="guizang", sentiment_history=self._senti_history())
         self.assertIn("新闻情绪", html)
         self.assertIn("DNS +1.00", html)
-        self.assertIn("▲ S+1", html)  # 黑白模式用符号区分方向
-        self.assertIn("▼ S−1", html)
-        self.assertIn("MOM +0.67", html)
         self.assertIn("AI 情绪分", html)
-        self.assertIn("原因", html)
         self.assertIn("A股 · 成交量前5", html)
         self.assertNotIn("暂无评分", html)   # 未被点名的个股不再占位
+        if pipeline.LITE_ENABLED:
+            # 精简模式（2026-09-30 起默认）：逐股只留「情绪分 + 1 条最强证据」，
+            # 原因段与动量 / 新闻量三行折叠（本夹具每市场只有 1~2 只被点名，
+            # 不够触发「按只折叠」，因此只断言逐股因子行确实收起）。
+            self.assertIn("▲ S+1", html)     # 黑白模式用符号区分方向
+            self.assertNotIn("MOM +0.67", html)
+            self.assertNotIn("原因", html)
+        else:
+            self.assertIn("▲ S+1", html)
+            self.assertIn("▼ S−1", html)
+            self.assertIn("MOM +0.67", html)
+            self.assertIn("原因", html)
+
+    def test_guizang_full_mode_keeps_per_stock_factors(self):
+        """--full / OCTOPUS_LITE=0：逐股原因段与情绪动量 / 新闻量一行不少地回来。"""
+        with patch.object(pipeline, "LITE_ENABLED", False):
+            html = pipeline.generate_report(
+                self._senti_data(), "2026年8月2日 · 周日", "20260802",
+                theme="guizang", sentiment_history=self._senti_history())
+        for text in ("MOM +0.67", "▼ S−1", "原因", "AI 情绪分", "A股 · 成交量前5"):
+            self.assertIn(text, html)
+        self.assertNotIn("已折叠", html)
 
     def test_per_stock_render_without_attribution(self):
         # 2026-09-27 精简排版：窗口内标题未点名任何榜单个股时栏目整体缺席，
@@ -2301,22 +2319,35 @@ class SectionReadingOrderTests(unittest.TestCase):
                          "栏目顺序不符合阅读逻辑:\n" + "\n".join(
                              f"  {h}: {p}" for h, p in zip(self.GUIZANG_ORDER, positions)))
 
+    def _lvl_markers(self, data, kickers):
+        """按本次实际渲染的栏目序列生成「LVL nn // KICKER」标记。
+
+        2026-09-30 起第一屏多了「【闪电飞鱼】短线速查卡」（LVL 00），编号整体后移一位；
+        编号由栏目序列推导而不是写死，精简 / 全量两种版面共用同一份断言。
+        """
+        sections = pipeline._collect_report_parts(data, pipeline.PIXEL_KIT,
+                                                  date_str="20260802")["sections"]
+        index = {kick: i for i, (kick, *_rest) in enumerate(sections)}
+        return [f"LVL {index[k]:02d} // {k}" for k in kickers if k in index], index
+
     def test_pixel_lvl_numbering_follows_reading_order(self):
-        html = pipeline.generate_report(
-            self._full_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
-        order = [
-            "LVL 01 // FORECAST",
-            "LVL 02 // MARKET REVIEW",
-            "LVL 03 // POLICY SHOCK", "LVL 04 // STRATEGY READ",
-            "LVL 05 // GLOBAL HEADLINES", "LVL 06 // EASTMONEY WIRE",
-            "LVL 07 // HK GURU CHANNELS",
-            "LVL 08 // NEWS SENTIMENT", "LVL 09 // SUMMARY",
-        ]
+        data = self._full_data()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
+        kickers = ["FORECAST", "MARKET REVIEW", "POLICY SHOCK", "STRATEGY READ",
+                   "GLOBAL HEADLINES", "EASTMONEY WIRE", "HK GURU CHANNELS",
+                   "NEWS SENTIMENT", "SUMMARY"]
+        order, index = self._lvl_markers(data, kickers)
+        self.assertEqual(len(order), len(kickers), "存在未渲染的栏目")
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "存在未渲染的 LVL 关卡")
         self.assertEqual(positions, sorted(positions),
                          "LVL 关卡编号顺序不符合阅读逻辑:\n" + "\n".join(
                              f"  {s}: {p}" for s, p in zip(order, positions)))
+        # 阅读顺序本身仍按 REPORT_SECTION_ORDER，且速查卡 / 速览永远在最前
+        self.assertEqual([index[k] for k in kickers], sorted(index[k] for k in kickers))
+        self.assertLess(index["AI DIGEST"], index["FORECAST"])
+        if "SHORT CARD" in index:
+            self.assertEqual(index["SHORT CARD"], 0)
 
     def test_order_skips_missing_sections_without_shifting_rest(self):
         # 无新闻/无政策/无情绪归因（缺席栏目）时，剩余栏目顺序与编号仍正确
@@ -2328,8 +2359,8 @@ class SectionReadingOrderTests(unittest.TestCase):
             "东方财富热门榜", "unavailable", markets={}, error="offline")
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
-        order = ["LVL 01 // FORECAST", "LVL 02 // MARKET REVIEW",
-                 "LVL 03 // STRATEGY READ", "LVL 04 // SUMMARY"]
+        order, _index = self._lvl_markers(
+            data, ["FORECAST", "MARKET REVIEW", "STRATEGY READ", "SUMMARY"])
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
@@ -2969,13 +3000,20 @@ class EconCalendarTests(unittest.TestCase):
     # ---------- ④ 排版与披露 ----------
     def test_section_renders_right_after_conclusion_in_both_themes(self):
         res, _ = self._fetch()
+        data = self._data(res)
+        # pixel 的 LVL 编号由本次实际渲染的栏目序列推导：2026-09-30 起第一屏多了
+        # 「【闪电飞鱼】短线速查卡」（LVL 00），写死编号会在版面调整时误报。
+        kickers = [s[0] for s in pipeline._collect_report_parts(
+            data, pipeline.PIXEL_KIT, date_str="20260928")["sections"]]
+        pixel_markers = [f"LVL {kickers.index(k):02d} // {k}"
+                         for k in ("FORECAST", "ECON CALENDAR", "MARKET REVIEW")
+                         if k in kickers]
         for theme, markers in (
             ("guizang", ["【回游金枪鱼】今日预判</h2>", "【探照安康鱼】时间节点</h2>",
                          "【及时秋刀鱼】AI 行情复盘</h2>"]),
-            ("pixel", ["LVL 01 // FORECAST", "LVL 02 // ECON CALENDAR",
-                       "LVL 03 // MARKET REVIEW"]),
+            ("pixel", pixel_markers),
         ):
-            html = self._report(self._data(res), theme=theme)
+            html = self._report(data, theme=theme)
             positions = [html.find(m) for m in markers]
             self.assertNotIn(-1, positions, f"{theme} 栏目缺失: {markers}")
             self.assertEqual(positions, sorted(positions),
@@ -2986,7 +3024,7 @@ class EconCalendarTests(unittest.TestCase):
         html = self._report(self._data(res))
         for text in ("窗口摘要", "时间窗口", "时间点合计", "央行议息 / 重要会议",
                      "中国关键读数", "美国关键读数", "最密集日", "筛选口径",
-                     "逐日时间点（北京时间）", "★★★", "美联储议息会议"):
+                     pipeline._calendar_table_label(), "★★★", "美联储议息会议"):
             self.assertIn(text, html, f"摘要/正文缺少 {text}")
         self.assertIn("未来 30 天", html)
         # 每个列出的时间点都要能看到地区与类型标签（数据 / 事件 / 动态）
