@@ -4290,6 +4290,7 @@ GZ_META = GZ_DARK_GRAY   # 次要文字（标签、来源、小标题）｜强�
 GZ_FAINT = GZ_DARK_GRAY  # 辅助文字（时间、脚注、表头、摘要）｜强制全局改深灰 #333
 GZ_HAIR = "#ddd"         # 栏目分割线
 GZ_HAIR_SOFT = "#eee"    # 行间细分隔线
+GZ_ZEBRA = "#F2F2F2"     # 栏目内段落灰底：相邻内容块 纯白 ↔ 浅灰 交替（见 _gz_zebra_bands）
 GZ_INK_TINT = "#FFFFFF"
 GZ_HAIR_INK = GZ_HAIR
 GZ_HAIR_W = 1               # 1px 细分隔线，不用 2px
@@ -5379,6 +5380,97 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 
+# 顶层块识别标记（与 gz_subsection / _gz_news_card 的输出模板逐字对应）
+_GZ_SUBSECTION_SIG = f"margin-top:12px;color:{GZ_META};font-weight:700"
+_GZ_ZEBRA_TAG_RE = re.compile(
+    r'<!--.*?-->|<(/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|\'[^\']*\'|[^>"\'])*)(/?)>',
+    re.S,
+)
+_GZ_ZEBRA_VOID = frozenset((
+    "br", "img", "hr", "col", "meta", "link", "input",
+    "area", "base", "embed", "source", "track", "wbr",
+))
+
+
+def _gz_top_level_spans(html):
+    """把归藏栏目的内容串按「顶层元素」切块，返回 ``[(start, end)]`` 坐标。
+
+    生成器自产 HTML 标签必然配对，用一个深度计数器即可：深度归零即收一块。
+    注释（<!--BODY--> 等推进标记）与顶层散落的空白/孤立 void 标签不计块，
+    折叠进相邻块的坐标区间，保证拼接后一个字符都不丢。
+    """
+    spans = []
+    depth = 0
+    start = 0
+    pending = 0          # 尚未归属任何块的前缀长度（空白/注释/void）
+    for m in _GZ_ZEBRA_TAG_RE.finditer(html):
+        if m.group(0).startswith("<!--"):
+            if depth == 0:
+                pending = m.end()
+            continue
+        closing, tag = m.group(1) == "/", m.group(2).lower()
+        if tag in _GZ_ZEBRA_VOID or m.group(4) == "/":
+            if depth == 0:
+                if spans:
+                    spans[-1] = (spans[-1][0], m.end())
+                else:
+                    pending = m.end()
+            continue
+        if not closing:
+            if depth == 0:
+                start = m.start()
+            depth += 1
+        else:
+            depth = max(0, depth - 1)
+            if depth == 0:
+                spans.append((min(start, pending), m.end()) if pending < start
+                             else (start, m.end()))
+                pending = m.end()
+    return spans
+
+
+def _gz_zebra_bands(content):
+    """栏目内部段落灰底交替：相邻顶层块按 纯白 ↔ 浅灰 #F2F2F2 两档背景轮流铺底。
+
+    - 每个顶层块（键值段 / 资讯卡片 / 表格 / 脚注 / 提示…）独立成带，奇数带铺灰；
+      内容本身的标签与样式一个字不改，只在外面套一层带 padding 的灰底 div；
+    - 子节标题（gz_subsection）并进紧随其后的首块，避免「标题白、表格灰」断裂；
+    - 灰底带自带宽 8px 内衬，正文与纯白带左缘有呼吸差，读视线跟着色带走；
+    - 全内联样式，微信 PushPlus 清洗不掉 background，与整页白底不冲突。
+    """
+    if not content or "<" not in content:
+        return content
+    spans = _gz_top_level_spans(content)
+    if len(spans) < 2:   # 只有一块（或纯表格）无需交替
+        return content
+    # 分组：子节标题与其后首块同带
+    groups = []
+    i = 0
+    while i < len(spans):
+        s, e = spans[i]
+        if (content[s:e].startswith("<div")
+                and _GZ_SUBSECTION_SIG in content[s:min(e, s + 160)]
+                and i + 1 < len(spans)):
+            groups.append((s, spans[i + 1][1]))
+            i += 2
+        else:
+            groups.append((s, e))
+            i += 1
+    out = []
+    cursor = 0
+    for bi, (s, e) in enumerate(groups):
+        out.append(content[cursor:s])          # 带间空白原样保留
+        inner = content[s:e]
+        if bi % 2 == 1:
+            out.append(f'<div style="background:{GZ_ZEBRA};'
+                       f'padding:4px 8px;margin:2px 0;">{inner}</div>')
+        else:
+            out.append(inner)
+        cursor = e
+    out.append(content[cursor:])
+    return "".join(out)
+
+
 def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
     """归藏简洁栏目头：编号 + kicker（克莱因蓝）→ 标题（深灰黑）→ 徽标 / 口径。
 
@@ -5389,6 +5481,8 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
                    f'style="width:100%!important;border-collapse:collapse;'
                    f'font-size:{GZ_FS_TABLE}px;color:{GZ_INK}">{content}</table>')
+    # 段落灰底交替：栏目内相邻内容块 纯白 ↔ 浅灰 轮流铺底（表格体已先合成为单块）
+    content = _gz_zebra_bands(content)
     meta_bits = [x for x in (badge_html, caption) if x]
     meta = (f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;'
             f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
