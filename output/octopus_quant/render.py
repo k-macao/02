@@ -358,8 +358,7 @@ def render_hk_probability(res, kit):
             if s.get("main_net_yi") is not None:
                 flow_txt = f'{s["main_net_yi"]:+.2f}亿'
             rows.append([
-                f'{esc(s["label"])}<br><span style="font-weight:400;">'
-                f'{esc(s["code"].split(".")[0])}</span>',
+                f'{esc(s["label"])}<br>{esc(s["code"].split(".")[0])}',
                 num(f.get("close"), 2),
                 kit.trend(f.get("chg_pct"), compact=True),
                 prob_cell(kit, p5),
