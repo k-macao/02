@@ -300,7 +300,8 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         order = pipeline.REPORT_SECTION_ORDER
         self.assertIn("WEEKLY FORECAST", order)
         self.assertLess(order.index("LIQUIDITY FLOW"), order.index("WEEKLY FORECAST"))
-        self.assertLess(order.index("WEEKLY FORECAST"), order.index("MARKET SNAPSHOT"))
+        # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为 MARKET REVIEW 一栏
+        self.assertLess(order.index("WEEKLY FORECAST"), order.index("MARKET REVIEW"))
         self.assertLess(order.index("WEEKLY FORECAST"), order.index("SUMMARY"))
 
     def test_render_section_in_both_themes(self):
@@ -339,7 +340,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         # 页首「AI 全篇速览」会先提到各栏目标题，因此用栏目 kicker（只在正文栏目头出现）定位顺序
         # 归藏简洁排版（2026-09-29 起）栏目头写作「07 · WEEKLY FORECAST」，编号在前
         i_wk = html.find("· WEEKLY FORECAST<")
-        i_mk = html.find("· MARKET SNAPSHOT<")
+        i_mk = html.find("· MARKET REVIEW<")
         self.assertGreater(i_wk, -1)
         self.assertGreater(i_mk, -1)
         self.assertLess(i_wk, i_mk)

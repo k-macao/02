@@ -46,7 +46,7 @@ EM_SECID_FOR_YAHOO = {
     "^HSTECH": "100.HSTECH", "%5EHSTECH": "100.HSTECH",
     "^HSCE": "100.HSCEI", "%5EHSCE": "100.HSCEI",
     "MSFT": "105.MSFT", "META": "105.META",
-    # NYMEX 美原油连续（东财 globalfuture/CL00Y）；若接口不认该代码，行情速览的 WTI 行
+    # NYMEX 美原油连续（东财 globalfuture/CL00Y）；若接口不认该代码，AI 行情复盘的 WTI 行
     # 只在 Yahoo 双主机失败时缺席，不会出现错误数字。
     "CL=F": "102.CL00Y",
 }
@@ -92,7 +92,9 @@ def _google_search_rss(query: str, hl: str, gl: str, ceid: str) -> str:
 DATA_LINES: Dict[str, Dict[str, Any]] = {
     "yahoo_chart": {
         "name": "实时行情 · Yahoo 日线快照",
-        "used_by": ("行情速览", "今日预判", "全球大盘全景复盘·全球指数"),
+        # 2026-09-30 起「行情速览」与「全球大盘全景复盘」合并为【及时秋刀鱼】AI 行情复盘；
+        # 原全景首块「全球指数概览」复用的就是本数据线的同一份 Yahoo 快照，已随合并删除。
+        "used_by": ("【及时秋刀鱼】AI 行情复盘·报价", "【回游金枪鱼】今日预判"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -104,7 +106,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "yahoo_bars": {
         "name": "日线序列 · 港股量化 / 每周预测",
-        "used_by": ("量化预测总览", "港股概率走势分析", "每周量化走势预测"),
+        "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析", "每周量化走势预测"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -116,7 +118,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "em_ulist": {
         "name": "东方财富 指数 / 个股快照（ulist.np）",
-        "used_by": ("全球大盘全景复盘", "行情速览·港股核对", "资金流动性分析"),
+        "used_by": ("【及时秋刀鱼】AI 行情复盘·A股全景",
+                    "【及时秋刀鱼】AI 行情复盘·港股核对", "资金流动性分析"),
         "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get")),
         "backups": (
             ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/ulist.np/get"), True),
@@ -126,17 +129,18 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "sina_index": {
         "name": "A股宽基指数快照 · 独立第三源",
-        "used_by": ("全球大盘全景复盘·指数表现",),
+        "used_by": ("【及时秋刀鱼】AI 行情复盘·A股指数",),
         "primary": ("东方财富 push2 ulist.np", _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get")),
         "backups": (
             ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/ulist.np/get"), True),
             ("新浪财经 hq.sinajs（独立源，代码映射）", SINA_HQ_URL, False),
         ),
-        "note": "适配器 pipeline._sina_index_rows；新浪不提供涨跌家数，启用时全景只报指数与成交额（partial）",
+        "note": "适配器 pipeline._sina_index_rows；新浪不提供涨跌家数，启用时 A股全景只报指数与成交额（partial）",
     },
     "em_clist": {
         "name": "东方财富 榜单列表（clist）",
-        "used_by": ("热门榜单", "全球大盘全景复盘·板块热力", "每日量化策略·行业列表", "资金流动性·港股成交榜"),
+        "used_by": ("热门榜单", "【及时秋刀鱼】AI 行情复盘·板块热力",
+                    "每日量化策略·行业列表", "资金流动性·港股成交榜"),
         "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/clist/get")),
         "backups": (
             ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/clist/get"), True),
@@ -146,7 +150,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "em_kline": {
         "name": "东方财富 日K（push2his）",
-        "used_by": ("全球大盘全景复盘·上日成交额", "每日量化策略·行业指数日线", "日线序列备用"),
+        "used_by": ("【及时秋刀鱼】AI 行情复盘·上日成交额",
+                    "每日量化策略·行业指数日线", "日线序列备用"),
         "primary": ("东方财富 push2his", _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get")),
         "backups": (
             ("东方财富 91.push2his（同格式镜像）", _em(EM_PUSH2HIS_HOSTS[1], "/api/qt/stock/kline/get"), True),
@@ -156,7 +161,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "em_datacenter": {
         "name": "东方财富 数据中心报表（沪深港通成交 / 财经日历）",
-        "used_by": ("全球大盘全景复盘·南北向", "资金流动性分析", "未来30天影响经济时间点"),
+        "used_by": ("【及时秋刀鱼】AI 行情复盘·南北向", "资金流动性分析",
+                    "【探照安康鱼】时间节点"),
         "primary": ("东方财富 datacenter-web", EM_DATACENTER_URLS[0]),
         "backups": (
             ("东方财富 datacenter（同格式镜像）", EM_DATACENTER_URLS[1], True),

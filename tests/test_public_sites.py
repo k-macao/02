@@ -380,8 +380,12 @@ class SentimentFactorTests(unittest.TestCase):
             for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
                 # 结论先行（今日预判）→ 行情数据 → 趋势跟踪 → 资讯 → 总结收尾
-                self.assertLess(titles.index("行情速览"), titles.index("趋势跟踪"))
-                self.assertLess(titles.index("今日预判"), titles.index("行情速览"))
+                # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」
+                review = pipeline.SECTION_TITLE_MARKET_REVIEW
+                self.assertLess(titles.index(review), titles.index("趋势跟踪"))
+                self.assertLess(titles.index("【回游金枪鱼】今日预判"), titles.index(review))
+                self.assertNotIn("行情速览", titles)            # 旧栏目名不得回潮
+                self.assertNotIn("全球大盘全景复盘", titles)
                 self.assertNotIn("每日量化策略趋势跟踪线索", titles)  # 旧栏目名不得回潮
                 self.assertEqual(titles[-1], "总结")
 
