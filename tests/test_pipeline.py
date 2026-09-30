@@ -600,6 +600,29 @@ class GuizangThemeTests(unittest.TestCase):
                         f"{name} 仍含未加深的灰色字体 {c}",
                     )
 
+    def test_kv_and_channel_rows_stack_label_and_value_on_separate_lines(self):
+        """内容表格分行：标题（标签）独占一行，具体内容换到下一行展示，不挤在同一行"""
+        kv_html = pipeline.gz_kv_table([("市场倾向", "中性 ■"), ("核心判断", "指数温和偏多")])
+        self.assertIn(f'市场倾向<br><b style="color:{pipeline.GZ_INK}">中性 ■</b>', kv_html)
+        self.assertIn(f'核心判断<br><b style="color:{pipeline.GZ_INK}">指数温和偏多</b>', kv_html)
+        self.assertNotIn("市场倾向 · <b", kv_html)
+
+        ch_html = pipeline.gz_channel_block({
+            "name": "郭思治（郭Sir）",
+            "desc": "港股评论",
+            "url": "https://example.com/kwok",
+            "is_today": True,
+            "videos": [{
+                "title": "港股收市汇报",
+                "url": "https://example.com/v1",
+                "published_cst": "2026-09-29 18:00",
+                "is_today": True,
+            }],
+        }, ch_idx=1)
+        self.assertIn('id="h-hk-01-01"', ch_html)
+        self.assertIn('<br><small style="color:#333">2026-09-29 18:00</small>', ch_html)
+        self.assertNotIn("<table", ch_html)
+
     def test_true_white_background_and_gray_hairlines(self):
         """真白底 #ffffff + 1px 浅灰分割线，不靠背景色块分区"""
         html = self._html()

@@ -4555,18 +4555,16 @@ def _gz_num(text):
 
 
 def _gz_flow_rows(pairs):
-    """键值对逐行铺开：整组一个容器，行间用 <br>，只有「值」需要一层颜色标记。
+    """键值对上下分行：标题（标签）独占一行，具体内容换到下一行展示。
 
-    这样一条键值只花 <br> + 一个 span 的标记，比两列表格省一半以上，手机上也不会
-    被窄标签列挤成竖排；标签统一灰色、值统一正文色，层级靠颜色而不是靠边框。
+    一条键值只花 <br> + 一层 <b> 标记，手机端标题与内容上下分行不拥挤，同时保持一页推体积。
     """
     lines = []
     for label, value in pairs:
         if label in (None, ""):
             lines.append(str(value))
         else:
-            # 值用墨色加粗（标签沿用容器的灰）：层次照旧，比每行套 span 省一半标记
-            lines.append(f'{label} · <b style="color:{GZ_INK}">{value}</b>')
+            lines.append(f'{label}<br><b style="color:{GZ_INK}">{value}</b>')
     return (f'<div style="padding:4px 0;color:{GZ_META}">'
             + "<br>".join(lines) + "</div>")
 
@@ -4937,19 +4935,18 @@ def gz_channel_block(ch, ch_idx=None):
     badge = gz_source_badge({"status": "success", "is_today": True}) if ch.get("is_today") else ""
     name_link = f'<a href="{url}" style="color:{GZ_KLEIN}">{name}</a>' \
         if url else name
-    rows, anchors = [], []
+    cards = []
     for vi, v in enumerate(videos[:CHANNEL_TOP_N], 1):
         title = _esc(v.get("title", "")[:110])
         pub = _esc(v.get("published_cst", ""))
         link = (f'<a href="{_esc(v.get("url", "#"))}" '
                 f'style="color:{GZ_KLEIN}">{title}</a>')
         new_tag = f' <span style="color:{GZ_UP}">当天</span>' if v.get("is_today") else ""
-        rows.append([link + new_tag, pub])
-        anchors.append(f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None)
+        anchor = f"h-hk-{ch_idx:02d}-{vi:02d}" if isinstance(ch_idx, int) else None
+        cards.append(_gz_news_card("", link + new_tag, pub, anchor=anchor))
     head = (f'<div style="padding:10px 0 2px;font-weight:700;color:{GZ_INK_STRONG};'
             f'line-height:1.5">{name_link}{" · " + badge if badge else ""}</div>')
-    return head + gz_data_table(["标题", "时间"], rows, aligns=("left", "right"),
-                                row_anchors=anchors)
+    return head + "".join(cards)
 
 
 
@@ -6199,15 +6196,18 @@ def _weekly_forecast_block(res, kit):
         f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
         f'{"✓" if r.get("hit") else "✗"}'
         for r in recent)
-    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+    rows.append(kit.item_row(
+        "✓", "<b>预测留痕</b>",
+        f"{j_txt}<br>{recent_txt}" if recent_txt else j_txt,
+    ))
 
-    note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
-            f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
-            f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
-            f' · 先存档后结算（weekly_forecast.json · settled 字段）'
-            f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
+    note_sub = (f'截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
+                f' · 特征只用 ≤t 数据（扩张归一，绝无全样本统计量）'
+                f' · 相似样本标签须已结算（s+{int(_weekly.HORIZON)}≤t，purged/embargo 依据）'
+                f' · 先存档后结算（weekly_forecast.json · settled 字段）'
+                f' · 方法：{esc(str(res.get("method") or ""))} · 规则合成，非投资建议')
     # 口径行按 item_row 走（pixel 精简排版会丢弃 note 脚注，两主题都必须能看到口径披露）
-    rows.append(kit.item_row("⚖", note))
+    rows.append(kit.item_row("⚖", "<b>无未来函数口径</b>", note_sub))
     return kit.rows("".join(rows))
 
 
@@ -6232,8 +6232,11 @@ def _hk_seven_day_block(res, kit):
     else:
         head_sub += (f' · 大模型不可用（{esc(str(res.get("llm_reason") or "未配置 Key"))}）'
                      f'→ 量化基准')
-    head_row = kit.item_row("◈", f'<b>引擎</b> · {esc(str(res.get("engine_label") or ""))}',
-                            head_sub)
+    engine_label = esc(str(res.get("engine_label") or ""))
+    head_row = kit.item_row(
+        "◈", "<b>引擎</b>",
+        f"{engine_label} · {head_sub}" if engine_label else head_sub,
+    )
     for t in targets:
         icon = {"up": "▲", "down": "▼"}.get(t.get("direction"), "■")
         bits = []
@@ -6261,13 +6264,10 @@ def _hk_seven_day_block(res, kit):
             sub_layers.append(" · ".join(bits))
         if fb_summary:
             sub_layers.append(f'因子：{esc(fb_summary)}')
-        ev = []
         if drivers:
-            ev.append(f'依据：{drivers}')
+            sub_layers.append(f'依据：{drivers}')
         if risks:
-            ev.append(f'风险：{risks}')
-        if ev:
-            sub_layers.append(" · ".join(ev))
+            sub_layers.append(f'风险：{risks}')
         if res.get("engine") == "llm":
             q_info = f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%' + (
                 '（已按基准收敛）' if t.get("converged")
@@ -6284,7 +6284,7 @@ def _hk_seven_day_block(res, kit):
 
     cross = str(res.get("cross_note") or "")
     if cross:
-        rows.append(kit.item_row("◇", f'跨市场 · {esc(cross)}', ''))
+        rows.append(kit.item_row("◇", "<b>跨市场</b>", esc(cross)))
 
     jr = res.get("journal") or {}
     if jr.get("hit_rate") is not None:
@@ -6302,17 +6302,20 @@ def _hk_seven_day_block(res, kit):
         f'{"+" if float(r.get("ret") or 0) >= 0 else ""}{float(r.get("ret") or 0) * 100:.1f}% '
         f'{"✓" if r.get("hit") else "✗"}'
         for r in (jr.get("recent") or []))
-    rows.append(kit.item_row("✓", f'<b>预测留痕</b> · {j_txt}', recent_txt))
+    rows.append(kit.item_row(
+        "✓", "<b>预测留痕</b>",
+        f"{j_txt}<br>{recent_txt}" if recent_txt else j_txt,
+    ))
 
     self_check = next((str(t.get("self_check") or "") for t in targets
                        if t.get("self_check")), "")
-    note = (f'<b>七日口径</b> · 目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
-            f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
-            + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
-            + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
-            + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
-            f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
-    rows.append(kit.item_row("⚖", note))
+    note_sub = (f'目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
+                f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
+                + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
+                + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
+                + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
+                f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
+    rows.append(kit.item_row("⚖", "<b>七日口径</b>", note_sub))
     return kit.rows("".join(rows))
 
 
