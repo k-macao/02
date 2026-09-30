@@ -582,9 +582,12 @@ class GuizangThemeTests(unittest.TestCase):
             '<span style="color:#555">标签</span>'
             '<span style="color:#6B6B6B">旧灰</span>'
             '<a style="color:#002FA7">链接</a></div>'
+            '<div style="padding:5px 0;border-top:1px solid #eee">无色块文本</div>'
+            '<table style="border-collapse:separate"><tr><td>无色表单元格</td></tr></table>'
         )
         enforced = pipeline._enforce_dark_gray_font(sample_raw)
         self.assertEqual(enforced.count("color:#333"), 4)
+        self.assertEqual(enforced.count("color:#222"), 2)
         self.assertIn("border-top:1px solid #ddd", enforced)
         self.assertIn("color:#002FA7", enforced)
 
@@ -599,6 +602,77 @@ class GuizangThemeTests(unittest.TestCase):
                         pipeline._is_light_or_mid_gray_hex(c),
                         f"{name} 仍含未加深的灰色字体 {c}",
                     )
+
+    def test_every_text_node_has_explicit_color_without_body_tag(self):
+        """PushPlus v-html 会剥离 <body> 标签：剥离 <body> 后，每个文本节点都必须在自身或 <body> 内祖先节点上拥有显式内联 color。"""
+        from html.parser import HTMLParser
+
+        class _BodylessColorAudit(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+                self.unstyled = []
+                self.total = 0
+
+            def handle_starttag(self, tag, attrs):
+                style = dict(attrs).get("style") or ""
+                m = re.search(r"(?<![-\w])color\s*:\s*([^;\"'\s]+)", style, re.I)
+                self.stack.append((tag.lower(), m.group(1) if m else None))
+
+            def handle_endtag(self, tag):
+                t = tag.lower()
+                for i in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[i][0] == t:
+                        self.stack.pop(i)
+                        break
+
+            def handle_data(self, data):
+                txt = data.strip()
+                if not txt:
+                    return
+                if self.stack and self.stack[-1][0] in ("title", "style", "script"):
+                    return
+                self.total += 1
+                color_in_fragment = None
+                for t, col in reversed(self.stack):
+                    if t == "body":
+                        break
+                    if col:
+                        color_in_fragment = col
+                        break
+                if color_in_fragment is None:
+                    path = "/".join(t for t, _ in self.stack)
+                    self.unstyled.append((txt[:30], path))
+
+        html = self._html()
+        audit = _BodylessColorAudit()
+        audit.feed(html)
+        self.assertGreater(audit.total, 50)
+        self.assertEqual(
+            audit.unstyled, [],
+            f"剥离 <body> 后仍有未声明 color 的文本节点：{audit.unstyled[:5]}",
+        )
+
+        compact = pipeline._compact_html_for_push(html)
+        self.assertIsNotNone(compact)
+        compact_audit = _BodylessColorAudit()
+        compact_audit.feed(compact)
+        self.assertGreater(compact_audit.total, 20)
+        self.assertEqual(
+            compact_audit.unstyled, [],
+            f"精简推送版剥离 <body> 后仍有未声明 color 的文本节点：{compact_audit.unstyled[:5]}",
+        )
+
+        output_dir = Path(__file__).parents[1] / "output"
+        for name in ("latest.html", "日报排版示例.html", "daily_report_20260929.html"):
+            p = output_dir / name
+            if p.is_file():
+                disk_audit = _BodylessColorAudit()
+                disk_audit.feed(p.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    disk_audit.unstyled, [],
+                    f"{name} 剥离 <body> 后仍有未声明 color 的文本节点：{disk_audit.unstyled[:5]}",
+                )
 
     def test_kv_and_channel_rows_stack_label_and_value_on_separate_lines(self):
         """内容表格分行：标题（标签）独占一行，具体内容换到下一行展示，不挤在同一行"""

@@ -4584,15 +4584,15 @@ def gz_source_badge(item, on_ink=False):
 
 
 def gz_shell(inner, bg=None, pad="20px 0", hair=False, anchor=None, border_css=""):
-    """轻量分块包装：只输出 padding（+可选锚点 / 上边线），不再套表格外壳。
+    """轻量分块包装：只输出 padding（+可选锚点 / 上边线）与显式正文色，不再套表格外壳。
 
     bg 仅为兼容旧调用保留（整页统一真白底 #FFFFFF，无需逐块再写背景色）。
     """
     attr = f' id="{_esc(anchor)}"' if anchor else ""
     hair_css = f"border-top:1px solid {GZ_HAIR};" if hair else ""
     if not pad and not hair_css and not border_css:
-        return f"<div{attr}>{inner}</div>" if attr else inner
-    return f'<div{attr} style="padding:{pad};{hair_css}{border_css}">{inner}</div>'
+        return f'<div{attr} style="color:{GZ_INK}">{inner}</div>' if attr else inner
+    return f'<div{attr} style="padding:{pad};color:{GZ_INK};{hair_css}{border_css}">{inner}</div>'
 
 
 
@@ -4681,7 +4681,7 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="width:100%!important;border-collapse:separate;'
-        f'border-spacing:6px 4px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.55">'
+        f'border-spacing:6px 4px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.55;color:{GZ_INK}">'
         f'{cols}{"".join(trs)}</table>'
     )
 
@@ -5012,16 +5012,16 @@ def _cal_gz_cells(day_label, t_plus, item, first=False):
     imp = max(1, min(3, int(item.get("imp") or 1)))
     day_html = ""
     if first:
-        day_html = f'<b>{_esc(day_label)}</b>'
+        day_html = f'<b style="color:{GZ_INK}">{_esc(day_label)}</b>'
         when = _cal_countdown(t_plus)
         if when:
             day_html += (f'<div style="color:{GZ_META};'
-                         f'padding-top:2px;">{_esc(when)}</div>')
-    star_style = (f"color:{GZ_INK};font-weight:{GZ_W_BOLD};" if imp >= 3
-                  else (f"color:{GZ_INK};" if imp == 2 else f"color:{GZ_META};"))
+                         f'padding-top:2px">{_esc(when)}</div>')
+    star_html = (f'<b style="color:{GZ_INK}">{"★" * imp}</b>' if imp >= 3
+                 else f'<span style="color:{GZ_INK if imp == 2 else GZ_META}">{"★" * imp}</span>')
     city = str(item.get("city") or "").strip()
-    city_html = f'<span style="color:{GZ_META};">{_esc(city)}</span> · ' if city else ""
-    body = (f'<span style="{star_style}">{"★" * imp}</span> '
+    city_html = f'<span style="color:{GZ_META}">{_esc(city)}</span> · ' if city else ""
+    body = (f'{star_html} '
             f'{city_html}{_esc(_cal_item_text(item))}')
     return [day_html, _esc(str(item.get("time") or "—")), body]
 
@@ -5049,7 +5049,7 @@ def _gz_news_card(marker, title, sub="", anchor=None):
     """一条资讯：标题先行，来源与时间安静地跟在下面；细线分隔，不用卡片底色。"""
     attr = f' id="{_esc(anchor)}"' if anchor else ""
     meta = f'<br><small style="color:{GZ_FAINT}">{sub}</small>' if sub else ""
-    return (f'<div{attr} style="padding:5px 0;border-top:1px solid {GZ_HAIR_SOFT}">'
+    return (f'<div{attr} style="padding:5px 0;border-top:1px solid {GZ_HAIR_SOFT};color:{GZ_INK}">'
             f'{title}{meta}</div>')
 
 
@@ -5091,7 +5091,7 @@ def gz_channel_block(ch, ch_idx=None):
     videos = ch.get("videos") or []
     if not videos:
         note = _esc(ch.get("note") or "暂缺")
-        return (f'<div style="padding:8px 0">'
+        return (f'<div style="padding:8px 0;color:{GZ_FAINT}">'
                 f'<span style="color:{GZ_FAINT};font-weight:700">{name} · 暂缺</span>'
                 f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;padding-top:2px;'
                 f'line-height:1.6">{desc} · {note}</div></div>')
@@ -5133,7 +5133,7 @@ def gz_alert(text, color=None):
     """提示块：一条克莱因蓝（或指定色）竖线，不用底色。"""
     c = color or GZ_KLEIN
     return (f'<div style="margin:8px 0;padding:2px 0 2px 12px;'
-            f'border-left:2px solid {c};line-height:1.8">{text}</div>')
+            f'border-left:2px solid {c};color:{GZ_INK};line-height:1.8">{text}</div>')
 
 
 def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
@@ -5157,7 +5157,7 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
     meta = (f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;'
             f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
     return (
-        f'<div style="padding:28px 0 0;border-top:1px solid {GZ_HAIR}">'
+        f'<div style="padding:28px 0 0;border-top:1px solid {GZ_HAIR};color:{GZ_INK};background:{GZ_PAPER}">'
         f'<div style="padding-top:12px;color:{GZ_KLEIN};font-size:11px;'
         f'font-weight:700;letter-spacing:0.12em">{num} · {_esc(kicker_en)}</div>'
         f'<h2 style="margin:4px 0 0;font-size:{GZ_FS_SECTION}px;'
@@ -5235,7 +5235,7 @@ def gz_ai_analysis_block(res):
         out.append(gz_subsection("指数动能 · 趋势过滤") + gz_kv_table(tech_pairs))
     if res.get("risk_note"):
         out.append(gz_subsection("风险预算") + gz_shell(
-            f'<div style="line-height:1.85">{_esc(res["risk_note"])}</div>',
+            f'<div style="color:{GZ_INK};line-height:1.85">{_esc(res["risk_note"])}</div>',
             bg=GZ_PAPER, pad="8px 0"))
     if res["risks"]:
         risk_cards = []
@@ -5255,7 +5255,7 @@ def gz_ai_analysis_block(res):
         out.append(gz_subsection("风险提示 · 趋势跟踪止损") + "".join(risk_cards))
     if res.get("themes"):
         out.append(gz_subsection("量化配置 · 趋势跟踪") + gz_shell(
-            f'<div style="font-weight:700;line-height:1.85">'
+            f'<div style="color:{GZ_INK};font-weight:700;line-height:1.85">'
             f'★ 趋势跟踪配置： {_esc(res["themes"])} · 优选强势趋势板块，规避弱势/高风险板块'
             f'</div>', bg=GZ_PAPER, pad="8px 0"))
     return "".join(out)
@@ -6407,9 +6407,14 @@ def _ai_judge_row(note, kit, aspect=""):
     lc = (bull_c if note["label"] == "偏多"
           else bear_c if note["label"] == "偏空" else flat_c)
     title = f"⌁ AI 研判（{aspect}）" if aspect else "⌁ AI 研判"
-    head = (f'<span style="color:{lc};font-weight:900;">{title} {note["mark"]} {note["label"]}</span>'
-            f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
-            f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
+    if kit is GUIZANG_KIT:
+        head = (f'<b style="color:{lc}">{title} {note["mark"]} {note["label"]}</b>'
+                f' · <b style="color:{bull_c}">多头 {note["bull_pct"]}%</b>'
+                f' / <b style="color:{bear_c}">空头 {note["bear_pct"]}%</b>')
+    else:
+        head = (f'<span style="color:{lc};font-weight:900;">{title} {note["mark"]} {note["label"]}</span>'
+                f' · <span style="color:{bull_c};font-weight:900;">多头 {note["bull_pct"]}%</span>'
+                f' / <span style="color:{bear_c};font-weight:900;">空头 {note["bear_pct"]}%</span>')
     return kit.item_row("⌁", f"{head} — {note['text']}")
 
 
@@ -6420,9 +6425,10 @@ def _ren_judgment_row(text, kit):
     🦑 直接写进文字头（guizang 主题的行函数不渲染图标格，两主题都要能看到）；
     副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致。
     """
-    color = GZ_KLEIN if kit is GUIZANG_KIT else C_CYAN
-    head = (f'<span style="color:{color};font-weight:900;">🦑 鲜鲜解读</span>'
-            f' — {_esc(text)}')
+    if kit is GUIZANG_KIT:
+        head = f'<b style="color:{GZ_KLEIN}">🦑 鲜鲜解读</b> — {_esc(text)}'
+    else:
+        head = f'<span style="color:{C_CYAN};font-weight:900;">🦑 鲜鲜解读</span> — {_esc(text)}'
     return kit.item_row("", head, _esc(_ren.DISCLAIMER))
 
 
@@ -6665,7 +6671,8 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
     rows.append(("阅读提醒", _esc(
         f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。"
         "预测存在不确定性，完整依据、来源与暂缺项见下文。")))
-    lead_html = (f'<div style="font-size:26px;font-weight:700;line-height:1.5;'
+    lead_color = GZ_INK_STRONG if kit is GUIZANG_KIT else C_INK
+    lead_html = (f'<div style="font-size:26px;font-weight:700;color:{lead_color};line-height:1.5;'
                  f'margin:8px 0 20px;overflow-wrap:anywhere;">{_esc(brief(lead, 110))}</div>')
     return ("AI DIGEST", SECTION_TITLE_AI_DIGEST, lead_html + kit.kv(rows), "",
             "先看重点，再读全文 · 规则/量化合成，非大模型生成 · 非投资建议")
@@ -9532,6 +9539,10 @@ def _harden_wechat_table_widths(html):
 
 
 _CSS_COLOR_PROP_RE = re.compile(r'(?<![-\w])(color\s*:\s*)(#[0-9A-Fa-f]{3,6})\b')
+_BLOCK_STYLE_TAG_RE = re.compile(
+    r'(<(?P<tag>div|table|section|p|h1|h2|small)\b[^>]*?\bstyle\s*=\s*(?P<q>["\']))(?P<style>.*?)(?P=q)',
+    re.I | re.S,
+)
 
 
 def _is_light_or_mid_gray_hex(hex_color):
@@ -9549,19 +9560,33 @@ def _is_light_or_mid_gray_hex(hex_color):
 
 
 def _enforce_dark_gray_font(html, dark_gray=GZ_DARK_GRAY):
-    """强制全局：将白底/浅底 HTML 中的所有灰色字体（color:#444~#ddd 等）统一改写为深灰色（#333）。
+    """强制全局：
+    1) 将白底/浅底 HTML 中的所有灰色字体（color:#444~#ddd 等）统一改写为深灰色（#333）；
+    2) 为所有带内联 style 但未声明前景色 `color:` 的容器/表格标签（div/table/section/p/h1/h2/small）
+       显式补齐内联 `color`，防止 PushPlus `v-html` 剥离 `<body>` 后文字回退为宿主页面浅灰/深色模式反色。
 
-    仅改写文字前景色 `color:...`，不触碰 `background-color`、`border-color` 或 `border:1px solid #ddd` 分割线；
+    仅改写或补齐文字前景色 `color:...`，不触碰 `background-color`、`border-color` 或 `border:1px solid #ddd` 分割线；
     对暗色像素主题（`octopus-theme="pixel"` 或深色底 `background:#050711`）原样返回。
     """
     if not html:
         return html
     if 'name="octopus-theme" content="pixel"' in html or "background:#050711" in html:
         return html
-    return _CSS_COLOR_PROP_RE.sub(
+    html = _CSS_COLOR_PROP_RE.sub(
         lambda m: f"{m.group(1)}{dark_gray}" if _is_light_or_mid_gray_hex(m.group(2)) else m.group(0),
         html,
     )
+
+    def _ensure_block_color(match):
+        style = match.group("style")
+        if re.search(r'(?<![-\w])color\s*:', style, re.I):
+            return match.group(0)
+        tag = match.group("tag").lower()
+        fallback = GZ_INK_STRONG if tag in ("h1", "h2") else (dark_gray if tag == "small" else GZ_INK)
+        sep = "" if (not style or style.rstrip().endswith(";")) else ";"
+        return f"{match.group(1)}{style}{sep}color:{fallback}{match.group('q')}"
+
+    return _BLOCK_STYLE_TAG_RE.sub(_ensure_block_color, html)
 
 
 def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
@@ -9606,7 +9631,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     generated_at = _now()
     # 刊头：一行克莱因蓝刊名 → 标题 → 一行灰meta（日期 / 当天源 / 更新时间）
     masthead = (
-        f'<div style="padding:4px 0 0">'
+        f'<div style="padding:4px 0 0;color:{GZ_INK};background:{GZ_PAPER}">'
         f'<div style="color:{GZ_KLEIN};font-size:11px;font-weight:700;'
         f'letter-spacing:0.18em;line-height:1.6">OCTOPUS QUANT</div>'
         f'<h1 style="margin:6px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:700;'
@@ -9621,6 +9646,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only">
 <meta name="octopus-report-date" content="{date_str}">
 <meta name="octopus-generated-at" content="{generated_at}">
 <meta name="octopus-today-sources" content="{today_n}">
@@ -9629,8 +9655,8 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="description" content="{_esc(REPORT_TAGLINE)}">
 <title>{REPORT_TITLE}</title>
 </head>
-<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
-<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{GZ_PAPER}">
+<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
 
 {masthead}
 
@@ -9989,12 +10015,15 @@ def _compact_html_for_push(html):
     shell = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="color-scheme" content="light only">'
         '<title>章鱼 AI · 打氧日报（精简版）</title></head>'
-        '<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
-        'font-size:15px;line-height:1.7;color:#111;background:#fff;">'
-        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;">章鱼 AI · 打氧日报</h1>'
+        '<body bgcolor="#FFFFFF" style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
+        'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
+        '<div style="max-width:680px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
+        'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
+        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 打氧日报</h1>'
         f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
-        f'<div style="font-size:13px;line-height:1.6;margin-bottom:12px;">{intro}</div>'
+        f'<div style="font-size:13px;line-height:1.6;color:{GZ_INK};margin-bottom:12px;">{intro}</div>'
     )
     output = [shell]
     for number, section in enumerate(sections, 1):
@@ -10012,13 +10041,13 @@ def _compact_html_for_push(html):
         if not title:
             title = f"日报栏目 {number}"
         output.append(
-            f'{PART_BREAK_MARK}<section style="padding:10px 0 14px;border-top:1px solid #aaa;">'
-            f'<h2 style="font-size:18px;line-height:1.5;margin:0 0 6px;font-weight:700;">'
+            f'{PART_BREAK_MARK}<section style="padding:10px 0 14px;border-top:1px solid #ddd;color:{GZ_INK};background:#FFFFFF;">'
+            f'<h2 style="font-size:18px;line-height:1.5;margin:0 0 6px;font-weight:700;color:#111;">'
             f'{_html_escape(title)}</h2>'
-            f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;">{content}</div>'
+            f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;color:{GZ_INK};">{content}</div>'
             '</section>'
         )
-    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #aaa;padding-top:8px;font-size:12px;color:{GZ_DARK_GRAY};">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></body></html>')
+    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #ddd;padding-top:8px;font-size:12px;color:{GZ_DARK_GRAY};background:#FFFFFF;">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></div></body></html>')
     return _enforce_dark_gray_font("".join(output))
 
 
@@ -11067,6 +11096,15 @@ def main():
                           _prune_news_corpus(news_corpus, anchor_date))
     except OSError as exc:
         print(f"  ⚠️ 新闻标题存档保存失败（{exc}），不影响本次日报与推送")
+    # 确保工作流 git add 列表中的可选留痕文件存在（如未配置大模型 Key 时 hk7_forecast.json 未创建，
+    # 否则单条 git add 会因 pathspec 不匹配以退出码 128 中止，导致 latest.html 漏提交）。
+    for opt_name in ("quant_history.json", "hk7_forecast.json", "weekly_forecast.json"):
+        opt_path = os.path.join(REPORT_DIR, opt_name)
+        if not os.path.exists(opt_path):
+            try:
+                _atomic_write(opt_path, '{"entries": [], "version": 1}\n')
+            except OSError:
+                pass
     # 必须从刚保存的路径读取，避免 latest.html 被锁定时推送到旧副本。
     with open(output_path, "r", encoding="utf-8") as f:
         push_html = f.read()
