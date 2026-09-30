@@ -311,6 +311,7 @@ if SCRIPT_DIR not in sys.path:
 import octopus_quant as _quant  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
+import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报第一屏）
 import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
@@ -333,6 +334,58 @@ WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
 # （条件驱动、点缀不含数字、认不出方向就不点缀；随 OCTOPUS_REN 一并开关）。
 # OCTOPUS_REN=0 / --no-ren 整体关闭。
 REN_ENABLED = _ren.ENABLED
+# ------------------------------------------------------------
+# 🎯 精简模式（2026-09-30 按用户要求：「内容再精炼，适合短线操作，入门观看」）
+# 两件事，一个开关：
+#   ① 日报第一屏加「【飞刀快鱼】短线速查卡」——≤600 字讲完今天怎么动手
+#      （明日剧本 / 七日风 / 今明必看时点 / 板块强弱 / 水位 / 风声 / 数据底），
+#      末尾固定【新手三句话】小抄（看方向 / 放止损 / 别动手，不随数据变）；
+#   ② 全篇瘦身——**栏目一个不少、口径一句不隐**，只把重复展开的长文压成结论行：
+#      日程只留今明 + 近端 ★★★、个股概率只留前5/后3、七日逐日理由压成一行、
+#      校准曲线 / 分项评分 / 方法论长注折叠成一句、社区样本每组 2 条、
+#      情绪逐股只留评分 + 1 条证据。被折叠 / 被裁的条数一律**如实披露**（不静默丢）。
+# OCTOPUS_LITE=0 或 --full 回到全量长版（旧行为）。
+# ------------------------------------------------------------
+LITE_ENABLED = _short.ENABLED
+# 量化呈现层（octopus_quant/render.py）跟日报同一个开关：--full / OCTOPUS_LITE=0 时
+# 校准曲线表 / 分项评分表 / 五因子逐行 / 全量个股表全部回来。
+_quant.render.LITE = LITE_ENABLED
+# 精简模式的版面预算（full 值 = 原有常量，一个都不动）：
+#   键 → (精简值, 全量值)；LITE() 取当前模式那一档。
+LITE_LIMITS = {
+    "cal_days": (2, 0),              # 时间节点：正文只列今明两天（0 = 全窗口）
+    "cal_rows": (12, -1),            # 且最多 N 行（全量档 = OCTOPUS_CALENDAR_ROWS，见 LITE）
+    "cal_pairs": (3, 0),             # 窗口摘要只留 3 行（0 = 全部）
+    "stock_rows": (8, 0),            # 个股概率表：前5 + 后3（0 = 全部）
+    "sector_rows": (4, 6),           # 板块量化强度榜行数
+    "sector_heat": (3, 5),           # A股全景板块热力 领涨/领跌 各几条
+    "trend_evidence": (3, 0),        # 美联储/地缘 命中证据条数（0 = 全部）
+    "trend_events": (4, 0),          # 未来相关时间点行数
+    "news_per_source": (1, 3),       # 每个新闻源头列几条
+    "news_total": (8, 24),           # 新闻源头正文条数总上限
+    "site_posts": (2, 5),            # 每个社区板块/榜单的样本条数
+    "senti_stocks": (2, 15),         # 情绪逐股：每市场最多几只
+    "senti_headlines": (1, 3),       # 每只股票的证据标题条数
+    "em_summary": (60, 0),           # 东财快讯摘要截断字数（0 = 不截断）
+    "digest_brief": (30, 48),        # 首屏速览每栏摘要字数
+    "notes": (0, 1),                 # 方法论长注：0 = 折叠成一句，1 = 全文
+    "risk_cards": (2, 0),            # 风险提示卡条数（0 = 全部）
+}
+
+
+def LITE(key):
+    """取当前模式的版面预算值（精简 / 全量两档，见 LITE_LIMITS）。
+
+    全量档写 -1 表示「沿用原常量」（如 OCTOPUS_CALENDAR_ROWS 调过的日程行数上限），
+    保证 --full / OCTOPUS_LITE=0 与 2026-09-30 之前的行为逐字一致。
+    """
+    lite, full = LITE_LIMITS[key]
+    if LITE_ENABLED:
+        return lite
+    if full == -1 and key == "cal_rows":
+        return ECON_CALENDAR_MAX_ROWS
+    return full
+
 # AI 七日港股走势分析概率开关：OCTOPUS_HK7=0 或 --no-hk7 可整体跳过；
 # 大模型 Key 走 OCTOPUS_LLM_API_KEY（兼容 OPENAI_API_KEY / DEEPSEEK_API_KEY 等）。
 HK7_ENABLED = str(os.environ.get("OCTOPUS_HK7", "1")).strip().lower() not in ("0", "false", "no")
@@ -3876,14 +3929,100 @@ def _cal_digest(res, today=None):
     return {"pairs": pairs, "days": days}
 
 
-def _calendar_table_rows(res, cell_builder, today=None):
-    """两主题共用：摘要键值 + 逐日展平成表格行（cell_builder 决定各主题的配色）。"""
+def _calendar_view_days(res, today=None, date_str=None):
+    """精简模式的日程版面：只留「今明两天 + 近端 ★★★」，返回 (保留的天, 未列条数)。
+
+    短线客只关心**今明会不会被数据砸盘**；30 天窗口的全貌仍由栏目「窗口摘要」
+    如实给出（央行议息 / 中美关键读数 / 最密集日一条不少），因此这里裁的是
+    **表格行数**，不是信息——未列条数必须写进披露行，绝不静默丢内容。
+    全量模式（--full / OCTOPUS_LITE=0）返回 None = 不裁。
+    """
+    if not LITE_ENABLED:
+        return None
     digest = _cal_digest(res, today)
+    days = digest.get("days") or []
+    if not days:
+        return None
+    base = today or datetime.now(CST).date()
+    today_str = str(date_str or "")
+    if len(today_str) == 8:
+        try:
+            base = datetime.strptime(today_str, "%Y%m%d").date()
+        except ValueError:
+            pass
+    max_days = LITE("cal_days")
+    max_rows = LITE("cal_rows")
+    keep = []
+    total_rows = 0
+    near = []
+    for date_str_day, label, t_plus, items in days:
+        total_rows += len(items)
+        if t_plus is not None and 0 <= t_plus < max_days:
+            keep.append((date_str_day, label, t_plus, items))
+        else:
+            near.append((date_str_day, label, t_plus, items))
+    if keep:
+        # 今明有内容：近端只补 ★★★（重要度从高到低、时间从近到远），补到行数上限为止
+        rows = sum(len(items) for *_x, items in keep)
+        star3 = []
+        for date_str_day, label, t_plus, items in near:
+            hits = [it for it in items if int(it.get("imp") or 0) >= 3]
+            if hits:
+                star3.append((date_str_day, label, t_plus, hits))
+        for group in star3:
+            if rows + len(group[3]) > max_rows:
+                break
+            keep.append(group)
+            rows += len(group[3])
+        keep.sort(key=lambda g: str(g[0]))
+    else:
+        # 今明休市（周末 / 假期）：退化为「近端 ★★★ 优先、按时间从近到远」填满行数上限，
+        # 绝不因为「今天没有」就整表空掉——那等于把日程栏目变成哑巴。
+        ranked = sorted(near, key=lambda g: (-(max(int(it.get("imp") or 0) for it in g[3])),
+                                             str(g[0])))
+        rows = 0
+        for group in ranked:
+            if rows + len(group[3]) > max_rows:
+                break
+            keep.append(group)
+            rows += len(group[3])
+        keep.sort(key=lambda g: str(g[0]))
+    shown = sum(len(items) for *_x, items in keep)
+    return keep, max(0, total_rows - shown), base
+
+
+def _calendar_table_rows(res, cell_builder, today=None, date_str=None):
+    """两主题共用：摘要键值 + 逐日展平成表格行（cell_builder 决定各主题的配色）。
+
+    返回 (digest, rows, disclosure)：disclosure 是精简模式下的版面披露文字
+    （全量模式为 ""），由调用方渲染成一行脚注——裁了多少条必须如实说。
+    """
+    digest = _cal_digest(res, today)
+    view = _calendar_view_days(res, today, date_str)
+    days = view[0] if view else (digest.get("days") or [])
     rows = []
-    for _date, label, t_plus, items in digest.get("days") or []:
+    for _date, label, t_plus, items in days:
         for i, it in enumerate(items):
             rows.append(cell_builder(label, t_plus, it, first=(i == 0)))
-    return digest, rows
+    disclosure = ""
+    if view:
+        _keep, hidden, base = view
+        window_items = sum(len(items) for _d, _l, _t, items in digest.get("days") or [])
+        if hidden:
+            disclosure = (f'精简版面：表格只列今天（{base:%m-%d}）起 {LITE("cal_days")} 天'
+                          f' + 近端 ★★★，最多 {LITE("cal_rows")} 行；'
+                          f'窗口内另有 {hidden} 条未在表格列出（全窗口共 {window_items} 条，'
+                          f'分布见上方「窗口摘要」；--full 看全表）')
+        else:
+            disclosure = (f'精简版面：窗口内 {window_items} 条已全部列出'
+                          f'（今明 + 近端 ★★★，最多 {LITE("cal_rows")} 行）')
+    return digest, rows, disclosure
+
+
+def _calendar_table_label():
+    """日历表小标题：精简模式说明只列近端，全量模式仍是「逐日时间点」。"""
+    return ("今明 + 近端 ★★★ 时间点（北京时间）" if LITE_ENABLED
+            else "逐日时间点（北京时间）")
 
 
 def fetch_econ_calendar(days=None, today=None):
@@ -4308,6 +4447,8 @@ def _badge(text, kind="ok"):
 
 
 _SECTION_ICON_META = {
+    # 短线速查卡（2026-09-30 新增）：闪电 = 快进快出，短标签用交易员黑话 TL;DR 的孪生
+    "SHORT CARD": ("⚡", "ACT-NOW", C_LEMON, C_AI_BG),
     "ECON CALENDAR": ("▦", "30-DAY", C_LEMON, C_FLAT_BG),
     "STRATEGY READ": ("◆", "STRAT", C_LEMON, C_AI_BG),
     "POLICY SHOCK": ("§", "POLICY", C_AMBER, C_FLAT_BG),
@@ -5054,10 +5195,14 @@ def gz_panorama_block(pan, with_indices=True):
             parts.append(gz_subsection("南北向资金（前一收盘）") + gz_kv_table(flow_pairs))
 
     sec = pan.get("sectors") or {}
+    heat_n = LITE("sector_heat")
     for title, key in (("板块热力 · 领涨行业 TOP", "leading"),
                        ("板块热力 · 领跌行业 TOP", "lagging")):
-        items = sec.get(key) or []
+        all_items = sec.get(key) or []
+        items = all_items[:heat_n] if heat_n else all_items
         if items:
+            if len(all_items) > len(items):
+                title = f"{title[:len(title) - 3]}{len(items)}"
             s_rows = []
             for it in items:
                 badge = gz_trend_badge(it.get("chg_pct"))
@@ -5106,9 +5251,13 @@ def _cal_gz_cells(day_label, t_plus, item, first=False):
     return [day_html, _esc(str(item.get("time") or "—")), body]
 
 
-def gz_calendar_block(res):
-    """黑白研报版「时间节点」（原「未来 N 天影响经济时间点」）：窗口摘要表 + 全窗口一张三列日历表。"""
-    digest, rows = _calendar_table_rows(res, _cal_gz_cells)
+def gz_calendar_block(res, date_str=None):
+    """黑白研报版「时间节点」：窗口摘要表（全窗口口径，一条不删）+ 近端日历表。
+
+    精简模式（默认）表格只列今明 + 近端 ★★★，被折叠的条数在表下如实披露；
+    --full / OCTOPUS_LITE=0 回到全窗口逐日表。
+    """
+    digest, rows, disclosure = _calendar_table_rows(res, _cal_gz_cells, date_str=date_str)
     parts = []
     pairs = digest.get("pairs") or []
     if pairs:
@@ -5117,10 +5266,12 @@ def gz_calendar_block(res):
                                    aligns=("left", "left"), kv=True,
                                    widths=("26%", "74%")))
     if rows:
-        parts.append(gz_subsection("逐日时间点（北京时间）"))
+        parts.append(gz_subsection(_calendar_table_label()))
         parts.append(gz_data_table(["日期", "时间", "影响经济的时间点"], rows,
                                    aligns=("left", "left", "left"),
                                    widths=("17%", "13%", "70%")))
+    if disclosure:
+        parts.append(gz_note(_esc(disclosure)))
     return "".join(parts)
 
 
@@ -5151,7 +5302,12 @@ def gz_em_news_row(it, index=None):
     anchor = f"h-em-{index:02d}" if isinstance(index, int) else None
     if isinstance(it, dict):
         title = it.get("title") or ""
-        sub = " · ".join(x for x in (it.get("time", ""), it.get("summary", "")) if x)
+        summary = it.get("summary", "") or ""
+        cut = LITE("em_summary")
+        if cut and len(summary) > cut:
+            # 精简模式：快讯摘要只留开头（标题已经把要点说完了），截断处标省略号
+            summary = summary[:cut].rstrip(" ·，；") + "…"
+        sub = " · ".join(x for x in (it.get("time", ""), summary) if x)
     else:
         title, sub = it, ""
     return _gz_news_card(marker, _esc(title[:120]), sub, anchor=anchor)
@@ -5266,7 +5422,7 @@ def gz_ai_analysis_block(res):
     sectors = res.get("quant_sectors") or []
     if sectors:
         rows = []
-        for sec in sectors[:6]:
+        for sec in sectors[:LITE("sector_rows")]:
             chg = sec.get("chg")
             badge = gz_trend_badge(chg, compact=True) if chg is not None else _gz_missing()
             inflow = sec.get("inflow")
@@ -5322,7 +5478,8 @@ def gz_ai_analysis_block(res):
             bg=GZ_PAPER, pad="8px 0"))
     if res["risks"]:
         risk_cards = []
-        for risk in res["risks"]:
+        risk_limit = LITE("risk_cards")
+        for risk in (res["risks"][:risk_limit] if risk_limit else res["risks"]):
             if risk.get("shown") and risk.get("anchor"):
                 main = (f'<a href="#{_esc(risk["anchor"])}" '
                         f'style="color:{GZ_INK};font-weight:700;text-decoration:none;">'
@@ -5550,9 +5707,9 @@ def _cal_pixel_cells(day_label, t_plus, item, first=False):
     return [day_html, _esc(str(item.get("time") or "—")), body]
 
 
-def _calendar_block(res):
-    """pixel 版「时间节点」（原「未来 N 天影响经济时间点」）：窗口摘要 + 全窗口一张三列日历表。"""
-    digest, rows = _calendar_table_rows(res, _cal_pixel_cells)
+def _calendar_block(res, date_str=None):
+    """pixel 版「时间节点」：窗口摘要（全窗口口径）+ 近端日历表（精简模式披露折叠条数）。"""
+    digest, rows, disclosure = _calendar_table_rows(res, _cal_pixel_cells, date_str=date_str)
     parts = []
     pairs = digest.get("pairs") or []
     if pairs:
@@ -5560,10 +5717,12 @@ def _calendar_block(res):
         parts.append(_pixel_table(None, [[_esc(a), _esc(b)] for a, b in pairs],
                                   aligns=("left", "left"), widths=("26%", "74%")))
     if rows:
-        parts.append(_subsection("逐日时间点（北京时间）"))
+        parts.append(_subsection(_calendar_table_label()))
         parts.append(_pixel_table(["日期", "时间", "影响经济的时间点"], rows,
                                   aligns=("left", "left", "left"),
                                   widths=("17%", "13%", "70%")))
+    if disclosure:
+        parts.append(_note(_esc(disclosure)))
     return "".join(parts)
 
 
@@ -5722,8 +5881,17 @@ def _trend_clues_block(data, kit):
 
     无数据的源头 / 平台不进正文；缺失来源只在总结的「数据覆盖」里点名。Reddit 按 10 个
     板块分组（每板块至多 5 条），其余平台按各自榜单 / 板块分组。
+
+    精简模式（默认）：每个源头只列 1 条、社区每组只留 2 条样本、标题收到 80 字——
+    **覆盖面一个字不少**（20 家源头的名字、条数、更新时间全在），砍掉的只是重复展开的
+    样本正文；每个源头 / 分组行都写明「共 N 条」，读者知道折叠了多少。
     """
     color = GZ_KLEIN if kit is GUIZANG_KIT else C_CYAN
+    per_source = LITE("news_per_source")
+    news_total = LITE("news_total")
+    site_posts = LITE("site_posts")
+    title_limit = 80 if LITE_ENABLED else 235
+    detail_limit = 70 if LITE_ENABLED else 210
     rows = []
 
     # ① 全网 20 个新闻源头 · 港股挖掘（结论先行：覆盖度 + 港股相关条数）
@@ -5737,33 +5905,46 @@ def _trend_clues_block(data, kit):
                    f' · 扫描 {int(an.get("scanned") or 0)} 条 · 港股相关 {int(an.get("hk_n") or 0)} 条'
                    f' {kit.source_badge(news)}')
         rows.append(kit.item_row("", heading, _esc(latest)))
+        if LITE_ENABLED:
+            # 精简模式：20 家源头不再一家一行（光覆盖名单就占半屏），压成一行「覆盖面」
+            # ——**名字与港股相关条数一个不删**（按抓取顺序，含因条数预算未列条目的源头），
+            # 条目照常带链接逐条列出。
+            cover = [f'{str(rec.get("name") or "")} '
+                     f'{int(rec.get("hk_n") or len([it for it in (rec.get("items") or [])]))}'
+                     for rec in records
+                     if any(isinstance(it, dict) for it in (rec.get("items") or []))]
+            if cover:
+                rows.append(kit.item_row("▤", "<b>覆盖面</b>（源头 · 港股相关条数）",
+                                         _esc(" · ".join(cover))))
         shown = 0
         for rec in records:
-            if shown >= HK_NEWS_MAX_ITEMS:
+            if shown >= news_total:
                 break
             items = [it for it in (rec.get("items") or []) if isinstance(it, dict)]
             if not items:
                 continue
             hk_n = int(rec.get("hk_n") or len(items))
-            name = str(rec.get("name") or "")
-            home = _news_url(rec.get("url"), rec.get("hosts") or ())
-            name_html = (f'<a href="{_esc(home)}" style="color:{color}">'
-                         f'<b>{_esc(name)}</b></a>' if home else f"<b>{_esc(name)}</b>")
-            rows.append(kit.item_row(
-                "▤", f'{_esc(str(rec.get("region") or ""))} · {name_html}',
-                f"港股相关 {hk_n} 条" + (f" · 列出 {len(items)} 条" if hk_n > len(items) else "")))
-            for item in items[:HK_NEWS_PER_SOURCE]:
-                if shown >= HK_NEWS_MAX_ITEMS:
+            if not LITE_ENABLED:
+                name = str(rec.get("name") or "")
+                home = _news_url(rec.get("url"), rec.get("hosts") or ())
+                name_html = (f'<a href="{_esc(home)}" style="color:{color}">'
+                             f'<b>{_esc(name)}</b></a>' if home else f"<b>{_esc(name)}</b>")
+                rows.append(kit.item_row(
+                    "▤", f'{_esc(str(rec.get("region") or ""))} · {name_html}',
+                    f"港股相关 {hk_n} 条" + (f" · 列出 {min(len(items), per_source)} 条"
+                                            if hk_n > min(len(items), per_source) else "")))
+            for item in items[:per_source]:
+                if shown >= news_total:
                     break
                 url = _news_url(item.get("url"), rec.get("hosts") or ())
-                title = _public_text(item.get("title"), 235)
+                title = _public_text(item.get("title"), title_limit)
                 if not (url and title):
                     continue
                 link = (f'<a href="{_esc(url)}" style="color:{color}">'
                         f'{_esc(title)}</a>')
                 rows.append(kit.item_row(
                     f"{shown + 1:02d}", link,
-                    _esc(_concise_detail(_public_text(item.get("detail"), 210)))))
+                    _esc(_concise_detail(_public_text(item.get("detail"), detail_limit)))))
                 shown += 1
 
     # ② 多平台信息员（Reddit / StockTwits / TradingView / Bogleheads）
@@ -5780,40 +5961,49 @@ def _trend_clues_block(data, kit):
         anchor_name = f'<a href="{_esc(homepage)}" style="color:{color}"><b>{_esc(name)}</b></a>' if homepage else f"<b>{_esc(name)}</b>"
         rows.append(kit.item_row("", f'{anchor_name} {kit.source_badge(source)}',
                                  _esc(_public_text(source.get("content_date") or "", 30))))
+        # 只统计**能真正渲染出来**的样本（非法链接 / 空标题会被整条剔除）：
+        # 否则「共 N 条」会比实际列出的多，等于在披露里写假数字。
+        site_name = name
+        valid = [it for it in (source.get("items") or [])
+                 if isinstance(it, dict)
+                 and _public_url(it.get("url"), PUBLIC_SITE_URLS.get(site_name) or "")
+                 and _public_text(it.get("title"), 235)]
         if name == "Reddit":
             by_board = {}
-            for item in source.get("items") or []:
-                if isinstance(item, dict):
-                    by_board.setdefault(str(item.get("community") or ""), []).append(item)
+            for item in valid:
+                by_board.setdefault(str(item.get("community") or ""), []).append(item)
             for community, label in _REDDIT_BOARDS:
-                board_items = [it for it in by_board.get(f"r/{community}", [])
-                               if isinstance(it, dict)][:REDDIT_POSTS_PER_BOARD]
+                board_all = [it for it in by_board.get(f"r/{community}", [])
+                             if isinstance(it, dict)]
+                board_items = board_all[:site_posts]
                 if not board_items:
                     continue
                 rows.append(kit.item_row("▤", f'<b>{_esc(f"r/{community}")}</b> · {_esc(label)}',
-                                         f"热门帖样本 {len(board_items)} 条"))
+                                         f"热门帖样本 {len(board_items)} 条"
+                                         + (f"（共 {len(board_all)} 条）"
+                                            if len(board_all) > len(board_items) else "")))
                 for pick_no, item in enumerate(board_items, 1):
                     rows.append(_trend_clue_item_row(item, pick_no, PUBLIC_SITE_URLS[name],
-                                                     color, kit))
+                                                     color, kit, title_limit=title_limit))
             continue
         grouped, order = {}, []
-        for item in source.get("items") or []:
-            if not isinstance(item, dict):
-                continue
+        for item in valid:
             community = str(item.get("community") or name)
             if community not in grouped:
                 grouped[community] = []
                 order.append(community)
             grouped[community].append(item)
         for community in order:
-            picks = grouped[community][:REDDIT_POSTS_PER_BOARD]
+            picks = grouped[community][:site_posts]
             if not picks:
                 continue
             rows.append(kit.item_row("▤", f'<b>{_esc(community)}</b>',
-                                     f"公开样本 {len(picks)} 条"))
+                                     f"公开样本 {len(picks)} 条"
+                                     + (f"（共 {len(grouped[community])} 条）"
+                                        if len(grouped[community]) > len(picks) else "")))
             for pick_no, item in enumerate(picks, 1):
                 rows.append(_trend_clue_item_row(item, pick_no, PUBLIC_SITE_URLS[name],
-                                                 color, kit))
+                                                 color, kit, title_limit=title_limit))
     rows = [row for row in rows if row]
     return kit.rows("".join(rows)) if rows else ""
 
@@ -6030,6 +6220,11 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 # 因此「数据线主备」注册表与 freshness_checker 的源名保持原样。
 # ------------------------------------------------------------
 SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
+# 2026-09-30 新增（用户要求「内容再精炼，适合短线操作，入门观看」）：
+# 第一屏「短线速查卡」——≤600 字讲完今天怎么动手，末尾附固定【新手三句话】小抄。
+# 纯规则合成（output/octopus_short.py），数字全部取自下文各栏同一批实参；
+# OCTOPUS_LITE=0 / --full 关闭，日报回到全量长版。
+SECTION_TITLE_SHORT_CARD = "【闪电飞鱼】短线速查卡"
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
@@ -6598,11 +6793,44 @@ def _weekly_daily_table(daily, kit):
 
 
 def _weekly_daily_cards(daily, kit):
-    """逐日理由 · 分析 · AI 操作建议：一天一张卡，长文本在这里展开（不与表格重复数字）。"""
+    """逐日理由 · 分析 · AI 操作建议：一天一张卡，长文本在这里展开（不与表格重复数字）。
+
+    精简模式（默认）：一天压成一行——只留**动手要用的三件事**（态度 / 止损 / 止盈）+
+    事件日提醒；理由与分析的长文本折叠成一句「共同驱动」（7 天的动量 / 波动 / 基准率
+    本来就是同一批数字，逐日复述等于刷屏），并如实写明「逐日理由已折叠，--full 看全文」。
+    """
     rows = daily.get("rows") or []
     if not rows:
         return ""
     esc = kit.esc
+    if LITE_ENABLED:
+        cards = []
+        for r in rows:
+            adv = r.get("advice") or {}
+            icon = {"up": "▲", "down": "▼"}.get(r.get("direction"), "■")
+            bits = []
+            if adv.get("stop_pct") is not None:
+                stop_price = adv.get("stop_price")
+                bits.append(f'止损 {adv["stop_pct"] * 100:.1f}%'
+                            + (f'（{stop_price:,.0f}）' if stop_price else ""))
+            if adv.get("take_profit"):
+                bits.append(f'止盈 {adv["take_profit"]:,.0f}')
+            # 事件日提醒（adv.notes 里以 ⚠ 开头的那几条）：短线客最该看见的一行
+            warns = [str(x) for x in (adv.get("notes") or [])[1:-1]]
+            line = f'<b>{esc(str(adv.get("stance") or ""))}</b>'
+            if bits:
+                line += " · " + " · ".join(bits)
+            if adv.get("entry_hint"):
+                line += f'<br>建仓 · {esc(str(adv["entry_hint"]))}'
+            if warns:
+                line += "<br>" + "<br>".join(f"⚠ {esc(w)}" for w in warns[:1])
+            cards.append(kit.item_row(
+                icon, f'T+{int(r.get("k") or 0)} {esc(str(r.get("date") or "")[5:])}', line))
+        driver = str((rows[0].get("reason") or ""))
+        head = driver.split("·")[0].strip(" ·") if driver else ""
+        tail = (f'共同驱动 · {esc(head[:70])}（7 天同一批因子，逐日理由已折叠；'
+                "--full 看全文）") if head else "逐日理由已折叠（--full 看全文）"
+        return kit.rows("".join(cards)) + kit.item_row("▤", "<b>为什么</b>", tail)
     cards = []
     for r in rows:
         adv = r.get("advice") or {}
@@ -6740,6 +6968,14 @@ def _weekly_forecast_block(res, kit):
     out.append(kit.rows("".join(concl)))
 
     # ── ④ 无未来函数口径披露（截断不变性自检覆盖全部 7 个视界）──
+    if LITE_ENABLED:
+        # 精简模式：口径披露压成一行——**结论一句不删，细则指回全量版**（不静默丢披露）。
+        out.append(kit.item_row(
+            "⚖", f'<b>无未来函数口径</b> · 截断不变性自检通过'
+                 f'（{esc(str(res.get("self_check") or ""))}）· 特征只用 ≤t 数据 · '
+                 f'先存档后结算（weekly_forecast.json）· 仓位 / 止损为规则合成 · '
+                 "非投资建议（方法细则 --full 看全文）"))
+        return "".join(out)
     note = (f'<b>无未来函数口径</b> · 截断不变性自检通过（{esc(str(res.get("self_check") or ""))}）'
             f' · 逐日表格 {horizon} 行与整段结论出自同一次因果扫描（视界 1~{horizon} 各自独立记账）'
             f' · 特征只用 ≤t 数据（逐期扩张归一，绝无全样本统计量）'
@@ -6860,9 +7096,54 @@ def _hk_seven_day_block(res, kit):
     return kit.rows("".join(rows))
 
 
+def _short_card_base_date(date_str):
+    """报告日 YYYYMMDD → date 对象（速查卡「今明必看」的日基准）；非法值返回 None。"""
+    text = str(date_str or "")
+    if len(text) != 8:
+        return None
+    try:
+        return datetime.strptime(text, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _short_card_section(card_ctx, kit, today_n, total):
+    """🎯【闪电飞鱼】短线速查卡（2026-09-30 新增；日报第一屏，栏目编号 00）。
+
+    用户要求「内容再精炼，适合短线操作，入门观看」：把全天数据里**最能直接动手**的
+    几件事压成 ≤600 字一张卡——今天什么风、明天怎么做（概率 / 区间 / 仓位 / 止损 / 止盈）、
+    今明哪些时点别碰、板块强弱各 3、资金水位、舆情风声、当天数据底，
+    末尾附固定【新手三句话】小抄（看方向 / 放止损 / 别动手，**不随数据变化**）。
+
+    与整仓「防自欺」同规（细则见 output/octopus_short.py 与 tests/test_short_card.py）：
+    纯规则合成、可复现；每个数字都取自下文各栏渲染用的同一批实参（不另算一套）；
+    哪一路没数据那一行就缺席，全部缺数据整卡缺席；超字数预算按优先级**整行**撤下并留痕，
+    绝不截断半句话。OCTOPUS_LITE=0 / --full 关闭。
+    """
+    card = _short.build_card(card_ctx)
+    if not card:
+        return None
+    lead_color = GZ_INK_STRONG if kit is GUIZANG_KIT else C_INK
+    lead_size = GZ_FS_PRICE if kit is GUIZANG_KIT else 15
+    html = (f'<div style="font-size:{lead_size}px;font-weight:700;color:{lead_color};'
+            f'line-height:1.5;margin:8px 0 14px;overflow-wrap:anywhere;">'
+            f'{_esc(card["lead"])}</div>')
+    html += kit.kv([(_esc(label), value) for label, value in card["pairs"]])
+    html += kit.sub(_esc(_short.TIPS_TITLE))
+    html += kit.kv([(_esc(label), _esc(text)) for label, text in card["tips"]])
+    dropped = [d for d in (card.get("dropped") or [])]
+    if dropped:                  # 被字数预算撤下的行如实点名，并指回正文对应栏目
+        html += kit.note(_esc(f'字数预算内已收起：{"、".join(dropped)}（完整内容见下文对应栏目）'))
+    html += kit.note(_esc(_short.DISCLAIMER))
+    return ("SHORT CARD", SECTION_TITLE_SHORT_CARD, html, "", _short.CAPTION)
+
+
 def _opening_digest(sections, notes, conclusion, today_n, total, kit):
     """仅从本次实际渲染的栏目提炼首屏；不新增预测、不以历史数据补空。"""
-    def brief(value, limit):
+    def brief(value, limit=None):
+        # 精简模式下每栏摘要收一档（48 → LITE("digest_brief") 字）：速览只负责指路，
+        # 完整依据仍在正文各栏。全量档逐字保持原行为。
+        limit = int(limit or LITE("digest_brief"))
         text = _strip_html_text(value)
         return text if len(text) <= limit else text[:limit].rstrip(" ·，；") + "…"
 
@@ -6896,8 +7177,9 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
         if bits:
             rows.append((label, "<br>".join(bits)))
     # 新增栏目也必须进入速览，避免维护分组时漏掉正文内容。
+    # SHORT CARD 是结论型栏目（速查卡本身就在速览之前，内容同源），不重复进速览。
     for kick, title, content, badge, caption in sections:
-        if kick not in covered and kick not in {"FORECAST", "SUMMARY"}:
+        if kick not in covered and kick not in {"FORECAST", "SUMMARY", "SHORT CARD"}:
             rows.append((title, _esc(brief(content, 48))))
     rows.append(("阅读提醒", _esc(
         f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。"
@@ -7034,7 +7316,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     #    开头栏目——先看清日程窗口，再读今天的盘；窗口天数仍在栏目内「窗口摘要 · 时间窗口」显示。
     cal = data.get("财经日历") or {}
     if cal.get("status") == "success":
-        cal_html = kit.calendar_block(cal)
+        cal_html = kit.calendar_block(cal, date_str=date_str)
         if cal_html:
             blocks["ECON CALENDAR"] = (
                 "ECON CALENDAR", SECTION_TITLE_ECON_CALENDAR, cal_html,
@@ -7195,11 +7477,30 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 全部栏目构建完成后再提炼，保证首屏与本次推送正文一致。
     sections.insert(0, _opening_digest(sections, judge_notes, conclusion,
                                        today_n, total, kit))
+    # 🎯 短线速查卡插在速览之前（编号 00）：短线客第一屏就能动手，入门读者先看小抄。
+    #    取材全部是上面渲染正文用的同一批对象，缺数据自动缺席（LITE=0 / --full 整卡不出）。
+    if LITE_ENABLED:
+        card = _short_card_section({
+            "date_str": date_str or _today_str(),
+            # 「今明必看」的日基准：报告日（YYYYMMDD）→ date 对象；解析不出来就不猜今明。
+            "today": _short_card_base_date(date_str),
+            "weekly": weekly_res, "quant": quant, "ai": ai_result,
+            "pan": pan if pan_ok else {}, "cal": cal, "senti": senti_result,
+            "coverage": {"today": today_n, "total": total},
+        }, kit, today_n, total)
+        if card:
+            sections.insert(0, card)
     if ren_ctx is not None:
         digest_text = _ren.digest_ren(ren_ctx)
+        # 按 kicker 定位「AI 全篇速览」：速查卡插在最前面时 sections[0] 不再是速览，
+        # 用下标会把速览那句人话贴错栏目。
         if digest_text:
-            k0, t0, c0, b0, cp0 = sections[0]
-            sections[0] = (k0, t0, c0 + _ren_judgment_row(digest_text, kit), b0, cp0)
+            for i, (kick, title, content, badge, caption) in enumerate(sections):
+                if kick != "AI DIGEST":
+                    continue
+                sections[i] = (kick, title,
+                               content + _ren_judgment_row(digest_text, kit), badge, caption)
+                break
     return {
         "sections": sections,
         "total": total,
@@ -9012,12 +9313,26 @@ def gz_sentiment_block(res):
             ms_pairs.append(("关键信号", _esc(" · ".join(callouts))))
         out.append(gz_kv_table(ms_pairs))
     # ③ 逐市场逐股
+    #    精简模式（默认）：每市场只列**情绪最强 / 最弱各 1 只**，每只只留「情绪分 + 1 条
+    #    最强证据」，原因段与动量 / 新闻量三行折叠（被折叠的只数如实写出）；
+    #    全景总览（整体 DNS / 三市 DNS / 最暖最冷 / 报道最多）与关键词统计一行不少。
+    per_market = LITE("senti_stocks")
+    per_stock_heads = LITE("senti_headlines")
     for mb in by_market:
         scored = [st for st in (mb.get("stocks") or []) if st.get("matched")]
         if not scored:
             continue              # 该市场无个股被点名 → 不出「暂无评分」占位
-        out.append(gz_subsection(f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'))
-        for s in scored:
+        shown = scored
+        hidden_n = 0
+        if LITE_ENABLED and len(scored) > per_market:
+            ranked = sorted(scored, key=lambda st: -(st.get("score") or 0))
+            shown = ranked[:max(1, per_market // 2)] + ranked[-max(1, per_market - per_market // 2):]
+            hidden_n = len(scored) - len(shown)
+        head_txt = f'{_esc(mb["market"])} · 成交量前{HOT_STOCK_TOP_N}'
+        if hidden_n:
+            head_txt += f'（只列情绪最强 / 最弱，另 {hidden_n} 只已折叠）'
+        out.append(gz_subsection(head_txt))
+        for s in shown:
             arrow = "▲" if s["score"] > 0.2 else ("▼" if s["score"] < -0.2 else "■")
             title = f'{s["name"]} {s["code"]}' if s["code"] else s["name"]
             tag_label = {"name": "精确名", "alias": "别名/代码", "sector": "行业概念"}.get(
@@ -9025,16 +9340,17 @@ def gz_sentiment_block(res):
             out.append(gz_subsection(
                 f'{_esc(title)} · {s["market"]} {arrow}'
                 f' <span style="color:{GZ_META};font-weight:{GZ_W_BODY};">归因：{tag_label}</span>'))
-            stock_pairs = [
-                ("AI 情绪分", _esc(s.get("comment") or "")),
-                ("原因", _esc(s.get("reason") or "")),
-            ]
-            for label, line in _senti_factor_lines(s):
-                if "样本不足" in line:
-                    continue      # 冷启动的动量 / 新闻量不出行
-                stock_pairs.append((label, _esc(line)))
+            stock_pairs = [("AI 情绪分", _esc(s.get("comment") or ""))]
+            if not LITE_ENABLED:
+                stock_pairs.append(("原因", _esc(s.get("reason") or "")))
+                for label, line in _senti_factor_lines(s):
+                    if "样本不足" in line:
+                        continue  # 冷启动的动量 / 新闻量不出行
+                    stock_pairs.append((label, _esc(line)))
             out.append(gz_kv_table(stock_pairs))
-            for h in s["headlines"][:3]:
+            heads = (sorted(s["headlines"], key=lambda h: -abs(h.get("s") or 0))
+                     if LITE_ENABLED else s["headlines"])[:per_stock_heads]
+            for h in heads:
                 badge = {1: "▲ S+1", -1: "▼ S−1", 0: "■ S0"}[h["s"]]
                 tag_mark = ""
                 if h.get("tag") == "alias":
@@ -9566,6 +9882,8 @@ def gz_policy_block(res):
     if board:
         out.append(gz_subsection("政策冲击强度榜 · 量化趋势")
                    + gz_data_table(["行业", "PSI", "条数", "维度"], board))
+    # 政策新闻逐条不裁：条数已由 POLICY_DISPLAY_HEADLINES 封顶（8 条），而且旧闻
+    # （报告日前一天）必须留在正文里，读者才看得见「08-01 ·」这个日期前缀披露。
     heads = res["headlines"][:POLICY_DISPLAY_HEADLINES]
     if heads:
         out.append(gz_subsection("重点政策新闻"))
@@ -9664,7 +9982,7 @@ PIXEL_KIT = _RenderKit(
     senti_empty_badge=lambda: _badge("样本不足", "warn"),
     policy_block=_pixel_policy_block,
     panorama_block=_panorama_block,
-    calendar_block=_calendar_block,
+    calendar_block=lambda res, date_str=None: _calendar_block(res, date_str=date_str),
     trend_topic_block=_pixel_trend_topic_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
@@ -9690,8 +10008,13 @@ def gz_trend_topic_block(res):
     ]
     out = [gz_kv_table(pairs)]
     evid = res.get("evidence") or []
+    evid_limit = LITE("trend_evidence")
     if evid:
-        out.append(gz_subsection("命中证据"))
+        hidden = max(0, len(evid) - evid_limit) if evid_limit else 0
+        out.append(gz_subsection("命中证据"
+                                 + (f"（前 {evid_limit} 条，另 {hidden} 条已计入定调）"
+                                    if hidden else "")))
+        evid = evid[:evid_limit] if evid_limit else evid
     for ev in evid:
         hits = "、".join((ev.get("pos_hits") or []) + (ev.get("neg_hits") or []))
         tag = "▲" if ev.get("pos_hits") and not ev.get("neg_hits") else (
@@ -9702,10 +10025,14 @@ def gz_trend_topic_block(res):
         out.append(gz_item_row("◆", f'<b>{tag}</b> '
                                     f'{_esc(str(ev.get("title") or ""))}', sub))
     events = res.get("events") or []
+    ev_limit = LITE("trend_events")
     if events:
-        out.append(gz_subsection("未来相关时间点（财经日程）"))
         rows = []
-        for ev in events:
+        hidden = max(0, len(events) - ev_limit) if ev_limit else 0
+        out.append(gz_subsection("未来相关时间点（财经日程）"
+                                 + (f"（近端 {ev_limit} 条，另 {hidden} 条见时间节点栏目）"
+                                    if hidden else "")))
+        for ev in (events[:ev_limit] if ev_limit else events):
             imp = int(ev.get("imp") or 0)
             stars = "★" * imp if imp else "—"
             rows.append([_esc(str(ev.get("date") or "")), _esc(str(ev.get("time") or "")),
@@ -9734,7 +10061,7 @@ GUIZANG_KIT = _RenderKit(
     senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
     policy_block=gz_policy_block,
     panorama_block=gz_panorama_block,
-    calendar_block=gz_calendar_block,
+    calendar_block=lambda res, date_str=None: gz_calendar_block(res, date_str=date_str),
     trend_topic_block=gz_trend_topic_block,
     # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
     esc=_esc,
@@ -11413,6 +11740,9 @@ def main():
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
     parser.add_argument("--no-ren", action="store_true",
                        help="关闭逐栏目「🦑 鲜鲜解读」大白话翻译行（默认开启）")
+    parser.add_argument("--full", action="store_true",
+                       help="关闭精简模式：不出「【闪电飞鱼】短线速查卡」，各栏长文 / 表格 / "
+                            "方法论注释回到全量长版（等价 OCTOPUS_LITE=0）")
     parser.add_argument("--no-hk7", action="store_true",
                        help="跳过 AI 七日港股走势分析概率（只出常规栏目，运行更快）")
     parser.add_argument("--hk7-only", action="store_true",
@@ -11438,6 +11768,11 @@ def main():
     if args.no_ren:
         global REN_ENABLED
         REN_ENABLED = False
+
+    if args.full:
+        global LITE_ENABLED
+        LITE_ENABLED = False
+        _quant.render.LITE = False      # 量化呈现层同步回全量长版
 
     if args.no_hk7:
         global HK7_ENABLED
@@ -11512,6 +11847,8 @@ def main():
     print("🐙 " + "=" * 48)
     print(f"   运行时间: {_now()}")
     print(f"   推送主题: {theme}（OCTOPUS_PUSH_THEME / --theme 可切换）")
+    print("   版面模式: " + (f"精简（短线速查卡 ≤{_short.CARD_CHAR_BUDGET} 字 + 全篇瘦身；--full 回全量长版）"
+                            if LITE_ENABLED else "全量长版（--full / OCTOPUS_LITE=0）"))
 
     # 0. 清理历史 HTML 报告（手动/自动推送前必做）：
     #    避免历史残留文件（含旧版本特征的报告）被推送或被 latest.html 引用。

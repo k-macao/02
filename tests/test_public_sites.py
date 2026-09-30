@@ -359,10 +359,16 @@ class SentimentFactorTests(unittest.TestCase):
                     self.assertIn("散户投机风向", report)
                     # 无数据的板块不进正文
                     self.assertNotIn("r/ValueInvesting", report)
-                    # 每板块最多 5 条样本：第 6 / 7 条被裁剪
-                    self.assertIn("Stocks hot 4", report)
-                    self.assertNotIn("Stocks hot 5", report)
+                    # 每板块样本条数上限：全量档 5 条（第 6 / 7 条被裁剪）；
+                    # 精简档（2026-09-30 起默认）每板块 2 条，但分组行必须如实
+                    # 写出「共 5 条」——折叠多少条不许静默。
+                    cap = pipeline.LITE("site_posts")
+                    self.assertIn("Stocks hot %d" % (cap - 1), report)
+                    self.assertNotIn("Stocks hot %d" % cap, report)
                     self.assertNotIn("Stocks hot 6", report)
+                    if cap < 5:
+                        # r/stocks 有 7 条合法样本（第 8 条 javascript: 链接整体剔除）
+                        self.assertIn("热门帖样本 %d 条（共 7 条）" % cap, report)
                     # 链接与热度保留
                     self.assertIn("https://www.reddit.com/r/stocks/comments/s0/t0/", report)
                     self.assertIn("100 赞", report)
