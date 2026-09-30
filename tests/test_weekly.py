@@ -2,12 +2,16 @@
 
 核心是两条「防自欺」未来函数测试：
   · 截断不变性（arielb57/peekahead 不变量）：对任意切点 k，signals[k] 只依赖 ≤k 的
-    输入——把 k 之后的未来数据删掉 / 扰动，过去时刻的输出必须逐位不变；
-  · 结算严格在后（k-macao/03 PR #54 约束②③）：类比锚点标签必须已结算（s+5 ≤ t），
-    预测先存档 settled=False，满 5 个交易日才按真实收盘回填，当次运行不可能结算当次。
+    输入——把 k 之后的未来数据删掉 / 扰动，过去时刻的输出必须逐位不变；自检覆盖
+    全部 7 个视界（2026-09-29 起视界 5→7，逐日表格 7 行同一次因果扫描）；
+  · 结算严格在后（k-macao/03 PR #54 约束②③）：类比锚点标签必须已结算（s+7 ≤ t），
+    预测先存档 settled=False，满 7 个交易日才按真实收盘回填（旧档仍按其签发时的
+    5 个交易日结算，历史不篡改），当次运行不可能结算当次。
 
 另覆盖：概率夹逼 5%~95%、基准率独立双记账、回测样本不足只报样本量、
-留痕档案 issue→settle→reissue 流转、两主题渲染与栏目顺序、审计与结论接入。
+留痕档案 issue→settle→reissue 流转、两主题渲染与栏目顺序、审计与结论接入；
+逐日表格引擎（compute_path_signals / build_daily_path / build_advice / _var_horizon /
+trading_days_after / _lean_word）的离线纯函数回归。
 """
 import importlib.util
 import json
@@ -88,7 +92,9 @@ class WeeklySignalsLookaheadTests(unittest.TestCase):
 
     def test_constants_lock_the_lookahead_contract(self):
         # 口径常量一旦改动就会改变预测，必须与文档/README 一致
-        self.assertEqual(w.HORIZON, 5)       # 未来一周 = 5 个交易日
+        self.assertEqual(w.HORIZON, 7)       # 2026-09-29 起：未来 7 个交易日（逐日表格）
+        self.assertEqual(w.PATH_MAX, 7)      # 逐日表格行数 = 7
+        self.assertEqual(w.LEGACY_HORIZON, 5)  # 旧档（改视界前签发）仍按 5 个交易日结算
         self.assertEqual(w.WINDOW, 20)
         self.assertEqual(w.ANALOG_K, 8)
         self.assertEqual(w.MIN_ANALOGS, 4)
@@ -206,17 +212,18 @@ class WeeklyJournalSettleTests(unittest.TestCase):
             self.assertGreaterEqual(e0["p_up"], w.PROB_FLOOR)
             self.assertLessEqual(e0["p_up"], w.PROB_CAP)
 
-            # 不足 5 个交易日：即使重跑也绝不结算（目标日在严格之后）
+            # 不足 7 个交易日：即使重跑也绝不结算（目标日在严格之后）
             r_mid = self._run(base, hp, now1)
             self.assertTrue(r_mid["available"])
             with open(hp, encoding="utf-8") as fh:
                 journal = json.load(fh)
             self.assertEqual(len(journal["entries"]), 1)
             self.assertFalse(journal["entries"][0]["settled"])
+            self.assertEqual(journal["entries"][0]["target_sessions"], w.HORIZON)  # 新档 = 7
 
-            # 长出 5 根 K 线 → 按真实收盘结算，同一次运行里再签发新预测
-            grown = synthetic_closes(300, seed=11)[:80]
-            now2 = datetime(2026, 4, 17, 9, 0, tzinfo=CST)
+            # 长出 7 根 K 线 → 按真实收盘结算，同一次运行里再签发新预测
+            grown = synthetic_closes(300, seed=11)[:82]
+            now2 = datetime(2026, 4, 21, 9, 0, tzinfo=CST)
             r2 = self._run(grown, hp, now2)
             self.assertTrue(r2["available"])
             with open(hp, encoding="utf-8") as fh:
@@ -224,14 +231,14 @@ class WeeklyJournalSettleTests(unittest.TestCase):
             self.assertEqual(len(journal["entries"]), 2)
             e0, e1 = journal["entries"]
             self.assertTrue(e0["settled"])
-            self.assertEqual(e0["settle_date"], weekday_dates(80)[-1])
-            # 结算内容 = 真实收盘价差与底牌方向的命中判定（独立复算对账）
-            actual = grown[-1] / grown[74] - 1.0
+            self.assertEqual(e0["settle_date"], weekday_dates(82)[-1])
+            # 结算内容 = 真实收盘价差与底牌方向的命中判定（独立复算对账；视界 7 → 索引 74→81）
+            actual = grown[81] / grown[74] - 1.0
             self.assertAlmostEqual(e0["actual_ret"], actual, places=12)
             self.assertEqual(e0["hit"], bool((e0["p_up"] >= 0.5) == (actual > 0)))
             # 当次运行不可能结算当次预测：新签发的第二条必为未结算
             self.assertFalse(e1["settled"])
-            self.assertEqual(e1["base_date"], weekday_dates(80)[-1])
+            self.assertEqual(e1["base_date"], weekday_dates(82)[-1])
             # 留痕统计：样本 <10 不下命中率结论
             self.assertEqual(r2["journal"]["n"], 1)
             self.assertIsNone(r2["journal"]["hit_rate"])
@@ -310,16 +317,18 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         date_display = "2026年4月10日 · 周五"
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(data, date_display, "20260410", theme=theme)
-            self.assertIn("每周量化走势预测", html, theme)
+            self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, html, theme)
             self.assertIn("无未来函数口径", html, theme)
             self.assertIn("截断不变性自检通过", html, theme)
             self.assertIn("先存档后结算", html, theme)
             # 审计口径：元数据总源数含每周预测（9 个基础源 + 每周走势预测 = 10）
             self.assertIn('octopus-total-sources" content="9"', html, theme)
-            # 栏目副标题 = 来源名（_short_source）
-            self.assertGreaterEqual(html.count("每周量化走势预测"), 2, theme)
-            # 今日结论携带周度预测（页首优先级）
-            self.assertIn("周度预测", html, theme)
+            # 栏目副标题 = 来源名（_short_source）：数据源名不随栏目标题改名（2026-09-29）
+            self.assertIn("每周量化走势预测", html, theme)
+            self.assertGreaterEqual(
+                html.count(pipeline.SECTION_TITLE_WEEKLY_FORECAST), 1, theme)
+            # 今日结论携带七日预测（页首优先级；2026-09-29 起视界 5→7）
+            self.assertIn("七日预测", html, theme)
             if theme == "pixel":
                 self.assertIn("WEEKLY FORECAST", html)
 
@@ -329,7 +338,9 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
                                 "error": "日线样本不足"}}
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410")
         self.assertNotIn("每周量化走势预测</h2>", html)
-        self.assertNotIn("周度预测", html)
+        self.assertNotIn(f"{pipeline.SECTION_TITLE_WEEKLY_FORECAST}</h2>", html)
+        self.assertNotIn("七日预测", html)          # 栏目缺席时页首结论也不出现
+        self.assertNotIn("逐日表格", html)
 
     def test_weekly_section_before_market_snapshot_in_html(self):
         data = {"每周走势预测": self._source(),
@@ -357,10 +368,189 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         footer = pipeline._status_footer([
             ("港股量化引擎", {"status": "success", "is_today": True,
                               "fetched_at": "2026-04-10 09:00:00"}),
-            ("每周量化走势预测（恒指·5交易日）", self._source()),
+            ("每周量化走势预测（恒指·7交易日）", self._source()),
         ])
-        self.assertIn("每周量化走势预测（恒指·5交易日）", footer)
+        self.assertIn("每周量化走势预测（恒指·7交易日）", footer)
         self.assertIn("港股量化引擎", footer)
+
+
+class DailyPathEngineTests(unittest.TestCase):
+    """2026-09-29 起：未来 7 个交易日逐日表格引擎（纯函数，离线可复现）。
+
+    覆盖 compute_path_signals（视界 1..7 一次扫描）、build_daily_path（7 行摊平）、
+    build_advice（规则合成档位 / 仓位 / 止损止盈 / 事件提醒）、_var_horizon（分位自足）、
+    trading_days_after（跳周末）、_lean_word（50% = 五五开），以及 7 视界截断不变性自检。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.closes = synthetic_closes(300, seed=42)
+        cls.dates = weekday_dates(len(cls.closes))
+        cls.path = w.compute_path_signals(cls.closes)
+        cls.var7 = w._var_horizon(cls.closes, w.PATH_MAX)
+
+    def _daily(self, **over):
+        kw = dict(vol_pct=None, base_date=self.dates[-1], symbol="^HSI",
+                  events=None, var7=self.var7)
+        kw.update(over)
+        return w.build_daily_path(self.closes, self.dates,
+                                  dict(self.path, horizon=w.PATH_MAX), **kw)
+
+    # ---- compute_path_signals：一次扫描出 7 个视界 ----
+    def test_compute_path_signals_covers_seven_horizons(self):
+        self.assertTrue(self.path["ok"], self.path.get("reason"))
+        self.assertEqual(tuple(self.path["horizons"]), tuple(range(1, 8)))
+        by_h = self.path["signals_by_h"]
+        self.assertEqual(sorted(by_h), list(range(1, 8)))
+        for h in range(1, 8):
+            col = by_h[h]
+            self.assertEqual(len(col), len(self.closes), h)   # 逐 bar 一列，长度对齐
+            last = col[-1]
+            self.assertTrue(last, f"视界 {h} 最新 bar 应有信号")
+            self.assertTrue(w.PROB_FLOOR <= last["p_up"] <= w.PROB_CAP, h)
+            for key in ("p_base", "p_sim", "n_analog", "n_resolved", "features"):
+                self.assertIn(key, last, (h, key))
+
+    # ---- build_daily_path：7 行逐日表格 ----
+    def test_build_daily_path_yields_seven_rows(self):
+        d = self._daily()
+        self.assertTrue(d["available"], d.get("reason"))
+        self.assertEqual(d["horizon"], 7)
+        self.assertEqual(d["symbol_label"], "恒生指数")
+        self.assertAlmostEqual(d["base_close"], self.closes[-1])
+        rows = d["rows"]
+        self.assertEqual(len(rows), 7)
+        prev_date = d["base_date"]
+        for i, r in enumerate(rows, start=1):
+            self.assertEqual(r["k"], i)
+            self.assertEqual(r["target_sessions"], i)
+            self.assertEqual(r["weekday"], w._weekday_cn(r["date"]))
+            self.assertGreater(r["date"], prev_date)            # 严格递增、都在锚定日之后
+            prev_date = r["date"]
+            self.assertLess(datetime.strptime(r["date"], "%Y-%m-%d").weekday(), 5)  # 跳周末
+            self.assertTrue(w.PROB_FLOOR <= r["p_up"] <= w.PROB_CAP, i)
+            self.assertLess(r["band_lo"], d["base_close"])       # 80% 区间夹住锚定收盘
+            self.assertGreater(r["band_hi"], d["base_close"])
+            self.assertTrue(r["reason"] and r["analysis"], i)
+            self.assertIsInstance(r["advice"], dict)
+
+    def test_daily_dod_probability_chains_to_previous_row(self):
+        """当日环比 = 上一行的累计概率（同一批数字，绝不另算一套）。"""
+        rows = self._daily()["rows"]
+        self.assertIsNone(rows[0]["p_day"])                      # T+1 没有「上一日」
+        for i in range(1, 7):
+            self.assertAlmostEqual(rows[i]["p_day"], rows[i - 1]["p_up"], places=9)
+
+    def test_daily_event_reminds_on_day_and_within_holding_window(self):
+        """事件日当天点名「当天有」；之后各天仍在持有窗口内 → 继续提醒；之前的天不挂事件。"""
+        target = w.trading_days_after(self.dates[-1], 7)
+        ev = [{"date": target[2], "name": "测试 CPI", "imp": 3}]
+        rows = self._daily(events=ev)["rows"]
+
+        def _idx(pred):
+            return [i for i, r in enumerate(rows) if any(pred(n) for n in r["advice"]["notes"])]
+
+        self.assertEqual(_idx(lambda n: "当天有 ★★★" in n), [2])           # 事件当天
+        self.assertEqual(_idx(lambda n: "持有窗口内" in n and "★★★" in n), [3, 4, 5, 6])
+        self.assertEqual(_idx(lambda n: "★★★" in n), [2, 3, 4, 5, 6])       # T+1/T+2 不受惊扰
+        self.assertEqual(rows[0]["events"], [])
+        self.assertEqual(rows[1]["events"], [])
+        self.assertTrue(any(e["name"] == "测试 CPI" for e in rows[2]["events"]))
+
+    def test_build_daily_path_degrades_honestly(self):
+        short = w.build_daily_path(self.closes[:30], self.dates[:30],
+                                   dict(self.path, horizon=w.PATH_MAX),
+                                   base_date=self.dates[29], symbol="^HSI")
+        self.assertFalse(short["available"])
+        self.assertIn("样本不足", short["reason"])
+        self.assertEqual(short["rows"], [])
+        # 任一视界缺信号 → 整段降级，绝不用别的数据凑行
+        blank = {"horizon": 7, "vol_hist": [],
+                 "signals_by_h": {h: [None] * len(self.closes) for h in range(1, 8)}}
+        miss = w.build_daily_path(self.closes, self.dates, blank,
+                                  base_date=self.dates[-1], symbol="^HSI")
+        self.assertFalse(miss["available"])
+        self.assertEqual(miss["rows"], [])
+
+    # ---- build_advice：规则合成档位 / 仓位 / 止损止盈 ----
+    def _advice(self, p, **over):
+        kw = dict(base_close=24000.0, vol20=0.01, k=3, vol_pct=None,
+                  band_hi=24500.0, band_lo=23500.0, q95=None,
+                  events=None, day_events=None)
+        kw.update(over)
+        return w.build_advice(p, **kw)
+
+    def test_advice_tiers_position_and_stop_direction(self):
+        bull = self._advice(0.70)
+        self.assertEqual(bull["stance"], "积极看涨 · 顺势做多")
+        self.assertEqual(bull["tone"], "看涨")
+        self.assertEqual(bull["position"], 60)                   # 上限 60%，统计模型不给满仓
+        self.assertLess(bull["stop_price"], 24000.0)             # 看涨止损挂下方
+        self.assertEqual(bull["take_profit"], 24500.0)
+        self.assertIn("分批建仓", bull["entry_hint"])
+        self.assertEqual(bull["notes"][-1], "规则合成参考，非投资建议")
+
+        flat = self._advice(0.50)
+        self.assertEqual(flat["stance"], "中性 · 观望为主")
+        self.assertEqual(flat["tone"], "中性")
+        self.assertEqual(flat["position"], 5)                    # 非看跌档观察仓下限
+        self.assertIn("底仓不动", flat["entry_hint"])
+
+        bear = self._advice(0.30, k=2)
+        self.assertEqual(bear["tone"], "看跌")
+        self.assertEqual(bear["position"], 0)                    # 看跌档可以空仓
+        self.assertGreater(bear["stop_price"], 24000.0)          # 看跌止损挂上方（减仓点）
+        self.assertIn("减仓", bear["entry_hint"])
+
+    def test_advice_high_volatility_shrinks_position(self):
+        calm = self._advice(0.60, vol_pct=0.10)
+        wild = self._advice(0.60, vol_pct=0.85)
+        self.assertGreater(calm["position"], wild["position"])   # 高波动自动降杠杆
+        self.assertTrue(any("偏高" in n for n in wild["notes"]))
+
+    def test_advice_take_profit_takes_more_conservative_of_band_and_q95(self):
+        # q95 给出的止盈比 80% 区间上沿更低时，取更低的那个（更保守）
+        adv = self._advice(0.60, q95=0.005)                      # 24000×1.005=24120 < 24500
+        self.assertAlmostEqual(adv["take_profit"], 24120.0)
+
+    def test_advice_calendar_event_halves_execution(self):
+        adv = self._advice(0.60, day_events=[{"date": "2026-04-13", "name": "CPI", "imp": 3}])
+        self.assertTrue(any("★★★" in n and "减半执行" in n for n in adv["notes"]))
+        # imp<3 的日程不触发减半提醒（不拿低级别日程吓人）
+        calm = self._advice(0.60, day_events=[{"date": "2026-04-13", "name": "普通数据", "imp": 1}])
+        self.assertFalse(any("减半执行" in n for n in calm["notes"]))
+
+    # ---- _var_horizon / trading_days_after / _lean_word ----
+    def test_var_horizon_quantiles_and_min_samples(self):
+        v = self.var7
+        self.assertIsNotNone(v)
+        self.assertLess(v["q05"], v["q50"])
+        self.assertLess(v["q50"], v["q95"])
+        self.assertGreaterEqual(v["n"], 60)
+        # 样本不足 → None（不给分位，绝不编造）
+        self.assertIsNone(w._var_horizon(self.closes[:40], w.PATH_MAX, min_samples=60))
+
+    def test_trading_days_after_skips_weekends(self):
+        out = w.trading_days_after("2026-04-10", 7)               # 2026-04-10 是周五
+        self.assertEqual(len(out), 7)
+        prev = "2026-04-10"
+        for ds in out:
+            self.assertGreater(ds, prev)
+            prev = ds
+            self.assertLess(datetime.strptime(ds, "%Y-%m-%d").weekday(), 5)
+
+    def test_lean_word_neutral_is_even_not_biased(self):
+        self.assertEqual(w._lean_word(0.50), "五五开")
+        self.assertEqual(w._lean_word(0.55), "略偏涨")
+        self.assertEqual(w._lean_word(0.45), "略偏跌")
+
+    # ---- 7 视界截断不变性自检（含 hk_seven_day 的 horizon= 兼容别名）----
+    def test_no_lookahead_covers_all_seven_horizons(self):
+        ok, msg = w.check_no_lookahead(self.closes)
+        self.assertTrue(ok, msg)
+        self.assertIn("视界", msg)
+        self.assertTrue(w.check_no_lookahead(self.closes, horizon=7)[0])   # 别名（hk7 调用）
+        self.assertTrue(w.check_no_lookahead(self.closes, max_horizon=3)[0])  # 子集也须成立
 
 
 if __name__ == "__main__":
