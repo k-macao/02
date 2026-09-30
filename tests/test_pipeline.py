@@ -813,7 +813,13 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertLessEqual(len(part), limit, f"第 {index} 条超过单条上限")
         for title in re.findall(r"<h2[^>]*>([^<]+)</h2>", html):
             hits = sum(1 for part in parts if f">{title}</h2>" in part)
-            self.assertEqual(hits, 1, f"栏目「{title}」在 {len(parts)} 条里出现 {hits} 次")
+            self.assertGreaterEqual(hits, 1, f"栏目「{title}」在 {len(parts)} 条里一次都没出现")
+            # 「尽量合并」允许在同一栏内部续接：续片会重开栏目头，但必须在横幅里如实
+            # 标注「承接上条「栏目名」（续）」，所以标题出现次数 = 1 + 标了续接的条数
+            cont = sum(1 for part in parts if f"承接上条「{title}」（续）" in part)
+            self.assertEqual(
+                hits, 1 + cont,
+                f"栏目「{title}」在 {len(parts)} 条里出现 {hits} 次，其中 {cont} 条标了「承接上条（续）」")
         def flat(chunk):
             return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", re.sub(r"<!--.*?-->", "", chunk, flags=re.S)))
         joined = flat("".join(parts))
