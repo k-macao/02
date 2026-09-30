@@ -9655,8 +9655,8 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 <meta name="description" content="{_esc(REPORT_TAGLINE)}">
 <title>{REPORT_TITLE}</title>
 </head>
-<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
-<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{GZ_PAPER};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<body bgcolor="{GZ_PAPER}" style="margin:0;padding:0;background:{GZ_PAPER};color:{GZ_INK};font-family:{GZ_FONT};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{GZ_PAPER};color:{GZ_INK};font-family:{GZ_FONT};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
 
 {masthead}
 
