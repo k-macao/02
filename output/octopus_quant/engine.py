@@ -382,8 +382,10 @@ class QuantEngine:
         stocks = []
         if self.enable_stocks:
             ff = raw["fundflow"]
+            ff_by_code = {providers._normalize_hk_code(code): item
+                          for code, item in (ff or {}).items() if isinstance(item, dict)}
             nets = {}
-            for code5, item in (ff or {}).items():
+            for code5, item in ff_by_code.items():
                 if item.get("main_net") is not None:
                     nets[code5] = item["main_net"]
             cross_z = {}
@@ -401,13 +403,20 @@ class QuantEngine:
                                         is_index=False)
                 if not row:
                     continue
-                code5 = code.split(".")[0]
+                code5 = providers._normalize_hk_code(code)
+                quote = ff_by_code.get(code5) or {}
+                if quote:
+                    net = quote.get("main_net")
+                    row["main_net_yi"] = net / 1e8 if net is not None else None
+                    row["main_pct"] = quote.get("main_pct")
+                    row["main_amount"] = quote.get("amount")
+                    row["pe_ttm"] = quote.get("pe_ttm")
+                    row["pb"] = quote.get("pb")
+                    row["quote_as_of"] = quote.get("as_of")
                 if code5 in cross_z:
-                    # 个股资金流：用横截面 z 覆盖市场级南向 z（同一因子位，口径一致）
+                    # 个股资金流：用横截面 z 覆盖市场级南向 z（同一因子位，口径一致）。
+                    # 最新净流、估值与成交额则无论 cross-section 样本数多少都单独留给主题策略用。
                     row["feat_flow_z"] = cross_z[code5]
-                    row["main_net_yi"] = nets[code5] / 1e8
-                    row["main_pct"] = (ff or {}).get(code5, {}).get("main_pct")
-                    row["probs"] = row["probs"]
                 stocks.append(row)
 
         # 个股概率：用自身历史校准；样本不足时退回市场校准器（并标注）

@@ -349,6 +349,108 @@ def fetch_series_batch(fetch_json, specs, *, rng="1y", workers=6, timeout=15,
 
 
 # ------------------------------------------------------------------
+# 东方财富 —— A股概念板块列表（只取当前快照，不提供点时成分历史）
+# ------------------------------------------------------------------
+def fetch_concept_boards(fetch_json, page_size=500, max_pages=5, timeout=12):
+    """拉取东方财富 ``fs=m:90+t:3`` 概念板块列表及当日字段。
+
+    返回 ``{items, total, reported_total, complete, served_urls, errors}``。分页数有上限；接口
+    total 缺失时按有效短页 / 空页停止，网络中断不会误报完整。这里只返回当前概念行情快照，不把它当历史成分库。
+    ``served_urls`` 供日报层记录主 / 备用镜像来源。
+    """
+    empty = {"items": [], "total": 0, "reported_total": None,
+             "complete": False, "served_urls": [], "errors": []}
+    if not fetch_json:
+        empty["errors"].append("未注入取数函数")
+        return empty
+    try:
+        page_size = max(1, int(page_size))
+        max_pages = max(1, int(max_pages))
+    except (TypeError, ValueError):
+        page_size, max_pages = 500, 5
+
+    items, served_urls, errors = [], [], []
+    reported_total = None
+    pagination_ended = False
+    for page in range(1, max_pages + 1):
+        params = {
+            "pn": str(page), "pz": str(page_size), "po": "1", "np": "1",
+            "fltt": "2", "invt": "2", "fid": "f3", "fs": "m:90+t:3",
+            "fields": "f2,f3,f6,f12,f14,f20,f21,f23,f62,f104,f105,f124,f128,f136",
+        }
+        data, served = fetch_json_chain(
+            fetch_json, chain_urls("em_clist"), params,
+            ok=lambda body: (isinstance((body or {}).get("data"), dict)
+                             and isinstance(body["data"].get("diff"), (list, dict))),
+            timeout=timeout)
+        if data is None:
+            errors.append(f"概念板块第 {page} 页未取得有效 diff")
+            break
+        if served and served not in served_urls:
+            served_urls.append(served)
+        payload = data.get("data") or {}
+        diff = payload.get("diff") or []
+        if isinstance(diff, dict):
+            diff = list(diff.values())
+        try:
+            count = int(payload.get("total")) if payload.get("total") is not None else None
+        except (TypeError, ValueError):
+            count = None
+        if count is not None:
+            reported_total = count
+        page_rows = []
+        for row in diff:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("f12") or "").strip()
+            name = str(row.get("f14") or "").strip()
+            if not code or not name:
+                continue
+            quote_ts = None
+            raw_ts = row.get("f124")
+            try:
+                quote_ts = int(float(raw_ts)) if raw_ts not in (None, "", "-") else None
+                if quote_ts and quote_ts > 100_000_000_000:  # 防接口改为毫秒时间戳
+                    quote_ts //= 1000
+            except (TypeError, ValueError, OverflowError):
+                quote_ts = None
+            page_rows.append({
+                "code": code,
+                "name": name,
+                "chg_pct": _num(row.get("f3")),
+                "amount": _num(row.get("f6")),
+                "main_net": _num(row.get("f62")),
+                "up": _num(row.get("f104")),
+                "down": _num(row.get("f105")),
+                "lead_stock": str(row.get("f128") or "").strip(),
+                "lead_stock_pct": _num(row.get("f136")),
+                "quote_ts": quote_ts,
+                "as_of": (datetime.fromtimestamp(quote_ts, CST).strftime("%Y-%m-%d")
+                          if quote_ts else None),
+            })
+        items.extend(page_rows)
+        if not diff or len(diff) < page_size:
+            pagination_ended = True
+            break
+        if reported_total is not None and len(items) >= reported_total:
+            pagination_ended = True
+            break
+    total = reported_total if reported_total is not None else len(items)
+    hit_page_cap = len(items) >= page_size * max_pages
+    complete = bool(items) and (
+        len(items) >= reported_total if reported_total is not None else pagination_ended
+    )
+    if not complete and reported_total is not None and hit_page_cap:
+        errors.append(f"分页达到上限 {max_pages}，已取 {len(items)}/{reported_total} 个概念")
+    elif not complete and reported_total is None and hit_page_cap:
+        errors.append(f"分页达到上限 {max_pages}，总数未返回；至少已取 {len(items)} 个概念")
+    elif not complete and reported_total is not None:
+        errors.append(f"仅取得 {len(items)}/{reported_total} 个概念，分页完整性未确认")
+    return {"items": items, "total": total, "reported_total": reported_total,
+            "complete": complete, "served_urls": served_urls, "errors": errors}
+
+
+# ------------------------------------------------------------------
 # 东方财富 —— 南向 / 北向资金（沪深港通成交总额历史）
 # ------------------------------------------------------------------
 MUTUAL_TYPE_NORTH = "005"   # 北向合计（沪股通 + 深股通）
@@ -489,11 +591,17 @@ def fetch_hk_top_turnover(fetch_json, top_n=50, timeout=12):
     return rows
 
 
-def fetch_hk_fundflow(fetch_json, universe=None, timeout=12):
-    """个股主力资金净流入（东财港股资金流字段 f62/主力净占比 f184）。
+def _normalize_hk_code(code):
+    """港股代码内部统一为 5 位数字，兼容 Yahoo / 东财的前导零写法。"""
+    digits = "".join(ch for ch in str(code or "").split(".", 1)[0] if ch.isdigit())
+    return digits.zfill(5) if digits else str(code or "").strip()
 
-    返回 ``{5位代码: {"main_net": 元, "main_pct": %, "name": 名称}}``。
-    港股该字段不保证可用，取不到返回 {}（上层按「无个股资金流」降级）。
+
+def fetch_hk_fundflow(fetch_json, universe=None, timeout=12):
+    """港股快照：主力资金、主力净占比、成交额与 PE/PB（东财 ulist 字段）。
+
+    返回 ``{5位代码: {name, main_net, main_pct, amount, pe_ttm, pb, ...}}``。
+    港股主力资金字段不保证可用；若资金字段缺失但估值字段存在，仍保留该证券记录。
     """
     if not fetch_json:
         return {}
@@ -509,21 +617,43 @@ def fetch_hk_fundflow(fetch_json, universe=None, timeout=12):
     for i in range(0, len(secids), 8):  # 小批量，避免单请求过长
         data, _url = fetch_json_chain(fetch_json, chain_urls("em_ulist"), {
             "fltt": "2", "invt": "2", "secids": ",".join(secids[i:i + 8]),
-            "fields": "f12,f14,f2,f3,f62,f184",
+            "fields": "f12,f14,f2,f3,f6,f9,f23,f62,f124,f184",
         }, ok=lambda d: bool(((d or {}).get("data") or {}).get("diff")), timeout=timeout)
         try:
             rows = ((data or {}).get("data") or {}).get("diff") or []
         except (AttributeError, TypeError):
             continue
         for it in rows:
-            code = str(it.get("f12") or "").strip()
-            net = _num(it.get("f62"))
-            if not code or net is None:
+            raw_code = str(it.get("f12") or "").strip()
+            code = _normalize_hk_code(raw_code)
+            if not raw_code or not code:
                 continue
+            net = _num(it.get("f62"))
+            main_pct = _num(it.get("f184"))
+            amount = _num(it.get("f6"))
+            pe_ttm = _num(it.get("f9"))
+            pb = _num(it.get("f23"))
+            if all(value is None for value in (net, main_pct, amount, pe_ttm, pb)):
+                continue
+            quote_ts = None
+            try:
+                quote_ts = int(float(it.get("f124"))) if it.get("f124") not in (None, "", "-") else None
+                if quote_ts and quote_ts > 100_000_000_000:
+                    quote_ts //= 1000
+            except (TypeError, ValueError, OverflowError):
+                quote_ts = None
             out[code] = {
                 "name": str(it.get("f14") or "").strip() or code,
+                "price": _num(it.get("f2")),
+                "chg_pct": _num(it.get("f3")),
                 "main_net": net,
-                "main_pct": _num(it.get("f184")),
+                "main_pct": main_pct,
+                "amount": amount,
+                "pe_ttm": pe_ttm,
+                "pb": pb,
+                "quote_ts": quote_ts,
+                "as_of": (datetime.fromtimestamp(quote_ts, CST).strftime("%Y-%m-%d")
+                          if quote_ts else None),
             }
     return out
 

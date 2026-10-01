@@ -109,9 +109,10 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
         "note": "适配器 pipeline._eastmoney_snapshot_quotes；美股/港股/A股指数与 MSFT/META 全覆盖，WTI 视东财代码可用性",
     },
     "yahoo_bars": {
-        "name": "日线序列 · 港股量化 / 每周预测",
+        "name": "日线序列 · 港股量化 / 每周预测 / 板块轮动",
         "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析",
-                    "【贪吃大白鲨】量化走势预测"),
+                    "【贪吃大白鲨】量化走势预测",
+                    "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -124,7 +125,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_ulist": {
         "name": "东方财富 指数 / 个股快照（ulist.np）",
         "used_by": ("【及时秋刀鱼】AI 行情复盘·A股全景",
-                    "【及时秋刀鱼】AI 行情复盘·港股核对", "资金流动性分析"),
+                    "【及时秋刀鱼】AI 行情复盘·港股核对", "资金流动性分析",
+                    "【滚滚翻车鱼】板块轮动量化策略·港股快照"),
         "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/ulist.np/get")),
         "backups": (
             ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/ulist.np/get"), True),
@@ -145,7 +147,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_clist": {
         "name": "东方财富 榜单列表（clist）",
         "used_by": ("热门榜单", "【及时秋刀鱼】AI 行情复盘·板块热力",
-                    "每日量化策略·行业列表", "资金流动性·港股成交榜"),
+                    "每日量化策略·行业列表", "资金流动性·港股成交榜",
+                    "【滚滚翻车鱼】板块轮动量化策略·A股概念库"),
         "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/clist/get")),
         "backups": (
             ("东方财富 82.push2（同格式镜像）", _em(EM_PUSH2_HOSTS[1], "/api/qt/clist/get"), True),
@@ -156,7 +159,8 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_kline": {
         "name": "东方财富 日K（push2his）",
         "used_by": ("【及时秋刀鱼】AI 行情复盘·上日成交额",
-                    "每日量化策略·行业指数日线", "日线序列备用"),
+                    "每日量化策略·行业指数日线", "日线序列备用",
+                    "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线备用"),
         "primary": ("东方财富 push2his", _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get")),
         "backups": (
             ("东方财富 91.push2his（同格式镜像）", _em(EM_PUSH2HIS_HOSTS[1], "/api/qt/stock/kline/get"), True),

@@ -113,6 +113,7 @@ def make_fetcher(index_bars, stock_bars, south, north, *, top_rows=None,
             codes = [s.split(".")[-1] for s in secids.split(",")]
             return {"data": {"diff": [
                 {"f12": c, "f14": f"港股{c}", "f2": 100.0, "f3": 0.5,
+                 "f6": 8e8 * (i + 1), "f9": 10.0 + i, "f23": 1.0 + i * 0.1,
                  "f62": 1.2e8 * (i + 1), "f184": 3.2}
                 for i, c in enumerate(codes)]}}
         return None
@@ -529,6 +530,11 @@ class EngineTests(unittest.TestCase):
                 self.assertGreaterEqual(p, probability.PROB_FLOOR)
                 self.assertLessEqual(p, probability.PROB_CAP)
         self.assertTrue(res["stocks"])
+        for row in res["stocks"]:
+            for key in ("main_net_yi", "main_pct", "main_amount", "pe_ttm", "pb", "quote_as_of"):
+                self.assertIn(key, row)
+        self.assertIsNotNone(res["stocks"][0]["pe_ttm"])
+        self.assertIsNotNone(res["stocks"][0]["pb"])
         self.assertIn(res["primary"]["label"], ("恒生指数", "恒生科技", "国企指数"))
         self.assertTrue(res["breadth"]["available"])
         self.assertTrue(res["liquidity"]["available"])

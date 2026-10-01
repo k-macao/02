@@ -461,13 +461,18 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertNotIn("AI 七日港股走势分析概率", html)
         self.assertNotIn("HK 7D PROB", html)
 
-    def test_sector_rotation_column_is_fully_removed(self):
-        self.assertFalse(hasattr(pipeline, "fetch_sector_rotation"))
-        self.assertFalse(hasattr(pipeline, "_sector_rotation_block"))
-        self.assertNotIn("SECTOR ROTATION", pipeline.REPORT_SECTION_ORDER)
-        self.assertNotIn("SECTOR ROTATION", pipeline._SECTION_ICON_META)
-        for name in ("sector_rotation.py", "probe_sector_rotation.py"):
-            self.assertFalse((OUTPUT_DIR / name).exists(), name)
+    def test_sector_rotation_column_is_registered_as_a_separate_section(self):
+        self.assertTrue(hasattr(pipeline, "fetch_sector_rotation"))
+        self.assertTrue(hasattr(pipeline, "_render_sector_rotation"))
+        self.assertEqual(pipeline.SECTION_TITLE_SECTOR_ROTATION,
+                         "【滚滚翻车鱼】板块轮动量化策略")
+        self.assertIn("SECTOR ROTATION", pipeline.REPORT_SECTION_ORDER)
+        self.assertIn("SECTOR ROTATION", pipeline._SECTION_ICON_META)
+        self.assertLess(pipeline.REPORT_SECTION_ORDER.index("WEEKLY FORECAST"),
+                        pipeline.REPORT_SECTION_ORDER.index("SECTOR ROTATION"))
+        self.assertLess(pipeline.REPORT_SECTION_ORDER.index("SECTOR ROTATION"),
+                        pipeline.REPORT_SECTION_ORDER.index("MARKET REVIEW"))
+        self.assertTrue((OUTPUT_DIR / "octopus_quant" / "sector_rotation.py").exists())
 
 
 # ======================================================================
