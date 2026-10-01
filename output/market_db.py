@@ -10,22 +10,38 @@
     特征与标签（见 build_dataset / export_dataset / ai_context）。
 
 三条硬规则
-    ① 多源（源头 > 3）：每只标的都从 5 路独立源取数 ——
+    ① 多源（源头 > 3）：每只标的都从 6 路独立源取数 ——
        东方财富 push2 快照 / 新浪财经 hq / 腾讯财经 qt / Yahoo Finance chart /
-       东方财富 push2his 日K（收盘校验源，只校验昨收与收盘，不参与盘中比价）。
-       每路都可换镜像主机；单路失败只影响该路，全部失败**不落库**；
+       东方财富 push2his 日K（收盘校验源，只校验昨收与收盘，不参与盘中比价）/
+       通达信行情 mootdx（沪深，多主站自动选路；2026-10-01 升级加入）。
+       每路都可换镜像主机（通达信本身是 38 个主站的服务器池）；单路失败只影响该路，
+       全部失败**不落库**；
     ② 交叉验证：同一标的多源比价（中位数 + MAD 稳健离群），逐源判定「滞后」，
        输出共识价 / 离群源 / 价差百分比 / 置信度；只有 ≥2 路一致才计入「有效共识」；
     ③ 自我检查：每次落库对自己做一遍体检（结构 / 时段 / 源覆盖 / 标的覆盖 /
        数值合理性 / 跨源冲突 / 跨时段与跨日跳变 / 文件哈希），结果写进文件
        ``self_check``，可随时 ``verify`` 复核。
 
+通达信通道（mootdx，2026-10-01 升级）
+    · 行情：``Quotes.factory(market='std')`` → ``quotes()``，覆盖沪深股票与指数
+      （代码映射 sh600519 / sz000858 / sh000001）；港美股不在通达信标准行情内
+      （mootdx 自己的扩展市场接口已失效），因此该源只参与沪深标的的比价；
+    · 多主站：``OCTOPUS_DB_TDX_SERVERS="ip:port,…"`` 可指定，否则用 mootdx / tdxpy
+      内置主站池依次试连（连不上自动换站，最多 4 站），命中站点写进 ``sources.tdx.host``；
+    · 收盘校验：每档都用 ``bars(frequency=9)`` 取最近一根日K收盘，与 em_kline 一起做
+      双源收盘核对（两个独立通道的收盘价一致，昨收 / 标签才可信）；
+    · 财务 / 除权除息：17:00 档附带 ``fundamentals``（总股本 / 流通股本 / 每股净资产 /
+      净利润 → 总市值 / 流通市值 / PE / PB）与 ``corporate_actions``（近 45 天除权除息），
+      既进 AI 特征，也用来解释「跨日跳变」（除权日的大幅跳空不再当成数据错误）；
+    · 未安装 mootdx（或所有主站都连不上）→ 该源记 ``unavailable``，其余 5 路照常，
+      绝不伪造数字。安装：``pip install mootdx``（Actions 已装）。
+
 绝不伪造
-    任一路取不到就如实记 ``failed``（不猜数、不补历史数字）；5 路全失败不写文件；
+    任一路取不到就如实记 ``failed``（不猜数、不补历史数字）；全部源失败不写文件；
     Yahoo 与东财的「昨收 / 收盘」只做校验与留痕，绝不替换实时价。
 
 用法（隐藏入口二选一）
-    python3 output/market_db.py pull      [--slot auto|0800|1230|1700] [--date YYYY-MM-DD]
+    python3 output/market_db.py pull      [--slot auto|0800|1230|1700] [--no-enrich] [--no-tdx]
     python3 output/market_db.py verify    [--date YYYY-MM-DD | --all] [--strict]
     python3 output/market_db.py export    --out FILE [--format jsonl|csv] [--start D] [--end D]
     python3 output/market_db.py stats     [--days 7]
@@ -60,7 +76,7 @@ from urllib.parse import urlencode
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_ROOT = os.path.join(SCRIPT_DIR, "market_db")
 CST = timezone(timedelta(hours=8))          # 北京时间 / 澳门时间
-SCHEMA = "octopus-market-db/1"
+SCHEMA = "octopus-market-db/2"   # v2：新增通达信源 / 财务 / 除权除息
 
 # ------------------------------------------------------------
 # 口径常量（写死可复现；改任何一条都会影响库内容与自检结论）
@@ -83,6 +99,9 @@ SLOT_JUMP_PCT = 15.0      # 同日相邻时段共识价跳变告警阈值
 DAY_JUMP_PCT = 30.0       # 与前一交易日收盘共识价跳变告警阈值
 DEFAULT_TIMEOUT = 12
 MAX_WORKERS = 6
+TDX_SERVER_LIMIT = 4       # 通达信主站最多试连几个（内置池 38+ 个，逐个降级）
+TDX_ACTION_DAYS = 45       # 除权除息只留最近 N 天（超过就不是「本次跳变」的原因了）
+
 
 # ------------------------------------------------------------
 # 数据源注册表（≥4 路独立源；每路可换镜像主机）
@@ -113,6 +132,14 @@ SOURCES: Dict[str, Dict[str, Any]] = {
         "kind": "close", "price_peer": False, "delay": "收盘后",
         "hosts": ("push2his.eastmoney.com", "91.push2his.eastmoney.com", "63.push2his.eastmoney.com"),
     },
+    # 通达信通道（mootdx，2026-10-01 升级）：沪深行情 + 财务 + 除权除息。
+    # 主站是服务器池（mootdx/tdxpy 内置 38+ 个），由 _tdx_servers() 依次试连，
+    # 命中的站点写进 host，便于审计「这次是哪台机子供的数」。
+    "tdx": {
+        "label": "通达信行情 mootdx（沪深 · 多主站）",
+        "kind": "quote", "price_peer": True, "delay": "实时",
+        "hosts": ("mootdx-tdx-server-pool",),
+    },
 }
 
 DEFAULT_HEADERS = {
@@ -128,12 +155,26 @@ SINA_HEADERS = {"Referer": "https://finance.sina.com.cn/"}
 #   · 港股个股池直接复用量化引擎的 HK_STOCK_UNIVERSE（单一事实来源，避免两处漂移）；
 #   · 代码统一用 Yahoo 代码作主键（.HK / .SS / .SZ / ^XXX / 美股 ticker）。
 # ------------------------------------------------------------
+# 美股：只留两只会进 AI 行情复盘 / 情绪归因的龙头（东财 / Yahoo / 腾讯三路可覆盖）
+US_STOCKS: List[Tuple[str, str, str]] = [
+    ("微软", "MSFT", "US"), ("Meta", "META", "US"),
+]
+
+# A股：2026-10-01 随通达信通道（mootdx）补入的沪深蓝筹与热门标的。
+# 这些标的在东财 / 新浪 / 腾讯 / Yahoo / 东财日K / 通达信六路都有行情，
+# 是交叉验证最扎实的一批，也把数据库从「港股为主」扩成「港 + A + 美」。
+A_STOCKS: List[Tuple[str, str, str]] = [
+    ("贵州茅台", "600519.SS", "A"), ("宁德时代", "300750.SZ", "A"),
+    ("中际旭创", "300308.SZ", "A"), ("比亚迪", "002594.SZ", "A"),
+    ("招商银行", "600036.SS", "A"), ("中国平安", "601318.SS", "A"),
+    ("五粮液", "000858.SZ", "A"), ("美的集团", "000333.SZ", "A"),
+]
+
 CORE_SYMBOLS: List[Tuple[str, str, str]] = [
     ("恒生指数", "^HSI", "HK"), ("恒生科技", "^HSTECH", "HK"), ("国企指数", "^HSCEI", "HK"),
     ("上证指数", "000001.SS", "A"), ("深证成指", "399001.SZ", "A"), ("创业板指", "399006.SZ", "A"),
     ("道琼斯", "^DJI", "US"), ("标普500", "^GSPC", "US"), ("纳斯达克", "^IXIC", "US"),
-    ("微软", "MSFT", "US"), ("Meta", "META", "US"),
-]
+] + US_STOCKS + A_STOCKS
 
 _EM_EXTRA_US = "105."        # 东财美股 secid 前缀（105 = 纳斯达克）
 
@@ -226,6 +267,20 @@ def sina_code(symbol: str) -> str:
         return hk_index[sym]
     if sym.endswith(".HK") and sym[:-3].isdigit():
         return f"hk{int(sym[:-3]):05d}"
+    if sym.endswith(".SS") and sym[:-3].isdigit():
+        return f"sh{sym[:-3]}"
+    if sym.endswith(".SZ") and sym[:-3].isdigit():
+        return f"sz{sym[:-3]}"
+    return ""
+
+
+def tdx_code(symbol: str) -> str:
+    """Yahoo 代码 → 通达信代码（仅沪深：sh600519 / sz000858 / sh000001）。
+
+    通达信标准行情（mootdx std）只有沪深市场；扩展市场接口在 mootdx 内部已标注失效，
+    港美股一律返回空串 → 该源不参与这些标的，绝不拿错市场的数字充数。
+    """
+    sym = str(symbol or "").strip()
     if sym.endswith(".SS") and sym[:-3].isdigit():
         return f"sh{sym[:-3]}"
     if sym.endswith(".SZ") and sym[:-3].isdigit():
@@ -389,7 +444,8 @@ def _quote(price, *, prev_close=None, open_=None, high=None, low=None, volume=No
 # ------------------------------------------------------------
 # ① 东方财富 push2 行情快照
 # ------------------------------------------------------------
-def fetch_eastmoney(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+def fetch_eastmoney(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT,
+                    **_kw) -> Dict[str, Any]:
     started = time.time()
     pairs = [(em_secid(s), s) for s in symbols]
     secids = {sec: sym for sec, sym in pairs if sec}
@@ -460,7 +516,8 @@ def _parse_sina_line(code: str, payload: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def fetch_sina(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+def fetch_sina(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT,
+               **_kw) -> Dict[str, Any]:
     started = time.time()
     code_to_sym = {}
     for sym in symbols:
@@ -523,7 +580,8 @@ def _parse_tencent_line(payload: str) -> Optional[Dict[str, Any]]:
                   amount=amount, quote_time=stamp, name=parts[1] if len(parts) > 1 else "")
 
 
-def fetch_tencent(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+def fetch_tencent(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT,
+                  **_kw) -> Dict[str, Any]:
     started = time.time()
     code_to_sym = {}
     for sym in symbols:
@@ -581,7 +639,8 @@ def _yahoo_quote_from_chart(data) -> Optional[Dict[str, Any]]:
                   quote_time=quote_time, name=meta.get("shortName") or "")
 
 
-def fetch_yahoo(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+def fetch_yahoo(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT,
+                **_kw) -> Dict[str, Any]:
     started = time.time()
 
     def one(sym: str):
@@ -635,7 +694,8 @@ def _em_kline_last_close(data) -> Optional[Dict[str, Any]]:
             "amount": _num(row[6], 2) if len(row) > 6 else None}
 
 
-def fetch_em_kline(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+def fetch_em_kline(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT,
+                   **_kw) -> Dict[str, Any]:
     """返回 {代码: {close, date, …}}：注意 close 是**最近一个已收盘交易日**的收盘价。"""
     started = time.time()
     pairs = {em_secid(s): s for s in symbols if em_secid(s)}
@@ -675,19 +735,303 @@ def fetch_em_kline(symbols: Sequence[str], http, timeout: int = DEFAULT_TIMEOUT)
                           elapsed_ms=(time.time() - started) * 1000)
 
 
-FETCHERS: Dict[str, Callable[[Sequence[str], Any, int], Dict[str, Any]]] = {
+# ------------------------------------------------------------
+# ⑥ 通达信行情（mootdx，2026-10-01 升级）—— 沪深行情 + 收盘校验 + 财务 / 除权除息
+# ------------------------------------------------------------
+def _records(obj) -> List[Dict[str, Any]]:
+    """把 mootdx 的返回拍成「字典列表」：支持 pandas.DataFrame / list[dict] / dict[list]。
+
+    单独做一层适配是为了让测试可以注入「纯 Python 假客户端」（不依赖 pandas），
+    生产环境里 mootdx 返回的 DataFrame 走 to_dict("records") 同一路径。
+    """
+    if obj is None:
+        return []
+    if isinstance(obj, list):
+        return [row for row in obj if isinstance(row, dict)]
+    if isinstance(obj, dict):
+        keys = list(obj)
+        if not keys:
+            return []
+        if isinstance(obj[keys[0]], (list, tuple)):
+            return [dict(zip(keys, values)) for values in zip(*[obj[k] for k in keys])]
+        return [dict(obj)]
+    to_dict = getattr(obj, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return [row for row in (to_dict("records") or []) if isinstance(row, dict)]
+        except Exception:                                           # noqa: BLE001
+            return []
+    return []
+
+
+def _tdx_servers(limit: int = TDX_SERVER_LIMIT) -> List[Tuple[str, int]]:
+    """候选主站：OCTOPUS_DB_TDX_SERVERS → mootdx 内置池 → tdxpy 内置池（去重后取前 N 个）。"""
+    out: List[Tuple[str, int]] = []
+    for chunk in os.environ.get("OCTOPUS_DB_TDX_SERVERS", "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        host, _, port = chunk.partition(":")
+        if host.strip():
+            out.append((host.strip(), int(port) if port.strip().isdigit() else 7709))
+    try:
+        from mootdx import consts as _consts                    # noqa: WPS433
+        out.extend((str(ip), int(port)) for _n, ip, port in (getattr(_consts, "HQ_HOSTS", ()) or ()))
+    except Exception:                                               # noqa: BLE001
+        pass
+    try:
+        from tdxpy.constants import hq_hosts as _hosts          # noqa: WPS433
+        out.extend((str(ip), int(port)) for _n, ip, port in (_hosts or ()))
+    except Exception:                                               # noqa: BLE001
+        pass
+    seen, unique = set(), []
+    for host, port in out:
+        if (host, port) in seen:
+            continue
+        seen.add((host, port))
+        unique.append((host, port))
+    return unique[:max(1, int(limit))]
+
+
+def _tdx_installed() -> bool:
+    try:
+        import importlib.util as _ilu                              # noqa: WPS433
+        return _ilu.find_spec("mootdx") is not None
+    except Exception:                                               # noqa: BLE001
+        return False
+
+
+def _open_tdx_client(host: str, port: int, timeout: int):
+    """连接一台通达信主站；未安装 mootdx / 连不上都返回 (None, 原因)。"""
+    try:
+        from mootdx.quotes import Quotes                         # noqa: WPS433
+    except Exception as exc:                                        # noqa: BLE001
+        return None, f"未安装 mootdx（pip install mootdx）：{type(exc).__name__}"
+    try:
+        return Quotes.factory(market="std", server=(host, int(port)), timeout=timeout,
+                              heartbeat=False), ""
+    except Exception as exc:                                        # noqa: BLE001
+        return None, f"{host}:{port} {type(exc).__name__}: {exc}"
+
+
+def _tdx_quote_time(servertime: Any, date_str: str) -> Optional[str]:
+    """通达信只给 HH:MM:SS[.mmm]（不含日期）→ 用落库日期补全成时间戳。"""
+    match = re.match(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", str(servertime or "").strip())
+    if not match:
+        return None
+    return f"{date_str} {int(match.group(1)):02d}:{match.group(2)}:{match.group(3) or '00'}"
+
+
+def _tdx_symbols_by_code(pairs: Dict[str, str]) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """通达信返回的 code 不带市场前缀 → 建两级索引，避免沪深同号撞车。
+
+    返回 ({(market, code): symbol}, {code: symbol})：
+      · 主索引用 ``market`` 字段（mootdx：1=沪 0=深）精确定位（如 000001.SS vs 000001.SZ）；
+      · 备索引只按数字代码，用于 market 字段缺失的客户端。
+    """
+    keyed, bare = {}, {}
+    for code, sym in pairs.items():
+        prefix, digits = (code[:2], code[2:]) if code[:2] in ("sh", "sz") else ("", code)
+        bare.setdefault(digits, sym)
+        if prefix:
+            keyed[f"{1 if prefix == 'sh' else 0}.{digits}"] = sym
+    return keyed, bare
+
+
+def _tdx_quotes(client, pairs: Dict[str, str], date_str: str,
+                session_dates: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+    """通达信只给 HH:MM:SS；日期用日K最后一根推出来的「交易日」补全（缺了才退回落库日）。
+
+    这一点很关键：08:00 盘前拉到的其实是**上一交易日**的收盘快照，
+    若不按交易日补日期，就会把昨天的价记成今天 14:59，等于凭空造时间戳。
+    """
+    rows = _records(client.quotes(symbol=list(pairs)))
+    keyed, bare = _tdx_symbols_by_code(pairs)
+    quotes: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        code = str(row.get("code") or "").strip()
+        sym = keyed.get(f"{row.get('market')}.{code}") or bare.get(code)
+        if not sym:
+            continue
+        stamp_date = (session_dates or {}).get(sym) or date_str
+        item = _quote(row.get("price"), prev_close=row.get("last_close"), open_=row.get("open"),
+                      high=row.get("high"), low=row.get("low"), volume=row.get("vol"),
+                      amount=row.get("amount"), quote_time=_tdx_quote_time(row.get("servertime"), stamp_date))
+        if item is not None:
+            quotes[sym] = item
+    return quotes
+
+
+def _tdx_eod_closes(client, pairs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+    """日K（frequency=9）最后一条收盘 → 与东财日K组成「双源收盘核对」。"""
+    out: Dict[str, Dict[str, Any]] = {}
+    for code, sym in pairs.items():
+        try:
+            rows = _records(client.bars(symbol=code, frequency=9, offset=2))
+        except Exception:                                           # noqa: BLE001
+            rows = []
+        if not rows:
+            continue
+        last = rows[-1]
+        close, stamp = _num(last.get("close")), str(last.get("datetime") or "")
+        if close is None or close <= 0 or len(stamp) < 10:
+            continue
+        out[sym] = {"close": close, "date": stamp[:10], "source_kind": "day_bar"}
+    return out
+
+
+def _tdx_fundamentals(client, pairs: Dict[str, str],
+                      price_by_sym: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """财务快照 → 市值 / PE / PB（缺失就留空，不猜）。
+
+    单位：mootdx 的 parser 已把通达信原始值 ×10000，股本单位=股、金额单位=元。
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for code, sym in pairs.items():
+        try:
+            rows = _records(client.finance(symbol=code))
+        except Exception:                                           # noqa: BLE001
+            rows = []
+        if not rows:
+            continue
+        row = rows[0]
+        total_shares = _num(row.get("zongguben"), 0)
+        float_shares = _num(row.get("liutongguben"), 0)
+        net_profit, bvps = _num(row.get("jinglirun"), 2), _num(row.get("meigujingzichan"), 4)
+        quote = price_by_sym.get(sym)
+        price = _num(quote.get("price") if isinstance(quote, dict) else quote)
+        eps = (net_profit / total_shares) if (net_profit and total_shares) else None
+        out[sym] = {
+            "updated_date": str(row.get("updated_date") or "") or None,
+            "total_shares": total_shares, "float_shares": float_shares,
+            "bvps": bvps, "net_profit": net_profit, "eps": round(eps, 6) if eps else None,
+            "total_mv": round(price * total_shares, 2) if (price and total_shares) else None,
+            "float_mv": round(price * float_shares, 2) if (price and float_shares) else None,
+            "pe": round(price / eps, 4) if (price and eps and eps > 0) else None,
+            "pb": round(price / bvps, 4) if (price and bvps and bvps > 0) else None,
+        }
+    return out
+
+
+def _tdx_corporate_actions(client, pairs: Dict[str, str], date_str: str,
+                           days: int = TDX_ACTION_DAYS) -> Dict[str, List[Dict[str, Any]]]:
+    """近 N 天除权除息 / 送配股（用来解释跨日跳变，也作为 AI 特征）。"""
+    try:
+        cut = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
+    except ValueError:
+        cut = date_str
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for code, sym in pairs.items():
+        try:
+            rows = _records(client.xdxr(symbol=code))
+        except Exception:                                           # noqa: BLE001
+            rows = []
+        items = []
+        for row in rows:
+            try:
+                stamp = f"{int(row.get('year')):04d}-{int(row.get('month')):02d}-{int(row.get('day')):02d}"
+            except (TypeError, ValueError):
+                continue
+            if not (cut <= stamp <= date_str):
+                continue
+            items.append({"date": stamp, "category": row.get("category"),
+                          "name": str(row.get("name") or ""),
+                          "fenhong": _num(row.get("fenhong"), 4),
+                          "songzhuangu": _num(row.get("songzhuangu"), 4),
+                          "peigu": _num(row.get("peigu"), 4),
+                          "peigujia": _num(row.get("peigujia"), 4)})
+        if items:
+            out[sym] = sorted(items, key=lambda item: item["date"])
+    return out
+
+
+def _tdx_from_client(client, pairs: Dict[str, str], label: str, enrich: bool,
+                     date_str: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """用给定客户端取一轮数据；返回 (源结果, 附加数据)。
+
+    附加数据：eod_closes 每档都有；fundamentals / corporate_actions 只有 enrich=True 时才有。
+    """
+    started = time.time()
+    eod_closes = _tdx_eod_closes(client, pairs)      # 每档都做收盘核对（很便宜）
+    session_dates = {sym: str(item.get("date") or "") for sym, item in eod_closes.items()}
+    try:
+        quotes = _tdx_quotes(client, pairs, date_str, session_dates)
+    except Exception as exc:                                        # noqa: BLE001
+        return _source_result("tdx", "failed", host=label, error=f"{type(exc).__name__}: {exc}",
+                              elapsed_ms=(time.time() - started) * 1000), {}
+    if not quotes:
+        return _source_result("tdx", "failed", host=label, error="返回内容无有效行情",
+                              elapsed_ms=(time.time() - started) * 1000), {}
+    stamps = [q["quote_time"] for q in quotes.values() if q.get("quote_time")]
+    result = _source_result("tdx", "ok", quotes=quotes, host=label,
+                            quote_time=max(stamps) if stamps else None,
+                            elapsed_ms=(time.time() - started) * 1000)
+    extras: Dict[str, Any] = {"eod_closes": eod_closes}
+    if enrich:
+        extras["fundamentals"] = _tdx_fundamentals(client, pairs, quotes)
+        extras["corporate_actions"] = _tdx_corporate_actions(client, pairs, date_str)
+    bits = []
+    if extras["eod_closes"]:
+        bits.append(f"收盘核对 {len(extras['eod_closes'])} 只")
+    if extras.get("fundamentals"):
+        bits.append(f"财务 {len(extras['fundamentals'])} 只")
+    if extras.get("corporate_actions"):
+        bits.append(f"除权除息 {sum(len(v) for v in extras['corporate_actions'].values())} 条")
+    result["summary"] = " · ".join(bits) or "无附加数据"
+    result.update(extras)
+    return result, extras
+
+
+def fetch_tdx(symbols: Sequence[str], http=None, timeout: int = DEFAULT_TIMEOUT, *,
+              client: Optional[Any] = None, servers: Optional[Sequence[Tuple[str, int]]] = None,
+              enrich: bool = False, slot: Optional[str] = None, date_str: Optional[str] = None,
+              **_kw) -> Dict[str, Any]:
+    """通达信行情源（沪深）：主站池逐个降级。
+
+    每档都附带日K收盘（与东财日K组成双源收盘核对）；enrich=True（默认只有 17:00 档）
+    再抓财务快照与近 45 天除权除息。连不上 / 没装 mootdx 就明确降级，绝不编数。
+    """
+    pairs = {tdx_code(sym): sym for sym in symbols if tdx_code(sym)}
+    if not pairs:
+        return _source_result("tdx", "failed", error="无沪深标的（通达信标准行情不覆盖港美股）")
+    when = date_str or _now().strftime("%Y-%m-%d")
+    started = time.time()
+    if client is not None:                                          # 测试注入 / 复用连接
+        result, _extras = _tdx_from_client(client, pairs, "injected", enrich, when)
+        return result
+    servers = list(servers or _tdx_servers())
+    if not servers:
+        err = ("未安装 mootdx（pip install mootdx）" if not _tdx_installed()
+               else "OCTOPUS_DB_TDX_SERVERS 为空且内置主站池为空")
+        return _source_result("tdx", "unavailable", error=err)
+    last_err = "无可用主站"
+    for host, port in servers:
+        opened, err = _open_tdx_client(host, port, timeout)
+        if opened is None:
+            last_err = err
+            continue
+        result, _extras = _tdx_from_client(opened, pairs, f"{host}:{port}", enrich, when)
+        if result["status"] == "ok":
+            result["elapsed_ms"] = int((time.time() - started) * 1000)
+            return result
+        last_err = result.get("error") or "返回内容无效"
+    status = "unavailable" if "未安装 mootdx" in str(last_err) else "failed"
+    return _source_result("tdx", status, error=last_err, elapsed_ms=(time.time() - started) * 1000)
+
+
+FETCHERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "eastmoney": fetch_eastmoney, "sina": fetch_sina, "tencent": fetch_tencent,
-    "yahoo": fetch_yahoo, "em_kline": fetch_em_kline,
+    "yahoo": fetch_yahoo, "em_kline": fetch_em_kline, "tdx": fetch_tdx,
 }
 
 
 def collect(symbols: Sequence[str], http, sources: Optional[Sequence[str]] = None,
-            timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+            timeout: int = DEFAULT_TIMEOUT, **extra) -> Dict[str, Any]:
     """并行跑完全部源（单源异常只记 failed，绝不影响其它源）。"""
     keys = list(sources or SOURCES.keys())
     out: Dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=min(len(keys), MAX_WORKERS)) as pool:
-        futures = {key: pool.submit(FETCHERS[key], symbols, http, timeout) for key in keys}
+        futures = {key: pool.submit(FETCHERS[key], symbols, http, timeout, **extra) for key in keys}
         for key, fut in futures.items():
             try:
                 out[key] = fut.result()
@@ -706,12 +1050,14 @@ def _pct_diff(a: Optional[float], b: Optional[float]) -> Optional[float]:
 
 
 def cross_validate(symbol: str, by_source: Dict[str, Dict[str, Any]],
-                   eod_close: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   eod_close: Optional[Dict[str, Any]] = None,
+                   eod_closes: Optional[Sequence[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """对单只标的做跨源交叉验证。
 
-    by_source —— {源: quote}（只有取到该标的的源才在里面）
-    eod_close —— em_kline 的最近收盘（校验源，不参与盘中比价）
-    返回 {consensus, by_source(标注 lagged/outlier/dev_pct), prev_close_check, verdict…}
+    by_source  —— {源: quote}（只有取到该标的的源才在里面）
+    eod_close  —— 单个收盘校验源（em_kline，向后兼容）
+    eod_closes —— 多个收盘校验源 [{"source": "tdx", "close": …, "date": …}]（东财日K + 通达信日K）
+    返回 {consensus, by_source(标注 lagged/outlier/dev_pct), eod_close_check(s), verdict…}
     """
     peers = [(key, q) for key, q in by_source.items() if SOURCES[key]["price_peer"] and q]
     prices = [q["price"] for _k, q in peers]
@@ -772,13 +1118,25 @@ def cross_validate(symbol: str, by_source: Dict[str, Dict[str, Any]],
 
     prev_closes = [q["prev_close"] for _k, q in peers if q.get("prev_close") is not None]
     prev_consensus = statistics.median(prev_closes) if prev_closes else None
-    prev_check = None
-    if eod_close and eod_close.get("close") is not None and prev_consensus is not None:
-        dev = _pct_diff(eod_close["close"], prev_consensus)
-        prev_check = {"kline_close": eod_close["close"], "kline_date": eod_close.get("date"),
-                      "consensus_prev_close": prev_consensus,
-                      "dev_pct": round(dev, 4) if dev is not None else None,
-                      "ok": bool(dev is not None and dev <= SOFT_TOL_PCT)}
+    closes: List[Tuple[str, Dict[str, Any]]] = []
+    if eod_close and eod_close.get("close") is not None:
+        closes.append((str(eod_close.get("source") or "em_kline"), eod_close))
+    for item in eod_closes or []:
+        if item and item.get("close") is not None:
+            closes.append((str(item.get("source") or "?"), item))
+    close_checks = []
+    for source, item in closes:
+        dev = _pct_diff(item["close"], prev_consensus) if prev_consensus is not None else None
+        close_checks.append({
+            "source": source, "close": item["close"], "date": item.get("date"),
+            "close_kind": item.get("source_kind"),
+            "consensus_prev_close": prev_consensus,
+            "dev_pct": round(dev, 4) if dev is not None else None,
+            "ok": bool(dev is not None and dev <= SOFT_TOL_PCT),
+        })
+    prev_check = close_checks[0] if close_checks else None
+    if prev_check is not None:                     # 兼容旧字段名（em_kline 口径）
+        prev_check = {**prev_check, "kline_close": prev_check["close"], "kline_date": prev_check["date"]}
 
     consensus.update({
         "price": round(statistics.median(trust_pool), 6),
@@ -789,6 +1147,7 @@ def cross_validate(symbol: str, by_source: Dict[str, Dict[str, Any]],
         "prev_close": round(prev_consensus, 6) if prev_consensus is not None else None,
         "prev_close_sources": len(prev_closes),
         "eod_close_check": prev_check,
+        "eod_close_checks": close_checks,
         "by_source": detail,
         "symbol": symbol,
     })
@@ -802,11 +1161,34 @@ def _check(name: str, ok: bool, detail: str, *, warn_only: bool = False) -> Dict
     return {"name": name, "ok": bool(ok), "warn_only": bool(warn_only), "detail": detail}
 
 
+def _explain_action(actions: Optional[Dict[str, List[Dict[str, Any]]]], sym: str,
+                    date_str: str, days: int = 5) -> str:
+    """跳变是不是除权除息造成的？是就给出「疑似除权除息」的说明（通达信通道提供）。"""
+    items = (actions or {}).get(sym) or []
+    if not items:
+        return ""
+    try:
+        low = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+    recent = [it for it in items if low <= str(it.get("date") or "") <= date_str]
+    if not recent:
+        return ""
+    item = recent[-1]
+    return f"（疑似除权除息：{item.get('name') or item.get('category') or '除权除息'} {item['date']}）"
+
+
 def self_check(slot_doc: Dict[str, Any], *, prev_slot: Optional[Dict[str, Any]] = None,
-               prev_day: Optional[Dict[str, Any]] = None, trading_day: bool = True) -> Dict[str, Any]:
-    """对一次落库做体检：结构 / 时段 / 源覆盖 / 标的覆盖 / 数值 / 跨源 / 跳变 / 时效。"""
+               prev_day: Optional[Dict[str, Any]] = None, trading_day: bool = True,
+               corporate_actions: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> Dict[str, Any]:
+    """对一次落库做体检：结构 / 时段 / 源覆盖 / 标的覆盖 / 数值 / 跨源 / 跳变 / 时效。
+
+    corporate_actions —— 通达信通道给出的近 45 天除权除息；若跳变日正好有除权除息，
+    该跳变会写明原因且不计分（正常的除权缺口不是数据错误）。
+    """
     checks: List[Dict[str, Any]] = []
     alerts: List[str] = []
+    explained = 0
 
     slot = slot_doc.get("slot")
     checks.append(_check("slot_valid", slot in SLOTS, f"时段 {slot} ∈ {list(SLOTS)}"))
@@ -869,7 +1251,9 @@ def self_check(slot_doc: Dict[str, Any], *, prev_slot: Optional[Dict[str, Any]] 
                     key=lambda x: (x[1] is None, x[1] or 0), default=(None, None))
         jump = worst[1]
         if jump is not None and jump > SLOT_JUMP_PCT:
-            alerts.append(f"跨时段跳变：{worst[0]} 较上一时段 {jump:.1f}%")
+            note = _explain_action(corporate_actions, str(worst[0]), str(slot_doc.get("date") or ""))
+            alerts.append(f"跨时段跳变：{worst[0]} 较上一时段 {jump:.1f}%{note}")
+            explained += 1 if note else 0
     checks.append(_check("slot_jump", jump is None or jump <= SLOT_JUMP_PCT,
                          f"同日内相邻时段最大价差 {jump:.2f}%" if jump is not None else "无可比时段"))
 
@@ -885,7 +1269,9 @@ def self_check(slot_doc: Dict[str, Any], *, prev_slot: Optional[Dict[str, Any]] 
                      for sym in now_prices if sym in prev_prices and prev_prices.get(sym)),
                     key=lambda x: (x[1] is None, x[1] or 0), default=(None, None))
         if worst[1] is not None and worst[1] > DAY_JUMP_PCT:
-            alerts.append(f"跨日跳变：{worst[0]} 较上一交易日收盘 {worst[1]:.1f}%")
+            note = _explain_action(corporate_actions, str(worst[0]), str(slot_doc.get("date") or ""))
+            alerts.append(f"跨日跳变：{worst[0]} 较上一交易日收盘 {worst[1]:.1f}%{note}")
+            explained += 1 if note else 0
 
     live = False
     for _sym, q in quotes.items():
@@ -902,7 +1288,7 @@ def self_check(slot_doc: Dict[str, Any], *, prev_slot: Optional[Dict[str, Any]] 
 
     penalty = sum(0 if c["ok"] or c["warn_only"] else 12 for c in checks)
     penalty += sum(4 for c in checks if not c["ok"] and c["warn_only"])
-    penalty += 6 * len(alerts)
+    penalty += 6 * max(0, len(alerts) - explained)       # 被除权除息解释的跳变不计分
     score = max(0, 100 - penalty)
     for c in checks:
         if not c["ok"] and not c["warn_only"]:
@@ -971,8 +1357,13 @@ def _slot_payload(slot_doc: Dict[str, Any]) -> Dict[str, Any]:
 def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[str]] = None,
          http: Optional[Any] = None, sources: Optional[Sequence[str]] = None,
          now: Optional[datetime] = None, timeout: int = DEFAULT_TIMEOUT,
-         dry_run: bool = False, verbose: bool = True) -> Dict[str, Any]:
-    """拉一次快照：多源采集 → 交叉验证 → 自检 → 合并写进当天文件（以日期为名字）。"""
+         dry_run: bool = False, verbose: bool = True, enrich: Optional[bool] = None,
+         tdx_client: Optional[Any] = None) -> Dict[str, Any]:
+    """拉一次快照：多源采集 → 交叉验证 → 自检 → 合并写进当天文件（以日期为名字）。
+
+    enrich —— 是否附带通达信财务 / 除权除息（默认 auto：只在 17:00 收盘档抓）。
+    tdx_client —— 测试注入的通达信客户端；生产走 mootdx 主站池。
+    """
     log = (lambda msg: print(msg)) if verbose else (lambda msg: None)
     moment = _now(now)
     date_compact = moment.strftime("%Y%m%d")
@@ -983,15 +1374,24 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
     universe = list(symbols) if symbols else [code for _n, code, _m in symbol_universe()]
     names = {code: name for name, code, _m in symbol_universe()}
     http = http or Http(timeout=timeout)
+    chosen = list(sources) if sources else list(SOURCES)
+    if os.environ.get("OCTOPUS_DB_TDX", "1").strip() == "0" and "tdx" in chosen:
+        chosen.remove("tdx")                                   # 显式关闭通达信通道
+    enrich = (slot == SLOTS[-1]) if enrich is None else bool(enrich)
 
     log(f"🗄️ 市场数据库 · 拉取 {date_str} {SLOT_LABELS[slot]}（{slot}）")
-    log(f"   标的 {len(universe)} 只 · 源 {len(list(sources or SOURCES))} 路")
-    source_results = collect(universe, http, sources=sources, timeout=timeout)
+    log(f"   标的 {len(universe)} 只 · 源 {len(chosen)} 路" + (" · 通达信附带财务" if enrich else ""))
+    source_results = collect(universe, http, sources=chosen, timeout=timeout,
+                             enrich=enrich, slot=slot, date_str=date_str, client=tdx_client)
     ok = {k: s for k, s in source_results.items() if s["status"] == "ok"}
     for key, s in source_results.items():
-        icon = "✅" if s["status"] == "ok" else "⚠️"
-        log(f"   {icon} {s['label']}：{s['symbols']} 只"
-            + (f" · {s['elapsed_ms']/1000:.1f}s" if s["status"] == "ok" else f" · {s['error']}"))
+        if s["status"] == "ok":
+            extra = f" · {s['summary']}" if s.get("summary") else ""
+            log(f"   ✅ {s['label']}：{s['symbols']} 只 · {s['elapsed_ms']/1000:.1f}s{extra}")
+        elif s["status"] == "unavailable":
+            log(f"   🚫 {s['label']}：跳过（{s['error']}）")
+        else:
+            log(f"   ⚠️ {s['label']}：{s['error']}")
     if not ok:
         log("❌ 全部源失败：按「绝不伪造」原则不写文件。")
         return {"status": "failed", "written": False, "date": date_str, "slot": slot,
@@ -999,6 +1399,9 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
 
     # ---- 逐标的交叉验证 ----
     kline = (source_results.get("em_kline") or {}).get("quotes") or {}
+    tdx_closes = (source_results.get("tdx") or {}).get("eod_closes") or {}
+    fundamentals = (source_results.get("tdx") or {}).get("fundamentals") or {}
+    corporate_actions = (source_results.get("tdx") or {}).get("corporate_actions") or {}
     quotes, conflicts, lagged_pairs = {}, [], []
     median_prices = {}
     for sym in universe:
@@ -1006,7 +1409,12 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
         peer_quotes = {k: q for k, q in by_source.items() if SOURCES[k]["price_peer"] and q.get("price")}
         if not peer_quotes:
             continue
-        consensus = cross_validate(sym, by_source, eod_close=kline.get(sym))
+        closes = []
+        if kline.get(sym):
+            closes.append({"source": "em_kline", **kline[sym]})
+        if tdx_closes.get(sym):
+            closes.append({"source": "tdx", **tdx_closes[sym]})
+        consensus = cross_validate(sym, by_source, eod_closes=closes)
         entry = {
             "name": names.get(sym) or next((q.get("name") for q in peer_quotes.values() if q.get("name")), sym),
             "market": market_of(sym),
@@ -1023,6 +1431,7 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
             "n_sources": len(peer_quotes),
             "consensus": consensus,
             "eod_close": kline.get(sym),
+            "eod_close_tdx": tdx_closes.get(sym),
         }
         if consensus["verdict"] == "冲突":
             conflicts.append((sym, consensus["spread_pct"]))
@@ -1048,10 +1457,15 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
         "pulled_at": moment.strftime("%Y-%m-%d %H:%M:%S"),
         "scheduled_at": scheduled_at(date_str, slot),
         "trading_day": is_trading_day(date_str),
-        "sources": {k: {kk: vv for kk, vv in s.items() if kk != "quotes"}
+        "sources": {k: {kk: vv for kk, vv in s.items()
+                        if kk not in ("quotes", "fundamentals", "corporate_actions", "eod_closes")}
                     for k, s in source_results.items()},
         "quotes": quotes, "cross_check": cross_check,
     }
+    if fundamentals:
+        slot_doc["fundamentals"] = fundamentals
+    if corporate_actions:
+        slot_doc["corporate_actions"] = corporate_actions
 
     # ---- 自检（与上一时段 / 上一交易日对比）----
     prev_doc = load_day(date_compact, root)
@@ -1061,7 +1475,8 @@ def pull(slot: str = "auto", *, root: str = DB_ROOT, symbols: Optional[Sequence[
     prev_days = [d for d in load_days(root) if d.get("date_compact", "") < date_compact]
     slot_doc["self_check"] = self_check(slot_doc, prev_slot=prev_slot,
                                         prev_day=prev_days[-1] if prev_days else None,
-                                        trading_day=slot_doc["trading_day"])
+                                        trading_day=slot_doc["trading_day"],
+                                        corporate_actions=corporate_actions)
     slot_doc["integrity"] = {"algo": "sha256", "hash": _sha256(_slot_payload(slot_doc))}
 
     log(f"   🔍 自检 {slot_doc['self_check']['score']}/100"
@@ -1212,6 +1627,8 @@ def _timeline(docs: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]
                     "low": q.get("low"), "open": q.get("open"),
                     "lagged": cons.get("lagged") or [], "verdict": cons.get("verdict"),
                     "day": doc.get("date_compact"),
+                    "fund": (slot_doc.get("fundamentals") or {}).get(sym),
+                    "actions": (slot_doc.get("corporate_actions") or {}).get(sym) or [],
                 }
                 idx = seen.get(key)
                 if idx is None:
@@ -1226,7 +1643,9 @@ def _timeline(docs: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]
 
 FEATURE_NAMES = ["price", "change_pct", "prev_close", "open", "high", "low", "volume", "amount",
                  "spread_pct", "n_sources", "confidence", "n_lagged", "slot_index",
-                 "ret_prev_slot", "ret_day_open", "ret_1d", "ret_5d", "vol_5d"]
+                 "ret_prev_slot", "ret_day_open", "ret_1d", "ret_5d", "vol_5d",
+                 # 通达信通道（2026-10-01）：财务与除权除息 —— 全部按「当时已知」前向填充
+                 "pe", "pb", "total_mv", "float_mv", "days_since_action"]
 LABEL_NAMES = ["next_slot_ret", "eod_ret", "next_day_eod_ret"]
 
 
@@ -1258,7 +1677,15 @@ def build_dataset(*, root: Optional[str] = DB_ROOT, docs: Optional[Sequence[Dict
 
     rows_out: List[Dict[str, Any]] = []
     for sym, rows in sorted(series.items()):
+        fund: Optional[Dict[str, Any]] = None       # 最近一次「当时已知」的财务快照
+        action_dates: List[str] = []                # 当时已知的除权除息日期
         for idx, row in enumerate(rows):
+            if row.get("fund"):
+                fund = row["fund"]
+            for item in row.get("actions") or []:
+                stamp = str(item.get("date") or "")
+                if stamp and stamp not in action_dates and stamp <= row["date"]:
+                    action_dates.append(stamp)
             day_rows = [r for r in rows if r["date"] == row["date"] and r["ts"] <= row["ts"]]
             first_today = day_rows[0]["price"] if day_rows else None
             prev_slot = day_rows[-2]["price"] if len(day_rows) >= 2 else None
@@ -1300,6 +1727,12 @@ def build_dataset(*, root: Optional[str] = DB_ROOT, docs: Optional[Sequence[Dict
                     "ret_1d": _ret(prev_eod),
                     "ret_5d": (round(row["price"] / eod_hist[4] - 1.0, 6) if eod_hist[4] else None),
                     "vol_5d": (round(statistics.pstdev(rets), 6) if len(rets) >= 2 else None),
+                    "pe": (fund or {}).get("pe"), "pb": (fund or {}).get("pb"),
+                    "total_mv": (fund or {}).get("total_mv"), "float_mv": (fund or {}).get("float_mv"),
+                    "days_since_action": (
+                        (datetime.strptime(row["date"], "%Y-%m-%d")
+                         - datetime.strptime(max(action_dates), "%Y-%m-%d")).days
+                        if action_dates else None),
                 },
                 "labels": {
                     "next_slot_ret": _ret(next_slot["price"] if next_slot else None),
@@ -1343,6 +1776,34 @@ def export_dataset(out_path: str, *, fmt: str = "jsonl", root: str = DB_ROOT,
     return {"path": out_path, "format": fmt, "rows": len(rows), "meta": meta}
 
 
+def _latest_fundamentals(docs: Sequence[Dict[str, Any]], sym: str,
+                         lookback: int = 30) -> Optional[Dict[str, Any]]:
+    """最近一次「已落库」的财务快照（从最新日期往前找，最多回看 lookback 天）。"""
+    for doc in reversed(list(docs)[-lookback:]):
+        slots = doc.get("slots") or {}
+        for key in sorted(slots, reverse=True):
+            fund = (slots[key].get("fundamentals") or {}).get(sym)
+            if fund:
+                return fund
+    return None
+
+
+def _recent_actions(docs: Sequence[Dict[str, Any]], sym: str,
+                    lookback: int = 5) -> List[Dict[str, Any]]:
+    """最近几档里记录过的除权除息（跨日期文件回看，最多 lookback 档）。"""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for doc in reversed(list(docs)[-lookback:]):
+        slots = doc.get("slots") or {}
+        for key in sorted(slots, reverse=True):
+            for item in ((slots[key].get("corporate_actions") or {}).get(sym) or []):
+                stamp = str(item.get("date") or "")
+                if stamp and stamp not in seen:
+                    seen.add(stamp)
+                    out.append(item)
+    return sorted(out, key=lambda item: str(item.get("date")), reverse=True)
+
+
 def ai_context(date_compact: Optional[str] = None, *, root: str = DB_ROOT,
                symbols: Optional[Sequence[str]] = None,
                max_age_hours: int = 18, now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -1367,16 +1828,21 @@ def ai_context(date_compact: Optional[str] = None, *, root: str = DB_ROOT,
                        .replace(tzinfo=CST)).total_seconds() / 3600, 2)
     except (KeyError, ValueError, TypeError):
         pass
+    keep = set(symbols) if symbols else None
     quotes = {}
     for sym, q in (slot.get("quotes") or {}).items():
-        if symbols and sym not in set(symbols):
+        if keep and sym not in keep:
             continue
         cons = q.get("consensus") or {}
+        fund = _latest_fundamentals(docs, sym)
+        actions = _recent_actions(docs, sym)
         quotes[sym] = {"name": q.get("name"), "market": q.get("market"),
                        "price": cons.get("price"), "change_pct": q.get("change_pct"),
                        "prev_close": cons.get("prev_close"), "confidence": cons.get("confidence_label"),
                        "n_agree": cons.get("n_agree"), "spread_pct": cons.get("spread_pct"),
-                       "verdict": cons.get("verdict"), "lagged": cons.get("lagged") or []}
+                       "verdict": cons.get("verdict"), "lagged": cons.get("lagged") or [],
+                       "close_checks": cons.get("eod_close_checks") or [],
+                       "fundamentals": fund, "recent_actions": actions}
     return {
         "available": bool(quotes), "db_date": doc.get("db_date"), "slot": slot_key,
         "pulled_at": slot.get("pulled_at"), "age_hours": age_h,
@@ -1447,6 +1913,9 @@ def main(argv: Optional[Sequence[str]] = None, *, http: Optional[Any] = None,
     p_pull.add_argument("--sources", default="", help="只跑指定源（逗号分隔），默认全部")
     p_pull.add_argument("--symbols", default="", help="只取指定代码（逗号分隔），默认全部标的池")
     p_pull.add_argument("--dry-run", action="store_true", help="只采集与自检，不写文件")
+    p_pull.add_argument("--no-enrich", action="store_true",
+                        help="不抓通达信财务 / 除权除息（默认只在 17:00 收盘档抓）")
+    p_pull.add_argument("--no-tdx", action="store_true", help="跳过通达信通道（也可用 OCTOPUS_DB_TDX=0）")
 
     p_verify = sub.add_parser("verify", help="复核库文件（哈希 / 自检 / 覆盖）")
     p_verify.add_argument("--date", default="")
@@ -1474,10 +1943,13 @@ def main(argv: Optional[Sequence[str]] = None, *, http: Optional[Any] = None,
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.cmd == "pull":
+        if args.no_tdx:
+            os.environ["OCTOPUS_DB_TDX"] = "0"                  # 只影响本次进程
         result = pull(args.slot, root=root, http=http, timeout=args.timeout,
                       sources=[s for s in args.sources.split(",") if s] or None,
                       symbols=[s for s in args.symbols.split(",") if s] or None,
-                      dry_run=args.dry_run, now=now)
+                      dry_run=args.dry_run, now=now,
+                      enrich=False if args.no_enrich else None)
         return 0 if result["status"] in ("ok", "dry-run") else 1
 
     if args.cmd == "verify":

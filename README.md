@@ -259,7 +259,7 @@ python3 output/preview_server.py
 | 港股名家频道 | YouTube / 通用 RSS | YouTube Atom → RSSHub → Invidious |
 | 公开社区平台 | 趋势跟踪 | 官方接口 → 同格式镜像 / 备用端点；各平台按自身可用方式降级 |
 | 港股新闻源头（20 家） | 趋势跟踪新闻 | 媒体官方 RSS → Bing News `site:` RSS → Google News `site:` RSS |
-| 市场数据库（隐藏功能） | AI 分析 / AI 预测 / AI 模型基础数据 | 东方财富 `push2` → 新浪 `hq.sinajs` → 腾讯 `qt.gtimg` → Yahoo `chart` → 东方财富 `push2his` 日K（5 路并行取数 + 交叉验证，非主备降级） |
+| 市场数据库（隐藏功能） | AI 分析 / AI 预测 / AI 模型基础数据 | 东方财富 `push2` + 新浪 `hq.sinajs` + 腾讯 `qt.gtimg` + Yahoo `chart` + 东方财富 `push2his` 日K + 通达信 `mootdx`（6 路并行取数 + 交叉验证，非主备降级） |
 
 ## 文件结构、量化流程与测试
 
@@ -331,7 +331,7 @@ python3 -m unittest discover -s tests
 | `tests/test_hk_seven_day.py` | AI 七日港股分析、降级与数字溯源 |
 | `tests/test_short_card.py`、`tests/test_ren.py`、`tests/test_lexicon.py` | 短线卡、鲜鲜解读与词库 |
 | `tests/test_push_split.py` | 超长日报分条与栏目续接 |
-| `tests/test_market_db.py` | 市场数据库：多源代码映射、五路取数、交叉验证判定、自检、日期文件合并、哈希防改写、AI 数据集因果性 |
+| `tests/test_market_db.py` | 市场数据库：多源代码映射、六路取数（含通达信假客户端）、交叉验证判定、自检、日期文件合并、哈希防改写、AI 数据集因果性 |
 
 ## 隐藏功能：市场数据库（AI 基础数据）
 
@@ -348,7 +348,7 @@ AI 模型的基础数据：每只标的都带多源明细、共识价、置信�
 
 | 规则 | 落地方式 |
 |---|---|
-| 源头 >3 | 5 路独立源：东方财富 `push2`、新浪 `hq.sinajs`、腾讯 `qt.gtimg`、Yahoo `chart`、东方财富 `push2his` 日K（收盘校验源）。每路都带镜像主机；单路失败只影响该路，5 路全失败**不落库**（绝不写空文件、绝不补历史数字）。 |
+| 源头 >3 | 6 路独立源：东方财富 `push2`、新浪 `hq.sinajs`、腾讯 `qt.gtimg`、Yahoo `chart`、东方财富 `push2his` 日K（收盘校验源）、通达信 `mootdx`（沪深行情 + 日K收盘核对）。HTTP 源每路都带镜像主机，通达信走主站池逐个降级；单路失败只影响该路，全失败**不落库**（绝不写空文件、绝不补历史数字）。 |
 | 交叉验证 | 同一标的跨源比价：中位数 + MAD 稳健离群，逐源判定「滞后」（比最新行情时间落后 >30 分钟），输出共识价 / 离群源 / 价差百分比 / 置信度（高 / 中 / 低 / 单源）；≥2 路一致才计入「有效共识」，冲突（价差 >3%）单独点名。 |
 | 自我检查 | 每次落库做一遍体检并写进文件 `self_check`：时段合法性、计划时刻偏差、成功源数（≥4）、标的覆盖率（≥80%）、有效共识率（≥90%）、价格与涨跌幅合理性、跨源冲突、同日跨时段跳变、跨日跳变、当天行情时效、文件哈希。 |
 
@@ -363,14 +363,18 @@ python3 output/market_db.py export --out ai.jsonl      # 导出 AI 数据集（j
 python3 output/market_db.py ai-context --date 20261001 # 打印给 AI 分析用的紧凑上下文
 python3 output/market_db.py prune --keep-days 90       # 只保留最近 90 天（删前先 export）
 
+python3 output/market_db.py pull --no-tdx              # 跳过通达信通道（等价 OCTOPUS_DB_TDX=0）
+python3 output/market_db.py pull --no-enrich           # 收盘档也不抓财务 / 除权除息
+
 python3 output/pipeline.py --stock-db pull             # 同一个功能（隐藏参数，--help 不显示）
 python3 output/pipeline.py --stock-db verify --all
 ```
 
 `output/market_db.py` 不依赖第三方库（有 `requests` 用 `requests`，没有就回退标准库 `urllib`），
-因此在没装依赖的服务器上也能直接跑。
+因此在没装依赖的服务器上也能直接跑。通达信通道是**可选增强**：装了 `mootdx` 就多一路
+沪深行情；没装或主站连不上时该源标记 `unavailable`，其余 5 路照常，绝不编数字。
 
-标的池默认为「港股三大指数 + 18 只港股蓝筹 + A 股三大指数 + 美股三指数与龙头」，
+标的池默认为「港股三大指数 + 18 只港股蓝筹 + A 股三大指数与 8 只沪深蓝筹 + 美股三指数与龙头」，
 可用 `OCTOPUS_DB_SYMBOLS='0700.HK:腾讯控股,^HSI'` 覆盖；`OCTOPUS_DB_SYMBOLS` 也可在
 workflow 的仓库变量里配置（Actions → Variables）。
 
@@ -378,7 +382,7 @@ workflow 的仓库变量里配置（Actions → Variables）。
 
 ```jsonc
 {
-  "schema": "octopus-market-db/1",
+  "schema": "octopus-market-db/2",
   "db_date": "2026-10-01",
   "slots": {
     "0800": {
@@ -393,6 +397,10 @@ workflow 的仓库变量里配置（Actions → Variables）。
         }
       },
       "cross_check": { "symbols_ok": 29, "symbols_with_quorum": 29, "agreement_rate": 1.0, "conflicts": [] },
+      "fundamentals": { "600519.SS": { "updated_date": "20260630", "pe": 21.4, "pb": 8.1,
+                                      "total_mv": 2.1e12, "float_mv": 1.9e12, "eps": 34.2 } },
+      "corporate_actions": { "600519.SS": [ { "date": "2026-06-20", "category": 1,
+                                             "name": "除权除息", "fenhong": 25.9 } ] },
       "self_check": { "score": 100, "ok": true, "checks": [], "alerts": [] },
       "integrity": { "algo": "sha256", "hash": "..." }
     },
@@ -410,6 +418,8 @@ workflow 的仓库变量里配置（Actions → Variables）。
 - **特征**（只用当次及之前的数据，无未来函数）：`price`、`change_pct`、`prev_close`、
   `open/high/low`、`volume/amount`、`spread_pct`、`n_sources`、`confidence`、`n_lagged`、
   `slot_index`、`ret_prev_slot`、`ret_day_open`、`ret_1d`、`ret_5d`、`vol_5d`；
+  以及通达信通道的 `pe`、`pb`、`total_mv`、`float_mv`、`days_since_action`
+  （财务按「当时已知」前向填充 —— 早盘不会拿 17:00 才落库的财务去回填）；
 - **标签**（只用之后的数据）：`next_slot_ret`、`eod_ret`、`next_day_eod_ret`；
 - **质量标记**：`verdict`（一致 / 冲突 / 孤证…）、`lagged`（滞后源）、`consensus`（是否有 ≥2 路共识）。
 
@@ -417,6 +427,25 @@ workflow 的仓库变量里配置（Actions → Variables）。
 供 AI 分析 / 预测在提示词里引用；库文件里的 `ai` 块是当天数据的即时摘要。
 CI 每次运行还会导出 `output/market_db/ai/dataset.jsonl` 并作为 Actions Artifact 上传
 （该目录不进版本库，避免仓库膨胀）；库文件本身正常入库，需要瘦身时用 `prune --keep-days`。
+
+### 通达信通道（mootdx，2026-10-01 升级）
+
+`mootdx`（MIT，v0.11.7）是通达信行情协议的 Python 封装，作为第 6 路源接入：
+
+- **行情**：`Quotes.factory(market='std')` 取沪深实时快照（`quotes()`），补进当日共识价；
+  港美股不在通达信标准行情覆盖内，该源只对沪深标的生效（代码映射 `600519.SS → sh600519`）。
+- **收盘核对**：每档都取日K（`bars(frequency=9)`）最后一条收盘，与东财 `push2his` 日K
+  组成**双源收盘核对**（`consensus.eod_close_checks`），互相印证上一交易日收盘价；
+  跳变若由除权除息造成，会写明「疑似除权除息」并免于扣分。
+- **行情时间**：通达信只回 `HH:MM:SS`，日期用日K最后一根推出的交易日补全 ——
+  盘前拉到的其实是上一交易日的收盘快照，不会被记成当天盘中价（不造时间戳）。
+- **财务 / 除权除息**：只有 **17:00 收盘档**才抓 `finance()`（总股本 / 净资产 / 净利润
+  → 市值、PE、PB）与 `xdxr()`（近 45 天除权除息），写进 `fundamentals` / `corporate_actions`，
+  同时进入 AI 数据集与 `ai-context`。
+- **降级**：`mootdx` 未安装、主站全连不上、返回空数据时，该源标记 `unavailable` / `failed`，
+  其余 5 路照常入库；`OCTOPUS_DB_TDX=0` 或 `pull --no-tdx` 可整体关闭。
+- **主站池**：默认用 mootdx 内置主机列表（最多试 4 个，可 `OCTOPUS_DB_TDX_SERVERS=1.2.3.4:7709,…`
+  覆盖），连上哪个就把实际 host 写进 `sources.tdx.host`。
 
 > 说明：新浪与腾讯的美股字段口径与 A / 港股不同，未纳入比价（避免误读数字）；
 > Yahoo 对港股 / A 股可能延迟 15 分钟，滞后源会被标注并从共识价中剔除，但保留在

@@ -1,8 +1,10 @@
 """🗄️ 市场数据库（隐藏功能）回归测试 —— 全部离线，不发任何网络请求。
 
-覆盖四件事：
-  ① 多源契约：源头 >3（5 路，其中 4 路参与比价）、每路可换镜像、代码映射正确、
+覆盖五件事：
+  ① 多源契约：源头 >3（6 路，其中 5 路参与比价）、每路可换镜像、代码映射正确、
      单只标的异常不拖垮整路源、单路全失败只记 failed；
+  ⑤ 通达信通道（mootdx）：代码映射只认沪深、未装 mootdx / 连不上就明确降级、
+     注入假客户端时行情 / 日K / 财务 / 除权除息全通、17:00 档才附带财务、
   ② 交叉验证：一致 / 离群 / 滞后 / 冲突 / 孤证五种判定，共识价只用可信源；
   ③ 自我检查：源覆盖、标的覆盖、数值合理性、跨时段与跨日跳变、非交易日不误判；
   ④ 落库与 AI 数据集：日期命名文件、同日三档合并、同档重拉覆盖留痕、哈希防改写、
@@ -44,6 +46,74 @@ PREV = {"^HSI": 26016.0, "0700.HK": 625.6, "000001.SS": 3830.3, "MSFT": 513.3}
 
 def stamp(moment: datetime) -> int:
     return int(moment.timestamp())
+
+
+TDX_PRICES = {"600519.SS": 1690.0, "000001.SS": 3842.19}
+TDX_PREV = {"600519.SS": 1680.5, "000001.SS": 3830.3}
+TDX_MAP = {"sh600519": "600519.SS", "sh000001": "000001.SS", "sz300750": "300750.SZ"}
+
+
+class FakeTdxClient:
+    """假的 mootdx StdQuotes：返回纯 Python dict 列表（不依赖 pandas / 网络）。"""
+
+    def __init__(self, prices=None, prev=None, *, quote_time="14:59:58", boom=(), empty=()):
+        self.prices = dict(prices or TDX_PRICES)
+        self.prev = dict(prev or TDX_PREV)
+        self.quote_time = quote_time
+        self.boom = set(boom)
+        self.empty = set(empty)
+
+    @staticmethod
+    def _bare(symbol):
+        return symbol[2:] if symbol[:2] in ("sh", "sz") else symbol
+
+    def quotes(self, symbol):
+        if "quotes" in self.boom:
+            raise RuntimeError("主站断开")
+        rows = []
+        for code in symbol or []:
+            sym = TDX_MAP.get(code)
+            if not sym or sym in self.empty or sym not in self.prices:
+                continue
+            value = self.prices[sym]
+            rows.append({"market": 1 if code.startswith("sh") else 0, "code": self._bare(code),
+                         "price": value, "last_close": self.prev.get(sym),
+                         "open": round(value * 0.999, 3), "high": round(value * 1.01, 3),
+                         "low": round(value * 0.99, 3), "vol": 12345, "amount": 6.7e8,
+                         "servertime": self.quote_time})
+        return rows
+
+    def bars(self, symbol, frequency=9, offset=800):
+        if "bars" in self.boom:
+            raise RuntimeError("K 线主站断开")
+        sym = TDX_MAP.get(symbol)
+        if not sym or sym in self.empty:
+            return []
+        close = self.prev.get(sym) or self.prices[sym]
+        return [{"open": close, "close": close, "high": close, "low": close, "vol": 1000.0,
+                 "amount": 1.0e7, "year": 2026, "month": 9, "day": 30, "hour": 15, "minute": 0,
+                 "datetime": "2026-09-30 15:00:00"}]
+
+    def finance(self, symbol):
+        if "finance" in self.boom:
+            raise RuntimeError("财务主站断开")
+        sym = TDX_MAP.get(symbol)
+        if not sym or sym in self.empty:
+            return []
+        return [{"code": self._bare(symbol), "updated_date": 20260630, "ipo_date": 20010827,
+                 "zongguben": 1.2e9, "liutongguben": 1.0e9, "jinglirun": 5.4e10,
+                 "meigujingzichan": 160.0, "industry": "白酒"}]
+
+    def xdxr(self, symbol):
+        if "xdxr" in self.boom:
+            raise RuntimeError("除权除息主站断开")
+        sym = TDX_MAP.get(symbol)
+        if not sym or sym in self.empty:
+            return []
+        return [{"year": 2026, "month": 9, "day": 30, "category": 1, "name": "除权除息",
+                 "fenhong": 25.9, "songzhuangu": 0.0, "peigu": 0.0, "peigujia": 0.0},
+                {"year": 2025, "month": 6, "day": 20, "category": 1, "name": "除权除息",
+                 "fenhong": 23.8, "songzhuangu": 0.0, "peigu": 0.0, "peigujia": 0.0}]
 
 
 def _em_payload(prices, prev, deviate, when):
@@ -279,10 +349,14 @@ class AdapterTests(unittest.TestCase):
         http = FixtureHttp()
         for key, fetcher in m.FETCHERS.items():
             with self.subTest(source=key):
-                result = fetcher(SYMBOLS, http)
+                # 通达信通道不是 HTTP 源：注入假客户端（真实场景连 mootdx 主站池）
+                extra = {"client": FakeTdxClient()} if key == "tdx" else {}
+                result = fetcher(SYMBOLS, http, **extra)
                 self.assertEqual(result["status"], "ok")
                 self.assertTrue(result["quotes"])
                 self.assertEqual(result["key"], key)
+                if key == "tdx":       # 通达信只有沪深
+                    self.assertNotIn("0700.HK", result["quotes"])
 
 
 # ======================================================================
@@ -619,3 +693,305 @@ class PipelineHiddenEntryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ======================================================================
+# ⑥ 通达信通道（mootdx，2026-10-01 升级）：沪深行情 / 日K核对 / 财务 / 除权除息
+# ======================================================================
+A_SYMBOLS = ["600519.SS", "300750.SZ", "000001.SS"]
+A_PRICES = {"600519.SS": 1690.0, "300750.SZ": 402.5, "000001.SS": 3842.19}
+A_PREV = {"600519.SS": 1680.5, "300750.SZ": 399.8, "000001.SS": 3830.3}
+
+
+class TdxChannelTests(unittest.TestCase):
+    """全部用注入的假客户端验证：不需要 mootdx / pandas / 网络。"""
+
+    def test_registry_has_six_sources_with_tdx_peer(self):
+        self.assertEqual(len(m.SOURCES), 6)
+        self.assertIn("tdx", m.SOURCES)
+        self.assertTrue(m.SOURCES["tdx"]["price_peer"])
+        self.assertIn("通达信", m.SOURCES["tdx"]["label"])
+
+    def test_code_mapping_only_a_shares(self):
+        self.assertEqual(m.tdx_code("600519.SS"), "sh600519")
+        self.assertEqual(m.tdx_code("300750.SZ"), "sz300750")
+        for sym in ("0700.HK", "MSFT", "^HSI", ""):
+            self.assertEqual(m.tdx_code(sym), "")
+
+    def test_universe_now_covers_a_shares(self):
+        codes = [code for _n, code, _mk in m.symbol_universe()]
+        for sym in ("600519.SS", "300750.SZ", "000858.SZ", "MSFT"):
+            self.assertIn(sym, codes)
+        self.assertEqual(m.market_of("600519.SS"), "A")
+
+    def test_records_accepts_dataframe_dict_and_none(self):
+        class FakeFrame:
+            def __init__(self):
+                self.orient = None
+
+            def to_dict(self, orient):
+                self.orient = orient
+                return [{"code": "600519", "price": 1.0}]
+
+        frame = FakeFrame()
+        self.assertEqual(m._records(frame)[0]["code"], "600519")
+        self.assertEqual(frame.orient, "records")
+        self.assertEqual(m._records(None), [])
+        self.assertEqual(m._records({"a": [1, 2], "b": [3, 4]}),
+                         [{"a": 1, "b": 3}, {"a": 2, "b": 4}])
+        self.assertEqual(m._records({"price": 1.0}), [{"price": 1.0}])
+        self.assertEqual(m._records([]), [])
+
+    def test_quotes_hit_and_hk_excluded(self):
+        result = m.fetch_tdx(["600519.SS", "000001.SS", "0700.HK"], None,
+                             client=FakeTdxClient(), date_str="2026-10-01")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(sorted(result["quotes"]), ["000001.SS", "600519.SS"])
+        self.assertEqual(result["host"], "injected")
+        self.assertIn("300750.SZ", m.fetch_tdx(["300750.SZ"], None, client=FakeTdxClient(
+            prices=A_PRICES, prev=A_PREV), date_str="2026-10-01")["quotes"])   # 深市路径
+        quote = result["quotes"]["600519.SS"]
+        self.assertAlmostEqual(quote["price"], 1690.0)
+        self.assertAlmostEqual(quote["prev_close"], 1680.5)
+        self.assertEqual(quote["quote_time"], "2026-09-30 14:59:58")   # 日期由最后一根日K给出
+
+    def test_same_bare_code_disambiguated_by_market(self):
+        """沪深同号（000001.SS 指数 vs 000001.SZ 个股）不能串行。"""
+        TDX_MAP["sz000001"] = "000001.SZ"
+        self.addCleanup(TDX_MAP.pop, "sz000001", None)
+        client = FakeTdxClient(prices={"000001.SS": 3842.19, "000001.SZ": 11.5},
+                               prev={"000001.SS": 3830.3, "000001.SZ": 11.4})
+        result = m.fetch_tdx(["000001.SS", "000001.SZ"], None, client=client,
+                             date_str="2026-10-01")
+        self.assertEqual(sorted(result["quotes"]), ["000001.SS", "000001.SZ"])
+        self.assertAlmostEqual(result["quotes"]["000001.SS"]["price"], 3842.19)
+        self.assertAlmostEqual(result["quotes"]["000001.SZ"]["price"], 11.5)
+
+    def test_quote_date_comes_from_last_daily_bar(self):
+        """盘前（日K最后一根是上一交易日）不能把昨天的价记成今天 14:59。"""
+        result = m.fetch_tdx(["600519.SS"], None, client=FakeTdxClient(), date_str="2026-10-01")
+        self.assertEqual(result["quotes"]["600519.SS"]["quote_time"], "2026-09-30 14:59:58")
+
+    def test_quote_date_falls_back_when_no_daily_bar(self):
+        client = FakeTdxClient(boom={"bars"})
+        result = m.fetch_tdx(["600519.SS"], None, client=client, date_str="2026-10-01")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["quotes"]["600519.SS"]["quote_time"], "2026-10-01 14:59:58")
+
+    def test_enrich_adds_closes_fundamentals_actions(self):
+        result = m.fetch_tdx(["600519.SS"], None, client=FakeTdxClient(), enrich=True,
+                             date_str="2026-10-01")
+        self.assertIn("收盘核对", result["summary"])
+        close = result["eod_closes"]["600519.SS"]
+        self.assertEqual(close["date"], "2026-09-30")
+        self.assertEqual(close["source_kind"], "day_bar")
+        fund = result["fundamentals"]["600519.SS"]
+        self.assertEqual(fund["total_shares"], 1.2e9)
+        self.assertEqual(fund["float_shares"], 1.0e9)
+        self.assertAlmostEqual(fund["eps"], round(5.4e10 / 1.2e9, 6))
+        self.assertAlmostEqual(fund["pe"], round(1690.0 / (5.4e10 / 1.2e9), 4))
+        self.assertAlmostEqual(fund["pb"], round(1690.0 / 160.0, 4))
+        self.assertAlmostEqual(fund["total_mv"], round(1690.0 * 1.2e9, 2))
+        actions = result["corporate_actions"]["600519.SS"]
+        self.assertEqual([a["date"] for a in actions], ["2026-09-30"])   # 45 天窗口外的旧记录被剔除
+        self.assertEqual(actions[0]["fenhong"], 25.9)
+
+    def test_enrich_off_by_default(self):
+        result = m.fetch_tdx(["600519.SS"], None, client=FakeTdxClient(), date_str="2026-10-01")
+        self.assertIn("eod_closes", result)                # 收盘核对每档都做
+        self.assertNotIn("fundamentals", result)           # 财务 / 除权除息只在收盘档
+        self.assertNotIn("corporate_actions", result)
+
+    def test_non_a_share_universe_is_failed_not_faked(self):
+        result = m.fetch_tdx(["0700.HK", "MSFT"], None, client=FakeTdxClient())
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("不覆盖港美股", result["error"])
+        self.assertEqual(result["quotes"], {})
+
+    def test_empty_reply_is_failed(self):
+        client = FakeTdxClient(empty={"600519.SS"})
+        result = m.fetch_tdx(["600519.SS"], None, client=client)
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["error"])
+
+    def test_broken_client_is_failed_not_raised(self):
+        client = FakeTdxClient(boom={"quotes"})
+        result = m.fetch_tdx(["600519.SS"], None, client=client)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("主站断开", result["error"])
+
+    @unittest.skipIf(importlib.util.find_spec("mootdx") is not None,
+                     "环境已装 mootdx，跳过「未安装」分支")
+    def test_missing_mootdx_degrades_gracefully(self):
+        os.environ["OCTOPUS_DB_TDX_SERVERS"] = "127.0.0.1:1"
+        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_SERVERS", None)
+        result = m.fetch_tdx(["600519.SS"], None)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("未安装 mootdx", result["error"])
+
+    @unittest.skipIf(importlib.util.find_spec("mootdx") is not None,
+                     "环境已装 mootdx，跳过「未安装」分支")
+    def test_no_mootdx_and_no_pool_says_install(self):
+        prior = os.environ.pop("OCTOPUS_DB_TDX_SERVERS", None)
+        self.addCleanup(self._restore_env, "OCTOPUS_DB_TDX_SERVERS", prior)
+        result = m.fetch_tdx(["600519.SS"], None)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("pip install mootdx", result["error"])
+
+    def test_server_pool_prefers_env_and_dedupes(self):
+        os.environ["OCTOPUS_DB_TDX_SERVERS"] = "10.0.0.1:7709, 10.0.0.2"
+        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_SERVERS", None)
+        servers = m._tdx_servers()
+        self.assertEqual(servers[0], ("10.0.0.1", 7709))
+        self.assertIn(("10.0.0.2", 7709), servers)
+        self.assertEqual(len(servers), len(set(servers)))
+        self.assertLessEqual(len(servers), m.TDX_SERVER_LIMIT)
+
+    def test_cli_no_tdx_and_no_enrich(self):
+        prior = os.environ.pop("OCTOPUS_DB_TDX", None)
+        self.addCleanup(self._restore_env, "OCTOPUS_DB_TDX", prior)
+        root = tempfile.mkdtemp(prefix="octopus_db_cli_")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = m.main(["pull", "--slot", "0800", "--symbols", "600519.SS,000001.SS",
+                         "--dry-run", "--no-tdx", "--no-enrich"],
+                        http=FixtureHttp(prices=A_PRICES, prev=A_PREV), root=root, now=DAY1)
+        self.assertEqual(rc, 0)
+        self.assertIn("源 5 路", buf.getvalue())          # --no-tdx → 只剩 5 路
+        self.assertNotIn("通达信", buf.getvalue())
+        self.assertEqual(os.listdir(root), [])
+
+    @staticmethod
+    def _restore_env(key, value):
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+    def test_env_switch_can_disable_tdx(self):
+        os.environ["OCTOPUS_DB_TDX"] = "0"
+        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX", None)
+        result = m.pull("0800", root=tempfile.mkdtemp(prefix="octopus_db_tdx_"),
+                        http=FixtureHttp(prices=A_PRICES, prev=A_PREV), now=DAY1,
+                        symbols=A_SYMBOLS, verbose=False, tdx_client=FakeTdxClient())
+        self.assertNotIn("tdx", result["doc"]["slots"]["0800"]["sources"])
+
+
+class TdxCrossCheckTests(unittest.TestCase):
+    def _by_source(self):
+        return {"eastmoney": {"price": 100.0, "prev_close": 99.0,
+                              "quote_time": "2026-10-01 12:30:00", "name": "x", "open": None,
+                              "high": None, "low": None, "volume": None, "amount": None,
+                              "change_pct": None}}
+
+    def test_single_close_source_keeps_backward_compatible_fields(self):
+        res = m.cross_validate("600519.SS", self._by_source(),
+                               eod_close={"close": 99.05, "date": "2026-09-30"})
+        self.assertEqual(len(res["eod_close_checks"]), 1)
+        self.assertEqual(res["eod_close_check"]["kline_close"], 99.05)
+        self.assertTrue(res["eod_close_check"]["ok"])
+
+    def test_two_close_sources_listed(self):
+        res = m.cross_validate("600519.SS", self._by_source(), eod_closes=[
+            {"source": "em_kline", "close": 99.05, "date": "2026-09-30"},
+            {"source": "tdx", "close": 99.0, "date": "2026-09-30", "source_kind": "day_bar"}])
+        self.assertEqual([c["source"] for c in res["eod_close_checks"]], ["em_kline", "tdx"])
+        self.assertTrue(all(c["ok"] for c in res["eod_close_checks"]))
+        self.assertEqual(res["eod_close_check"]["source"], "em_kline")
+
+    def test_disagreeing_tdx_close_flagged(self):
+        res = m.cross_validate("600519.SS", self._by_source(),
+                               eod_closes=[{"source": "tdx", "close": 120.0, "date": "2026-09-30"}])
+        self.assertFalse(res["eod_close_checks"][0]["ok"])
+        self.assertGreater(res["eod_close_checks"][0]["dev_pct"], m.SOFT_TOL_PCT)
+
+
+class TdxPullIntegrationTests(TempRootCase):
+    """整链：Fixtures(HTTP) + 假通达信客户端 → 落库文件里能看到 6 路源与附带数据。"""
+
+    def _http(self, **kw):
+        return FixtureHttp(prices=A_PRICES, prev=A_PREV, **kw)
+
+    def _pull(self, slot, when, **kw):
+        return m.pull(slot, root=self.root, http=self._http(), now=when, symbols=A_SYMBOLS,
+                      verbose=False, tdx_client=FakeTdxClient(prices=A_PRICES, prev=A_PREV), **kw)
+
+    def test_six_sources_and_two_close_checks(self):
+        self._pull("0800", DAY1)
+        doc = json.load(open(os.path.join(self.root, "20261001.json"), encoding="utf-8"))
+        self.assertEqual(len(doc["slots"]["0800"]["sources"]), 6)
+        self.assertEqual(doc["slots"]["0800"]["sources"]["tdx"]["status"], "ok")
+        self.assertEqual(doc["slots"]["0800"]["cross_check"]["sources_ok"], 6)
+        self.assertIn("pe", doc["ai"]["feature_names"])
+        quote = doc["slots"]["0800"]["quotes"]["600519.SS"]
+        self.assertEqual(quote["n_sources"], 5)                # 5 路参与比价（em_kline 不在内）
+        self.assertEqual([c["source"] for c in quote["consensus"]["eod_close_checks"]],
+                         ["em_kline", "tdx"])
+        self.assertTrue(all(c["ok"] for c in quote["consensus"]["eod_close_checks"]))
+
+    def test_fundamentals_only_at_closing_slot(self):
+        self._pull("0800", DAY1)
+        self._pull("1700", DAY1.replace(hour=17, minute=0))
+        doc = json.load(open(os.path.join(self.root, "20261001.json"), encoding="utf-8"))
+        self.assertNotIn("fundamentals", doc["slots"]["0800"])
+        self.assertNotIn("corporate_actions", doc["slots"]["0800"])
+        fund = doc["slots"]["1700"]["fundamentals"]["600519.SS"]
+        self.assertAlmostEqual(fund["pb"], round(1690.0 / 160.0, 4))
+        self.assertIn("2026-09-30",
+                      [a["date"] for a in doc["slots"]["1700"]["corporate_actions"]["600519.SS"]])
+
+    def test_ai_dataset_carries_fundamental_features(self):
+        self._pull("0800", DAY1)
+        self._pull("1700", DAY1.replace(hour=17, minute=0))
+        rows, meta = m.build_dataset(root=self.root, symbols=["600519.SS"])
+        self.assertIn("pe", meta["feature_names"])
+        self.assertIn("days_since_action", meta["feature_names"])
+        self.assertTrue(rows)
+        early = [r for r in rows if r["slot"] == "0800"]
+        late = [r for r in rows if r["slot"] == "1700"]
+        self.assertIsNone(early[0]["features"]["pe"])           # 早上还没有财务数据 → 不凭空填
+        self.assertIsNotNone(late[0]["features"]["pe"])         # 17:00 档已知
+        self.assertEqual(late[0]["features"]["days_since_action"], 1)
+
+    def test_ai_context_exposes_fundamentals_and_actions(self):
+        self._pull("1700", DAY1.replace(hour=17, minute=0))
+        ctx = m.ai_context("20261001", root=self.root)
+        item = ctx["quotes"]["600519.SS"]
+        self.assertAlmostEqual(item["fundamentals"]["pb"], round(1690.0 / 160.0, 4))
+        self.assertEqual(item["recent_actions"][0]["date"], "2026-09-30")
+        self.assertEqual(len(item["close_checks"]), 2)
+
+    def test_enrich_can_be_forced_off_at_closing_slot(self):
+        self._pull("1700", DAY1.replace(hour=17, minute=0), enrich=False)
+        doc = json.load(open(os.path.join(self.root, "20261001.json"), encoding="utf-8"))
+        slot = doc["slots"]["1700"]
+        self.assertNotIn("fundamentals", slot)
+        self.assertNotIn("corporate_actions", slot)
+        self.assertEqual(slot["sources"]["tdx"]["status"], "ok")
+        self.assertIn("收盘核对", slot["sources"]["tdx"]["summary"])
+
+    def test_self_check_explains_dividend_jump(self):
+        """除权除息造成的跳变：写明原因，且不再按数据错误扣分。"""
+        slot_doc = {"date": "2026-10-01", "slot": "1230", "trading_day": True,
+                    "quotes": {"600519.SS": {"name": "贵州茅台", "market": "A",
+                                             "consensus": {"price": 100.0, "prev_close": 100.0}}},
+                    "sources": {k: {"status": "ok", "symbols": 1} for k in m.SOURCES},
+                    "cross_check": {"median_prices": {"600519.SS": 100.0}, "consensus_ok": True,
+                                    "symbols_total": 1, "symbols_ok": 1, "symbols_with_quorum": 1}}
+        prev_day = {"slots": {"1700": {"cross_check": {"median_prices": {"600519.SS": 170.0},
+                                                       "consensus_ok": True}}}}
+        plain = m.self_check(slot_doc, prev_day=prev_day)
+        explained = m.self_check(slot_doc, prev_day=prev_day, corporate_actions={
+            "600519.SS": [{"date": "2026-09-30", "category": 1, "name": "除权除息"}]})
+        self.assertTrue(any("跨日跳变" in a for a in plain["alerts"]))
+        note = [a for a in explained["alerts"] if "跨日跳变" in a][0]
+        self.assertIn("疑似除权除息", note)
+        self.assertIn("2026-09-30", note)
+        self.assertGreater(explained["score"], plain["score"])   # 有解释的跳变不惩罚
+
+    def test_explain_action_ignores_old_or_unknown(self):
+        actions = {"600519.SS": [{"date": "2026-01-05", "category": 1, "name": "除权除息"}]}
+        self.assertEqual(m._explain_action(actions, "600519.SS", "2026-10-01"), "")
+        self.assertEqual(m._explain_action(actions, "000001.SS", "2026-10-01"), "")
+        self.assertEqual(m._explain_action(None, "600519.SS", "2026-10-01"), "")
