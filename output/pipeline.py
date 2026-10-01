@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
+🐙 章鱼 AI · 上水日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
 核心规则（2026-08-02 新版，当天修订）：
@@ -249,6 +249,20 @@
       POLICY SHOCK / WEEKLY FORECAST）与图标砖短标签一律不变——它们是数据线的名字，
       不是栏目标题。风险提示里的跨栏目引用（「『栏目名』第NN条」）指向正文栏目头，
       因此同步用新标题，读者按名字能找到栏目。历史归档日报不改写。
+
+  22. 隐藏功能「市场数据库」（2026-10-01 按用户要求，output/market_db.py）：
+      每天三次（北京时间 08:00 / 12:30 / 17:00）多源抓取股票行情快照，落库到
+      output/market_db/YYYYMMDD.json（**文件以日期为名字**，当天三档写同一个文件），
+      作为 AI 分析 / AI 预测 / AI 模型的基础数据（特征 + 标签数据集 / ai_context）。
+      ① 源头 >3：东方财富 push2、新浪财经 hq、腾讯财经 qt、Yahoo chart、东财 push2his
+         日K收盘校验、通达信 mootdx（沪深，2026-10-01 升级），共 6 路（HTTP 源每路带
+         镜像主机，通达信走主站池逐个降级；单路失败不影响其它路，全失败不落库）；
+      ② 交叉验证：同标的多源比价（中位数 + MAD 稳健离群）、逐源判「滞后」、
+         输出共识价 / 离群源 / 价差 / 置信度，≥2 路一致才计入有效共识；
+      ③ 自我检查：结构 / 时段 / 源覆盖 / 标的覆盖 / 数值合理性 / 跨源冲突 /
+         跨时段与跨日跳变 / 当天行情时效 / 文件哈希，结论写进 self_check，可随时 verify。
+      **边界**：不进日报正文、不进微信推送、不出现在 --help（隐藏入口 --stock-db，
+      见 .github/workflows/market-db.yml），因此不改动日报的当天检验与推送门禁。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -4535,7 +4549,7 @@ GZ_WARN_INK = GZ_WARN
 GZ_PRIMARY = GZ_KLEIN
 GZ_PRIMARY_HOVER = GZ_KLEIN_DEEP
 GZ_PRIMARY_LIGHT = GZ_KLEIN_WASH
-REPORT_TITLE = "章鱼 AI · 打氧日报"
+REPORT_TITLE = "章鱼 AI · 上水日报"
 # 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
 REPORT_TAGLINE = "每日上水，新鲜活泼"
 # 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
@@ -11065,12 +11079,12 @@ def _compact_html_for_push(html):
         '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta name="color-scheme" content="light only">'
-        '<title>章鱼 AI · 打氧日报（精简版）</title></head>'
+        '<title>章鱼 AI · 上水日报（精简版）</title></head>'
         '<body bgcolor="#FFFFFF" style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
         '<div style="max-width:680px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
-        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 打氧日报</h1>'
+        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 上水日报</h1>'
         f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
         f'<div style="font-size:13px;line-height:1.6;color:{GZ_INK};margin-bottom:12px;">{intro}</div>'
     )
@@ -12168,7 +12182,7 @@ def calendar_only_report(days=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
+        description="🐙 章鱼 AI · 上水日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -12236,6 +12250,18 @@ def main():
                        help="只抓「时间节点」（原「未来 N 天影响经济时间点」）并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
 
+    # 隐藏功能：市场数据库（2026-10-01）——供 AI 分析 / 预测 / 建模用的多源快照库。
+    # 不进日报、不推送，所以 --help 里不显示（help=argparse.SUPPRESS），入口见 output/market_db.py。
+    parser.add_argument("--stock-db", nargs="?", const="pull", default=None,
+                       choices=["pull", "verify", "export", "stats", "ai-context", "prune"],
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-slot", default="auto", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-out", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-format", default="jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-days", type=int, default=7, help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-date", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-symbols", default="", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
 
     if args.no_quant:
@@ -12258,6 +12284,37 @@ def main():
     if args.no_hk7:
         global HK7_ENABLED
         HK7_ENABLED = False
+
+    # --stock-db 模式：隐藏功能「市场数据库」（不进日报、不推送；--help 不显示）
+    if args.stock_db:
+        if SCRIPT_DIR not in sys.path:
+            sys.path.insert(0, SCRIPT_DIR)
+        import importlib
+        market_db = importlib.import_module("market_db")
+        argv = [args.stock_db]
+        if args.stock_db == "pull":
+            argv += ["--slot", args.stock_db_slot]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        elif args.stock_db == "export":
+            if not args.stock_db_out:
+                print("❌ --stock-db export 需要 --stock-db-out 指定输出文件")
+                return 2
+            argv += ["--out", args.stock_db_out, "--format", args.stock_db_format]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        elif args.stock_db == "stats":
+            argv += ["--days", str(args.stock_db_days)]
+        elif args.stock_db == "prune":
+            argv += ["--keep-days", str(args.stock_db_days)]
+        elif args.stock_db == "verify":
+            argv += (["--date", args.stock_db_date] if args.stock_db_date else ["--all"])
+        elif args.stock_db == "ai-context":
+            if args.stock_db_date:
+                argv += ["--date", args.stock_db_date]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        return market_db.main(argv)
 
     # --list 模式
     if args.list:
