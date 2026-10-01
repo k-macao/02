@@ -40,10 +40,22 @@ fi
 
 log "====== 自动推送任务启动 ======"
 
+# 如果未显式传参，默认按时段分流：09:00 与 21:00 全流程推送微信，其余盘中时段静默更新（--no-push）
+EXTRA_ARGS=("$@")
+if [ $# -eq 0 ]; then
+    CURRENT_HOUR=$(TZ='Asia/Shanghai' date +%H)
+    if [ "$CURRENT_HOUR" != "09" ] && [ "$CURRENT_HOUR" != "21" ]; then
+        log "当前时段 ($CURRENT_HOUR:00) 盘中更新：默认静默更新（--no-push），不推微信；早晚 09:00 / 21:00 正常推送"
+        EXTRA_ARGS=("--no-push")
+    else
+        log "当前时段 ($CURRENT_HOUR:00)：全流程生成并推送微信"
+    fi
+fi
+
 # 用进程替换替代管道，避免子shell + 退出码误判问题
 # 同时处理最后一行无换行的边界情况
 while IFS= read -r line || [[ -n "$line" ]]; do
     log "$line"
-done < <(python3 "$SCRIPT_DIR/pipeline.py" "$@" 2>&1)
+done < <(python3 "$SCRIPT_DIR/pipeline.py" "${EXTRA_ARGS[@]}" 2>&1)
 
 log "任务结束"

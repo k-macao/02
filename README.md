@@ -214,7 +214,7 @@ python3 output/push.py                # 完整流程：采集 → 分析 → 生
 
 | 方式 | 配置 / 操作 |
 |---|---|
-| GitHub 定时任务 | `.github/workflows/octopus-daily.yml` 当前设置为每天 UTC 01:00，即北京时间 09:00；21:00 任务目前仍为注释，未启用。 |
+| GitHub 定时任务 | `.github/workflows/octopus-daily.yml` 当前设置为每天北京时间 09:00 至 21:00 每两小时自动运行（对应 UTC 01:00~13:00 奇数整点，共 7 次）；09:00 早盘前与 21:00 晚间复盘推送到微信，盘中时段静默更新数据与网页（`--no-push`）。 |
 | GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选只生成、不推送。 |
 | 本地手动运行 | `./output/manual_push.sh`；`--force` 可强制推送，`--no-push` 只生成。 |
 | 自有服务器定时任务 | 使用 cron 调用 `./output/auto_push.sh`。 |
@@ -222,7 +222,8 @@ python3 output/push.py                # 完整流程：采集 → 分析 → 生
 例如，在自有服务器运行 `crontab -e` 后添加：
 
 ```cron
-0 9 * * * cd /path/to/02 && ./output/auto_push.sh >> /tmp/octopus.log 2>&1
+# 每天北京时间 09:00 至 21:00 每两小时运行一次（09:00/21:00 推送微信，其余时段静默更新数据）
+0 9-21/2 * * * cd /path/to/02 && ./output/auto_push.sh >> /tmp/octopus.log 2>&1
 ```
 
 GitHub 定时任务可能受平台负载影响而延迟；若发送失败，工作流会失败退出，不会静默显示成功。
