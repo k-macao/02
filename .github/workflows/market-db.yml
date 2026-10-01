@@ -1,0 +1,132 @@
+name: 🗄️ 市场数据库 · 定时入库（隐藏功能）
+
+# 隐藏功能（2026-10-01 按用户要求）：每天三次把股票行情快照落库到
+# output/market_db/YYYYMMDD.json（文件以日期为名字，当天三档写同一个文件），
+# 作为 AI 分析 / AI 预测 / AI 模型的基础数据。
+#
+#   · 源头 >3：东方财富 push2 / 新浪财经 hq / 腾讯财经 qt / Yahoo chart /
+#     东财 push2his 日K收盘校验 / 通达信 mootdx（沪深，2026-10-01 升级），共 6 路
+#     （HTTP 源每路带镜像主机，通达信走主站池逐个降级）；
+#   · 交叉验证：同标的多源比价（中位数 + MAD 稳健离群）、逐源判滞后、共识价与置信度；
+#   · 自我检查：源覆盖 / 标的覆盖 / 数值 / 冲突 / 跨时段与跨日跳变 / 文件哈希。
+#
+# 该功能不进日报正文、不进微信推送、不出现在 pipeline --help 里，与日报的
+# 当天检验 / 推送门禁完全解耦。
+on:
+  schedule:
+    # GitHub cron 用 UTC；北京时间 = UTC+8
+    - cron: "0 0 * * *"     # 北京 08:00（盘前）
+    - cron: "30 4 * * *"    # 北京 12:30（午间）
+    - cron: "0 9 * * *"     # 北京 17:00（盘后 / 收盘复核）
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "时段（auto = 按北京时间就近匹配 0800 / 1230 / 1700）"
+        type: choice
+        options: ["auto", "0800", "1230", "1700"]
+        default: "auto"
+        required: false
+      dry_run:
+        description: "只采集与自检，不写库文件"
+        type: boolean
+        default: false
+        required: false
+      days:
+        description: "stats 回看的日期数"
+        type: string
+        default: "5"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-db
+  cancel-in-progress: false
+
+jobs:
+  market-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 安装依赖
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet requests
+          # 通达信通道（mootdx）：装上就多一路沪深行情 + 日K收盘核对 + 财务 / 除权除息；
+          # 装不上或连不上主站时该源标记 unavailable，其余 5 路照常（绝不编数）。
+          pip install --quiet mootdx || echo "::warning::mootdx 安装失败，本次跳过通达信通道"
+
+      - name: 🗄️ 多源采集 → 交叉验证 → 自检 → 落库
+        env:
+          SLOT: ${{ github.event.inputs.slot || 'auto' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          OCTOPUS_DB_SYMBOLS: ${{ vars.OCTOPUS_DB_SYMBOLS }}
+          # 可选：OCTOPUS_DB_TDX_SERVERS 指定通达信主站（host:port,host:port）
+          OCTOPUS_DB_TDX: ${{ vars.OCTOPUS_DB_TDX || '1' }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "运行模式：采集 + 自检（不写库文件）"
+            python3 output/market_db.py pull --slot "$SLOT" --dry-run
+          else
+            echo "运行模式：采集 → 交叉验证 → 自检 → 写库"
+            python3 output/market_db.py pull --slot "$SLOT"
+          fi
+
+      - name: 🔍 复核库文件（哈希 / 覆盖 / 自检）
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          python3 output/market_db.py verify --all || echo "::warning::市场数据库复核发现缺陷（见上方日志）"
+          python3 output/market_db.py stats --days "${{ github.event.inputs.days || '5' }}"
+
+      - name: 🧠 导出 AI 数据集（供分析与建模；失败不影响落库）
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/market_db/ai
+          python3 output/market_db.py export --out output/market_db/ai/dataset.jsonl --format jsonl \
+            || echo "::warning::AI 数据集导出失败（库文件已照常提交）"
+
+      - name: 📦 上传 AI 数据集（不进版本库，按需下载）
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-db-ai-dataset
+          path: output/market_db/ai/dataset.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: 📤 提交库文件
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          git config user.name "octopus-bot"
+          git config user.email "bot@octopus.ai"
+
+          git add output/market_db/ 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "无新内容，跳过提交。"
+          else
+            COMMIT_TIME=$(TZ='Asia/Macau' date +'%Y-%m-%d %H:%M')
+            git commit -m "🗄️ 市场数据库 ${COMMIT_TIME}"
+            # 日报工作流可能同时在推同一分支：被拒时 rebase 后重试（库文件是纯追加，冲突概率极低）
+            git push origin HEAD || {
+              git pull --rebase --autostash origin HEAD
+              git push origin HEAD
+            }
+          fi
