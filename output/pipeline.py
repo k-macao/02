@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
+🐙 章鱼 AI · 上水日报 ——「每日上水，新鲜活泼」· 全网多模型协同 · 每日财经日报流水线
 每次运行都重新抓取全网最新数据 → 分析 → 生成 → 当天检验 → 推送
 
 核心规则（2026-08-02 新版，当天修订）：
@@ -4535,7 +4535,7 @@ GZ_WARN_INK = GZ_WARN
 GZ_PRIMARY = GZ_KLEIN
 GZ_PRIMARY_HOVER = GZ_KLEIN_DEEP
 GZ_PRIMARY_LIGHT = GZ_KLEIN_WASH
-REPORT_TITLE = "章鱼 AI · 打氧日报"
+REPORT_TITLE = "章鱼 AI · 上水日报"
 # 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
 REPORT_TAGLINE = "每日上水，新鲜活泼"
 # 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
@@ -11065,12 +11065,12 @@ def _compact_html_for_push(html):
         '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta name="color-scheme" content="light only">'
-        '<title>章鱼 AI · 打氧日报（精简版）</title></head>'
+        '<title>章鱼 AI · 上水日报（精简版）</title></head>'
         '<body bgcolor="#FFFFFF" style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
         '<div style="max-width:680px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
-        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 打氧日报</h1>'
+        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 上水日报</h1>'
         f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
         f'<div style="font-size:13px;line-height:1.6;color:{GZ_INK};margin-bottom:12px;">{intro}</div>'
     )
@@ -12168,7 +12168,7 @@ def calendar_only_report(days=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🐙 章鱼 AI · 打氧日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
+        description="🐙 章鱼 AI · 上水日报 ——「每日上水，新鲜活泼」· 每日财经日报流水线（当天检验后推送）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
