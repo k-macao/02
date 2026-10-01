@@ -250,6 +250,19 @@
       不是栏目标题。风险提示里的跨栏目引用（「『栏目名』第NN条」）指向正文栏目头，
       因此同步用新标题，读者按名字能找到栏目。历史归档日报不改写。
 
+  22. 隐藏功能「市场数据库」（2026-10-01 按用户要求，output/market_db.py）：
+      每天三次（北京时间 08:00 / 12:30 / 17:00）多源抓取股票行情快照，落库到
+      output/market_db/YYYYMMDD.json（**文件以日期为名字**，当天三档写同一个文件），
+      作为 AI 分析 / AI 预测 / AI 模型的基础数据（特征 + 标签数据集 / ai_context）。
+      ① 源头 >3：东方财富 push2、新浪财经 hq、腾讯财经 qt、Yahoo chart、东财 push2his
+         日K收盘校验，共 5 路（每路带镜像主机，单路失败不影响其它路，全失败不落库）；
+      ② 交叉验证：同标的多源比价（中位数 + MAD 稳健离群）、逐源判「滞后」、
+         输出共识价 / 离群源 / 价差 / 置信度，≥2 路一致才计入有效共识；
+      ③ 自我检查：结构 / 时段 / 源覆盖 / 标的覆盖 / 数值合理性 / 跨源冲突 /
+         跨时段与跨日跳变 / 当天行情时效 / 文件哈希，结论写进 self_check，可随时 verify。
+      **边界**：不进日报正文、不进微信推送、不出现在 --help（隐藏入口 --stock-db，
+      见 .github/workflows/market-db.yml），因此不改动日报的当天检验与推送门禁。
+
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
   1 = 应当推送却失败，或用法错误。
@@ -12236,6 +12249,18 @@ def main():
                        help="只抓「时间节点」（原「未来 N 天影响经济时间点」）并打印（研究模式：不生成日报、不推送；"
                             "不带数字时用 OCTOPUS_CALENDAR_DAYS，默认 30 天）")
 
+    # 隐藏功能：市场数据库（2026-10-01）——供 AI 分析 / 预测 / 建模用的多源快照库。
+    # 不进日报、不推送，所以 --help 里不显示（help=argparse.SUPPRESS），入口见 output/market_db.py。
+    parser.add_argument("--stock-db", nargs="?", const="pull", default=None,
+                       choices=["pull", "verify", "export", "stats", "ai-context", "prune"],
+                       help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-slot", default="auto", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-out", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-format", default="jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-days", type=int, default=7, help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-date", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--stock-db-symbols", default="", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
 
     if args.no_quant:
@@ -12258,6 +12283,37 @@ def main():
     if args.no_hk7:
         global HK7_ENABLED
         HK7_ENABLED = False
+
+    # --stock-db 模式：隐藏功能「市场数据库」（不进日报、不推送；--help 不显示）
+    if args.stock_db:
+        if SCRIPT_DIR not in sys.path:
+            sys.path.insert(0, SCRIPT_DIR)
+        import importlib
+        market_db = importlib.import_module("market_db")
+        argv = [args.stock_db]
+        if args.stock_db == "pull":
+            argv += ["--slot", args.stock_db_slot]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        elif args.stock_db == "export":
+            if not args.stock_db_out:
+                print("❌ --stock-db export 需要 --stock-db-out 指定输出文件")
+                return 2
+            argv += ["--out", args.stock_db_out, "--format", args.stock_db_format]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        elif args.stock_db == "stats":
+            argv += ["--days", str(args.stock_db_days)]
+        elif args.stock_db == "prune":
+            argv += ["--keep-days", str(args.stock_db_days)]
+        elif args.stock_db == "verify":
+            argv += (["--date", args.stock_db_date] if args.stock_db_date else ["--all"])
+        elif args.stock_db == "ai-context":
+            if args.stock_db_date:
+                argv += ["--date", args.stock_db_date]
+            if args.stock_db_symbols:
+                argv += ["--symbols", args.stock_db_symbols]
+        return market_db.main(argv)
 
     # --list 模式
     if args.list:
