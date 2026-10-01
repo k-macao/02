@@ -22,19 +22,35 @@
        数值合理性 / 跨源冲突 / 跨时段与跨日跳变 / 文件哈希），结果写进文件
        ``self_check``，可随时 ``verify`` 复核。
 
-通达信通道（mootdx，2026-10-01 升级）
+通达信通道（mootdx，2026-10-01 升级；同日加固防卡死，见「防卡死四道闸」）
     · 行情：``Quotes.factory(market='std')`` → ``quotes()``，覆盖沪深股票与指数
       （代码映射 sh600519 / sz000858 / sh000001）；港美股不在通达信标准行情内
       （mootdx 自己的扩展市场接口已失效），因此该源只参与沪深标的的比价；
     · 多主站：``OCTOPUS_DB_TDX_SERVERS="ip:port,…"`` 可指定，否则用 mootdx / tdxpy
       内置主站池依次试连（连不上自动换站，最多 4 站），命中站点写进 ``sources.tdx.host``；
+
     · 收盘校验：每档都用 ``bars(frequency=9)`` 取最近一根日K收盘，与 em_kline 一起做
       双源收盘核对（两个独立通道的收盘价一致，昨收 / 标签才可信）；
     · 财务 / 除权除息：17:00 档附带 ``fundamentals``（总股本 / 流通股本 / 每股净资产 /
       净利润 → 总市值 / 流通市值 / PE / PB）与 ``corporate_actions``（近 45 天除权除息），
       既进 AI 特征，也用来解释「跨日跳变」（除权日的大幅跳空不再当成数据错误）；
-    · 未安装 mootdx（或所有主站都连不上）→ 该源记 ``unavailable``，其余 5 路照常，
+    · 未安装 mootdx（或所有主站都连不上）→ 该源记 ``unavailable`` / ``failed``，其余 5 路照常，
       绝不伪造数字。安装：``pip install mootdx``（Actions 已装）。
+
+防卡死四道闸（2026-10-01：一次 20 分钟作业被单台死主站拖到超时取消，逐条对症）
+    ① 预置配置：创建客户端前先写好 ``~/.mootdx/config.json``（SERVER 主机池 + BESTIP），
+       mootdx 就不会在首次使用时跑 bestip 探测。原来那条
+       「未找到配置文件 … / 请手动运行 python -m mootdx bestip」既吓人又真写坏了配置：
+       在线程池里 ``asyncio.get_event_loop()`` 直接 RuntimeError，写出的 BESTIP 是空串；
+    ② TCP 预检：先用自己的 socket 探一次（``TDX_PROBE_TIMEOUT`` 3s），连不上的站**不交给
+       mootdx**。因为 tdxpy 的 ``connect()`` 会把 socket.timeout 吞掉并 return False，
+       mootdx 又不检查返回值 —— 死站会被当成「连上了」；
+    ③ 先验活后明细：每台主站先做一次 ``quotes()``（全部标的、一次调用）验活，行情为空
+       立刻换站，绝不在一台死站上逐只跑 bars/finance/xdxr（11 只标的 34 次调用 × 每次
+       tdxpy auto_retry 阶梯 4 次重连 × 5s ≈ 十几分钟，4 台主站直接拖爆 20 分钟上限）；
+       客户端显式 ``auto_retry=False``，重试责任交给「主站池逐个降级」；
+    ④ 总预算：``TDX_BUDGET_SEC``（90s，可用 ``OCTOPUS_DB_TDX_BUDGET`` 覆盖）是整条通道的
+       墙钟上限，超预算立即收工并把原因写进 ``error``，其余 5 路照常入库。
 
 绝不伪造
     任一路取不到就如实记 ``failed``（不猜数、不补历史数字）；全部源失败不写文件；
@@ -65,8 +81,10 @@ import json
 import math
 import os
 import re
+import socket
 import statistics
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -101,6 +119,9 @@ DEFAULT_TIMEOUT = 12
 MAX_WORKERS = 6
 TDX_SERVER_LIMIT = 4       # 通达信主站最多试连几个（内置池 38+ 个，逐个降级）
 TDX_ACTION_DAYS = 45       # 除权除息只留最近 N 天（超过就不是「本次跳变」的原因了）
+TDX_PROBE_TIMEOUT = 3      # 建 mootdx 客户端前的 TCP 预检上限（2026-10-01 修复）
+TDX_SOCKET_TIMEOUT = 8     # 通达信单次调用 socket 超时（比 HTTP 的 12s 更紧，它是快协议）
+TDX_BUDGET_SEC = 90        # 整个通达信通道的墙钟预算（秒）：到点收工，绝不拖垮作业
 
 
 # ------------------------------------------------------------
@@ -801,17 +822,135 @@ def _tdx_installed() -> bool:
         return False
 
 
-def _open_tdx_client(host: str, port: int, timeout: int):
-    """连接一台通达信主站；未安装 mootdx / 连不上都返回 (None, 原因)。"""
+_TDX_CONFIG_LOCK = threading.Lock()      # 预置配置只做一次，多个客户端并发也不会写花
+
+
+def _mootdx_config_path() -> str:
+    """mootdx 的配置文件路径：``$HOME/.mootdx/config.json``（与 mootdx 自己的规则一致）。
+
+    · 不调 ``mootdx.utils.get_config_path``：那个函数会顺手 mkdir，只读路径的调用不该有副作用
+      （口径一致性由 tests 里的 `test_config_path_matches_mootdx_rule` 盯着）；
+    · ``OCTOPUS_DB_TDX_CONFIG`` 可覆盖（HOME 只读、或想把配置放在工作区内时用）。
+    """
+    override = os.environ.get("OCTOPUS_DB_TDX_CONFIG", "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".mootdx", "config.json")
+
+
+def _tdx_config_payload(server: Optional[Tuple[str, int]] = None) -> Optional[Dict[str, Any]]:
+    """构造一份 mootdx 认的配置（结构必须与 mootdx 自己写出来的一模一样）。
+
+    ``SERVER`` 直接搬 mootdx 内置主机池（JSON 里元组变列表，mootdx 也这么存）；
+    ``BESTIP`` 写本次要连的主站，mootdx 就不会再去跑 bestip 探测。
+    """
     try:
-        from mootdx.quotes import Quotes                         # noqa: WPS433
+        from mootdx import consts as _consts                     # noqa: WPS433
+    except Exception:                                               # noqa: BLE001
+        return None
+    if not getattr(_consts, "HQ_HOSTS", None):
+        return None
+    hosts = {}
+    for key in ("HQ", "EX", "GP"):
+        rows = getattr(_consts, f"{key}_HOSTS", ()) or ()
+        hosts[key] = [[str(site), str(ip), int(port)] for site, ip, port in rows]
+    bestip: Dict[str, Any] = {"HQ": "", "EX": "", "GP": ""}
+    if server:
+        bestip["HQ"] = [str(server[0]), int(server[1])]
+    return {"SERVER": hosts, "BESTIP": bestip, "TDXDIR": str(getattr(_consts, "TDXDIR", "C:/new_tdx"))}
+
+
+def _ensure_tdx_config(host: str, port: int, *, path: Optional[str] = None) -> Optional[str]:
+    """创建 mootdx 客户端**之前**把配置文件写好（返回写好的路径 / None=没写）。
+
+    · 已存在且是合法 JSON → 原样尊重（CI 或用户可自行预置主站）；
+    · 缺失 / 损坏 → 用 mootdx 内置主机池 + 本次选中的主站写一份；
+    · HOME 只读等写不进去 → 返回 None 静默降级（后面还有预检 + 预算兜底），绝不抛异常。
+    """
+    target = path or _mootdx_config_path()
+    with _TDX_CONFIG_LOCK:
+        try:
+            with open(target, "r", encoding="utf-8") as fh:
+                if isinstance(json.load(fh), dict):
+                    return target
+        except (OSError, ValueError):
+            pass
+        payload = _tdx_config_payload((host, port))
+        if payload is None:
+            return None
+        try:
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+            with open(target, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2, ensure_ascii=False)
+        except OSError:
+            return None
+        return target
+
+
+def _tdx_probe(host: str, port: int, timeout: int = TDX_PROBE_TIMEOUT, *,
+               connector: Optional[Callable[..., Any]] = None) -> Tuple[bool, str]:
+    """TCP 预检：能连上才算「活着」（3s 上限），连不上的站根本不交给 mootdx。
+
+    为什么必须自己先探一次：tdxpy 的 ``connect()`` 把 socket.timeout 吞掉并 return False，
+    ``mootdx.StdQuotes.__init__`` 又不检查这个返回值 —— SYN 被丢弃的死站会被当成
+    「连上了」，随后每次 API 调用都跑一遍 auto_retry 阶梯（4 次重连 × 5s + 退避 sleep），
+    单台主站就足以把 20 分钟的作业拖到被取消。
+    """
+    connect = connector or socket.create_connection
+    try:
+        sock = connect((str(host), int(port)), timeout=max(1, int(timeout)))
     except Exception as exc:                                        # noqa: BLE001
-        return None, f"未安装 mootdx（pip install mootdx）：{type(exc).__name__}"
+        return False, f"{host}:{port} TCP 预检失败（{type(exc).__name__}）"
     try:
-        return Quotes.factory(market="std", server=(host, int(port)), timeout=timeout,
-                              heartbeat=False), ""
+        close = getattr(sock, "close", None)
+        close and close()
+    except Exception:                                               # noqa: BLE001
+        pass
+    return True, ""
+
+
+def _open_tdx_client(host: str, port: int, timeout: int, *, connector: Optional[Callable[..., Any]] = None,
+                     factory: Optional[Callable[..., Any]] = None):
+    """连接一台通达信主站；未安装 mootdx / 预检不过 / 建连异常都返回 (None, 原因)。
+
+    · 预检通过才建客户端（SYN 被丢 / 端口不通 3s 内换下一台）；
+    · ``auto_retry=False``：tdxpy 的重连阶梯是「单台死站拖垮整个作业」的主因，
+      重试责任交给 ``fetch_tdx`` 的主站池逐个降级（语义更清楚，也不再重复烧墙钟）。
+    """
+    if factory is None and not _tdx_installed():
+        return None, "未安装 mootdx（pip install mootdx）"
+    ok, err = _tdx_probe(host, port, min(TDX_PROBE_TIMEOUT, max(1, int(timeout))), connector=connector)
+    if not ok:
+        return None, err
+    _ensure_tdx_config(host, port)
+    maker = factory
+    if maker is None:
+        try:
+            from mootdx.quotes import Quotes                     # noqa: WPS433
+        except Exception as exc:                                    # noqa: BLE001
+            return None, f"未安装 mootdx（pip install mootdx）：{type(exc).__name__}"
+        maker = Quotes.factory
+    try:
+        return maker(market="std", server=(host, int(port)), timeout=int(timeout), heartbeat=False,
+                     auto_retry=False), ""
     except Exception as exc:                                        # noqa: BLE001
         return None, f"{host}:{port} {type(exc).__name__}: {exc}"
+
+
+def _tdx_budget(budget: Optional[float] = None) -> float:
+    """本次通达信通道的墙钟预算（秒）：参数 → ``OCTOPUS_DB_TDX_BUDGET`` → 默认 90s。"""
+    if budget is None:
+        raw = os.environ.get("OCTOPUS_DB_TDX_BUDGET", "")
+        try:
+            budget = float(raw) if str(raw).strip() else float(TDX_BUDGET_SEC)
+        except ValueError:
+            budget = float(TDX_BUDGET_SEC)
+    return max(0.0, float(budget))
+
+
+def _tdx_time_left(deadline: Optional[float]) -> float:
+    """距预算到点还剩几秒；没有 deadline 就是无限（测试注入 fake 客户端时走这条）。"""
+    return math.inf if deadline is None else deadline - time.monotonic()
 
 
 def _tdx_quote_time(servertime: Any, date_str: str) -> Optional[str]:
@@ -862,10 +1001,30 @@ def _tdx_quotes(client, pairs: Dict[str, str], date_str: str,
     return quotes
 
 
-def _tdx_eod_closes(client, pairs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
-    """日K（frequency=9）最后一条收盘 → 与东财日K组成「双源收盘核对」。"""
+def _tdx_restamp(quotes: Dict[str, Dict[str, Any]],
+                 session_dates: Optional[Dict[str, str]]) -> Dict[str, Dict[str, Any]]:
+    """日K给出的交易日回填行情时间戳的日期部分（盘前拉到的是**上一交易日**的收盘快照）。
+
+    只换日期、保留 ``HH:MM:SS``：通达信只回报时刻，日期本来就只能从日K推。
+    """
+    for sym, item in quotes.items():
+        day = str((session_dates or {}).get(sym) or "")
+        stamp = str(item.get("quote_time") or "")
+        if len(day) == 10 and len(stamp) >= 19:
+            item["quote_time"] = f"{day} {stamp[11:]}"
+    return quotes
+
+
+def _tdx_eod_closes(client, pairs: Dict[str, str],
+                    deadline: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
+    """日K（frequency=9）最后一条收盘 → 与东财日K组成「双源收盘核对」。
+
+    deadline 到点就收手：宁可少几只收盘核对，也不让通道拖过总预算（数据只少不假）。
+    """
     out: Dict[str, Dict[str, Any]] = {}
     for code, sym in pairs.items():
+        if _tdx_time_left(deadline) <= 0:
+            break
         try:
             rows = _records(client.bars(symbol=code, frequency=9, offset=2))
         except Exception:                                           # noqa: BLE001
@@ -880,14 +1039,16 @@ def _tdx_eod_closes(client, pairs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _tdx_fundamentals(client, pairs: Dict[str, str],
-                      price_by_sym: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _tdx_fundamentals(client, pairs: Dict[str, str], price_by_sym: Dict[str, Any],
+                      deadline: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
     """财务快照 → 市值 / PE / PB（缺失就留空，不猜）。
 
     单位：mootdx 的 parser 已把通达信原始值 ×10000，股本单位=股、金额单位=元。
     """
     out: Dict[str, Dict[str, Any]] = {}
     for code, sym in pairs.items():
+        if _tdx_time_left(deadline) <= 0:
+            break
         try:
             rows = _records(client.finance(symbol=code))
         except Exception:                                           # noqa: BLE001
@@ -914,7 +1075,8 @@ def _tdx_fundamentals(client, pairs: Dict[str, str],
 
 
 def _tdx_corporate_actions(client, pairs: Dict[str, str], date_str: str,
-                           days: int = TDX_ACTION_DAYS) -> Dict[str, List[Dict[str, Any]]]:
+                           days: int = TDX_ACTION_DAYS,
+                           deadline: Optional[float] = None) -> Dict[str, List[Dict[str, Any]]]:
     """近 N 天除权除息 / 送配股（用来解释跨日跳变，也作为 AI 特征）。"""
     try:
         cut = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -922,6 +1084,8 @@ def _tdx_corporate_actions(client, pairs: Dict[str, str], date_str: str,
         cut = date_str
     out: Dict[str, List[Dict[str, Any]]] = {}
     for code, sym in pairs.items():
+        if _tdx_time_left(deadline) <= 0:
+            break
         try:
             rows = _records(client.xdxr(symbol=code))
         except Exception:                                           # noqa: BLE001
@@ -946,30 +1110,38 @@ def _tdx_corporate_actions(client, pairs: Dict[str, str], date_str: str,
 
 
 def _tdx_from_client(client, pairs: Dict[str, str], label: str, enrich: bool,
-                     date_str: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                     date_str: str, deadline: Optional[float] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """用给定客户端取一轮数据；返回 (源结果, 附加数据)。
+
+    取数顺序（2026-10-01 加固）：**先行情验活，后逐只明细**。
+    ``quotes()`` 一次拿全部标的，既是数据也是「这台主站在不在服务」的验活；
+    行情为空立刻返回 failed 交给下一台主站，绝不在一台半死的主站上逐只跑
+    bars / finance / xdxr —— 那是 11 只标的几十次调用，每次都可能吃满 tdxpy 的
+    重连阶梯，单站就能把作业拖到超时被取消。
 
     附加数据：eod_closes 每档都有；fundamentals / corporate_actions 只有 enrich=True 时才有。
     """
     started = time.time()
-    eod_closes = _tdx_eod_closes(client, pairs)      # 每档都做收盘核对（很便宜）
-    session_dates = {sym: str(item.get("date") or "") for sym, item in eod_closes.items()}
     try:
-        quotes = _tdx_quotes(client, pairs, date_str, session_dates)
+        quotes = _tdx_quotes(client, pairs, date_str)
     except Exception as exc:                                        # noqa: BLE001
         return _source_result("tdx", "failed", host=label, error=f"{type(exc).__name__}: {exc}",
                               elapsed_ms=(time.time() - started) * 1000), {}
     if not quotes:
-        return _source_result("tdx", "failed", host=label, error="返回内容无有效行情",
+        return _source_result("tdx", "failed", host=label, error="返回内容无有效行情（验活不通过）",
                               elapsed_ms=(time.time() - started) * 1000), {}
+    eod_closes = _tdx_eod_closes(client, pairs, deadline)           # 验活通过才做收盘核对
+    session_dates = {sym: str(item.get("date") or "") for sym, item in eod_closes.items()}
+    quotes = _tdx_restamp(quotes, session_dates)                    # 交易日补全行情日期
     stamps = [q["quote_time"] for q in quotes.values() if q.get("quote_time")]
     result = _source_result("tdx", "ok", quotes=quotes, host=label,
                             quote_time=max(stamps) if stamps else None,
                             elapsed_ms=(time.time() - started) * 1000)
     extras: Dict[str, Any] = {"eod_closes": eod_closes}
     if enrich:
-        extras["fundamentals"] = _tdx_fundamentals(client, pairs, quotes)
-        extras["corporate_actions"] = _tdx_corporate_actions(client, pairs, date_str)
+        extras["fundamentals"] = _tdx_fundamentals(client, pairs, quotes, deadline)
+        extras["corporate_actions"] = _tdx_corporate_actions(client, pairs, date_str,
+                                                             deadline=deadline)
     bits = []
     if extras["eod_closes"]:
         bits.append(f"收盘核对 {len(extras['eod_closes'])} 只")
@@ -985,11 +1157,20 @@ def _tdx_from_client(client, pairs: Dict[str, str], label: str, enrich: bool,
 def fetch_tdx(symbols: Sequence[str], http=None, timeout: int = DEFAULT_TIMEOUT, *,
               client: Optional[Any] = None, servers: Optional[Sequence[Tuple[str, int]]] = None,
               enrich: bool = False, slot: Optional[str] = None, date_str: Optional[str] = None,
-              **_kw) -> Dict[str, Any]:
-    """通达信行情源（沪深）：主站池逐个降级。
+              budget: Optional[float] = None, connector: Optional[Callable[..., Any]] = None,
+              factory: Optional[Callable[..., Any]] = None, **_kw) -> Dict[str, Any]:
+    """通达信行情源（沪深）：主站池逐个降级，且整条通道有墙钟预算。
 
     每档都附带日K收盘（与东财日K组成双源收盘核对）；enrich=True（默认只有 17:00 档）
     再抓财务快照与近 45 天除权除息。连不上 / 没装 mootdx 就明确降级，绝不编数。
+
+    防卡死（2026-10-01）：
+      · 每台主站先 TCP 预检（``TDX_PROBE_TIMEOUT``），连不上直接换站，不交给 mootdx；
+      · 连上后先做一次 ``quotes()`` 验活，通过才做逐只的日K / 财务 / 除权除息；
+      · 全程受 ``budget``（默认 ``TDX_BUDGET_SEC`` 90s，``OCTOPUS_DB_TDX_BUDGET`` 可覆盖）
+        约束，到点立即收工并如实写失败原因 —— 单台死主站拖垮整个作业是绝不允许的。
+
+    connector / factory 仅用于测试注入（真实场景走 socket + mootdx 主站池）。
     """
     pairs = {tdx_code(sym): sym for sym in symbols if tdx_code(sym)}
     if not pairs:
@@ -1004,18 +1185,27 @@ def fetch_tdx(symbols: Sequence[str], http=None, timeout: int = DEFAULT_TIMEOUT,
         err = ("未安装 mootdx（pip install mootdx）" if not _tdx_installed()
                else "OCTOPUS_DB_TDX_SERVERS 为空且内置主站池为空")
         return _source_result("tdx", "unavailable", error=err)
-    last_err = "无可用主站"
+    budget_sec = _tdx_budget(budget)
+    deadline = time.monotonic() + budget_sec
+    sock_timeout = min(int(timeout), TDX_SOCKET_TIMEOUT)
+    errors: List[str] = []
+    tried = 0
     for host, port in servers:
-        opened, err = _open_tdx_client(host, port, timeout)
+        if _tdx_time_left(deadline) <= 0:
+            errors.append(f"总预算 {budget_sec}s 用尽，停止试连（已试 {tried} 台）")
+            break
+        tried += 1
+        opened, err = _open_tdx_client(host, port, sock_timeout, connector=connector, factory=factory)
         if opened is None:
-            last_err = err
+            errors.append(err)
             continue
-        result, _extras = _tdx_from_client(opened, pairs, f"{host}:{port}", enrich, when)
+        result, _extras = _tdx_from_client(opened, pairs, f"{host}:{port}", enrich, when, deadline)
         if result["status"] == "ok":
             result["elapsed_ms"] = int((time.time() - started) * 1000)
             return result
-        last_err = result.get("error") or "返回内容无效"
-    status = "unavailable" if "未安装 mootdx" in str(last_err) else "failed"
+        errors.append(f"{host}:{port} {result.get('error') or '返回内容无效'}")
+    last_err = "；".join(errors[-3:]) or "无可用主站"
+    status = "unavailable" if "未安装 mootdx" in last_err else "failed"
     return _source_result("tdx", status, error=last_err, elapsed_ms=(time.time() - started) * 1000)
 
 
