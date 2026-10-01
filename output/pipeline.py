@@ -309,6 +309,7 @@ REPORT_DIR = SCRIPT_DIR
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
+from octopus_quant import sector_rotation as _sector_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报第一屏）
@@ -323,6 +324,9 @@ QUANT_HISTORY_FILENAME = "quant_history.json"
 HK_QUANT_ENABLED = str(os.environ.get("OCTOPUS_QUANT", "1")).strip().lower() not in ("0", "false", "no")
 # 是否逐只跑个股概率（关掉后只出指数与流动性，明显更快）
 HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower() not in ("0", "false", "no")
+# A股概念 → 港股观察篮子轮动：独立于港股量化开关；OCTOPUS_SECTOR_ROTATION=0 可关闭。
+SECTOR_ROTATION_ENABLED = str(os.environ.get("OCTOPUS_SECTOR_ROTATION", "1")).strip().lower() not in ("0", "false", "no")
+SECTOR_ROTATION_SOURCE_NAME = "板块轮动量化策略"
 # 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
 WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
 WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
@@ -1451,7 +1455,7 @@ def _google_news_items(xml_text, limit=8):
 
 def _fetch_news_search(query, source_name, limit=8):
     """Google News RSS 搜索查询抓取；失败如实标注 unavailable，不兜底旧内容。
-    
+
     备用源：中文搜索 → 英文搜索 → RSSHub
     """
     # 数据线 google_news_search：主源 中文大陆版搜索 → 备用源1 中文香港版 → 备用源2 英文美国版
@@ -1674,7 +1678,7 @@ EASTMONEY_NEWS_URLS = [
 
 def fetch_eastmoney_news():
     """抓取东方财富最新财经新闻（免费接口，无 API Key，取 5 条）。
-    
+
     备用源：np-listapi → np-weblist → panorama
     """
     print("📡 正在抓取东方财富快讯...")
@@ -3322,6 +3326,224 @@ def fetch_hk_quant():
 
 
 # ============================================================
+# 【滚滚翻车鱼】板块轮动量化策略
+# ============================================================
+def _sector_rotation_is_today(content_date, today=None):
+    """近期交易日收盘可作为当前策略输入；日期缺失、未来或滞后超过 4 天均不算当天。"""
+    try:
+        as_of = datetime.strptime(str(content_date or "")[:10], "%Y-%m-%d").date()
+        today = today or datetime.now(CST).date()
+        if isinstance(today, datetime):
+            today = today.date()
+        lag = (today - as_of).days
+        return 0 <= lag <= 4
+    except (TypeError, ValueError):
+        return False
+
+
+def _sector_rotation_headlines(data):
+    """整理已有公开标题；事件维度只接受可解析的原始内容日期，当天抓取标记不代替日期。"""
+    records = []
+    for key, label in (("全球头条", "全球头条"), ("东财快讯", "东方财富快讯"),
+                       ("国家政策", "中国政府网")):
+        source = (data or {}).get(key) or {}
+        if source.get("status") != "success":
+            continue
+        for item in source.get("headlines") or []:
+            if isinstance(item, str):
+                item = {"title": item}
+            if not isinstance(item, dict) or not str(item.get("title") or "").strip():
+                continue
+            records.append({
+                "title": str(item.get("title") or ""),
+                "source": str(item.get("source") or label),
+                "published_cst": (item.get("published_cst") or item.get("time") or item.get("date")
+                                   or item.get("published_at") or item.get("release_date")),
+                "published": item.get("published"),
+                "published_at": item.get("published_at"),
+            })
+
+    # 港股新闻源头已经只保留近 72 小时且带明确时区的标题，可补充主题事件证据。
+    hk_news = (data or {}).get(HK_NEWS_SOURCE_NAME) or {}
+    if hk_news.get("status") == "success":
+        for source in hk_news.get("sources") or []:
+            if not isinstance(source, dict) or source.get("status") != "ok":
+                continue
+            for item in source.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                records.append({
+                    "title": str(item.get("title") or ""),
+                    "source": str(source.get("name") or "港股新闻源头"),
+                    "published_cst": item.get("published_cst"),
+                })
+    return records
+
+
+def _sector_rotation_market_inputs(mapped_codes, data):
+    """优先复用港股量化引擎已经抓到的 bars / 快照，缺项再按映射代码补取。"""
+    wanted = set(mapped_codes or [])
+    quant_src = (data or {}).get("港股量化") or {}
+    quant_result = quant_src.get("result") or {}
+    stock_data = {}
+    for row in quant_result.get("stocks") or []:
+        if not isinstance(row, dict):
+            continue
+        code = _sector_rotation.normalize_hk_code(row.get("code"))
+        if code not in wanted:
+            continue
+        net_yi = row.get("main_net_yi")
+        try:
+            net = float(net_yi) * 1e8 if net_yi is not None else None
+        except (TypeError, ValueError):
+            net = None
+        stock_data[code] = {
+            "code": code,
+            "name": row.get("label") or (_sector_rotation.HK_STOCKS.get(code) or {}).get("name"),
+            "symbol": row.get("code"),
+            "bars": row.get("bars") or [],
+            "main_net": net,
+            "main_pct": row.get("main_pct"),
+            "amount": row.get("main_amount"),
+            "pe_ttm": row.get("pe_ttm"),
+            "pb": row.get("pb"),
+            "quote_as_of": row.get("quote_as_of"),
+        }
+
+    # 日线仅补没有 61 根有效 bar 的映射股；不因单一数据源失败放弃其余维度。
+    bar_specs = []
+    for code in sorted(wanted):
+        record = stock_data.get(code) or {}
+        if len(record.get("bars") or []) >= 61:
+            continue
+        meta = _sector_rotation.HK_STOCKS.get(code)
+        if meta:
+            bar_specs.append((meta["name"], meta["symbol"]))
+    if bar_specs:
+        try:
+            bars_by_symbol = _quant.providers.fetch_series_batch(
+                safe_request, bar_specs, rng="1y", workers=6, timeout=12)
+            for symbol, bars in (bars_by_symbol or {}).items():
+                code = _sector_rotation.normalize_hk_code(symbol)
+                record = stock_data.setdefault(code, {
+                    "code": code,
+                    "name": (_sector_rotation.HK_STOCKS.get(code) or {}).get("name", code),
+                    "symbol": symbol,
+                    "bars": [],
+                })
+                if len(bars or []) > len(record.get("bars") or []):
+                    record["bars"] = bars
+        except Exception as exc:
+            print(f"  ⚠️ 板块轮动港股日线补取失败（保留可用快照）：{exc}")
+
+    # 同一 ulist 快照同时带资金流、成交额、PE/PB；只请求缺少这两类输入的映射代码。
+    quote_specs = []
+    for code in sorted(wanted):
+        record = stock_data.get(code) or {}
+        net, amount = record.get("main_net"), record.get("amount")
+        try:
+            has_amount = amount is not None and float(amount) > 0
+        except (TypeError, ValueError):
+            has_amount = False
+        has_flow = (record.get("main_pct") is not None or (net is not None and has_amount))
+        has_valuation = record.get("pe_ttm") is not None or record.get("pb") is not None
+        if has_flow and has_valuation:
+            continue
+        meta = _sector_rotation.HK_STOCKS.get(code)
+        if meta:
+            quote_specs.append((meta["name"], meta["symbol"]))
+    if quote_specs:
+        try:
+            snapshots = _quant.providers.fetch_hk_fundflow(safe_request, quote_specs, timeout=12)
+            for code, values in (snapshots or {}).items():
+                code = _sector_rotation.normalize_hk_code(code)
+                record = stock_data.setdefault(code, {
+                    "code": code,
+                    "name": (_sector_rotation.HK_STOCKS.get(code) or {}).get("name", code),
+                    "bars": [],
+                })
+                for key in ("main_net", "main_pct", "amount", "pe_ttm", "pb", "quote_as_of"):
+                    source_key = "as_of" if key == "quote_as_of" else key
+                    if record.get(key) is None and values.get(source_key) is not None:
+                        record[key] = values[source_key]
+        except Exception as exc:
+            print(f"  ⚠️ 板块轮动资金/估值快照不可用：{exc}")
+
+    benchmark_bars = []
+    primary = quant_result.get("primary") or {}
+    if str(primary.get("code") or "").upper() == "^HSI":
+        benchmark_bars = primary.get("bars") or []
+    if not benchmark_bars:
+        benchmark = next((row for row in (quant_result.get("indices") or [])
+                          if str(row.get("code") or "").upper() == "^HSI"), None)
+        if benchmark:
+            benchmark_bars = benchmark.get("bars") or []
+    if not benchmark_bars:
+        try:
+            benchmark_bars = _quant.providers.fetch_bars(safe_request, "^HSI", rng="1y", timeout=12)
+        except Exception as exc:
+            print(f"  ⚠️ 板块轮动恒指基准暂缺：{exc}")
+    return stock_data, benchmark_bars
+
+
+def fetch_sector_rotation(data=None):
+    """采集 A 股概念库与映射港股输入，运行五维评分和三策略投票。
+
+    概念名到港股证券的关联由 output/octopus_quant/sector_rotation.py 中的明确关键词表给出；
+    不是官方跨市场成分关系。数据缺项保持缺失，总分与策略票按各自门槛降级。
+    """
+    source_label = "东方财富 A股概念库 + 港股日线/快照"
+    if not SECTOR_ROTATION_ENABLED:
+        return _source_result(source_label, "unavailable", result=None,
+                              error="板块轮动已关闭（OCTOPUS_SECTOR_ROTATION=0）")
+    print("📡 正在抓取 A股概念库并计算港股板块轮动（五维评分 + 三策略投票）...")
+    try:
+        catalog = _quant.providers.fetch_concept_boards(safe_request)
+    except Exception as exc:
+        catalog = {"items": [], "total": 0, "complete": False,
+                   "served_urls": [], "errors": [str(exc)]}
+    concepts = catalog.get("items") or []
+    for url in catalog.get("served_urls") or []:
+        _note_backup_served("em_clist", url)
+    if not concepts:
+        reason = "；".join((catalog.get("errors") or [])[:2]) or "东方财富概念板块接口未返回有效列表"
+        print(f"  ⚠️ A股概念库暂不可用：{reason}")
+        return _source_result(source_label, "unavailable", result={
+            "concept_total": 0, "mapped_total": 0, "unmapped_total": 0,
+            "items": [], "catalog_complete": False,
+        }, error=reason)
+
+    mapped_codes = _sector_rotation.mapped_stock_codes(concepts)
+    stock_data, benchmark_bars = _sector_rotation_market_inputs(mapped_codes, data or {})
+    result = _sector_rotation.build_rotation(
+        concepts, stock_data=stock_data, benchmark_bars=benchmark_bars,
+        headlines=_sector_rotation_headlines(data or {}),
+        catalog_complete=bool(catalog.get("complete")), now=datetime.now(CST))
+    result["catalog_reported_total"] = catalog.get("reported_total")
+    result["catalog_served_urls"] = list(catalog.get("served_urls") or [])
+    result["catalog_errors"] = list(catalog.get("errors") or [])
+    result["source_names"] = ["东方财富 push2 概念列表（fs=m:90+t:3）",
+                               "Yahoo Finance / 东方财富日线（映射港股与恒指）",
+                               "东方财富 ulist 快照（主力净占比、成交额、PE/PB）",
+                               "本次成功采集的全球头条、东财快讯、国家政策与港股新闻标题候选源（近 72 小时事件匹配）"]
+    dates = result.get("data_dates") or {}
+    content_date = dates.get("latest_seen")
+    partial = bool(catalog.get("errors") or not catalog.get("complete")
+                   or result.get("mapped_total", 0) == 0
+                   or result.get("scored_total", 0) == 0)
+    if result.get("mapped_total", 0) == 0:
+        print(f"  ⚠️ 概念库 {len(concepts)} 项已取得，但本地关键词映射命中 0 项；不伪造港股关联")
+    else:
+        print(f"  ✅ 概念库 {len(concepts)} 项 · 关键词命中 {result['mapped_total']} 项 · "
+              f"总分可用 {result['scored_total']} 项 · 港股行情样本 {result['coverage']['technical_symbols']}/"
+              f"{result['coverage']['mapped_hk_symbols']}")
+    return _source_result(
+        source_label, "success", is_today=_sector_rotation_is_today(content_date),
+        content_date=content_date, partial=partial, result=result,
+        error="；".join((catalog.get("errors") or [])[:2]) or None)
+
+
+# ============================================================
 # 每周量化走势预测：未来 7 个交易日逐日表格（恒指升跌方向 / 概率 / 理由 / 分析 / AI 操作建议）
 # ------------------------------------------------------------
 # 方法来自 GitHub 无未来函数（look-ahead）量化工程实践调研：
@@ -4175,6 +4397,10 @@ def collect_all_data():
         data[HK7_SOURCE_NAME] = hk7_src
     time.sleep(0.5)
 
+    # A股全量概念库 → 明确关键词映射到港股观察篮子；失败 / 无映射不伪造信号。
+    data[SECTOR_ROTATION_SOURCE_NAME] = fetch_sector_rotation(data)
+    time.sleep(0.5)
+
     # === 新增：全栏目新鲜度检查 ===
     print("\n🕐 正在检查全栏目数据新鲜度...")
     try:
@@ -4471,6 +4697,7 @@ _SECTION_ICON_META = {
     "HK PROBABILITY": ("◈", "HK-PROB", C_MAGENTA, "#301226"),
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
+    "SECTOR ROTATION": ("↻", "ROTATE", C_CYAN, "#092836"),
 }
 
 
@@ -6324,6 +6551,7 @@ SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
 SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
+SECTION_TITLE_SECTOR_ROTATION = "【滚滚翻车鱼】板块轮动量化策略"
 SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
 SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
 SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
@@ -6334,7 +6562,7 @@ REPORT_SECTION_ORDER = (
     "FORECAST",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "MARKET REVIEW", "POLICY SHOCK",
+    "SECTOR ROTATION", "MARKET REVIEW", "POLICY SHOCK",
     "FED TREND", "GEO TREND", "STRATEGY READ",
     "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
@@ -7285,6 +7513,153 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
             "先看重点，再读全文 · 规则/量化合成，非大模型生成 · 非投资建议")
 
 
+def _sector_rotation_rows(item, kit, rank_label=None):
+    """一条映射概念的窄屏渲染行：名称、可用总分、港股观察股、五维和三票。"""
+    esc = kit.esc
+    score = item.get("overall_score")
+    score_text = (f'{score:.1f}/100 · {_esc(str(item.get("score_label") or ""))}'
+                  if score is not None else f'总分暂缺 · {_esc(str(item.get("score_reason") or ""))}')
+    number = f"{rank_label:02d}" if isinstance(rank_label, int) else "◇"
+    main = f'<b>{esc(str(item.get("name") or "未命名概念"))}</b> · {score_text}'
+
+    mapped = []
+    for stock in item.get("mapped_stocks") or []:
+        label = str(stock.get("name") or "")
+        code = str(stock.get("code") or "")
+        if label:
+            mapped.append(f"{label} {code}".strip())
+    mapping_text = "、".join(mapped[:6]) or "映射港股无行情记录"
+    if len(mapped) > 6:
+        mapping_text += f" 等 {len(mapped)} 只"
+
+    dim_labels = (("技术面", "技"), ("资金面", "资"), ("基本面", "基"),
+                  ("行业板块", "板"), ("事件驱动", "事"))
+    dim_bits = []
+    for key, short in dim_labels:
+        dim = (item.get("dimensions") or {}).get(key) or {}
+        value = dim.get("score")
+        if value is None:
+            dim_bits.append(f"{short}—")
+        else:
+            dim_bits.append(f"{short}{value:.0f}({dim.get('valid', 0)}/{dim.get('total', 0)})")
+    available_weight = float(item.get("available_weight") or 0) * 100
+    dim_text = "五维 " + " / ".join(dim_bits) + f" · 可用权重 {available_weight:.0f}%"
+
+    vote_summary = item.get("strategy_summary") or {}
+    vote_names = {"ma_trend": "MA", "multi_momentum": "动量", "relative_rotation": "相对轮动"}
+    vote_bits = []
+    for vote in item.get("strategy_votes") or []:
+        vote_bits.append(f'{vote_names.get(vote.get("key"), vote.get("name", "策略"))}'
+                         f' {vote.get("direction") or "数据不足"}')
+    valid_n = int(vote_summary.get("available_n") or 0)
+    consensus = str(vote_summary.get("consensus") or "数据不足")
+    votes_text = ("三策 " + " / ".join(vote_bits)
+                  + f" → {consensus}（有效 {valid_n}/3）")
+    pieces = [f"港股观察篮子：{_esc(mapping_text)}", _esc(dim_text), _esc(votes_text)]
+    matched = "、".join(str(x) for x in (item.get("matched_terms") or [])[:5])
+    if matched:
+        pieces.append("映射命中词：" + _esc(matched))
+    evidence = item.get("event_evidence") or []
+    if evidence:
+        ev = evidence[0]
+        pieces.append(f'事件证据（{_esc(str(ev.get("source") or "公开标题"))} · '
+                      f'{_esc(str(ev.get("sentiment") or "中性"))}）：'
+                      f'{_esc(str(ev.get("title") or "")[:90])}')
+    return kit.item_row(number, main, "<br>".join(pieces))
+
+
+def _render_sector_rotation(source, kit):
+    """两套主题共用：板块轮动评分、三策略投票、映射范围与缺项解释。"""
+    result = (source or {}).get("result") or {}
+    if not isinstance(result, dict):
+        return ""
+    concepts = int(result.get("concept_total") or 0)
+    mapped_total = int(result.get("mapped_total") or 0)
+    unmapped_total = int(result.get("unmapped_total") or 0)
+    scored_total = int(result.get("scored_total") or 0)
+    coverage = result.get("coverage") or {}
+    dates = result.get("data_dates") or {}
+    rows = []
+    rows.append(("A股概念库", f'{concepts:,} 项'
+                 + (" · 分页完整" if result.get("catalog_complete") else " · 分页/接口完整性未确认")))
+    rows.append(("关键词映射", f"命中 {mapped_total} 项 · 未映射 {unmapped_total} 项不进入港股评分"))
+    rows.append(("港股数据覆盖",
+                 f"日线 {int(coverage.get('technical_symbols') or 0)}/{int(coverage.get('mapped_hk_symbols') or 0)}"
+                 f" · 资金 {int(coverage.get('flow_symbols') or 0)}/{int(coverage.get('mapped_hk_symbols') or 0)}"
+                 f" · PE/PB {int(coverage.get('fundamental_symbols') or 0)}/{int(coverage.get('mapped_hk_symbols') or 0)}"
+                 f" · 可评分概念 {scored_total}"))
+    date_bits = [f"A股概念 {dates.get('a_share_concepts') or '未返回日期'}",
+                 f"港股日线 {dates.get('hk_stocks_latest') or '暂缺'}",
+                 f"港股资金/估值快照 {dates.get('hk_quotes_latest') or '暂缺'}",
+                 f"恒指基准 {dates.get('hsi_benchmark') or '暂缺'}"]
+    rows.append(("行情日期", " · ".join(_esc(str(x)) for x in date_bits)))
+    rows.append(("五维权重", "技术面 35% · 资金面 35% · 基本面 10% · 行业板块 10% · 事件驱动 10%"))
+    out = [kit.kv(rows)]
+
+    items = [row for row in result.get("items") or [] if isinstance(row, dict)]
+    scored = [row for row in items if row.get("overall_score") is not None]
+    if scored:
+        if len(scored) <= 8:
+            leaders = scored
+            laggards = []
+        else:
+            leaders = scored[:5]
+            laggards = scored[-3:]
+        out.append(kit.sub("综合分靠前"))
+        for index, item in enumerate(leaders, 1):
+            out.append(_sector_rotation_rows(item, kit, rank_label=item.get("rank") or index))
+        if laggards:
+            out.append(kit.sub("综合分靠后（供风险对照）"))
+            for item in laggards:
+                out.append(_sector_rotation_rows(item, kit, rank_label=item.get("rank")))
+        out.append(kit.note(_esc(
+            f"共有 {scored_total} 个概念满足总分门槛；版面展示前 5 与后 3（若候选不超过 8 个则全部列出）。")))
+    else:
+        out.append(kit.item_row("!", "没有概念满足综合评分门槛",
+                                "保留板块行情与单项可用分；不会用缺失维度补 0 或 50 分。"))
+
+    unscored = [row for row in items if row.get("overall_score") is None]
+    if unscored:
+        out.append(kit.sub("数据不足的映射概念（示例）"))
+        for item in unscored[:3]:
+            out.append(_sector_rotation_rows(item, kit))
+        if len(unscored) > 3:
+            out.append(kit.note(_esc(f"另有 {len(unscored) - 3} 个映射概念未达到综合评分门槛。")))
+    if not items:
+        out.append(kit.item_row("!", "当前概念库没有命中本地港股关键词观察篮子",
+                                "不把名称相似或业务猜测当作官方跨市场关系。"))
+
+    refs = _sector_rotation.strategy_reference_links()
+    ref_html = " · ".join(
+        f'<a href="{_esc(url)}" style="color:inherit;text-decoration:underline;">{_esc(label)}</a>'
+        for label, url in refs)
+    methodology = (
+        "总分：每维 0–100；技术为映射股 20/60 日收益与 MA20/60 趋势等权组合，资金将 A 股概念板块 f62/f6 与港股映射股主力净占比分组等权（港股组至少 2 只），"
+        "基本面仅按全部映射港股观察篮子中的正 PE-TTM/PB 横截面分位做代理、非同行业比较且不代表盈利质量，行业板块用 A 股概念涨跌幅与涨跌宽度，"
+        "事件只扫描近 72 小时已抓标题的固定词表。缺失维度不填 0/50；至少 3 维且原始权重覆盖 ≥70% 才按可用权重重新归一化。"
+        "三策略独立投票：①MA20/60 多空排列达到映射股 60%；②20/60/120 日等权动量至少两周期同向；"
+        "③相对恒指的 20/60 日超额收益（简化 RRG 象限代理，非标准 JdK RRG）。至少 2 套策略有效且至少 2 票同向，才给偏多/偏空；权重总分与策略票不混算。"
+    )
+    mapping_note = (
+        "映射限制：A 股概念名称按仓库内白名单关键词连接至人工维护的港股公司观察篮子，"
+        "并非东方财富/交易所官方成分或公司关联；单股/少数公司不能代表完整概念产业链。当前概念池为当下快照，无点时成分历史，"
+        "因此不宣称历史回测收益或样本外有效性。东方财富接口参数、字段语义与分页尚未在线实测核验，页面值只代表当前解析结果。"
+    )
+    source_text = "数据：" + "；".join(result.get("source_names") or ["东方财富概念列表、港股日线与个股快照"])
+    methodology_html = _esc(methodology) + "<br>" + _esc(mapping_note) + "<br>" + _esc(source_text)
+    reference_html = ("GitHub 方法参考（仅借鉴规则思想；未复制第三方源码）：" + ref_html
+                      + _esc("。MA 模板仓库提供 MIT LICENSE；另外两个仓库在检查时未找到 LICENSE 文件，仅作概念参考。"))
+    if kit is PIXEL_KIT:
+        # Pixel 的通用脚注为节省版面而隐藏；此栏的计算口径、A/H 映射限制与来源是
+        # 防止误读所必需的信息，改用正文行输出，两个主题都必须保留。
+        out.append(kit.item_row("i", "<b>计算过程与映射限制</b>", methodology_html))
+        out.append(kit.item_row("↗", "<b>GitHub 方法参考</b>", reference_html))
+    else:
+        out.append(kit.note(methodology_html))
+        out.append(kit.note(reference_html))
+    return kit.rows("".join(out))
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -7323,6 +7698,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         ("热门榜单", hot),
         ("港股量化引擎（概率/流动性）", data.get("港股量化") or {}),
     ]
+    # 板块轮动是独立的 A股概念库 + 港股观察篮子来源；仅外部调用确实传入时计入审计。
+    if isinstance(data.get(SECTOR_ROTATION_SOURCE_NAME), dict):
+        source_items.append((SECTOR_ROTATION_SOURCE_NAME, data[SECTOR_ROTATION_SOURCE_NAME]))
     # 前瞻日程（「时间节点」栏目）：关掉采集时不进审计，总源数保持不变。
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
@@ -7405,6 +7783,15 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         blocks["WEEKLY FORECAST"] = (
             "WEEKLY FORECAST", SECTION_TITLE_WEEKLY_FORECAST, merged_html,
             wk_badge, wk_caption)
+
+    # ⑦ 【滚滚翻车鱼】A股概念库 → 港股观察篮子：权重分与三策略投票分别呈现。
+    rotation_src = data.get(SECTOR_ROTATION_SOURCE_NAME) or {}
+    if rotation_src.get("status") == "success":
+        rotation_html = _render_sector_rotation(rotation_src, kit)
+        if rotation_html:
+            blocks["SECTOR ROTATION"] = (
+                "SECTOR ROTATION", SECTION_TITLE_SECTOR_ROTATION, rotation_html,
+                kit.source_badge(rotation_src), _short_source(rotation_src))
 
     # ⓪ 时间节点（原「未来 N 天影响经济时间点」，2026-09-29 改名）：
     #    开头栏目——先看清日程窗口，再读今天的盘；窗口天数仍在栏目内「窗口摘要 · 时间窗口」显示。
