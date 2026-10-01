@@ -10,6 +10,13 @@ name: 🗄️ 市场数据库 · 定时入库（隐藏功能）
 #   · 交叉验证：同标的多源比价（中位数 + MAD 稳健离群）、逐源判滞后、共识价与置信度；
 #   · 自我检查：源覆盖 / 标的覆盖 / 数值 / 冲突 / 跨时段与跨日跳变 / 文件哈希。
 #
+# 防卡死（2026-10-01：一次运行被单台死主站拖到 20 分钟上限取消，日志只剩
+# 「未找到配置文件 … / 请手动运行 mootdx bestip / Error: The operation was canceled.」）：
+#   · market_db.py 侧四道闸 —— 预置 mootdx 配置、TCP 预检、先行情验活后逐只明细、
+#     通达信通道总预算（OCTOPUS_DB_TDX_BUDGET，默认 90s）；
+#   · 工作流侧 —— PYTHONUNBUFFERED=1（被 kill 时 stdout 不再整段丢失，日志留证）、
+#     采集步骤单独设 8 分钟上限（真卡住就快速失败，不占用整作业的 20 分钟）。
+#
 # 该功能不进日报正文、不进微信推送、不出现在 pipeline --help 里，与日报的
 # 当天检验 / 推送门禁完全解耦。
 on:
@@ -48,6 +55,9 @@ jobs:
   market-db:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # 行缓冲：作业被取消时 stdout 里的采集进度不会整段丢失（2026-10-01 事故复盘发现）
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: 📥 检出仓库
@@ -70,12 +80,15 @@ jobs:
           pip install --quiet mootdx || echo "::warning::mootdx 安装失败，本次跳过通达信通道"
 
       - name: 🗄️ 多源采集 → 交叉验证 → 自检 → 落库
+        timeout-minutes: 8        # 兜底：真卡住就快速失败，别耗满整作业的 20 分钟
         env:
           SLOT: ${{ github.event.inputs.slot || 'auto' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           OCTOPUS_DB_SYMBOLS: ${{ vars.OCTOPUS_DB_SYMBOLS }}
           # 可选：OCTOPUS_DB_TDX_SERVERS 指定通达信主站（host:port,host:port）
           OCTOPUS_DB_TDX: ${{ vars.OCTOPUS_DB_TDX || '1' }}
+          OCTOPUS_DB_TDX_BUDGET: ${{ vars.OCTOPUS_DB_TDX_BUDGET || '90' }}   # 通达信通道总预算（秒）
+          # 可选：OCTOPUS_DB_TDX_CONFIG 指定 mootdx 配置文件路径（默认 $HOME/.mootdx/config.json）
         run: |
           set -euo pipefail
           if [ "$DRY_RUN" = "true" ]; then
