@@ -19,11 +19,14 @@ import io
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
+import time
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 sys.modules.setdefault("requests", types.SimpleNamespace())
 
@@ -33,6 +36,15 @@ if OUTPUT_DIR not in sys.path:
     sys.path.insert(0, OUTPUT_DIR)
 
 import market_db as m  # noqa: E402
+
+# 测试全程离线（见模块 docstring）：装了 mootdx 的环境里，通达信通道默认**关掉**
+# （老用例只测其它 5 路），配置写进临时目录、主站指向必然拒绝连接的本机端口 ——
+# 不碰真实主站，也不碰真实 $HOME。要验通达信通道的用例自己注入假客户端
+# （防卡死用例注入 connector / factory），`TdxPullIntegrationTests` 会显式把开关打开。
+os.environ.setdefault("OCTOPUS_DB_TDX", "0")
+os.environ.setdefault("OCTOPUS_DB_TDX_SERVERS", "127.0.0.1:1")
+os.environ.setdefault("OCTOPUS_DB_TDX_CONFIG",
+                      os.path.join(tempfile.gettempdir(), "octopus_tdx_test_config.json"))
 
 CST = timezone(timedelta(hours=8))
 DAY1 = datetime(2026, 10, 1, 8, 0, 12, tzinfo=CST)      # 周四
@@ -823,8 +835,9 @@ class TdxChannelTests(unittest.TestCase):
     @unittest.skipIf(importlib.util.find_spec("mootdx") is not None,
                      "环境已装 mootdx，跳过「未安装」分支")
     def test_missing_mootdx_degrades_gracefully(self):
+        prior = os.environ.get("OCTOPUS_DB_TDX_SERVERS")
         os.environ["OCTOPUS_DB_TDX_SERVERS"] = "127.0.0.1:1"
-        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_SERVERS", None)
+        self.addCleanup(self._restore_env, "OCTOPUS_DB_TDX_SERVERS", prior)
         result = m.fetch_tdx(["600519.SS"], None)
         self.assertEqual(result["status"], "unavailable")
         self.assertIn("未安装 mootdx", result["error"])
@@ -839,8 +852,9 @@ class TdxChannelTests(unittest.TestCase):
         self.assertIn("pip install mootdx", result["error"])
 
     def test_server_pool_prefers_env_and_dedupes(self):
+        prior = os.environ.get("OCTOPUS_DB_TDX_SERVERS")
         os.environ["OCTOPUS_DB_TDX_SERVERS"] = "10.0.0.1:7709, 10.0.0.2"
-        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_SERVERS", None)
+        self.addCleanup(self._restore_env, "OCTOPUS_DB_TDX_SERVERS", prior)
         servers = m._tdx_servers()
         self.assertEqual(servers[0], ("10.0.0.1", 7709))
         self.assertIn(("10.0.0.2", 7709), servers)
@@ -878,6 +892,231 @@ class TdxChannelTests(unittest.TestCase):
         self.assertNotIn("tdx", result["doc"]["slots"]["0800"]["sources"])
 
 
+class _FakeSock:
+    """TCP 预检用的假 socket：只关心「连上了」和「有没有关掉」。"""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class TdxAntiHangTests(unittest.TestCase):
+    """防卡死四道闸（2026-10-01 事故回归）：预置配置 / TCP 预检 / 先验活后明细 / 总预算。
+
+    事故：一台 SYN 被丢弃的死主站，tdxpy 的 connect() 把 socket.timeout 吞掉并 return
+    False，mootdx 又不看返回值 → 死站被当成「连上了」，之后每次调用都跑 auto_retry 阶梯
+    （4 次重连 × 5s + 退避）。11 只沪深标的 ≈ 34 次调用，单站 ~6 分钟、4 站 ~24 分钟，
+    直接把 20 分钟上限的作业拖到「Error: The operation was canceled.」。
+    """
+
+    SNY_DROP = ("10.255.255.1", 7709)
+
+    def setUp(self):
+        # mootdx 配置一律写到临时目录：这些用例谁都不许碰真实 $HOME
+        cfg_dir = tempfile.mkdtemp(prefix="octopus_tdx_home_")
+        self.addCleanup(shutil.rmtree, cfg_dir, ignore_errors=True)
+        self.cfg_path = os.path.join(cfg_dir, "config.json")
+        os.environ["OCTOPUS_DB_TDX_CONFIG"] = self.cfg_path
+        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_CONFIG", None)
+
+    @staticmethod
+    def _dead_connector(calls=None):
+        def connector(address, timeout=None):
+            calls is not None and calls.append((address, timeout))
+            raise socket.timeout("SYN dropped")
+        return connector
+
+    def test_probe_rejects_dead_host_with_reason(self):
+        calls = []
+        ok, err = m._tdx_probe("10.255.255.1", 7709, connector=self._dead_connector(calls))
+        self.assertFalse(ok)
+        self.assertIn("TCP 预检失败", err)
+        self.assertIn("TimeoutError", err)
+        self.assertIn("10.255.255.1:7709", err)
+        self.assertEqual(calls[0][0], ("10.255.255.1", 7709))
+        self.assertLessEqual(calls[0][1], m.TDX_PROBE_TIMEOUT)   # 预检必须是短超时
+
+    def test_probe_accepts_live_host_and_closes_socket(self):
+        sock = _FakeSock()
+        ok, err = m._tdx_probe("1.2.3.4", 7709, connector=lambda address, timeout=None: sock)
+        self.assertTrue(ok)
+        self.assertEqual(err, "")
+        self.assertTrue(sock.closed)          # 预检只探端口，探完立刻放掉
+
+    def test_dead_host_never_reaches_mootdx(self):
+        def factory(**_kw):
+            raise AssertionError("预检不过就不该构造 mootdx 客户端")
+
+        client, err = m._open_tdx_client(*self.SNY_DROP, 8, factory=factory,
+                                         connector=self._dead_connector())
+        self.assertIsNone(client)
+        self.assertIn("TCP 预检失败", err)
+
+    def test_client_is_built_without_auto_retry(self):
+        seen = {}
+
+        def factory(**kw):
+            seen.update(kw)
+            return object()
+
+        client, err = m._open_tdx_client("1.2.3.4", 7709, m.TDX_SOCKET_TIMEOUT, factory=factory,
+                                         connector=lambda address, timeout=None: _FakeSock())
+        self.assertIsNotNone(client)
+        self.assertEqual(err, "")
+        if importlib.util.find_spec("mootdx") is not None:
+            self.assertTrue(os.path.exists(self.cfg_path))   # 预置配置写在（临时）指定路径
+        self.assertIs(seen["auto_retry"], False)     # tdxpy 重连阶梯 = 事故主因，关掉
+        self.assertIs(seen["heartbeat"], False)
+        self.assertEqual(seen["server"], ("1.2.3.4", 7709))
+        self.assertEqual(seen["market"], "std")
+
+    def test_quotes_liveness_comes_before_per_symbol_detail(self):
+        """行情为空立刻换站：绝不在一台死站上逐只跑 bars / finance / xdxr。"""
+
+        class DeadClient:
+            def __init__(self):
+                self.calls = []
+
+            def quotes(self, symbol):
+                self.calls.append("quotes")
+                return []
+
+            def bars(self, **kw):
+                self.calls.append("bars")
+                return []
+
+            def finance(self, **kw):
+                self.calls.append("finance")
+                return []
+
+            def xdxr(self, **kw):
+                self.calls.append("xdxr")
+                return []
+
+        client = DeadClient()
+        result = m.fetch_tdx(["600519.SS", "000001.SS"], None, client=client, enrich=True,
+                             date_str="2026-10-01")
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("验活", result["error"])
+        self.assertEqual(client.calls, ["quotes"])   # 后面三次调用一次都不许发
+
+    def test_deadline_stops_per_symbol_calls(self):
+        class MustNotCall:
+            def bars(self, **kw):
+                raise AssertionError("预算已到点，不该再逐只取数")
+
+            def finance(self, **kw):
+                raise AssertionError("预算已到点，不该再逐只取数")
+
+            def xdxr(self, **kw):
+                raise AssertionError("预算已到点，不该再逐只取数")
+
+        past = time.monotonic() - 1
+        pairs = {"sh600519": "600519.SS"}
+        self.assertEqual(m._tdx_eod_closes(MustNotCall(), pairs, past), {})
+        self.assertEqual(m._tdx_fundamentals(MustNotCall(), pairs, {}, past), {})
+        self.assertEqual(m._tdx_corporate_actions(MustNotCall(), pairs, "2026-10-01", deadline=past), {})
+        self.assertEqual(m._tdx_time_left(None), float("inf"))   # 注入客户端时不设 deadline
+
+    def test_budget_zero_stops_before_any_server(self):
+        def factory(**_kw):
+            raise AssertionError("预算为 0 时不该建客户端")
+
+        result = m.fetch_tdx(["600519.SS"], None,
+                             servers=[("1.1.1.1", 7709), ("1.1.1.2", 7709)], budget=0,
+                             connector=lambda address, timeout=None: _FakeSock(), factory=factory)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("预算", result["error"])
+
+    def test_budget_expires_midway_and_reports_reason(self):
+        clock = {"t": 1_000.0}
+
+        def fake_monotonic():
+            clock["t"] += 3.0
+            return clock["t"]
+
+        tried = []
+
+        def factory(**kw):
+            tried.append(kw["server"])
+            raise ConnectionResetError("reset by peer")
+
+        servers = [("1.1.1.%d" % i, 7709) for i in range(1, 7)]
+        with mock.patch.object(m.time, "monotonic", fake_monotonic):
+            result = m.fetch_tdx(["600519.SS"], None, servers=servers, budget=10,
+                                 connector=lambda address, timeout=None: _FakeSock(), factory=factory)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("预算", result["error"])
+        self.assertLess(len(tried), len(servers))    # 到点就收工，不把 4 台全试一遍
+        self.assertTrue(tried)
+
+    def test_dead_servers_reported_with_real_reasons(self):
+        tried = []
+
+        def factory(**kw):
+            tried.append(kw["server"])
+            raise ConnectionResetError("reset by peer")
+
+        result = m.fetch_tdx(["600519.SS"], None,
+                             servers=[("1.1.1.1", 7709), ("1.1.1.2", 7709)], budget=30,
+                             connector=lambda address, timeout=None: _FakeSock(), factory=factory)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(tried, [("1.1.1.1", 7709), ("1.1.1.2", 7709)])
+        self.assertIn("1.1.1.2:7709 ConnectionResetError", result["error"])
+        self.assertIn("1.1.1.1:7709", result["error"])
+
+    def test_config_path_env_override(self):
+        os.environ["OCTOPUS_DB_TDX_CONFIG"] = "/tmp/octopus_tdx_config.json"
+        self.addCleanup(os.environ.pop, "OCTOPUS_DB_TDX_CONFIG", None)
+        self.assertEqual(m._mootdx_config_path(), "/tmp/octopus_tdx_config.json")
+
+    def test_config_path_matches_mootdx_rule(self):
+        """我们算的路径必须和 mootdx 自己用的一致，否则预置配置等于白写。"""
+        if importlib.util.find_spec("mootdx") is None:
+            self.skipTest("环境未装 mootdx，路径口径由装了 mootdx 的 CI 覆盖")
+        from mootdx.utils import get_config_path
+        with mock.patch.dict(os.environ):                  # 临时摘掉覆盖，看默认口径
+            os.environ.pop("OCTOPUS_DB_TDX_CONFIG", None)
+            self.assertEqual(m._mootdx_config_path(), str(get_config_path("config.json")))
+
+    def test_seed_config_never_overwrites_existing_file(self):
+        path = os.path.join(tempfile.mkdtemp(prefix="octopus_tdx_cfg_"), "config.json")
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        payload = {"SERVER": {"HQ": [["自定义", "9.9.9.9", 7709]]},
+                   "BESTIP": {"HQ": ["9.9.9.9", 7709], "EX": "", "GP": ""}, "TDXDIR": "/dx"}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        self.assertEqual(m._ensure_tdx_config("1.2.3.4", 7709, path=path), path)
+        with open(path, "r", encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), payload)     # 用户 / CI 预置的主站被尊重
+
+    def test_seed_config_writes_mootdx_layout(self):
+        if importlib.util.find_spec("mootdx") is None:
+            path = os.path.join(tempfile.mkdtemp(prefix="octopus_tdx_cfg_"), "config.json")
+            self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+            self.assertIsNone(m._ensure_tdx_config("1.2.3.4", 7709, path=path))
+            self.assertFalse(os.path.exists(path))       # 没装 mootdx 就不写半个文件
+            return
+        path = os.path.join(tempfile.mkdtemp(prefix="octopus_tdx_cfg_"), "config.json")
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        self.assertEqual(m._ensure_tdx_config("1.2.3.4", 7709, path=path), path)
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data["BESTIP"]["HQ"], ["1.2.3.4", 7709])   # 写进去就不会跑 bestip
+        self.assertEqual(sorted(data["SERVER"]), ["EX", "GP", "HQ"])
+        self.assertTrue(data["SERVER"]["HQ"])
+        self.assertIn("TDXDIR", data)
+
+    def test_restamp_swaps_date_and_keeps_time(self):
+        quotes = {"600519.SS": {"quote_time": "2026-10-01 14:59:58", "price": 1.0},
+                  "000001.SS": {"quote_time": None, "price": 2.0}}
+        m._tdx_restamp(quotes, {"600519.SS": "2026-09-30"})
+        self.assertEqual(quotes["600519.SS"]["quote_time"], "2026-09-30 14:59:58")
+        self.assertIsNone(quotes["000001.SS"]["quote_time"])         # 没日K就别动
+
+
 class TdxCrossCheckTests(unittest.TestCase):
     def _by_source(self):
         return {"eastmoney": {"price": 100.0, "prev_close": 99.0,
@@ -909,6 +1148,12 @@ class TdxCrossCheckTests(unittest.TestCase):
 
 class TdxPullIntegrationTests(TempRootCase):
     """整链：Fixtures(HTTP) + 假通达信客户端 → 落库文件里能看到 6 路源与附带数据。"""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"OCTOPUS_DB_TDX": "1"})   # 本类要验通达信参与
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _http(self, **kw):
         return FixtureHttp(prices=A_PRICES, prev=A_PREV, **kw)
