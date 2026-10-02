@@ -264,6 +264,24 @@
       **边界**：不进日报正文、不进微信推送、不出现在 --help（隐藏入口 --stock-db，
       见 .github/workflows/market-db.yml），因此不改动日报的当天检验与推送门禁。
 
+  23. 新增「【深水石斑鱼】港股行情」栏目 + 港股境外数据源（2026-10-02 按用户要求，
+      output/hk_overseas.py）：
+      四路**境外**公开源，无需密钥、各自独立降级，取不到就少一行 / 整栏缺席，绝不编数字：
+        ① Yahoo Finance Chart（query1 → query2 镜像）：港股指数（恒指 / 恒科 / 恒生国企）
+           + 港股个股篮子（腾讯 / 阿里 / 美团 / 小米 / 中移动 / 友邦 / 港交所 / 平安）；
+        ② Stooq（stooq.com → stooq.pl 镜像）：主源缺某只时补位；OCTOPUS_HK_CROSSCHECK=1
+           时对主源价格做交叉校验，偏差 >1.5% 写进栏目说明（不覆盖主源数字）；
+        ③ HKEX 港交所官网「每日市场统计」：市场层成交额；解析必须「数字 + 单位」成对
+           才采纳，只有数字没有单位一律标暂缺（不做单位猜测）；
+        ④ stealth 浏览器（tools/patchright-enhanced/probe.js，patchright）：
+           渲染带 WAF 的香港站点（etnet 經濟通 / aastocks 阿斯達克 / HKEX），
+           仅补主源没给的字段，**默认关闭**，OCTOPUS_HK_BROWSER=1 且本机装好
+           Node + patchright + Chrome 才启用；只读公开页面，不登录、不绕付费墙。
+      栏目口径：逐行标供数来源（YH/ST/HKEX/+BR）与行情日；snapshot=True（行情快照），
+      因此不会单独把日报推过当天检验闸门；OCTOPUS_HK_OVERSEAS=0 可关闭整路采集。
+      本条与既有栏目的分工：【及时秋刀鱼】AI 行情复盘给全市场报价快照（含港股双指数），
+      【港股概率走势分析】给概率模型，本栏给**境外口径的港股个股与市场层明细**。
+
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
   1 = 应当推送却失败，或用法错误。
@@ -332,6 +350,7 @@ import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
 import backup_sources as _backup  # noqa: E402
 import dedup as _dedup  # noqa: E402
+import hk_overseas as _hkx  # noqa: E402  # 🇭🇰 港股境外数据源（Yahoo / Stooq / HKEX / 可选 stealth 浏览器）
 
 QUANT_HISTORY_FILENAME = "quant_history.json"
 # 量化引擎开关：OCTOPUS_QUANT=0 或 --no-quant 可整体跳过（离线/赶时间时用）
@@ -511,6 +530,14 @@ EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 # 前瞻性日程不属于「当天发布的内容」→ is_today=False + snapshot=True，
 # 因此它永远不会单独把日报推过当天检验闸门（见 check_push_eligibility）。
 # ------------------------------------------------------------
+def _env_flag(name, default=False):
+    """读布尔环境变量：1/true/yes/on/y 为真，其余为假；未设置取默认。"""
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on", "y")
+
+
 def _env_int(name, default, lo, hi):
     """读整数环境变量：非法值回落 default，合法值夹在 [lo, hi]。"""
     try:
@@ -527,6 +554,23 @@ ECON_CALENDAR_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 ECON_CALENDAR_REPORT = "RPT_CPH_FECALENDAR"
 ECON_CALENDAR_COLUMNS = "START_DATE,END_DATE,FE_CODE,FE_NAME,FE_TYPE,STD_TYPE_CODE,CITY"
 ECON_CALENDAR_PAGE = "https://data.eastmoney.com/cjrl/default.html"  # 溯源页（完整日历）
+
+
+# ------------------------------------------------------------
+# 港股境外数据源（2026-10-02 新增，output/hk_overseas.py）
+#   【深水石斑鱼】港股行情栏目的取数开关与口径：
+#     OCTOPUS_HK_OVERSEAS=0   关闭整路采集（栏目随之缺席）
+#     OCTOPUS_HK_BROWSER=1    启用 stealth 浏览器第 4 路（需 Node + patchright + Chrome，
+#                             Actions 默认不装；不启用时前三路照常）
+#     OCTOPUS_HK_CROSSCHECK=1 用 Stooq 对主源价格做交叉校验（偏差 >1.5% 记入栏目说明）
+#   三路境外公开源（Yahoo / Stooq / HKEX）都取不到时栏目自然缺席，绝不占位、不编数字。
+# ------------------------------------------------------------
+HK_OVERSEAS_SOURCE_NAME = _hkx.HK_OVERSEAS_SOURCE
+HK_OVERSEAS_ENABLED = _env_flag("OCTOPUS_HK_OVERSEAS", True)
+HK_OVERSEAS_BROWSER = _env_flag("OCTOPUS_HK_BROWSER", False)
+HK_OVERSEAS_CROSSCHECK = _env_flag("OCTOPUS_HK_CROSSCHECK", False)
+
+
 ECON_CALENDAR_SOURCE = "东方财富财经日历"
 ECON_CALENDAR_PAGE_SIZE = 500   # 服务端单页上限
 ECON_CALENDAR_MAX_PAGES = 8     # 30 天窗口实测 1 页足够，翻页只为窗口调大时兜底
@@ -4364,6 +4408,16 @@ def collect_all_data():
     if data["实时行情"].get("status") == "success":
         _reconcile_market_snapshot(data["实时行情"], data["A股大盘全景"],
                                    hk_ref=_fetch_hk_index_reference())
+    # 🇭🇰 港股境外数据源（2026-10-02 新增）：Yahoo / Stooq / HKEX / 可选 stealth 浏览器，
+    #   供【深水石斑鱼】港股行情栏目；四路各自降级，整块取不到就不进正文（栏目自然缺席）。
+    if HK_OVERSEAS_ENABLED:
+        data[HK_OVERSEAS_SOURCE_NAME] = _hkx.fetch_hk_overseas(
+            safe_request,
+            use_browser=HK_OVERSEAS_BROWSER,
+            crosscheck=HK_OVERSEAS_CROSSCHECK,
+        )
+        time.sleep(0.5)
+
     # 政策因子的独立官方输入：直接读取中国政府网最新政策，不以媒体转载替代。
     data["国家政策"] = fetch_gov_policy()
     time.sleep(0.5)
@@ -4712,6 +4766,8 @@ _SECTION_ICON_META = {
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
     "SECTOR ROTATION": ("↻", "ROTATE", C_CYAN, "#092836"),
+    # 港股行情（2026-10-02 新增）：境外数据源（Yahoo / Stooq / HKEX / 可选浏览器）
+    "HK QUOTES": ("◍", "HK-MKT", C_CYAN, "#092836"),
 }
 
 
@@ -5918,6 +5974,162 @@ def _pixel_market_section(market, pan=None):
             + _block("港股双指数", MARKET_REVIEW_HK_SPECS))
 
 
+# ------------------------------------------------------------
+# 【深水石斑鱼】港股行情（2026-10-02 新增）
+#   数据来自 output/hk_overseas.py 的四路**境外**公开源：
+#     ① Yahoo Finance Chart（主源）② Stooq（备用 + 交叉校验）
+#     ③ HKEX 官方统计（市场成交额）④ stealth 浏览器（可选，patchright-enhanced 读 WAF 站点）
+#   诚实口径：有几行说几行——某只取不到就少一行、整块取不到就整栏缺席；
+#   市场成交额拿不到就不显示总量；每个数字都带「行情日」与供数来源（YH/ST/BR）。
+#   本条与「AI 行情复盘 · 港股双指数」「港股概率走势分析」的分工：
+#     前者给全市场快照口径的两只指数，后者给概率模型，
+#     这里给**港股个股篮子 + 港交所市场层**的境外行情明细（含成交量/成交额）。
+# ------------------------------------------------------------
+_HK_SOURCE_TAGS = {"yahoo": "YH", "stooq": "ST", "hkex-http": "HKEX"}
+
+
+def _hk_row_tag(row):
+    """单行的供数来源标签：YH=Yahoo 主源、ST=Stooq 备用、+BR=浏览器补齐过字段。"""
+    tag = _HK_SOURCE_TAGS.get(str(row.get("source") or "").lower(),
+                              str(row.get("source") or "—").upper()[:4])
+    if row.get("browser_source"):
+        tag = f"{tag}+BR" if tag != "—" else "BR"
+    return tag
+
+
+def _hk_quote_cells(row):
+    """行情行 → (价格文本, 涨跌数值, 成交量文本, 成交额文本/None)；缺失一律 None，不顶替。"""
+    try:
+        price = float(row.get("price")) if row.get("price") is not None else None
+    except (TypeError, ValueError):
+        price = None
+    pct = _percent_number(row.get("change_pct"))
+    price_str = f"{price:,.2f}" if price is not None else None
+    vol = row.get("volume")
+    vol_str = f"{_format_amount(vol)}股" if vol else None
+    turnover = row.get("turnover_yi")
+    tn_str = f"{turnover:.2f}亿" if turnover is not None else None
+    return price_str, pct, vol_str, tn_str
+
+
+def _hk_source_note(res):
+    """数据源与口径一行字：各路状态 + 行情日 + 交叉校验（只陈述实际发生的事）。"""
+    bits = []
+    for src in res.get("sources") or []:
+        status = src.get("status")
+        if status == "skipped":
+            continue
+        mark = {"success": "✅", "failed": "⚠️", "empty": "🕓"}.get(status, "·")
+        bits.append(f'{mark}{src.get("name", "")}')
+    cross = res.get("crosscheck") or {}
+    if cross.get("rows"):
+        bad = cross.get("bad") or []
+        bits.append(f"交叉校验 {len(cross['rows'])} 项" + (f"（{', '.join(bad)}）" if bad else "一致"))
+    date = str(res.get("content_date") or "")[:10]
+    head = f"境外数据源：{' · '.join(bits)}" if bits else "境外数据源状态暂缺"
+    tail = (f"行情日 {date}。" if date else "") + \
+        "YH=Yahoo Finance 主源 / ST=Stooq 备用源 / HKEX=港交所官方统计 / BR=stealth 浏览器补齐；" \
+        "取不到的字段显示「—」，不猜测、不用相邻数字顶替。非投资建议。"
+    return f"{head}。{tail}"
+
+
+def gz_hk_quotes_block(res):
+    """guizang 版【深水石斑鱼】港股行情：港股指数 / 个股篮子 / 港交所市场层 + 数据源说明。"""
+    parts = []
+    date = str(res.get("content_date") or "")[:10]
+    indices = res.get("indices") or []
+    stocks = res.get("stocks") or []
+
+    if indices:
+        rows = []
+        for r in indices:
+            price_str, pct, _vol, _tn = _hk_quote_cells(r)
+            badge = gz_trend_badge(pct) if pct is not None else _gz_missing()
+            rows.append([_esc(r["label"]), _gz_num(price_str or "—"), badge, _hk_row_tag(r)])
+        parts.append(gz_subsection("港股指数" + (f" · 截至 {_asof_short(date)}" if date else ""))
+                     + gz_data_table(["指数", "最新价", "涨跌", "来源"], rows,
+                                     aligns=["left", "right", "left", "left"]))
+
+    if stocks:
+        rows = []
+        for r in stocks:
+            price_str, pct, vol_str, tn_str = _hk_quote_cells(r)
+            badge = gz_trend_badge(pct) if pct is not None else _gz_missing()
+            name = (f'{_esc(r["label"])} <span style="color:{GZ_FAINT};font-size:11px;">'
+                    f'{_esc(r["code"])} · {_hk_row_tag(r)}</span>')
+            rows.append([name, _gz_num(price_str or "—"), badge, tn_str or vol_str or "—"])
+        parts.append(gz_subsection("港股个股（行情明细）") + gz_data_table(
+            ["名称 / 代码", "最新价", "涨跌", "成交额 / 成交量"], rows,
+            aligns=["left", "right", "left", "right"]))
+
+    market = res.get("market") or {}
+    if market.get("turnover_yi") is not None:
+        m_date = str(market.get("as_of") or date or "")[:10]
+        parts.append(gz_subsection("港交所市场层")
+                     + gz_data_table(["项目", "数值"],
+                                     [["主板成交额（港交所官方统计）",
+                                       _gz_num(f'{market["turnover_yi"]:,.2f} 亿港元')
+                                       + (f'（{_asof_short(m_date)}）' if m_date else '')]]))
+    elif parts:
+        parts.append(gz_subsection("港交所市场层")
+                     + gz_note("港交所官方统计暂缺：页面未解析出成对的「数字 + 单位」，不猜测总量。"))
+
+    if not parts:
+        return ""
+    parts.append(gz_note(_esc(_hk_source_note(res))))
+    return "".join(parts)
+
+
+def _pixel_hk_quotes_block(res):
+    """pixel 版【深水石斑鱼】港股行情：港股指数 / 个股篮子 / 港交所市场层 + 数据源说明。"""
+    parts = []
+    date = str(res.get("content_date") or "")[:10]
+    indices = res.get("indices") or []
+    stocks = res.get("stocks") or []
+
+    if indices:
+        rows = []
+        for r in indices:
+            price_str, pct, _vol, _tn = _hk_quote_cells(r)
+            badge = _trend_badge(pct) if pct is not None else _gz_missing()
+            rows.append([_esc(r["label"]), price_str or "—", badge, _hk_row_tag(r)])
+        parts.append(_subsection("港股指数" + (f" · {_asof_short(date)}" if date else ""))
+                     + _pixel_table(["指数", "最新价", "涨跌", "来源"], rows,
+                                    aligns=["left", "right", "left", "left"],
+                                    widths=("34%", "20%", "24%", "22%")))
+
+    if stocks:
+        rows = []
+        for r in stocks:
+            price_str, pct, vol_str, tn_str = _hk_quote_cells(r)
+            badge = _trend_badge(pct) if pct is not None else _gz_missing()
+            label = (f'{_esc(r["label"])} <span style="color:{C_FAINT};font-size:10px;">'
+                     f'{_esc(r["code"])} · {_hk_row_tag(r)}</span>')
+            rows.append([label, price_str or "—", badge, tn_str or vol_str or "—"])
+        parts.append(_subsection("港股个股（行情明细）")
+                     + _pixel_table(["名称 / 代码", "最新价", "涨跌", "量 / 额"], rows,
+                                    aligns=["left", "right", "left", "right"],
+                                    widths=("40%", "18%", "20%", "22%")))
+
+    market = res.get("market") or {}
+    if market.get("turnover_yi") is not None:
+        m_date = str(market.get("as_of") or date or "")[:10]
+        parts.append(_subsection("港交所市场层") + _mini_table([
+            ("主板成交额（港交所官方统计）",
+             f'<b style="color:{C_LEMON};">{market["turnover_yi"]:,.2f} 亿港元</b>'
+             + (f'（{_asof_short(m_date)}）' if m_date else ''), C_INK)]))
+    elif parts:
+        parts.append(_subsection("港交所市场层") + _mini_table([
+            ("官方统计", f'<span style="color:{C_FAINT};">暂缺（未解析出成对数字+单位，不猜测）</span>',
+             C_INK)]))
+
+    if not parts:
+        return ""
+    parts.append(_mini_table([("数据源", f'<span style="color:{C_FAINT};font-size:10px;">'
+                                      f'{_esc(_hk_source_note(res))}</span>', C_INK)]))
+    return "".join(parts)
+
+
 def _panorama_block(pan, with_indices=True):
     """pixel 版 A股全景：指数表现 / 涨跌家数 / 成交额 / 南北向 / 板块热力。
 
@@ -6566,6 +6778,7 @@ SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
 SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
 SECTION_TITLE_SECTOR_ROTATION = "【滚滚翻车鱼】板块轮动量化策略"
+SECTION_TITLE_HK_QUOTES = "【深水石斑鱼】港股行情"
 SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
 SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
 SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
@@ -6576,7 +6789,7 @@ REPORT_SECTION_ORDER = (
     "FORECAST",
     "ECON CALENDAR",
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "SECTOR ROTATION", "MARKET REVIEW", "POLICY SHOCK",
+    "SECTOR ROTATION", "MARKET REVIEW", "HK QUOTES", "POLICY SHOCK",
     "FED TREND", "GEO TREND", "STRATEGY READ",
     "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
@@ -6867,6 +7080,34 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
             notes["MARKET SNAPSHOT"] = _judge_note(
                 prob, f"{len(rows)} 项报价 涨{up_n} / 跌{down_n}（最强 {_esc(strongest[0])}、"
                       f"最弱 {_esc(weakest[0])}）→ 预测：{verdict}")
+
+    # ①b 港股行情（境外数据源）：指数 + 个股涨跌投票 → 方向定调
+    #     证据只取本栏目抓到的行情行（港股指数 + 个股篮子），与报价面/全景面互不混算。
+    hkq = data.get(HK_OVERSEAS_SOURCE_NAME) or {}
+    if isinstance(hkq, dict) and hkq.get("status") == "success":
+        rows = [(str(r.get("label") or ""), _percent_number(r.get("change_pct")))
+                for r in (hkq.get("indices") or []) + (hkq.get("stocks") or [])]
+        rows = [(lab, pct) for lab, pct in rows if pct is not None]
+        if rows:
+            bull = round(sum(max(p, 0) for _, p in rows), 4)
+            bear = round(sum(max(-p, 0) for _, p in rows), 4)
+            prob = _ai_judge_prob(bull, bear)
+            up = sum(1 for _, p in rows if p > 0)
+            down = sum(1 for _, p in rows if p < 0)
+            idx_pct = [p for lab, p in rows if lab in ("恒生指数", "恒生科技", "恒生中国企业指数")]
+            if down == 0 and up:
+                verdict = "港股普涨，留意量能与外围配合"
+            elif up == 0 and down:
+                verdict = "港股普跌，以防守与减仓应对"
+            else:
+                verdict = "港股结构分化，跟随强势品种"
+            idx_txt = ("；".join(f"{lab} {p:+.2f}%" for lab, p in
+                                zip([lab for lab, _ in rows if lab in ("恒生指数", "恒生科技",
+                                                                       "恒生中国企业指数")],
+                                    idx_pct)) or "指数暂缺")
+            notes["HK QUOTES"] = _judge_note(
+                prob, f"{len(rows)} 项境外行情（涨 {up} / 跌 {down}）：{_esc(idx_txt)}"
+                      f" → 预测：{verdict}")
 
     # ② A股大盘全景：市场宽度 + 成交额环比 + 领涨板块 → 三票合成
     pan = data.get("A股大盘全景") or {}
@@ -7732,6 +7973,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 外部旧调用若无该键仍维持原来的基础数据源数量。
     if isinstance(data.get(HK_NEWS_SOURCE_NAME), dict):
         source_items.append(("全网新闻源头（20家）", data[HK_NEWS_SOURCE_NAME]))
+    # 港股境外数据源（2026-10-02）：Yahoo / Stooq / HKEX / 可选浏览器，存在即进审计。
+    if isinstance(data.get(HK_OVERSEAS_SOURCE_NAME), dict):
+        source_items.append((HK_OVERSEAS_SOURCE_NAME, data[HK_OVERSEAS_SOURCE_NAME]))
     # 趋势跟踪：每个平台单独计入审计（缺失平台在「数据覆盖」里点名）；
     # 未运行过多平台采集的旧调用自然不进审计，维持基础数据源数量。
     source_items.extend((name, data[name]) for name in _active_public_site_names() if name in data)
@@ -7832,6 +8076,21 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             "MARKET REVIEW", SECTION_TITLE_MARKET_REVIEW, review_html,
             review_badge, review_caption,
         )
+
+    # ②b 【深水石斑鱼】港股行情（2026-10-02 新增）：境外数据源（Yahoo / Stooq / HKEX /
+    #     可选 stealth 浏览器）供数；某只取不到就少一行、整块取不到整栏缺席。
+    hkq = data.get(HK_OVERSEAS_SOURCE_NAME) or {}
+    if isinstance(hkq, dict) and hkq.get("status") == "success":
+        hkq_html = kit.hk_quotes_block(hkq)
+        if hkq_html:
+            hkq_date = str(hkq.get("content_date") or "")[:10]
+            ok_n = sum(1 for src in (hkq.get("sources") or []) if src.get("status") == "success")
+            hkq_caption = (f"境外 {ok_n} 路供数"
+                           + (f" · 行情日 {_asof_short(hkq_date)}" if hkq_date else ""))
+            blocks["HK QUOTES"] = (
+                "HK QUOTES", SECTION_TITLE_HK_QUOTES, hkq_html,
+                kit.source_badge(hkq), hkq_caption,
+            )
 
     # ③ 政策因子（PSI 量化趋势预判）
     if policy.get("available"):
@@ -10460,6 +10719,7 @@ def _pixel_trend_summary(topic, icon, color, res):
 PIXEL_KIT = _RenderKit(
     market_section=_pixel_market_section,
     market_review=_pixel_market_review,
+    hk_quotes_block=_pixel_hk_quotes_block,
     channel_block=_channel_block,
     headline_row=_headline_row,
     em_news_row=_em_news_row,
@@ -10539,6 +10799,7 @@ def gz_trend_topic_block(res):
 GUIZANG_KIT = _RenderKit(
     market_section=gz_market_section,
     market_review=gz_market_review,
+    hk_quotes_block=gz_hk_quotes_block,
     channel_block=gz_channel_block,
     headline_row=gz_headline_row,
     em_news_row=gz_em_news_row,

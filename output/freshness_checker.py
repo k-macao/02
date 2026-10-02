@@ -30,6 +30,8 @@ FRESHNESS_THRESHOLDS = {
     "每周量化走势预测": {"max_lag_days": 7, "type": "trading", "desc": "七日预测，基于日线（未来 7 个交易日），允许一周滞后"},
     "每日量化策略（行业轮动）": {"max_lag_days": 5, "type": "trading", "desc": "行业轮动，基于日线"},
     "板块轮动量化策略": {"max_lag_days": 4, "type": "trading", "desc": "A股概念快照与港股日线/快照；以结果中最近数据日期检查"},
+    # 港股境外数据源（2026-10-02）：Yahoo / Stooq / HKEX，交易日行情，快照性质（snapshot=True）
+    "港股境外数据源": {"max_lag_days": 3, "type": "trading", "desc": "境外港股行情（Yahoo/Stooq/HKEX），交易日收盘数据"},
     
     # 新闻资讯类：要求当天或 72h 内
     "全球头条": {"max_lag_days": 1, "type": "news", "desc": "Google News 头条，要求当天"},
