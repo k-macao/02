@@ -6851,6 +6851,7 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 #   政策因子               → 【深海肥蓝鲸】政策因子
 #   趋势跟踪               → 【深海大鲨鱼】趋势跟踪
 #   全球头条               → 【无敌帝王蟹】全球头条
+#   策略研判               → 【六眼飞鱼】量化策略 AI 整体研判
 # 数据源键名（全球头条 / 国家政策 / 每周走势预测 …）、审计标签、抓取与门禁一律不动，
 # 因此「数据线主备」注册表与 freshness_checker 的源名保持原样。
 # ------------------------------------------------------------
@@ -6860,6 +6861,8 @@ SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
 # 纯规则合成（output/octopus_short.py），数字全部取自下文各栏同一批实参；
 # OCTOPUS_LITE=0 / --full 关闭，日报回到全量长版。
 SECTION_TITLE_SHORT_CARD = "【闪电飞鱼】短线速查卡"
+SECTION_TITLE_STRATEGY = "【六眼飞鱼】量化策略 AI 整体研判"
+SECTION_TITLE_STRATEGY_READ = SECTION_TITLE_STRATEGY
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
@@ -8235,7 +8238,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                                               limit=9 if LITE_ENABLED else 0)
     if strategy_html:
         blocks["STRATEGY READ"] = (
-            "STRATEGY READ", "策略研判", strategy_html, kit.badge("量化策略", "ai"), "",
+            "STRATEGY READ", SECTION_TITLE_STRATEGY, strategy_html,
+            kit.badge("量化策略", "ai"), "",
         )
         # 兼容旧 kicker 的锚点引用（如风险提示中的 AI READ 引用）
         blocks["AI READ"] = blocks["STRATEGY READ"]

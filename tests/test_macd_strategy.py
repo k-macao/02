@@ -351,7 +351,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                     patch.object(market_db, "load_daily_bars", side_effect=AssertionError("渲染不能读库")):
                 html = pipeline.generate_report(data, "2026年10月2日", "20261002", theme=theme)
             self.assertEqual(html.count("MACD 量化策略 · 日线"), 1)
-            marker = "策略研判</h2>" if theme == "guizang" else "// STRATEGY READ"
+            marker = f"{pipeline.SECTION_TITLE_STRATEGY}</h2>" if theme == "guizang" else "// STRATEGY READ"
             self.assertIn(marker, html)
             self.assertLess(html.find(marker), html.find("MACD 量化策略 · 日线"))
             for text in ("DIF / DEA", "MACD柱", "2026-09-30", "EMA12−EMA26", "非投资建议", "信号不等于上涨概率", "36 根"):
@@ -360,7 +360,7 @@ class PipelineIntegrationTests(unittest.TestCase):
     def test_macd_only_still_has_strategy_column_without_fake_market_neutral_score(self):
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(self._data(False), "2026年10月2日", "20261002", theme=theme)
-            self.assertIn("策略研判</h2>" if theme == "guizang" else "// STRATEGY READ", html)
+            self.assertIn(f"{pipeline.SECTION_TITLE_STRATEGY}</h2>" if theme == "guizang" else "// STRATEGY READ", html)
             self.assertIn("MACD 量化策略", html)
             self.assertNotIn("市场倾向", html)
             self.assertNotIn("量化信号 · 策略总览", html)

@@ -995,7 +995,8 @@ class GuizangOnePageTests(unittest.TestCase):
         for title in ("【爪爪八爪鱼】AI 全篇速览", "【回游金枪鱼】今日预判",
                       "【探照安康鱼】时间节点", "【蜉蝣天地水母】量化预测总览",
                       "港股概率走势分析", "资金流动性分析", "【及时秋刀鱼】AI 行情复盘",
-                      "【深海肥蓝鲸】政策因子", "策略研判", "【深海大鲨鱼】趋势跟踪",
+                      "【深海肥蓝鲸】政策因子", pipeline.SECTION_TITLE_STRATEGY,
+                      "【深海大鲨鱼】趋势跟踪",
                       "【无敌帝王蟹】全球头条",
                       "港股名家频道", "新闻情绪", "总结"):
             self.assertIn(title, titles)
@@ -2187,7 +2188,7 @@ class PolicyFactorTests(unittest.TestCase):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         policy_head = f"{pipeline.SECTION_TITLE_POLICY}</h2>"
-        strategy_head = "策略研判</h2>"
+        strategy_head = f"{pipeline.SECTION_TITLE_STRATEGY}</h2>"
         market_head = f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>"
         self.assertLess(html.find(strategy_head), html.find(policy_head))
         self.assertLess(html.find(policy_head), html.find(market_head))
@@ -2336,7 +2337,7 @@ class SectionReadingOrderTests(unittest.TestCase):
     # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
     # 策略研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
-        "策略研判</h2>",
+        f"{pipeline.SECTION_TITLE_STRATEGY}</h2>",
         f"{pipeline.SECTION_TITLE_POLICY}</h2>",
         f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>",
         f"{pipeline.SECTION_TITLE_GLOBAL_HEADLINES}</h2>",
@@ -2424,7 +2425,7 @@ class ConciseLayoutTests(unittest.TestCase):
 
     def test_analysis_data_conclusion_order_and_emphasis(self):
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
-        strategy = html.find("策略研判</h2>")
+        strategy = html.find(f"{pipeline.SECTION_TITLE_STRATEGY}</h2>")
         market = html.find("【及时秋刀鱼】AI 行情复盘</h2>")
         recap = html.find("总结</h2>")
         forecast = html.find("【回游金枪鱼】今日预判</h2>")
@@ -2643,7 +2644,7 @@ class AiTrendAnalysisTests(unittest.TestCase):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
                 self.assertIn("AI趋势分析（美联储）", titles)
                 self.assertIn("AI趋势分析（地缘政治）", titles)
-                self.assertLess(titles.index("策略研判"),
+                self.assertLess(titles.index(pipeline.SECTION_TITLE_STRATEGY),
                                 titles.index(pipeline.SECTION_TITLE_POLICY))
                 self.assertLess(titles.index(pipeline.SECTION_TITLE_POLICY),
                                 titles.index("AI趋势分析（美联储）"))
@@ -3266,13 +3267,14 @@ class SectionRenameBatch2Tests(unittest.TestCase):
     """
 
     EXPECTED = {
+        "STRATEGY READ": "【六眼飞鱼】量化策略 AI 整体研判",
         "GLOBAL HEADLINES": "【无敌帝王蟹】全球头条",
         "TREND TRACKING": "【深海大鲨鱼】趋势跟踪",
         "POLICY SHOCK": "【深海肥蓝鲸】政策因子",
         "WEEKLY FORECAST": "【贪吃大白鲨】量化走势预测",
     }
     # 旧标题（改名前的栏目头文字）：不得再以任何主题的栏目头形式出现
-    OLD_HEADS = (">全球头条</h2>", ">趋势跟踪</h2>", ">政策因子</h2>",
+    OLD_HEADS = (">策略研判</h2>", ">全球头条</h2>", ">趋势跟踪</h2>", ">政策因子</h2>",
                  ">每周量化走势预测</h2>")
 
     def _data(self):
@@ -3289,6 +3291,8 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         return data
 
     def test_title_constants_match_requested_names(self):
+        self.assertEqual(pipeline.SECTION_TITLE_STRATEGY, self.EXPECTED["STRATEGY READ"])
+        self.assertEqual(pipeline.SECTION_TITLE_STRATEGY_READ, self.EXPECTED["STRATEGY READ"])
         self.assertEqual(pipeline.SECTION_TITLE_GLOBAL_HEADLINES, self.EXPECTED["GLOBAL HEADLINES"])
         self.assertEqual(pipeline.SECTION_TITLE_TREND, self.EXPECTED["TREND TRACKING"])
         self.assertEqual(pipeline.SECTION_TITLE_POLICY, self.EXPECTED["POLICY SHOCK"])
@@ -3320,17 +3324,18 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         titles = [s[1] for s in pipeline._collect_report_parts(
             self._data(), pipeline.GUIZANG_KIT, date_str="20260802")["sections"]]
         pos = [titles.index(self.EXPECTED[k]) for k in
-               ("WEEKLY FORECAST", "POLICY SHOCK", "TREND TRACKING", "GLOBAL HEADLINES")]
+               ("STRATEGY READ", "WEEKLY FORECAST", "POLICY SHOCK", "TREND TRACKING", "GLOBAL HEADLINES")]
         self.assertEqual(pos, sorted(pos))
 
     def test_digest_quotes_renamed_sections(self):
         """首屏速览按栏目引用标题，因此必须跟着改名（否则读者对不上正文栏目）。"""
         digest = pipeline._opening_digest(
-            [("WEEKLY FORECAST", pipeline.SECTION_TITLE_WEEKLY_FORECAST, "周度预测", "", ""),
+            [("STRATEGY READ", pipeline.SECTION_TITLE_STRATEGY, "策略信号", "", ""),
+             ("WEEKLY FORECAST", pipeline.SECTION_TITLE_WEEKLY_FORECAST, "周度预测", "", ""),
              ("POLICY SHOCK", pipeline.SECTION_TITLE_POLICY, "政策定调", "", ""),
              ("TREND TRACKING", pipeline.SECTION_TITLE_TREND, "多平台样本", "", ""),
              ("GLOBAL HEADLINES", pipeline.SECTION_TITLE_GLOBAL_HEADLINES, "39 条头条", "", "")],
-            {}, [("核心判断", "谨慎观察")], 1, 4, pipeline.GUIZANG_KIT)
+            {}, [("核心判断", "谨慎观察")], 1, 5, pipeline.GUIZANG_KIT)
         for kick, want in self.EXPECTED.items():
             self.assertIn(f"{want}：", digest[2], f"速览未引用新标题 {want}")
 
@@ -3340,11 +3345,12 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         self.assertIn("每周量化走势预测", pipeline._freshness.FRESHNESS_THRESHOLDS)
         # 数据线注册表的 used_by 写的是栏目标题 → 跟随改名（与 2026-09-29 第一批一致）
         used_by = [u for line in pipeline._backup.DATA_LINES.values() for u in line["used_by"]]
+        self.assertIn(f"{pipeline.SECTION_TITLE_STRATEGY}·MACD日线", used_by)
         self.assertIn(pipeline.SECTION_TITLE_GLOBAL_HEADLINES, used_by)
         self.assertIn(pipeline.SECTION_TITLE_POLICY, used_by)
         self.assertIn(pipeline.SECTION_TITLE_TREND, used_by)
         self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, used_by)
-        for stale in ("全球头条", "政策因子", "趋势跟踪", "每周量化走势预测"):
+        for stale in ("策略研判", "策略研判·MACD日线", "全球头条", "政策因子", "趋势跟踪", "每周量化走势预测"):
             self.assertNotIn(stale, used_by, f"注册表里仍写着旧栏目标题：{stale}")
         # 审计标签（数据源名）不随栏目标题改名
         data = self._data()
@@ -3360,8 +3366,9 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         """像素主题英文关卡名与图标砖短标签是关卡标识，不随中文标题改名。"""
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802",
                                         theme="pixel")
-        for kicker in ("GLOBAL HEADLINES", "TREND TRACKING", "POLICY SHOCK", "WEEKLY FORECAST"):
+        for kicker in ("STRATEGY READ", "GLOBAL HEADLINES", "TREND TRACKING", "POLICY SHOCK", "WEEKLY FORECAST"):
             self.assertIn(kicker, html)
+        self.assertEqual(pipeline._section_visual("STRATEGY READ")[1], "STRAT")
         self.assertEqual(pipeline._section_visual("GLOBAL HEADLINES")[1], "NEWS")
         self.assertEqual(pipeline._section_visual("TREND TRACKING")[1], "TREND")
         self.assertEqual(pipeline._section_visual("POLICY SHOCK")[1], "POLICY")
