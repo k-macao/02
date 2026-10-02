@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 CST = timezone(timedelta(hours=8))  # 北京时间 / 澳门时间
 
@@ -145,6 +146,39 @@ def hk_stock_universe():
 
 
 # ------------------------------------------------------------------
+# 日线完成性：不能把盘中 close 字段当作当天的最终收盘
+# ------------------------------------------------------------------
+def market_timezone(symbol):
+    """本模块股票 / 指数代码对应的交易所时区（美股自动处理夏令时）。"""
+    sym = str(symbol or "").upper()
+    if sym.endswith((".HK", ".SS", ".SZ")) or sym in ("^HSI", "^HSTECH", "^HSCEI", "^HSCE"):
+        return CST
+    return ZoneInfo("America/New_York")
+
+
+def is_session_closed(symbol, session_date, *, now=None):
+    """是否已过该交易日收盘缓冲：A股 15:10、港股 16:15、美股当地 16:15。
+
+    周末 / 非法日期返回 False。只判完成性，不猜法定假日或补造交易日；
+    提前收市日按常规收盘保守等待。库读取时须传入快照的原始采集时刻。
+    """
+    try:
+        day = datetime.strptime(str(session_date), "%Y-%m-%d").date()
+        if day.weekday() >= 5:
+            return False
+        sym = str(symbol or "").upper()
+        hour, minute = (15, 10) if sym.endswith((".SS", ".SZ")) else (16, 15)
+        cutoff = datetime(day.year, day.month, day.day, hour, minute,
+                          tzinfo=market_timezone(sym))
+        moment = now or datetime.now(CST)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=CST)
+        return moment >= cutoff
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+# ------------------------------------------------------------------
 # Yahoo Finance Chart —— 日线序列
 # ------------------------------------------------------------------
 def _meta_tz(meta):
@@ -216,7 +250,7 @@ def session_bar_from_meta(result, bars):
     }
 
 
-def parse_chart_result(result):
+def parse_chart_result(result, *, with_meta=True):
     """把 Yahoo Chart ``result[0]`` 解析成升序日线（含 meta 回补），供日线与快照共用。
 
     返回 ``[{date, open, high, low, close, volume[, from_meta]}]``；解析失败返回 ``[]``。
@@ -249,22 +283,25 @@ def parse_chart_result(result):
         except (IndexError, TypeError, ValueError):
             continue
     bars.sort(key=lambda b: b["date"])
-    extra = session_bar_from_meta(result, bars)
+    # meta 是单日快照，不能伪装成完整周 K；日线/快照调用保持默认兼容。
+    extra = session_bar_from_meta(result, bars) if with_meta else None
     if extra:
         bars.append(extra)
     return bars
 
 
-def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
-    """取一只标的的日线序列。
+def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15,
+               validate_bars=None, with_source=False):
+    """取一只标的的 K 线（默认日线，支持 1wk 周线），默认返回升序 bars 列表。
 
-    返回按日期升序的 ``[{date, open, high, low, close, volume}, ...]``；
-    任何一步失败都返回 ``[]``（由上层决定降级，绝不编造数据）。
-    Yahoo 在交易所本地 0 点后暂时丢掉刚收盘日线时，用 meta 报价补回那一根
-    （见 ``session_bar_from_meta``），避免量化 / 周度预测整体回退一个交易日。
+    ``validate_bars`` 可附加样本数 / 日期门禁，不合格时继续尝试备用源。
+    ``with_source=True`` 返回 {bars, source, url}，供策略逐标的溯源。
+    失败返回 []（with_source 时 bars=[]），绝不编造数据。
+    Yahoo 临时丢掉刚收盘日线时，用 meta 的已收盘报价补回（见 session_bar_from_meta）。
     """
+    empty = {"bars": [], "source": None, "url": None}
     if not fetch_json:
-        return []
+        return empty if with_source else []
 
     def _result(data):
         try:
@@ -272,55 +309,74 @@ def fetch_bars(fetch_json, symbol, *, rng="1y", interval="1d", timeout=15):
         except (KeyError, TypeError, IndexError, AttributeError):
             return None
 
-    # 数据线 yahoo_bars：主源 query1 → 备用源1 query2（同格式）→ 备用源2 东财日 K（独立解析）
-    data, _url = fetch_json_chain(
+    def _ok(data):
+        result = _result(data)
+        bars = parse_chart_result(result, with_meta=interval == "1d") if result else []
+        return bool(bars) and (validate_bars(bars) if validate_bars else True)
+
+    # 数据线 yahoo_bars：query1 → query2 → 东财日 K（独立解析）
+    data, url = fetch_json_chain(
         fetch_json, chain_urls("yahoo_chart", symbol=symbol),
-        {"range": rng, "interval": interval},
-        ok=lambda d: bool(parse_chart_result(_result(d))) if _result(d) else False,
-        timeout=timeout)
+        {"range": rng, "interval": interval}, ok=_ok, timeout=timeout)
     if data is not None:
-        return parse_chart_result(_result(data))
-    if interval != "1d":
-        return []
-    return fetch_bars_eastmoney(fetch_json, symbol, rng=rng, timeout=timeout)
+        bars = parse_chart_result(_result(data), with_meta=interval == "1d")
+        result = {"bars": bars, "source": "Yahoo Finance " + url.split("/")[2], "url": url}
+        return result if with_source else bars
+    if interval not in ("1d", "1wk"):
+        return empty if with_source else []
+    return fetch_bars_eastmoney(fetch_json, symbol, rng=rng, timeout=timeout, interval=interval,
+                                validate_bars=validate_bars, with_source=with_source)
 
 
 _EM_LIMIT_FOR_RANGE = {"5d": 8, "1mo": 25, "3mo": 70, "6mo": 135, "1y": 260, "2y": 520,
                        "5y": 1300, "10y": 2600, "max": 10000}
 
 
-def fetch_bars_eastmoney(fetch_json, symbol, *, rng="1y", timeout=15):
-    """东方财富日 K → 与 Yahoo 同结构的日线序列（yahoo_bars 数据线的独立备用源2）。
-
-    klines 每行 "日期,开,收,高,低,成交量,成交额"；映射不到东财 secid 的代码返回 []。
-    """
-    secid = em_secid_for_yahoo(symbol)
-    if not fetch_json or not secid:
-        return []
-    params = {"secid": secid, "klt": "101", "fqt": "1", "end": "20500101",
-              "lmt": str(_EM_LIMIT_FOR_RANGE.get(str(rng), 520)),
-              "fields1": "f1,f2,f3,f4,f5,f6", "fields2": "f51,f52,f53,f54,f55,f56,f57"}
-    data, _url = fetch_json_chain(
-        fetch_json, chain_urls("em_kline"), params,
-        ok=lambda d: bool(((d or {}).get("data") or {}).get("klines")), timeout=timeout)
-    if data is None:
-        return []
+def _parse_eastmoney_bars(data):
+    """东方财富日 K 的独立解析器，供返回值与主备门禁共用。"""
     bars = []
-    for line in ((data.get("data") or {}).get("klines") or []):
+    for line in (((data or {}).get("data") or {}).get("klines") or []):
         parts = str(line).split(",")
         if len(parts) < 6:
             continue
-        try:
-            close = float(parts[2])
-        except (TypeError, ValueError):
-            continue
-        if close <= 0:
+        close = _num(parts[2])
+        if close is None or close <= 0:
             continue
         bars.append({"date": parts[0].strip(), "open": _num(parts[1]), "high": _num(parts[3]),
                      "low": _num(parts[4]), "close": close, "volume": _num(parts[5]),
                      "from_eastmoney": True})
     bars.sort(key=lambda b: b["date"])
     return bars
+
+
+def fetch_bars_eastmoney(fetch_json, symbol, *, rng="1y", timeout=15, interval="1d",
+                         validate_bars=None, with_source=False):
+    """东方财富前复权日/周 K；主机依次回退，解析无效也回退。"""
+    empty = {"bars": [], "source": None, "url": None}
+    secid = em_secid_for_yahoo(symbol)
+    if not fetch_json or not secid or interval not in ("1d", "1wk"):
+        return empty if with_source else []
+    # 旧注册表把综合指数 ^IXIC 映射到 100.NDX；未经核验不能串成另一只指数。
+    if str(symbol).strip().upper().replace("%5E", "^") == "^IXIC" and secid == "100.NDX":
+        return empty if with_source else []
+    limit = _EM_LIMIT_FOR_RANGE.get(str(rng), 520)
+    if interval == "1wk" and str(rng) != "max":
+        limit = (limit + 4) // 5 + 2  # range 表是日线数量，周 K 使用约 1/5 + 边界缓冲
+    params = {"secid": secid, "klt": "102" if interval == "1wk" else "101", "fqt": "1", "end": "20500101",
+              "lmt": str(limit),
+              "fields1": "f1,f2,f3,f4,f5,f6", "fields2": "f51,f52,f53,f54,f55,f56,f57"}
+
+    def _ok(data):
+        bars = _parse_eastmoney_bars(data)
+        return bool(bars) and (validate_bars(bars) if validate_bars else True)
+
+    data, url = fetch_json_chain(fetch_json, chain_urls("em_kline"), params,
+                                 ok=_ok, timeout=timeout)
+    if data is None:
+        return empty if with_source else []
+    bars = _parse_eastmoney_bars(data)
+    result = {"bars": bars, "source": ("东方财富周K " if interval == "1wk" else "东方财富日K ") + url.split("/")[2], "url": url}
+    return result if with_source else bars
 
 
 def fetch_series_batch(fetch_json, specs, *, rng="1y", workers=6, timeout=15,

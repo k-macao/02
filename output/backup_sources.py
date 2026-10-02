@@ -109,10 +109,10 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
         "note": "适配器 pipeline._eastmoney_snapshot_quotes；美股/港股/A股指数与 MSFT/META 全覆盖，WTI 视东财代码可用性",
     },
     "yahoo_bars": {
-        "name": "日线序列 · 港股量化 / 每周预测 / 板块轮动",
+        "name": "日线序列 · 港股量化 / 每周预测 / 板块轮动 / MACD",
         "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析",
                     "【贪吃大白鲨】量化走势预测",
-                    "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线"),
+                    "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线", "策略研判·MACD日线"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",
@@ -120,7 +120,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
             ("东方财富 日K（独立源，secid 映射）",
              _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get"), False),
         ),
-        "note": "适配器 octopus_quant.providers.fetch_bars_eastmoney；恒指/恒科/国企指数与港股个股全覆盖",
+        "note": "适配器 octopus_quant.providers.fetch_bars_eastmoney；恒指/恒科/国企指数、港股个股、A股与美股宽基指数；MACD 先读市场库 / 复用本次日线",
     },
     "em_ulist": {
         "name": "东方财富 指数 / 个股快照（ulist.np）",

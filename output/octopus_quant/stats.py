@@ -232,23 +232,32 @@ def rsi(prices, n=14):
     return 100.0 - 100.0 / (1.0 + rs)
 
 
-def macd(prices, fast=12, slow=26, signal=9):
-    """MACD 三线；返回 (dif, dea, hist)，样本不足返回 (None, None, None)。"""
+def macd_series(prices, fast=12, slow=26, signal=9):
+    """因果 MACD 序列，与清洗后的价格对齐；每项为 (DIF, DEA, DIF−DEA)。
+
+    EMA 用首个窗口的 SMA 播种；沿用 macd 的 slow+signal 根预热门槛。
+    hist 保留原有「单倍差值」口径，国内双倍柱由呈现 / 策略层显式换算。
+    """
     ps = _clean(prices)
-    if len(ps) < slow + signal:
-        return (None, None, None)
+    empty = (None, None, None)
+    out = [empty] * len(ps)
+    if min(fast, slow, signal) <= 0 or len(ps) < slow + signal:
+        return out
     ef, es = ema(ps, fast), ema(ps, slow)
     dif = [(a - b) if (a is not None and b is not None) else None
            for a, b in zip(ef, es)]
-    dif_clean = [d for d in dif if d is not None]
-    if len(dif_clean) < signal:
-        return (None, None, None)
-    dea_series = ema(dif_clean, signal)
-    dea = dea_series[-1]
-    cur = dif_clean[-1]
-    if dea is None or cur is None:
-        return (None, None, None)
-    return (cur, dea, cur - dea)
+    indices = [i for i, d in enumerate(dif) if d is not None]
+    dea = ema([dif[i] for i in indices], signal)
+    for i, avg in zip(indices, dea):
+        if i >= slow + signal - 1 and avg is not None:
+            out[i] = (dif[i], avg, dif[i] - avg)
+    return out
+
+
+def macd(prices, fast=12, slow=26, signal=9):
+    """MACD 最新值 (DIF, DEA, DIF−DEA)；样本不足返回三个 None。"""
+    series = macd_series(prices, fast, slow, signal)
+    return series[-1] if series else (None, None, None)
 
 
 def bollinger(prices, n=20, k=2.0):
