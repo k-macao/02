@@ -36,6 +36,8 @@ jobs:
       - name: 🐙 抓取最新动态数据并推送
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          OCTOPUS_MACD: ${{ vars.OCTOPUS_MACD || '1' }}
+          OCTOPUS_MACD_SYMBOLS: ${{ vars.OCTOPUS_MACD_SYMBOLS }}
         run: |
           set -euo pipefail
           NO_PUSH="${{ github.event.inputs.no_push || 'false' }}"
