@@ -58,6 +58,9 @@ jobs:
       - name: 🐙 运行章鱼AI流水线
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          # 策略研判内的 MACD（无需密钥）：优先库 / 本次日线，缺项才取免费源。
+          OCTOPUS_MACD: ${{ vars.OCTOPUS_MACD || '1' }}
+          OCTOPUS_MACD_SYMBOLS: ${{ vars.OCTOPUS_MACD_SYMBOLS }}
           # ◧ AI 七日港股走势分析概率的大模型（默认 DeepSeek：https://api.deepseek.com + deepseek-flash）
           # 未配置 OCTOPUS_LLM_API_KEY → 该栏目整体缺席（不进审计），日报其它栏目照常
           # 想「没有 Key 也看量化基准」→ OCTOPUS_HK7_FALLBACK: "1"
