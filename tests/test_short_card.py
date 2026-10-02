@@ -6,10 +6,11 @@
   · 不伪造——数据缺失时对应行缺席，一行都没有时整卡缺席（返回 None）；
   · 同源——卡上每个数字都能在输入实参里逐字找到（不另算一套、不加戏）；
   · 诚实——字数超预算时按优先级**整行**撤下并留痕（dropped），绝不截断半句话；
-    【新手三句话】是固定小抄，不随数据变化。
+    【新手三句话】读取 `output/stock_memes.json` 百句股票梗句库，按当次盘面与种子随时配对使用。
 """
 import datetime as dt
 import importlib.util
+import json
 import re
 import sys
 import tempfile
@@ -286,36 +287,137 @@ class CardNumbersTraceableTests(unittest.TestCase):
 
 
 class BeginnerTipsTests(unittest.TestCase):
-    def test_tips_are_three_fixed_lines(self):
-        self.assertEqual(len(short.BEGINNER_TIPS), 3)
-        self.assertEqual([label for label, _ in short.BEGINNER_TIPS],
-                         ["① 看方向", "② 放止损", "③ 别动手"])
+    def test_meme_library_file_has_one_hundred_unique_stock_memes(self):
+        """库文件（output/stock_memes.json）存在且正好包含 100 句不重复的股票梗句。"""
+        lib_path = Path(short.MEME_LIB_PATH)
+        self.assertTrue(lib_path.is_file(), f"未找到股票梗句库文件：{lib_path}")
+        memes = short.load_meme_library(force=True)
+        self.assertEqual(len(memes), 100)
+        self.assertEqual(len(memes), short.MEME_LIBRARY_SIZE)
+        self.assertEqual(len({m["id"] for m in memes}), 100)
+        self.assertEqual(len({m["meme"] for m in memes}), 100)
+        self.assertEqual(len({m["pair"] for m in memes}), 100)
+        self.assertEqual(len({m["text"] for m in memes}), 100)
+        digit_re = re.compile(r"[0-9０-９]")
+        for m in memes:
+            self.assertIn(m["slot"], ("direction", "stoploss", "discipline"))
+            self.assertIn(m["label"], ("① 看方向", "② 放止损", "③ 别动手"))
+            self.assertIn("——", m["text"])
+            self.assertNotIn("…", m["text"])
+            self.assertIsNone(digit_re.search(m["text"]),
+                              f"梗句库不得伪造阿拉伯数字：{m['id']} {m['text']}")
+            self.assertTrue(m["keywords"], f"{m['id']} 缺少配对关键词")
+        # 三个槽位与九个子场景均有充足候选
+        for slot, scenes in short.SLOT_SCENES.items():
+            self.assertGreaterEqual(len(short.memes_by_slot(slot)), 30)
+            for sc in scenes:
+                self.assertGreaterEqual(len(short.memes_by_slot(slot, scene=sc)), 10,
+                                        f"{slot}/{sc} 候选梗句不足")
 
-    def test_tips_do_not_change_with_data(self):
-        tips = list(short.BEGINNER_TIPS)
-        self.assertEqual(short.build_card(rich_ctx())["tips"], tips)
+    def test_tips_are_three_paired_lines_from_library(self):
+        lib_texts = {m["text"] for m in short.load_meme_library()}
+        card = short.build_card(rich_ctx())
+        self.assertEqual(len(card["tips"]), 3)
+        self.assertEqual([label for label, _ in card["tips"]],
+                         ["① 看方向", "② 放止损", "③ 别动手"])
+        for _label, text in card["tips"]:
+            self.assertIn(text, lib_texts, f"卡片三句话必须来自百句股票梗库：{text}")
+
+    def test_tips_pair_dynamically_with_market_state_and_date(self):
+        """不同行情场景或不同日期会从百句库中配对出不同的股票梗句；同输入则严格一致。"""
+        base = rich_ctx()
+        bull = rich_ctx()
+        bull["ai"]["score"] = 25
+        bull["ai"]["sentiment_label"] = "偏多"
+        bull["weekly"]["daily"]["rows"][0]["direction"] = "up"
+        bull["weekly"]["daily"]["rows"][0]["p_day"] = 0.68
+        bull["weekly"]["daily"]["rows"][0]["advice"]["position"] = 30
+        bull["quant"]["liquidity"]["score"] = 72
+        bull["cal"]["items"] = []
+
+        bear = rich_ctx()
+        bear["ai"]["score"] = -22
+        bear["ai"]["sentiment_label"] = "偏空"
+        bear["weekly"]["daily"]["rows"][0]["direction"] = "down"
+        bear["weekly"]["daily"]["rows"][0]["p_day"] = 0.34
+        bear["coverage"] = {"today": 8, "total": 18}
+
+        self.assertEqual(short.infer_card_scenes(bull),
+                         {"direction": "up", "stoploss": "volatile", "discipline": "wait"})
+        self.assertEqual(short.infer_card_scenes(bear),
+                         {"direction": "down", "stoploss": "defensive", "discipline": "missing"})
+        self.assertEqual(short.infer_card_scenes(base),
+                         {"direction": "flat", "stoploss": "defensive", "discipline": "event"})
+
+        tips_base = short.build_card(base)["tips"]
+        tips_bull = short.build_card(bull)["tips"]
+        tips_bear = short.build_card(bear)["tips"]
+        self.assertNotEqual(tips_base, tips_bull)
+        self.assertNotEqual(tips_bull, tips_bear)
+        self.assertNotEqual(tips_base, tips_bear)
+
+        # 同一份数据无有效行情行时整卡仍然缺席
         minimal = rich_ctx()
         for key in ("ai", "quant", "cal", "senti", "pan", "weekly"):
             minimal[key] = {}
         minimal["coverage"] = {"today": 1, "total": 9}
         self.assertIsNone(short.build_card(minimal), "一行数据都没有 → 整卡缺席")
-        only_week = rich_ctx()
-        only_week["coverage"] = {}
-        for key in ("ai", "quant", "cal", "senti", "pan"):
-            only_week[key] = {}
-        self.assertEqual(short.build_card(only_week)["tips"], tips)
+
+    def test_reads_custom_library_file_and_falls_back_when_missing(self):
+        """支持读取自定义库文件；库文件缺失或损坏时回退 FALLBACK_BEGINNER_TIPS。"""
+        custom_doc = {
+            "memes": [
+                {"id": "C1", "slot": "direction", "scene": "flat",
+                 "meme": "自定义看方向梗", "pair": "先看概率方向再动手。"},
+                {"id": "C2", "slot": "stoploss", "scene": "defensive",
+                 "meme": "自定义放止损梗", "pair": "先挂好止损单保本金。"},
+                {"id": "C3", "slot": "discipline", "scene": "event",
+                 "meme": "自定义别动手梗", "pair": "遇到大事先场外观望。"},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_path = Path(tmp) / "custom_memes.json"
+            custom_path.write_text(json.dumps(custom_doc, ensure_ascii=False), encoding="utf-8")
+            with patch.object(short, "MEME_LIB_PATH", str(custom_path)):
+                card = short.build_card(rich_ctx())
+            self.assertEqual(card["tips"], [
+                ("① 看方向", "自定义看方向梗——先看概率方向再动手。"),
+                ("② 放止损", "自定义放止损梗——先挂好止损单保本金。"),
+                ("③ 别动手", "自定义别动手梗——遇到大事先场外观望。"),
+            ])
+            missing_path = Path(tmp) / "nonexistent.json"
+            with patch.object(short, "MEME_LIB_PATH", str(missing_path)):
+                fallback_card = short.build_card(rich_ctx())
+            self.assertEqual(fallback_card["tips"], list(short.FALLBACK_BEGINNER_TIPS))
+
+    def test_on_demand_pairing_by_slot_scene_keyword_and_cross_pair(self):
+        """随时配对使用：支持按槽位、场景、关键词检索配对，以及上下句交叉配对。"""
+        m_up = short.pair_stock_meme("up", slot="direction", seed="s1")
+        self.assertEqual(m_up["slot"], "direction")
+        self.assertEqual(m_up["scene"], "up")
+        m_kw = short.pair_stock_meme(keyword="鳄鱼法则", seed="s2")
+        self.assertIn("鳄鱼法则", m_kw["meme"])
+        m_cross = short.pair_stock_meme("up", slot="direction", seed="s3", cross_pair=True)
+        self.assertNotEqual(m_cross["id"], m_cross["pair_id"])
+        self.assertIn("——", m_cross["text"])
+        batch = short.pair_memes(5, slot="stoploss", seed="batch")
+        self.assertEqual(len(batch), 5)
+        self.assertEqual(len({x["id"] for x in batch}), 5)
 
     def test_tips_survive_tight_budget(self):
+        expected = short.pair_beginner_tips(rich_ctx())
         with patch.object(short, "CARD_CHAR_BUDGET", 260):
             card = short.build_card(rich_ctx())
-        self.assertEqual(card["tips"], list(short.BEGINNER_TIPS),
-                         "字数再紧也不能把新手小抄撤掉")
+        self.assertEqual(card["tips"], expected,
+                         "字数再紧也不能把新手三句话撤掉")
 
-    def test_tips_mention_stop_loss_and_no_go_conditions(self):
-        blob = "".join(text for _label, text in short.BEGINNER_TIPS)
-        self.assertIn("止损", blob)
-        self.assertIn("60%", blob)
-        self.assertIn("观望", blob)
+    def test_tips_mention_direction_stop_loss_and_no_go_conditions(self):
+        for seed in ("20260930", "20261001", "20261002", "bull", "bear"):
+            tips = short.pair_beginner_tips(rich_ctx(), seed=seed)
+            blob = "".join(text for _label, text in tips)
+            self.assertIn("方向", blob)
+            self.assertIn("止损", blob)
+            self.assertIn("观望", blob)
 
 
 class CardRenderingTests(unittest.TestCase):
