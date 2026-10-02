@@ -327,7 +327,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
             self.assertIn("每周量化走势预测", html, theme)
             self.assertGreaterEqual(
                 html.count(pipeline.SECTION_TITLE_WEEKLY_FORECAST), 1, theme)
-            # 今日结论携带七日预测（页首优先级；2026-09-29 起视界 5→7）
+            # 最终今日预判包含七日方向结论（2026-09-29 起视界 5→7）
             self.assertIn("七日预测", html, theme)
             if theme == "pixel":
                 self.assertIn("WEEKLY FORECAST", html)
@@ -339,7 +339,7 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410")
         self.assertNotIn("每周量化走势预测</h2>", html)
         self.assertNotIn(f"{pipeline.SECTION_TITLE_WEEKLY_FORECAST}</h2>", html)
-        self.assertNotIn("七日预测", html)          # 栏目缺席时页首结论也不出现
+        self.assertNotIn("七日预测", html)          # 栏目缺席时最终结论也不出现
         self.assertNotIn("逐日表格", html)
 
     def test_weekly_section_before_market_snapshot_in_html(self):

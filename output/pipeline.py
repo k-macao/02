@@ -48,7 +48,7 @@
       （【回游金枪鱼】今日预判 / 策略研判 / 总结）与前瞻日程类栏目（【探照安康鱼】时间节点：
       日程不含方向信息，只给「最密集日 + 事件密度提示」）不附加，栏目无数据自然缺席。
       规则合成，非投资建议。
-  6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，日报开头第一个数据栏目；
+  6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，位于专业分析之后的首个数据栏目；
       2026-09-29 起更名为「【探照安康鱼】时间节点」）：
       数据源为东方财富财经日历（数据中心公开报表 RPT_CPH_FECALENDAR，无需密钥，
       START_DATE 即北京时间）。服务端只支持按日期过滤，故一次拉全窗口 + 翻页，
@@ -121,7 +121,7 @@
       0~100 与对概率的有界修正）。概率全部由「同一套因子在自身历史上滚动重算 →
       分桶 + 保序 + 逻辑回归校准」得到，并经推进式回测检验（每步只用过去数据），
       夹在 5%~95%，非投资建议；数据取不到时对应子块明确显示「暂缺」，绝不编造。
-  12. 「政策因子」栏目：抓取后、推送前单独构建，推送页首位渲染。除资讯标题外，
+  12. 「政策因子」栏目：抓取后、推送前单独构建，归入专业分析组。除资讯标题外，
       直接读取中国政府网「最新政策」官方页面，保留发布日期与 gov.cn 原文链接；
       近 POLICY_WINDOW_DAYS=15 日窗口（自然日，含历史存档）内标题做政策维度识别
       （货币/监管/扶持/财政/地产/开放/贸易/宏观数据——宏观数据含 CPI / PPI /
@@ -349,7 +349,7 @@ import octopus_quant as _quant  # noqa: E402
 from octopus_quant import sector_rotation as _sector_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
-import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报第一屏）
+import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
 import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
@@ -382,7 +382,7 @@ REN_ENABLED = _ren.ENABLED
 # ------------------------------------------------------------
 # 🎯 精简模式（2026-09-30 按用户要求：「内容再精炼，适合短线操作，入门观看」）
 # 两件事，一个开关：
-#   ① 日报第一屏加「【闪电飞鱼】短线速查卡」——≤600 字讲完今天怎么动手
+#   ① 日报末尾加「【闪电飞鱼】短线速查卡」——≤600 字收束今日动作要点
 #      （明日剧本 / 七日风 / 今明必看时点 / 板块强弱 / 水位 / 风声 / 数据底），
 #      末尾【新手三句话】从库文件（output/stock_memes.json，100 句股票梗句）读取并按盘面随时配对使用；
 #   ② 全篇瘦身——**栏目一个不少、口径一句不隐**，只把重复展开的长文压成结论行：
@@ -529,7 +529,7 @@ EM_DISPLAY_N = 5    # 东财快讯展示前 5 条
 # ------------------------------------------------------------
 # 「时间节点」栏目（原「未来 N 天影响经济时间点」）的数据口径
 # （东方财富财经日历 RPT_CPH_FECALENDAR）
-# 放在日报开头：先看清「未来 30 天哪些时点会动市场」，再读今天的盘。
+# 归入数据显示组，排在专业分析之后；用来核对未来 30 天可能影响市场的时点。
 # 接口是东财数据中心公开报表（与 A股大盘全景的南北向资金同一台主机），无需密钥；
 # START_DATE 为北京时间（形如 2026-10-28 20:30:00）。服务端只支持按日期过滤
 # （按 CITY / FE_TYPE 过滤返回空），所以一次拉全窗口（翻页）再在本地按重要度筛选。
@@ -6333,9 +6333,9 @@ def _calendar_block(res, date_str=None):
 
 
 # ============================================================
-# 精简排版（2026-09-27）：结论先行 → 分栏展开 → 盘点收尾
-# ——正文不再出现口径说明 / 免责声明脚注、「数据暂缺」占位行、抓取失败的来源
-#   与过期内容；来源状态只在末尾「总结」里压成一行。
+# 精简排版：专业分析 → 数据显示 → 结论收尾
+# ——导读只给结果与关键数字，不展示推导过程；正文不出现「数据暂缺」占位行、
+#   抓取失败的来源与过期内容；来源状态只在「总结」里压成一行。
 # ============================================================
 REPORT_STALE_DAYS = 7          # 频道视频 / 全球头条超过 N 天视为过期，不进正文
 
@@ -6660,7 +6660,7 @@ def _market_brief(market, labels, kit, with_date=False):
 
 
 def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=None):
-    """页首「今日预判」：倾向 → 量化预测 → 七日预测 → 核心判断 → 各市场一句话 → 政策定调。"""
+    """最终「今日预判」：量化与方向结论 → 核心判断 → 市场数据 → 政策定调。"""
     pairs = []
     # 量化预测置顶：概率 + 区间 + 模型可信度，一眼看到「结论与把握有多大」
     if quant and quant.get("available"):
@@ -6739,6 +6739,35 @@ def _conclusion_pairs(kit, ai_result, market, pan, policy, quant=None, weekly=No
     return pairs
 
 
+def _conclusion_panel(kit, pairs):
+    """把核心判断做成收尾重点卡；次级数字仍按键值表显示。"""
+    pairs = list(pairs or [])
+    if not pairs:
+        return ""
+    primary_index = next((i for i, (label, _value) in enumerate(pairs)
+                          if label == "核心判断"), None)
+    if primary_index is None:
+        primary_index = next((i for i, (label, _value) in enumerate(pairs)
+                              if label in ("市场倾向", "量化预测", "七日预测")), 0)
+    primary_label, primary_value = pairs[primary_index]
+    secondary = [pair for i, pair in enumerate(pairs) if i != primary_index]
+    if kit is GUIZANG_KIT:
+        accent, background, ink = GZ_KLEIN, "#F3F6FF", GZ_INK_STRONG
+    else:
+        accent, background, ink = C_LEMON, C_AI_BG, C_INK
+    body = (f'<div style="border-left:5px solid {accent};background:{background};'
+            f'padding:10px 12px;margin:4px 0 8px;">'
+            f'<div style="font-size:11px;font-weight:900;letter-spacing:.08em;color:{accent};">'
+            f'结论 · 重点</div>'
+            f'<div style="font-size:17px;line-height:1.6;font-weight:900;color:{ink};padding-top:3px;">'
+            f'{primary_value}</div>')
+    if primary_label != "核心判断":
+        body += (f'<div style="font-size:10px;color:{ink};padding-top:2px;">'
+                 f'{_esc(primary_label)}</div>')
+    body += kit.kv(secondary)
+    return body + "</div>"
+
+
 # 正文不展示的数据源（底层仍供量化用）：总结「数据覆盖」与鲜鲜解读的
 # 「配料表」都不点名它们，避免两处口径漂移。
 _HIDDEN_REPORT_SOURCES = {"A股资讯"}
@@ -6752,7 +6781,7 @@ def _missing_source_names(source_items):
 
 def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=None,
                    backup_events=None):
-    """末尾「总结」：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
+    """前置盘点：结论回顾 → 模型校准与预测追踪 → 明日关注 → 风险 → 数据覆盖。"""
     pairs = []
     if quant and quant.get("available"):
         v1 = (quant.get("validation") or {}).get(1) or {}
@@ -6827,7 +6856,7 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 # ------------------------------------------------------------
 SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
 # 2026-09-30 新增（用户要求「内容再精炼，适合短线操作，入门观看」）：
-# 第一屏「短线速查卡」——≤600 字讲完今天怎么动手，末尾附【新手三句话】（从百句股票梗句库文件读取配对）。
+# 末尾「短线速查卡」——≤600 字归纳今日动作要点，末尾附【新手三句话】（从百句股票梗句库读取配对）。
 # 纯规则合成（output/octopus_short.py），数字全部取自下文各栏同一批实参；
 # OCTOPUS_LITE=0 / --full 关闭，日报回到全量长版。
 SECTION_TITLE_SHORT_CARD = "【闪电飞鱼】短线速查卡"
@@ -6842,17 +6871,21 @@ SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
 SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
 SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
 
-# 阅读顺序：结论 → 前瞻日程（时间节点）→ 数据（行情复盘 / 政策 / 研判依据）
-#           → 趋势跟踪与资讯 → 新闻情绪 → 总结。
+# 正文顺序：专业分析 → 数据显示 → 结论。
+# 方法与计算过程不放在导读；数据栏目保留可核对数字，结论收尾并视觉强调。
+REPORT_ANALYSIS_SECTIONS = (
+    "STRATEGY READ", "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
+    "WEEKLY FORECAST", "SECTOR ROTATION", "POLICY SHOCK", "FED TREND", "GEO TREND",
+)
+REPORT_DATA_SECTIONS = (
+    "ECON CALENDAR", "MARKET REVIEW", "HK QUOTES", "TREND TRACKING",
+    "GLOBAL HEADLINES", "HK GURU CHANNELS", "NEWS SENTIMENT",
+)
+REPORT_CONCLUSION_SECTIONS = ("SUMMARY", "FORECAST")
 REPORT_SECTION_ORDER = (
-    "FORECAST",
-    "ECON CALENDAR",
-    "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
-    "SECTOR ROTATION", "MARKET REVIEW", "HK QUOTES", "POLICY SHOCK",
-    "FED TREND", "GEO TREND", "STRATEGY READ",
-    "TREND TRACKING", "GLOBAL HEADLINES",
-    "HK GURU CHANNELS", "NEWS SENTIMENT",
-    "SUMMARY",
+    *REPORT_ANALYSIS_SECTIONS,
+    *REPORT_DATA_SECTIONS,
+    *REPORT_CONCLUSION_SECTIONS,
 )
 
 
@@ -7744,7 +7777,7 @@ def _short_card_base_date(date_str):
 
 
 def _short_card_section(card_ctx, kit, today_n, total):
-    """🎯【闪电飞鱼】短线速查卡（2026-09-30 新增；日报第一屏，栏目编号 00）。
+    """🎯【闪电飞鱼】短线速查卡（2026-09-30 新增；正文结论之后的行动要点收尾）。
 
     用户要求「内容再精炼，适合短线操作，入门观看」：把全天数据里**最能直接动手**的
     几件事压成 ≤600 字一张卡——今天什么风、明天怎么做（概率 / 区间 / 仓位 / 止损 / 止盈）、
@@ -7775,27 +7808,22 @@ def _short_card_section(card_ctx, kit, today_n, total):
 
 
 def _opening_digest(sections, notes, conclusion, today_n, total, kit):
-    """仅从本次实际渲染的栏目提炼首屏；不新增预测、不以历史数据补空。"""
+    """以「专业分析 → 数据显示 → 结论」生成结果导读，不展开推导过程。"""
     def brief(value, limit=None):
-        # 精简模式下每栏摘要收一档（48 → LITE("digest_brief") 字）：速览只负责指路，
-        # 完整依据仍在正文各栏。全量档逐字保持原行为。
         limit = int(limit or LITE("digest_brief"))
         text = _strip_html_text(value)
         return text if len(text) <= limit else text[:limit].rstrip(" ·，；") + "…"
 
-    conclusions = dict(conclusion)
-    lead = (conclusions.get("核心判断") or conclusions.get("市场倾向")
-            or conclusions.get("量化预测"))
-    if not lead:
-        lead = "当前信息不足以形成综合方向判断，请先关注已获取内容与数据覆盖。"
-    groups = [
-        ("市场与资金", {"MARKET REVIEW", "LIQUIDITY FLOW"}),
-        ("量化与策略", {"QUANT FORECAST", "HK PROBABILITY", "WEEKLY FORECAST",
-                       "STRATEGY READ"}),
-        ("政策与日程", {"ECON CALENDAR", "POLICY SHOCK", "FED TREND", "GEO TREND"}),
-        ("资讯与情绪", {"TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
-                       "HK GURU CHANNELS", "NEWS SENTIMENT"}),
-    ]
+    conclusions = dict(conclusion or [])
+    lead_raw = (conclusions.get("核心判断") or conclusions.get("市场倾向")
+                or conclusions.get("量化预测"))
+    lead = _strip_html_text(lead_raw) if lead_raw else \
+        "当前信息不足以形成综合方向判断。"
+
+    groups = (
+        ("专业分析", set(REPORT_ANALYSIS_SECTIONS)),
+        ("数据显示", set(REPORT_DATA_SECTIONS)),
+    )
     rows = []
     covered = set()
     for label, keys in groups:
@@ -7803,8 +7831,7 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
         for kick, title, content, badge, caption in sections:
             if kick not in keys:
                 continue
-            # 合并栏目（AI 行情复盘）有两条研判：报价面 + A股全景面，各留 48 字后用「；」
-            # 接起来（合并前是两栏各占一行速览，总长度与那时一致，不因合并丢掉一路结论）。
+            # 只呈现结论性短句和关键数字；合并栏目仍分别保留各自研判。
             texts = _section_note_texts(notes, kick)
             text = "；".join(brief(t, 48) for t in texts) if texts else brief(content, 48)
             if text:
@@ -7812,19 +7839,42 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
                 covered.add(kick)
         if bits:
             rows.append((label, "<br>".join(bits)))
-    # 新增栏目也必须进入速览，避免维护分组时漏掉正文内容。
-    # SHORT CARD 是结论型栏目（速查卡本身就在速览之前，内容同源），不重复进速览。
+
+    # 新增栏目按本身类别自动补入速览，避免维护分组时漏掉正文内容。
     for kick, title, content, badge, caption in sections:
-        if kick not in covered and kick not in {"FORECAST", "SUMMARY", "SHORT CARD"}:
-            rows.append((title, _esc(brief(content, 48))))
-    rows.append(("阅读提醒", _esc(
-        f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。"
-        "预测存在不确定性，完整依据、来源与暂缺项见下文。")))
+        if kick in covered or kick in {"FORECAST", "SUMMARY", "SHORT CARD"}:
+            continue
+        group = "专业分析" if kick in set(REPORT_ANALYSIS_SECTIONS) else "数据显示"
+        text = _esc(brief(content, 48))
+        if text:
+            existing = next((i for i, (name, _value) in enumerate(rows) if name == group), None)
+            line = f"{_esc(title)}：{text}"
+            if existing is None:
+                rows.append((group, line))
+            else:
+                name, value = rows[existing]
+                rows[existing] = (name, value + "<br>" + line)
+
+    # 覆盖率是可核对数据，置于结论之前；不写模型步骤或推导描述。
+    coverage = f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。"
+    data_row = next((i for i, (name, _value) in enumerate(rows) if name == "数据显示"), None)
+    if data_row is None:
+        rows.append(("数据显示", _esc(coverage)))
+    else:
+        name, value = rows[data_row]
+        rows[data_row] = (name, value + "<br>" + _esc(coverage))
+
     lead_color = GZ_INK_STRONG if kit is GUIZANG_KIT else C_INK
-    lead_html = (f'<div style="font-size:26px;font-weight:700;color:{lead_color};line-height:1.5;'
-                 f'margin:8px 0 20px;overflow-wrap:anywhere;">{_esc(brief(lead, 110))}</div>')
-    return ("AI DIGEST", SECTION_TITLE_AI_DIGEST, lead_html + kit.kv(rows), "",
-            "先看重点，再读全文 · 规则/量化合成，非大模型生成 · 非投资建议")
+    accent = GZ_KLEIN if kit is GUIZANG_KIT else C_LEMON
+    background = "#F3F6FF" if kit is GUIZANG_KIT else C_AI_BG
+    conclusion_html = (
+        f'<div style="margin-top:12px;border-left:5px solid {accent};background:{background};'
+        f'padding:10px 12px;overflow-wrap:anywhere;">'
+        f'<div style="font-size:11px;font-weight:900;letter-spacing:.08em;color:{accent};">结论</div>'
+        f'<div style="font-size:20px;line-height:1.55;font-weight:900;color:{lead_color};padding-top:3px;">'
+        f'{_esc(brief(lead, 110))}</div></div>')
+    return ("AI DIGEST", SECTION_TITLE_AI_DIGEST, kit.kv(rows) + conclusion_html, "",
+            "专业分析 → 数据显示 → 结论 · 结论重点突出 · 非投资建议")
 
 
 def _sector_rotation_rows(item, kit, rank_label=None):
@@ -8045,7 +8095,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     today_n = sum(1 for _, s in source_items if s.get("is_today"))
     content_n = sum(1 for _, s in source_items if s.get("status") == "success")
 
-    # ---- 栏目拼版：结论先行 → 分栏展开 → 盘点收尾（有内容才渲染）----
+    # ---- 栏目拼版：专业分析 → 数据显示 → 结论收尾（有内容才渲染）----
     blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
 
     policy = {}
@@ -8229,11 +8279,12 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 kit.sentiment_block(senti_result), kit.ai_badge(), "",
             )
 
-    # 页首结论 / 末尾盘点
+    # 最终结论 / 前置盘点：核心判断放大显示，关键市场数字保留在同一栏核对。
     conclusion = _conclusion_pairs(kit, ai_result, market, pan, policy,
                                    quant=quant, weekly=weekly_res)
     if conclusion:
-        blocks["FORECAST"] = ("FORECAST", SECTION_TITLE_FORECAST, kit.kv(conclusion), "", "")
+        blocks["FORECAST"] = ("FORECAST", SECTION_TITLE_FORECAST,
+                               _conclusion_panel(kit, conclusion), "", "")
     summary = _summary_pairs(ai_result, pan, policy, source_items, today_n, total,
                              quant=quant,
                              backup_events=(data.get("_backup_info") or {}).get("events"))
@@ -8287,11 +8338,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             decorated.append((kick, title, content, badge, caption))
         sections = decorated
 
-    # 全部栏目构建完成后再提炼，保证首屏与本次推送正文一致。
+    # 全部栏目构建完成后再提炼导读，保证摘要与本次正文同源。
     sections.insert(0, _opening_digest(sections, judge_notes, conclusion,
                                        today_n, total, kit))
-    # 🎯 短线速查卡插在速览之前（编号 00）：短线客第一屏就能动手，入门读者先看小抄。
-    #    取材全部是上面渲染正文用的同一批对象，缺数据自动缺席（LITE=0 / --full 整卡不出）。
+    # 短线速查卡收尾呈现：正文按分析 → 数据 → 结论阅读后，再给行动要点。
+    # 取材全部是上面渲染正文用的同一批对象，缺数据自动缺席（LITE=0 / --full 整卡不出）。
     if LITE_ENABLED:
         card = _short_card_section({
             "date_str": date_str or _today_str(),
@@ -8302,11 +8353,10 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             "coverage": {"today": today_n, "total": total},
         }, kit, today_n, total)
         if card:
-            sections.insert(0, card)
+            sections.append(card)
     if ren_ctx is not None:
         digest_text = _ren.digest_ren(ren_ctx)
-        # 按 kicker 定位「AI 全篇速览」：速查卡插在最前面时 sections[0] 不再是速览，
-        # 用下标会把速览那句人话贴错栏目。
+        # 按 kicker 定位「AI 全篇速览」：短线速查卡在正文之后，不影响导读定位。
         if digest_text:
             for i, (kick, title, content, badge, caption) in enumerate(sections):
                 if kick != "AI DIGEST":
@@ -8787,7 +8837,7 @@ def _ai_analysis_block(res):
                 f'<div style="font-size:15px;color:{value_color};font-family:{FONT_MONO};font-weight:900;'
                 f'padding-top:3px;line-height:1.25;">{value}</div></td>')
 
-    # AI 主控卡：大图标 + 情绪结论 + 三个关键指标，先于所有明细出现。
+    # 专业分析总览：方向信号与关键指标先列出，主结论在栏目末尾单独强调。
     hero = (
         f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
         f'border:1px solid {C_VIOLET};background:{C_AI_BG};box-shadow:7px 7px 0 #000;">'
@@ -8803,7 +8853,7 @@ def _ai_analysis_block(res):
         f'line-height:1.15;padding-top:4px;text-shadow:2px 2px 0 #000;">'
         f'{_esc(res["sentiment_label"])} <span style="font-size:14px;">{("▲" if score > 8 else ("▼" if score < -8 else "■"))}</span></div>'
         f'<div style="font-size:9px;color:{C_MUTED};font-family:{FONT_MONO};font-weight:900;'
-        f'letter-spacing:1px;padding-top:4px;">{_esc(res["sentiment_en"])} // RULESET v3</div>'
+        f'letter-spacing:1px;padding-top:4px;">{_esc(res["sentiment_en"])}</div>'
         f'</td></tr>'
         f'<tr><td colspan="2" style="padding:0 10px 11px;">'
         f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
@@ -8817,10 +8867,10 @@ def _ai_analysis_block(res):
         f'</td></tr></table>'
     )
 
-    # 主结论使用高亮黄框与更大的正文，避免被后续表格淹没。
+    # 栏目结尾用高亮黄框与更大字号突出最终结论。
     conclusion_body = (
         f'<div style="font-size:9px;color:{C_LEMON};font-weight:900;font-family:{FONT_MONO};'
-        f'letter-spacing:1px;">READ THIS FIRST // 先看结论</div>'
+        f'letter-spacing:1px;">FINAL TAKEAWAY // 核心结论</div>'
         f'<div style="font-size:14px;color:{C_INK};font-weight:900;line-height:1.9;'
         f'font-family:{FONT_MONO};padding-top:4px;">{_esc(res["reason"])}</div>'
     )
@@ -8957,10 +9007,11 @@ def _ai_analysis_block(res):
                       f'font-family:{FONT_MONO};">■ NO WATCH THEME</div>')
     watch_html = _pixel_panel("QUANT ALLOC // 量化配置 · 趋势跟踪", watch_body, C_LEMON, "⌖")
 
-    note_html = _note("策略研判由公开数据经确定性规则合成 // RULESET v3 // 趋势分=价格60%+资金30%+舆情10% + 风险控制 // 非投资建议，决策需独立判断")
+    note_html = _note("仅供参考 · 非投资建议")
     macd_html = _quant.macd_strategy.render_strategy(res.get("macd"), PIXEL_KIT,
                                                     limit=9 if LITE_ENABLED else 0)
-    return hero + conclusion_html + macd_html + sectors_html + tech_html + risk_html + watch_html + note_html
+    return (hero + macd_html + sectors_html + tech_html + risk_html + watch_html
+            + conclusion_html + note_html)
 
 
 # 兼容并行分支旧名入口（每日量化策略渲染入口）
@@ -10227,7 +10278,7 @@ def gz_sentiment_empty_block(res):
 # ============================================================
 # 政策因子（POLICY SHOCK · 确定性关键词矩阵）
 # ------------------------------------------------------------
-# 抓取后、推送前单独构建（main 1.6 阶段），推送页首位栏目渲染。
+# 抓取后、推送前单独构建（main 1.6 阶段），渲染到专业分析栏目组。
 # 逻辑：识别政策类新闻（监管/扶持/货币/财政/地产/贸易/宏观数据等维度），经
 # 关键词矩阵映射到行业受益/受损权重，汇总为 PolicyShockIndex：
 #   行业 PSI ＝ 该行业在今日政策新闻中的权重之和（正=受益，负=承压）
@@ -10390,7 +10441,7 @@ def _policy_summary(policy_n, total_n, dim_counts, broad_score, broad_label,
 
 
 def build_policy_factor(data, date_str=None, news_corpus=None):
-    """构建政策因子（抓取后、推送前单独构建；推送页首位栏目）。
+    """构建政策因子（抓取后、推送前单独构建；渲染在专业分析栏目组）。
 
     标题窗口：近 POLICY_WINDOW_DAYS=15 日（自然日，含锚定日；news_corpus 为
     跨运行标题存档，缺省时只用本次抓取标题，仍按 15 日窗口过滤）。中国政府网
@@ -12739,13 +12790,13 @@ def main():
     fresh_items = _collect_headline_items(data, _today_display())
     news_corpus = _merge_news_corpus(_load_news_corpus(news_history_path), fresh_items)
 
-    # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（推送页首位栏目；
+    # 1.6 政策因子：抓取后、推送前单独做政策冲击分析（归入专业分析栏目组；
     #     近 POLICY_WINDOW_DAYS=15 日窗口内无政策/宏观新闻时栏目缺席，不伪造）
     policy_result = build_policy_factor(data, date_str, news_corpus)
     if policy_result.get("available"):
         print(f"  📊 政策因子：{policy_result['summary']}")
     else:
-        print(f"  📊 政策因子：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，首位栏目缺席")
+        print(f"  📊 政策因子：近{POLICY_WINDOW_DAYS}日窗口内无显著政策新闻，栏目缺席")
 
     # 2. 生成报告
     print("\n📝 正在生成日报...")
