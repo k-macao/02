@@ -485,26 +485,32 @@ class RetroPixelVisualTests(unittest.TestCase):
             "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
         }
         # 像素视觉回归固定走 pixel 主题（默认主题自 2026-08-21 起为 guizang）
+        parts = pipeline._collect_report_parts(data, pipeline.PIXEL_KIT, date_str="20260802")
+        kickers = [s[0] for s in parts["sections"]]
+        marker = lambda key: f"LVL {kickers.index(key):02d} // {key}"
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
 
         self.assertIn("OCTOPUS_OS v3.0", html)
         self.assertIn("aria-label=\"章鱼像素图标\"", html)
-        self.assertIn("LVL 01 // FORECAST", html)  # 结论先行
-        self.assertIn("LVL 02 // MARKET REVIEW", html)
+        self.assertIn(marker("STRATEGY READ"), html)
+        self.assertIn(marker("MARKET REVIEW"), html)
         self.assertIn("// POLICY SHOCK", html)
-        self.assertIn("// STRATEGY READ", html)
-        self.assertIn("LVL 07 // SUMMARY", html)  # 盘点收尾（2026-10-02 东财快讯页面隐藏后顺移）
+        self.assertLess(kickers.index("STRATEGY READ"), kickers.index("MARKET REVIEW"))
+        self.assertLess(kickers.index("SUMMARY"), kickers.index("FORECAST"))
+        if "SHORT CARD" in kickers:
+            self.assertLess(kickers.index("FORECAST"), kickers.index("SHORT CARD"))
+            self.assertIn(marker("SHORT CARD"), html)
         self.assertIn("QUANT CORE", html)
         self.assertIn("量化主结论 // QUANT THESIS", html)
-        self.assertIn("READ THIS FIRST // 先看结论", html)
+        self.assertIn("FINAL TAKEAWAY // 核心结论", html)
         self.assertIn("▲ 涨 +1.25%", html)  # 标普行情
         self.assertIn("▼ 跌 -2.50%", html)  # 深证行情（AI 行情复盘：明细数字唯一出处）
         # 2026-09-09 页内去重：TECH READ 不再逐条复述 compact 徽标，只保留聚合
         self.assertIn("指数动能聚合", html)
         self.assertNotIn("明细数值见「AI 行情复盘」", html)  # 说明性脚注已移除
-        # 逐指数 compact 徽标已从动能区移除；只在页首「今日预判」摘要出现一次
+        # 逐指数 compact 徽标只在行情数据栏出现一次，不在分析导读中重复
         self.assertEqual(html.count("▼ -2.50%"), 1)
-        self.assertLess(html.find("▼ -2.50%"), html.find("LVL 02 // MARKET REVIEW"))
+        self.assertLess(html.find(marker("MARKET REVIEW")), html.find("▼ -2.50%"))
         self.assertIn("▲ 涨 / UP", html)    # 页首方向图例
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
@@ -1615,7 +1621,7 @@ class ReportInnerDedupeTests(unittest.TestCase):
             html = pipeline.generate_report(
                 self._dedupe_data(), "2026年8月2日 · 周日", "20260802", theme=theme)
             self.assertEqual(html.count("12,345.67"), 1, f"theme={theme}")  # 千分位价格仅出现一次
-            # 涨跌幅：AI 行情复盘明细 + 页首「今日预判」摘要各一次
+            # 涨跌幅：行情复盘明细 + 最终「今日预判」摘要各一次
             self.assertLessEqual(html.count("-2.50%"), 2, f"theme={theme}")
 
     def test_unshown_channel_risk_keeps_full_title(self):
@@ -2002,7 +2008,7 @@ class NewsSentimentFactorTests(unittest.TestCase):
 
 
 class PolicyFactorTests(unittest.TestCase):
-    """政策因子：关键词矩阵 / 行业 PSI / 量化趋势分 / 总结 / 首位渲染。
+    """政策因子：关键词矩阵 / 行业 PSI / 量化趋势分 / 总结 / 专业分析区渲染。
 
     2026-09-09 起标题窗口放宽为近 15 个自然日（含报告日）：
     单日无政策但近 15 日有政策/宏观新闻时栏目照常出现；更早（窗口外）
@@ -2161,12 +2167,13 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertIn("有色金属", names)           # PPI 涨幅扩大利多上游资源
         self.assertIn("政策及宏观数据类新闻 1 条", res["summary"])
 
-    def test_pixel_renders_first_with_summary(self):
+    def test_pixel_renders_policy_in_analysis_group(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
-        self.assertIn("LVL 01 // FORECAST", html)        # 结论先行，政策定调进入结论
+        self.assertIn("LVL 01 // STRATEGY READ", html)
         self.assertIn("// POLICY SHOCK", html)
-        self.assertLess(html.find("// POLICY SHOCK"), html.find("// STRATEGY READ"))
+        self.assertLess(html.find("// STRATEGY READ"), html.find("// POLICY SHOCK"))
+        self.assertLess(html.find("// POLICY SHOCK"), html.find("// MARKET REVIEW"))
         self.assertIn("政策冲击指数", html)
         self.assertIn("量化强度", html)
         self.assertIn("PSI +2", html)
@@ -2176,12 +2183,15 @@ class PolicyFactorTests(unittest.TestCase):
         self.assertIn("08-01 ·", html)
         self.assertIn("昨日：证监会约谈多家券商", html)
 
-    def test_guizang_renders_first_with_summary(self):
+    def test_guizang_renders_policy_after_analysis_before_market_data(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         policy_head = f"{pipeline.SECTION_TITLE_POLICY}</h2>"
-        self.assertLess(html.find(policy_head), html.find("策略研判</h2>"))
-        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"), html.find(policy_head))
+        strategy_head = "策略研判</h2>"
+        market_head = f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>"
+        self.assertLess(html.find(strategy_head), html.find(policy_head))
+        self.assertLess(html.find(policy_head), html.find(market_head))
+        self.assertLess(html.find(market_head), html.find("【回游金枪鱼】今日预判</h2>"))
         self.assertIn("PSI +2", html)
         self.assertIn("6 条（近 15 日）", html)
         self.assertIn("政策冲击强度榜", html)
@@ -2307,13 +2317,11 @@ class NationalPolicySourceTests(unittest.TestCase):
 
 
 class SectionReadingOrderTests(unittest.TestCase):
-    """2026-09-27：按人类阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
+    """日报栏目固定为专业分析 → 数据显示 → 结论（两主题共用 _collect_report_parts）。
 
-    结论先行 → 分栏展开（AI 行情复盘 → 政策因子 → 策略研判 →
-    资讯：全球头条 → 港股名家频道 → 新闻情绪）→
-    总结收尾。无数据栏目缺席但不打乱其余顺序。
+    导读先按同一顺序给出短摘要；正文分析在前、行情与资讯数据居中、今日结论收尾，
+    短线速查卡置于全文末端。不显示推导过程；无数据栏目缺席但不打乱其余顺序。
     2026-09-30 起「行情速览」与「全球大盘全景复盘」合并成一栏「【及时秋刀鱼】AI 行情复盘」，
-    原来两个位置合成一个（MARKET REVIEW），其余栏目顺序与编号顺次前移。
     2026-10-02 起「东方财富快讯」页面栏目隐藏（保留后台抓取供 AI 分析与审计）。
     """
 
@@ -2328,14 +2336,15 @@ class SectionReadingOrderTests(unittest.TestCase):
     # guizang 栏目标题统一以 </h2> 收尾，用它定位真实栏目头，避免命中
     # 策略研判内部的「→ 「全球头条」第N条」等跨栏目引用文字。
     GUIZANG_ORDER = [
-        f"{pipeline.SECTION_TITLE_FORECAST}</h2>",
-        f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>",
-        f"{pipeline.SECTION_TITLE_POLICY}</h2>",
         "策略研判</h2>",
+        f"{pipeline.SECTION_TITLE_POLICY}</h2>",
+        f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>",
         f"{pipeline.SECTION_TITLE_GLOBAL_HEADLINES}</h2>",
         "港股名家频道</h2>",
         "新闻情绪</h2>",
         "总结</h2>",
+        f"{pipeline.SECTION_TITLE_FORECAST}</h2>",
+        f"{pipeline.SECTION_TITLE_SHORT_CARD}</h2>",
     ]
 
     def test_guizang_section_reading_order(self):
@@ -2352,8 +2361,8 @@ class SectionReadingOrderTests(unittest.TestCase):
     def _lvl_markers(self, data, kickers):
         """按本次实际渲染的栏目序列生成「LVL nn // KICKER」标记。
 
-        2026-09-30 起第一屏多了「【闪电飞鱼】短线速查卡」（LVL 00），编号整体后移一位；
-        编号由栏目序列推导而不是写死，精简 / 全量两种版面共用同一份断言。
+        速查卡已收在结论之后，栏目编号按当前实际渲染序列推导；
+        编号由栏目序列计算而不是写死，精简 / 全量两种版面共用同一份断言。
         """
         sections = pipeline._collect_report_parts(data, pipeline.PIXEL_KIT,
                                                   date_str="20260802")["sections"]
@@ -2363,9 +2372,9 @@ class SectionReadingOrderTests(unittest.TestCase):
     def test_pixel_lvl_numbering_follows_reading_order(self):
         data = self._full_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
-        kickers = ["FORECAST", "MARKET REVIEW", "POLICY SHOCK", "STRATEGY READ",
-                   "GLOBAL HEADLINES", "HK GURU CHANNELS",
-                   "NEWS SENTIMENT", "SUMMARY"]
+        kickers = ["STRATEGY READ", "POLICY SHOCK", "MARKET REVIEW",
+                   "GLOBAL HEADLINES", "HK GURU CHANNELS", "NEWS SENTIMENT",
+                   "SUMMARY", "FORECAST", "SHORT CARD"]
         order, index = self._lvl_markers(data, kickers)
         self.assertEqual(len(order), len(kickers), "存在未渲染的栏目")
         positions = [html.find(s) for s in order]
@@ -2375,11 +2384,11 @@ class SectionReadingOrderTests(unittest.TestCase):
                              f"  {s}: {p}" for s, p in zip(order, positions)))
         self.assertNotIn("EASTMONEY WIRE", index)
         self.assertNotIn("EASTMONEY WIRE", html)
-        # 阅读顺序本身仍按 REPORT_SECTION_ORDER，且速查卡 / 速览永远在最前
+        # 正文分析 → 数据 → 结论；导读置顶，短线速查卡在最终结论之后收尾。
         self.assertEqual([index[k] for k in kickers], sorted(index[k] for k in kickers))
-        self.assertLess(index["AI DIGEST"], index["FORECAST"])
+        self.assertEqual(index["AI DIGEST"], 0)
         if "SHORT CARD" in index:
-            self.assertEqual(index["SHORT CARD"], 0)
+            self.assertGreater(index["SHORT CARD"], index["FORECAST"])
 
     def test_order_skips_missing_sections_without_shifting_rest(self):
         # 无新闻/无政策/无情绪归因（缺席栏目）时，剩余栏目顺序与编号仍正确
@@ -2392,7 +2401,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         html = pipeline.generate_report(
             data, "2026年8月2日 · 周日", "20260802", theme="pixel")
         order, _index = self._lvl_markers(
-            data, ["FORECAST", "MARKET REVIEW", "STRATEGY READ", "SUMMARY"])
+            data, ["STRATEGY READ", "MARKET REVIEW", "SUMMARY", "FORECAST"])
         positions = [html.find(s) for s in order]
         self.assertNotIn(-1, positions, "缺席栏目后剩余关卡渲染不完整")
         self.assertEqual(positions, sorted(positions))
@@ -2401,7 +2410,7 @@ class SectionReadingOrderTests(unittest.TestCase):
 
 
 class ConciseLayoutTests(unittest.TestCase):
-    """2026-09-27 精简排版：结论先行、去说明、去无效 / 缺失内容。"""
+    """精简排版：专业分析 → 数据显示 → 结论收尾，去过程与无效内容。"""
 
     def _data(self):
         data = SectionReadingOrderTests()._full_data()
@@ -2413,13 +2422,22 @@ class ConciseLayoutTests(unittest.TestCase):
         })
         return data
 
-    def test_conclusion_first_and_summary_last(self):
+    def test_analysis_data_conclusion_order_and_emphasis(self):
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
-        self.assertLess(html.find("【回游金枪鱼】今日预判</h2>"),
-                        html.find("【及时秋刀鱼】AI 行情复盘</h2>"))
-        self.assertIn("市场倾向", html)
+        strategy = html.find("策略研判</h2>")
+        market = html.find("【及时秋刀鱼】AI 行情复盘</h2>")
+        recap = html.find("总结</h2>")
+        forecast = html.find("【回游金枪鱼】今日预判</h2>")
+        short_card = html.find(f"{pipeline.SECTION_TITLE_SHORT_CARD}</h2>")
+        self.assertGreaterEqual(strategy, 0)
+        self.assertLess(strategy, market)
+        self.assertLess(market, recap)
+        self.assertLess(recap, forecast)
+        self.assertLess(forecast, short_card)
+        self.assertIn("专业分析", html)
+        self.assertIn("数据显示", html)
+        self.assertIn("结论 · 重点", html)
         self.assertIn("核心判断", html)
-        self.assertGreater(html.find("总结</h2>"), html.find("新闻情绪</h2>"))
         self.assertIn("今日盘点", html)
         self.assertIn("数据覆盖", html)
         self.assertNotIn("本次数据可用性", html)
@@ -2625,11 +2643,14 @@ class AiTrendAnalysisTests(unittest.TestCase):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
                 self.assertIn("AI趋势分析（美联储）", titles)
                 self.assertIn("AI趋势分析（地缘政治）", titles)
+                self.assertLess(titles.index("策略研判"),
+                                titles.index(pipeline.SECTION_TITLE_POLICY))
                 self.assertLess(titles.index(pipeline.SECTION_TITLE_POLICY),
                                 titles.index("AI趋势分析（美联储）"))
                 self.assertLess(titles.index("AI趋势分析（美联储）"),
                                 titles.index("AI趋势分析（地缘政治）"))
-                self.assertLess(titles.index("AI趋势分析（地缘政治）"), titles.index("策略研判"))
+                self.assertLess(titles.index("AI趋势分析（地缘政治）"),
+                                titles.index(pipeline.SECTION_TITLE_MARKET_REVIEW))
                 html = pipeline.generate_report(
                     data, "2026年9月28日 · 周一", "20260928", theme=theme)
                 # 证据逐条引用：命中词 + 来源 + 发布时间
@@ -3030,26 +3051,27 @@ class EconCalendarTests(unittest.TestCase):
         self.assertRegex(html, r"暂缺：[^<]*财经日历")
 
     # ---------- ④ 排版与披露 ----------
-    def test_section_renders_right_after_conclusion_in_both_themes(self):
+    def test_calendar_is_in_data_group_before_conclusion(self):
         res, _ = self._fetch()
         data = self._data(res)
-        # pixel 的 LVL 编号由本次实际渲染的栏目序列推导：2026-09-30 起第一屏多了
-        # 「【闪电飞鱼】短线速查卡」（LVL 00），写死编号会在版面调整时误报。
-        kickers = [s[0] for s in pipeline._collect_report_parts(
-            data, pipeline.PIXEL_KIT, date_str="20260928")["sections"]]
+        with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False), \
+             patch.object(pipeline, "HK_QUANT_ENABLED", False):
+            kickers = [s[0] for s in pipeline._collect_report_parts(
+                data, pipeline.PIXEL_KIT, date_str="20260928")["sections"]]
         pixel_markers = [f"LVL {kickers.index(k):02d} // {k}"
-                         for k in ("FORECAST", "ECON CALENDAR", "MARKET REVIEW")
-                         if k in kickers]
+                         for k in ("ECON CALENDAR", "MARKET REVIEW", "SUMMARY",
+                                   "FORECAST", "SHORT CARD") if k in kickers]
         for theme, markers in (
-            ("guizang", ["【回游金枪鱼】今日预判</h2>", "【探照安康鱼】时间节点</h2>",
-                         "【及时秋刀鱼】AI 行情复盘</h2>"]),
+            ("guizang", ["【探照安康鱼】时间节点</h2>",
+                         "【及时秋刀鱼】AI 行情复盘</h2>", "总结</h2>",
+                         "【回游金枪鱼】今日预判</h2>", f"{pipeline.SECTION_TITLE_SHORT_CARD}</h2>"]),
             ("pixel", pixel_markers),
         ):
             html = self._report(data, theme=theme)
             positions = [html.find(m) for m in markers]
             self.assertNotIn(-1, positions, f"{theme} 栏目缺失: {markers}")
             self.assertEqual(positions, sorted(positions),
-                             f"{theme} 新栏目必须紧跟今日预判、在 AI 行情复盘之前")
+                             f"{theme} 顺序必须为专业分析 → 数据显示 → 结论")
 
     def test_section_body_carries_window_summary_and_star_levels(self):
         res, _ = self._fetch()
@@ -3128,15 +3150,21 @@ if __name__ == "__main__":
 
 
 class OpeningDigestTests(unittest.TestCase):
-    def test_digest_precedes_details_in_both_themes(self):
+    def test_digest_uses_analysis_data_conclusion_order_in_both_themes(self):
         data = {"实时行情": pipeline._source_result(
             "test", "success", quotes={"标普500": {"price": 6123, "change_pct": 1.25}})}
-        for theme in ("guizang", "pixel"):
+        for theme, kit in (("guizang", pipeline.GUIZANG_KIT),
+                           ("pixel", pipeline.PIXEL_KIT)):
+            sections = pipeline._collect_report_parts(data, kit, date_str="20260928")["sections"]
+            first_detail = next(section for section in sections if section[0] != "AI DIGEST")
+            detail_marker = (f"{first_detail[1]}</h2>" if theme == "guizang"
+                             else f"LVL {sections.index(first_detail):02d} // {first_detail[0]}")
             html = pipeline.generate_report(data, "2026年9月28日", "20260928", theme=theme)
             self.assertEqual(html.count("【爪爪八爪鱼】AI 全篇速览"), 1)
-            self.assertLess(html.index("【爪爪八爪鱼】AI 全篇速览"),
-                            html.index("【回游金枪鱼】今日预判"))
-            self.assertIn("非大模型生成", html)
+            self.assertLess(html.index("【爪爪八爪鱼】AI 全篇速览"), html.index(detail_marker))
+            positions = [html.index(label) for label in ("专业分析", "数据显示", "结论</div>")]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn("推导过程", html)
 
     def test_all_content_sections_covered_and_html_escaped(self):
         sections = [(k, k, "<b>原始内容</b>", "", "")
@@ -3155,6 +3183,9 @@ class OpeningDigestTests(unittest.TestCase):
         self.assertIn("报价重点；全景重点 &lt;script&gt;", text)
         self.assertNotIn("<script>", text)
         self.assertIn("当天来源 2/8", text)
+        self.assertLess(text.index("专业分析"), text.index("数据显示"))
+        self.assertLess(text.index("数据显示"), text.index("结论</div>"))
+        self.assertNotIn("推导过程", text)
 
     def test_empty_report_does_not_invent_direction(self):
         html = pipeline.generate_report({}, "2026年9月28日", "20260928")
@@ -3279,14 +3310,13 @@ class SectionRenameBatch2Tests(unittest.TestCase):
             for old_head in self.OLD_HEADS:
                 self.assertNotIn(old_head, html, f"{theme} 旧栏目头回潮：{old_head}")
 
-    def test_reading_order_unchanged(self):
-        """改名不动顺序：今日预判 → 每周预测 → 政策因子 → 策略研判 → 趋势跟踪 → 全球头条。"""
+    def test_reading_order_is_analysis_then_data_then_conclusion(self):
         order = pipeline.REPORT_SECTION_ORDER
-        self.assertLess(order.index("FORECAST"), order.index("WEEKLY FORECAST"))
+        self.assertLess(order.index("STRATEGY READ"), order.index("WEEKLY FORECAST"))
         self.assertLess(order.index("WEEKLY FORECAST"), order.index("POLICY SHOCK"))
-        self.assertLess(order.index("POLICY SHOCK"), order.index("STRATEGY READ"))
-        self.assertLess(order.index("STRATEGY READ"), order.index("TREND TRACKING"))
+        self.assertLess(order.index("POLICY SHOCK"), order.index("TREND TRACKING"))
         self.assertLess(order.index("TREND TRACKING"), order.index("GLOBAL HEADLINES"))
+        self.assertLess(order.index("SUMMARY"), order.index("FORECAST"))
         titles = [s[1] for s in pipeline._collect_report_parts(
             self._data(), pipeline.GUIZANG_KIT, date_str="20260802")["sections"]]
         pos = [titles.index(self.EXPECTED[k]) for k in
@@ -3427,9 +3457,9 @@ class MarketReviewMergeTests(unittest.TestCase):
         self.assertNotIn("MARKET SNAPSHOT", order)
         self.assertNotIn("GLOBAL PANORAMA", order)
         self.assertEqual(pipeline.SECTION_TITLE_MARKET_REVIEW, "【及时秋刀鱼】AI 行情复盘")
-        # 合并后占原来「行情速览」的位置：每周预测之后、政策因子之前
-        self.assertLess(order.index("WEEKLY FORECAST"), order.index("MARKET REVIEW"))
-        self.assertLess(order.index("MARKET REVIEW"), order.index("POLICY SHOCK"))
+        # 行情数据归入专业分析之后：政策因子 / 周度预测先于市场数据显示
+        self.assertLess(order.index("WEEKLY FORECAST"), order.index("POLICY SHOCK"))
+        self.assertLess(order.index("POLICY SHOCK"), order.index("MARKET REVIEW"))
 
         for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
             kicks = [s[0] for s in pipeline._collect_report_parts(self._data(), kit)["sections"]]

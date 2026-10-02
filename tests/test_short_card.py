@@ -1,6 +1,6 @@
 """「🎯 短线速查卡」（output/octopus_short.py）回归测试（全部离线）。
 
-用户要求「内容再精炼，适合短线操作，入门观看」→ 日报第一屏加一张 ≤600 字的卡。
+用户要求「内容再精炼，适合短线操作，入门观看」→ 日报末尾加一张 ≤600 字的行动速查卡。
 本文件守的是整仓「防自欺」四条口径：
   · 确定性——同一份输入永远得到同一张卡（可复现，绝不随机跳变）；
   · 不伪造——数据缺失时对应行缺席，一行都没有时整卡缺席（返回 None）；
@@ -444,30 +444,35 @@ class CardRenderingTests(unittest.TestCase):
         data["财经日历"] = res
         return data
 
-    def test_card_is_first_section_in_both_themes(self):
+    def test_card_closes_report_after_analysis_data_and_conclusion(self):
         data = self._data()
         for kit in (self.pipeline.GUIZANG_KIT, self.pipeline.PIXEL_KIT):
             sections = self.pipeline._collect_report_parts(data, kit,
                                                            date_str="20260802")["sections"]
-            self.assertEqual(sections[0][0], "SHORT CARD")
-            self.assertEqual(sections[0][1], self.pipeline.SECTION_TITLE_SHORT_CARD)
-            self.assertEqual(sections[1][0], "AI DIGEST")
+            self.assertEqual(sections[0][0], "AI DIGEST")
+            self.assertEqual(sections[-1][0], "SHORT CARD")
+            self.assertEqual(sections[-1][1], self.pipeline.SECTION_TITLE_SHORT_CARD)
+            titles = [section[1] for section in sections]
+            self.assertLess(titles.index("策略研判"), titles.index(self.pipeline.SECTION_TITLE_MARKET_REVIEW))
+            self.assertLess(titles.index(self.pipeline.SECTION_TITLE_MARKET_REVIEW),
+                            titles.index("总结"))
+            self.assertLess(titles.index("总结"), titles.index(self.pipeline.SECTION_TITLE_FORECAST))
         for theme in ("guizang", "pixel"):
             html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
                                                 theme=theme)
             self.assertIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html)
-            self.assertLess(html.index(self.pipeline.SECTION_TITLE_SHORT_CARD),
-                            html.index(self.pipeline.SECTION_TITLE_AI_DIGEST),
-                            f"{theme} 速查卡必须排在 AI 全篇速览之前")
-            self.assertLess(html.index(self.pipeline.SECTION_TITLE_SHORT_CARD),
+            self.assertLess(html.index(self.pipeline.SECTION_TITLE_AI_DIGEST),
                             html.index(self.pipeline.SECTION_TITLE_FORECAST))
+            self.assertLess(html.index(self.pipeline.SECTION_TITLE_FORECAST),
+                            html.index(self.pipeline.SECTION_TITLE_SHORT_CARD),
+                            f"{theme} 速查卡必须作为结论后的收尾")
             self.assertIn("新手三句话", html)
 
     def test_card_text_stays_within_budget_in_full_report(self):
         data = self._data()
         sections = self.pipeline._collect_report_parts(data, self.pipeline.GUIZANG_KIT,
                                                        date_str="20260802")["sections"]
-        card_html = sections[0][2]
+        card_html = next(section[2] for section in sections if section[0] == "SHORT CARD")
         text = re.sub(r"<[^>]+>", "", card_html)
         self.assertLessEqual(len(text), short.CARD_CHAR_BUDGET + 40,
                              f"渲染后的速查卡 {len(text)} 字，超出预算太多")
