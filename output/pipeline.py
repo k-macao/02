@@ -13,11 +13,13 @@
   2. 每次生成后先做「当天内容检验」：每个数据源标注 ✅当天 / 🕓非当天 / ⚠️无数据，
      只有当「至少一个数据源含当天内容」时才自动推送日报；否则不推日报，
      但会推一条「纯文本告警」说明原因与各来源状态，避免彻底沉默。
-  3. 页面内容包含「港股名家频道」区块：香港股评人/财经平台的 YouTube 与通用 RSS
-     抓取（无需 API Key），每频道列出最新 3 条；需登录平台明确标注「暂缺」及原因，
-     不伪造内容。
+  3. 「港股名家频道」数据源：香港股评人/财经平台的 YouTube 与通用 RSS 抓取
+     （无需 API Key），每频道取最新 3 条；需登录平台明确标注「暂缺」及原因，
+     不伪造内容。2026-10-02 起该栏目在页面隐藏（见第 24 条），数据仍照常抓取并
+     供政策因子 / 策略研判 / 新闻情绪 / 逐栏 AI 研判与审计使用。
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
-     Google News 中文版，标题本身即中文，无需翻译。
+     Google News 中文版，标题本身即中文，无需翻译。2026-10-02 起该栏目
+     （【无敌帝王蟹】全球头条）同样在页面隐藏（见第 24 条），数据用途不变。
   5. 新增「东方财富快讯」数据源：东方财富免费公开接口的最新 5 条财经新闻。
      2026-10-02 起页面隐藏「东方财富快讯」栏目（正文与首屏速览均不再单独展示），
      原始快讯数据仅作为政策因子、策略研判、新闻情绪与数据审计的信号源。
@@ -40,8 +42,9 @@
       最新价与涨跌幅，复用同一次抓取的 Yahoo 报价——已于 2026-09-30 随两栏合并删除：
       它与报价块「全球与美股」「港股双指数」逐项数字完全相同，属于纯重复。）
   6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（【及时秋刀鱼】AI 行情复盘 /
-      政策因子 / 全球头条 / 东方财富快讯 / 趋势跟踪 / 港股名家频道 /
-      新闻情绪）正文末尾追加一行概率化多空判断：
+      政策因子 / 趋势跟踪 / 新闻情绪）正文末尾追加一行概率化多空判断
+      （全球头条 / 东方财富快讯 / 港股名家频道三栏已于 2026-10-02 在页面隐藏，
+      其研判照旧计算，但因栏目不再渲染而不会成行，首屏速览也不再列出这三栏）：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
@@ -286,6 +289,19 @@
       因此不会单独把日报推过当天检验闸门；OCTOPUS_HK_OVERSEAS=0 可关闭整路采集。
       本条与既有栏目的分工：【及时秋刀鱼】AI 行情复盘给全市场报价快照（含港股双指数），
       【港股概率走势分析】给概率模型，本栏给**境外口径的港股个股与市场层明细**。
+
+  24. 隐藏「【无敌帝王蟹】全球头条」与「港股名家频道」两个栏目（2026-10-02 按用户要求，
+      与同日隐藏「东方财富快讯」同一口径）：
+      · 页面侧：两个 kicker（GLOBAL HEADLINES / HK GURU CHANNELS）退出正文顺序表
+        REPORT_DATA_SECTIONS，_collect_report_parts 不再建区块，因此正文、首屏
+        「AI 全篇速览」逐栏摘要、像素主题关卡名与推送分条里都不再出现这两栏；
+      · 数据侧完全不变：Google News 全球头条与港股名家频道（YouTube / 通用 RSS）
+        照旧抓取，仍进数据覆盖审计（当天源 / 总源计数不变）、政策因子、策略研判、
+        新闻情绪归因、逐栏 AI 研判与「鲜鲜解读」的输入，freshness_checker 与
+        backup_sources 的源名 / 阈值不动；
+      · 风险提示：命中这两批标题时 shown=False（同东财快讯），保留完整标题展示，
+        不再生成指向已隐藏栏目的锚点跳转（h-gh-* / h-hk-* 不再写入页面）；
+      · 历史归档日报不改写。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -6880,9 +6896,13 @@ REPORT_ANALYSIS_SECTIONS = (
     "STRATEGY READ", "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
     "WEEKLY FORECAST", "SECTOR ROTATION", "POLICY SHOCK", "FED TREND", "GEO TREND",
 )
+# 2026-10-02 起 GLOBAL HEADLINES（【无敌帝王蟹】全球头条）与 HK GURU CHANNELS
+# （港股名家频道）按用户要求从页面隐藏，与此前隐藏的 EASTMONEY WIRE（东方财富快讯）
+# 同口径：kicker 不再进入正文顺序表，即使某处误建区块也不会渲染；
+# 抓取、审计、政策因子 / 策略研判 / 新闻情绪 / 逐栏 AI 研判的输入一律不变。
 REPORT_DATA_SECTIONS = (
     "ECON CALENDAR", "MARKET REVIEW", "HK QUOTES", "TREND TRACKING",
-    "GLOBAL HEADLINES", "HK GURU CHANNELS", "NEWS SENTIMENT",
+    "NEWS SENTIMENT",
 )
 REPORT_CONCLUSION_SECTIONS = ("SUMMARY", "FORECAST")
 REPORT_SECTION_ORDER = (
@@ -8048,7 +8068,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     if not isinstance(gov_policy, dict):
         gov_policy = data.get("中国政府网", {}) or {}
     yt = data.get("港股名家频道", {})
-    yt_live = yt.get("channels", [])        # 近期有内容的频道
     google = data.get("全球头条", {})
     gh_headlines = google.get("headlines", [])
     em = data.get("东财快讯", {})
@@ -8217,6 +8236,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # ③b AI趋势分析（美联储 / 地缘政治）：专门抓取 + 词表定调 + 证据引用
     fed_res = geo_res = {}
     if AI_ANALYSIS_ENABLED:
+        # 全球头条标题一律不作为两个专题的证据重复引用：2026-10-02 前是为了不与
+        # 正文「全球头条」栏目重列，栏目隐藏后继续排除，可保证被隐藏的头条内容
+        # 不会换个栏目重新出现在页面上（专题定调仍照原样计入这些标题）。
         shown_titles = [str((h or {}).get("title") or "")
                         for h in (gh_headlines or [])[:GH_DISPLAY_N] if isinstance(h, dict)]
         fed_res = build_fed_trend_analysis(data, exclude_titles=shown_titles)
@@ -8255,21 +8277,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["TREND TRACKING"] = (
                 "TREND TRACKING", SECTION_TITLE_TREND, digest, "", "")
 
-    # ⑥ 资讯：全球头条 / 港股名家频道（2026-10-02 起页面隐藏「东方财富快讯」栏目，
-    #    原始快讯数据仅作为政策因子、策略研判、新闻情绪与数据审计的信号源；
-    #    A股资讯已按用户要求移除，其数据不再采集）
-    if gh_headlines:
-        gh_items = kit.rows("".join(kit.headline_row(it, i)
-                                    for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
-        blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", SECTION_TITLE_GLOBAL_HEADLINES,
-                                      gh_items, kit.source_badge(google),
-                                      _short_source(google))
-    if yt_live:
-        channel_blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
-        blocks["HK GURU CHANNELS"] = (
-            "HK GURU CHANNELS", "港股名家频道", channel_blocks,
-            kit.source_badge(yt), f"{len(yt_live)} 个频道有近期更新",
-        )
+    # ⑥ 资讯：三个资讯栏目（东方财富快讯 / 【无敌帝王蟹】全球头条 / 港股名家频道）
+    #    自 2026-10-02 起全部在页面隐藏（用户要求），正文与首屏速览均不再单独展示；
+    #    原始抓取数据照旧保留，仅作为 政策因子 / 策略研判 / 新闻情绪 / 逐栏 AI 研判 /
+    #    鲜鲜解读 / 数据审计 的信号源（与「东方财富快讯」隐藏时的口径完全一致）。
+    #    A股资讯已按用户要求移除，其数据不再采集。
+    #    风险提示命中这些标题时 shown=False（见 build_daily_quant_strategy），
+    #    因此保留完整标题、不生成指向已隐藏栏目的死链锚点。
 
     # ⑦ 新闻情绪：只有真正归因到个股时才出现（样本不足不再占位）
     senti_result = {}
@@ -8526,9 +8540,10 @@ def build_daily_quant_strategy(data):
     # 每个条目：title / source / section（正文栏目名）/ index（栏目内序号，1-based，
     # 与渲染侧展示顺序一致）/ anchor（正文锚点 id）/ shown（该标题是否已在正文
     # 栏目展示）/ time（发布时间，供无序号栏目定位）/ channel（港股频道名）。
-    # 全球头条展示前 GH_DISPLAY_N 条（shown=True）；东财快讯自 2026-10-02 起在页面隐藏
-    # 独立栏目，故 shown=False（命中风险时保留全文展示）；港股频道每频道存储最多 8 条、
-    # 正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
+    # 三个资讯栏目（东财快讯 / 全球头条 / 港股名家频道）自 2026-10-02 起全部在页面隐藏
+    # 独立栏目，故一律 shown=False（命中风险时保留完整标题展示，且不生成指向
+    # 已隐藏栏目的死链锚点 h-em-* / h-gh-* / h-hk-*）。数据本身照旧参与
+    # 情绪打分、政策因子、新闻情绪与审计。
     headlines_struct = []
     for i, it in enumerate(google_headlines, 1):
         if isinstance(it, dict):
@@ -8536,7 +8551,7 @@ def build_daily_quant_strategy(data):
                 "title": it.get("title", ""), "source": it.get("source", ""),
                 "section": SECTION_TITLE_GLOBAL_HEADLINES,
                 "index": i, "anchor": f"h-gh-{i:02d}",
-                "shown": i <= GH_DISPLAY_N,
+                "shown": False,
                 "time": it.get("published_cst") or "", "channel": "",
             })
     for i, it in enumerate(em_headlines, 1):
@@ -8553,7 +8568,7 @@ def build_daily_quant_strategy(data):
                 "title": video.get("title", ""), "source": ch.get("name", ""),
                 "section": "港股名家频道", "index": v,
                 "anchor": f"h-hk-{c:02d}-{v:02d}",
-                "shown": v <= CHANNEL_TOP_N,
+                "shown": False,
                 "time": video.get("published_cst") or "", "channel": ch.get("name", ""),
             })
 
