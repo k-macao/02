@@ -421,9 +421,11 @@ class NewLayoutRenderingTests(unittest.TestCase):
 
     def test_report_renders_new_sections(self):
         html = pipeline.generate_report(self._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn("东方财富快讯", html)
-        self.assertIn("A股三大指数集体收涨", html)
-        self.assertIn("当天 5/8 源", html)  # 热门榜单只计入总结的数据覆盖
+        self.assertIn("当天 5/8 源", html)  # 东财快讯与热门榜单只计入总结的数据覆盖与AI信号
+        # 2026-10-02 起页面隐藏「东方财富快讯」栏目（与热门榜单一致，仅保留后台抓取供 AI 分析）
+        self.assertNotIn("东方财富快讯</h2>", html)
+        self.assertNotIn("EASTMONEY WIRE", html)
+        self.assertNotIn("A股三大指数集体收涨", html)
         # 2026-08-06 起不再单独渲染三个成交量榜单栏目，只保留 AI 研判结果
         self.assertNotIn("A股成交量前五", html)
         self.assertNotIn("港股成交量前五", html)
@@ -439,6 +441,28 @@ class NewLayoutRenderingTests(unittest.TestCase):
         self.assertNotIn("GEMINI", html)
         meta = pipeline._report_meta(html)
         self.assertEqual(meta["total_sources"], 8)  # 8 个基础数据源（A股资讯已移除、含「港股量化引擎」）；多平台趋势线索另计，本样本未含
+
+    def test_eastmoney_wire_hidden_on_page_but_feeds_ai_and_audit(self):
+        """2026-10-02：东方财富快讯栏目在页面隐藏，但后台数据仍用于政策因子/策略研判/新闻情绪/审计。"""
+        data = self._rich_data()
+        data["东财快讯"] = pipeline._source_result(
+            "东方财富", "success", is_today=True, content_date="2026-08-02",
+            headlines=[
+                {"title": "某大型房企债务违约爆雷引发市场担忧", "url": "",
+                 "time": "2026-08-02 15:40", "summary": "", "is_today": True},
+            ])
+        for theme in ("guizang", "pixel"):
+            html = pipeline.generate_report(
+                data, "2026年8月2日 · 周日", "20260802", theme=theme)
+            self.assertNotIn("东方财富快讯</h2>", html)
+            self.assertNotIn("EASTMONEY WIRE", html)
+            self.assertNotIn("东方财富快讯：", html)  # 首屏 AI 全篇速览也不列出该栏
+            # 东财快讯已隐藏，命中风险提示时必须保留完整标题（shown=False），不生成死链锚点
+            self.assertIn("某大型房企债务违约爆雷引发市场担忧", html)
+            self.assertNotIn("h-em-01", html)
+        ai = pipeline.build_ai_analysis(data)
+        em_risk = [r for r in ai["risks"] if "债务违约爆雷" in r["title"]][0]
+        self.assertFalse(em_risk["shown"])
 
 
 class RetroPixelVisualTests(unittest.TestCase):
@@ -469,7 +493,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("LVL 02 // MARKET REVIEW", html)
         self.assertIn("// POLICY SHOCK", html)
         self.assertIn("// STRATEGY READ", html)
-        self.assertIn("LVL 08 // SUMMARY", html)  # 盘点收尾
+        self.assertIn("LVL 07 // SUMMARY", html)  # 盘点收尾（2026-10-02 东财快讯页面隐藏后顺移）
         self.assertIn("QUANT CORE", html)
         self.assertIn("量化主结论 // QUANT THESIS", html)
         self.assertIn("READ THIS FIRST // 先看结论", html)
@@ -955,19 +979,23 @@ class GuizangOnePageTests(unittest.TestCase):
         """全量：重日栏目一个都不能少，只靠排版瘦身换一页"""
         data = self._heavy_data()
         html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929")
-        titles = [s[1] for s in pipeline._collect_report_parts(data, pipeline.GUIZANG_KIT)["sections"]]
+        titles = [s[1] for s in pipeline._collect_report_parts(
+            data, pipeline.GUIZANG_KIT, date_str="20260929")["sections"]]
         # 2026-09-29 起八个栏目改名（只改标题文字）：AI 全篇速览 / 今日预判 /
         # 未来30天影响经济时间点 / 量化预测总览 / 全球头条 / 趋势跟踪 / 政策因子 /
         # 每周量化走势预测 分别加上鱼名前缀；
-        # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」
+        # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」；
+        # 2026-10-02 起「东方财富快讯」页面栏目隐藏（保留后台抓取供 AI 分析）。
         for title in ("【爪爪八爪鱼】AI 全篇速览", "【回游金枪鱼】今日预判",
                       "【探照安康鱼】时间节点", "【蜉蝣天地水母】量化预测总览",
                       "港股概率走势分析", "资金流动性分析", "【及时秋刀鱼】AI 行情复盘",
                       "【深海肥蓝鲸】政策因子", "策略研判", "【深海大鲨鱼】趋势跟踪",
-                      "【无敌帝王蟹】全球头条", "东方财富快讯",
+                      "【无敌帝王蟹】全球头条",
                       "港股名家频道", "新闻情绪", "总结"):
             self.assertIn(title, titles)
             self.assertIn(f"{title}</h2>", html)
+        self.assertNotIn("东方财富快讯", titles)
+        self.assertNotIn("东方财富快讯</h2>", html)
 
 
 class CleanOldReportsTests(unittest.TestCase):
@@ -2282,10 +2310,11 @@ class SectionReadingOrderTests(unittest.TestCase):
     """2026-09-27：按人类阅读逻辑固定栏目顺序（两主题共用 _collect_report_parts）。
 
     结论先行 → 分栏展开（AI 行情复盘 → 政策因子 → 策略研判 →
-    资讯：全球头条 → 东财快讯 → 港股名家频道 → 新闻情绪）→
+    资讯：全球头条 → 港股名家频道 → 新闻情绪）→
     总结收尾。无数据栏目缺席但不打乱其余顺序。
     2026-09-30 起「行情速览」与「全球大盘全景复盘」合并成一栏「【及时秋刀鱼】AI 行情复盘」，
     原来两个位置合成一个（MARKET REVIEW），其余栏目顺序与编号顺次前移。
+    2026-10-02 起「东方财富快讯」页面栏目隐藏（保留后台抓取供 AI 分析与审计）。
     """
 
     def _full_data(self):
@@ -2304,7 +2333,6 @@ class SectionReadingOrderTests(unittest.TestCase):
         f"{pipeline.SECTION_TITLE_POLICY}</h2>",
         "策略研判</h2>",
         f"{pipeline.SECTION_TITLE_GLOBAL_HEADLINES}</h2>",
-        "东方财富快讯</h2>",
         "港股名家频道</h2>",
         "新闻情绪</h2>",
         "总结</h2>",
@@ -2318,6 +2346,8 @@ class SectionReadingOrderTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions),
                          "栏目顺序不符合阅读逻辑:\n" + "\n".join(
                              f"  {h}: {p}" for h, p in zip(self.GUIZANG_ORDER, positions)))
+        self.assertNotIn("东方财富快讯</h2>", html)
+        self.assertNotIn("EASTMONEY WIRE", html)
 
     def _lvl_markers(self, data, kickers):
         """按本次实际渲染的栏目序列生成「LVL nn // KICKER」标记。
@@ -2334,7 +2364,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         data = self._full_data()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802", theme="pixel")
         kickers = ["FORECAST", "MARKET REVIEW", "POLICY SHOCK", "STRATEGY READ",
-                   "GLOBAL HEADLINES", "EASTMONEY WIRE", "HK GURU CHANNELS",
+                   "GLOBAL HEADLINES", "HK GURU CHANNELS",
                    "NEWS SENTIMENT", "SUMMARY"]
         order, index = self._lvl_markers(data, kickers)
         self.assertEqual(len(order), len(kickers), "存在未渲染的栏目")
@@ -2343,6 +2373,8 @@ class SectionReadingOrderTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions),
                          "LVL 关卡编号顺序不符合阅读逻辑:\n" + "\n".join(
                              f"  {s}: {p}" for s, p in zip(order, positions)))
+        self.assertNotIn("EASTMONEY WIRE", index)
+        self.assertNotIn("EASTMONEY WIRE", html)
         # 阅读顺序本身仍按 REPORT_SECTION_ORDER，且速查卡 / 速览永远在最前
         self.assertEqual([index[k] for k in kickers], sorted(index[k] for k in kickers))
         self.assertLess(index["AI DIGEST"], index["FORECAST"])

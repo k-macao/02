@@ -18,7 +18,9 @@
      不伪造内容。
   4. 「全球头条」改用 Google News 数据源（替换原 Yahoo Finance News）：直接抓
      Google News 中文版，标题本身即中文，无需翻译。
-  5. 新增「东方财富快讯」区块：东方财富免费公开接口的最新 5 条财经新闻。
+  5. 新增「东方财富快讯」数据源：东方财富免费公开接口的最新 5 条财经新闻。
+     2026-10-02 起页面隐藏「东方财富快讯」栏目（正文与首屏速览均不再单独展示），
+     原始快讯数据仅作为政策因子、策略研判、新闻情绪与数据审计的信号源。
   6. 新增「热门榜单」数据源：最近交易日收盘后 A股/港股/美股 成交量前五
      （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
      原始榜单数据仅作为策略研判与数据审计的信号源；
@@ -6848,7 +6850,7 @@ REPORT_SECTION_ORDER = (
     "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW", "WEEKLY FORECAST",
     "SECTOR ROTATION", "MARKET REVIEW", "HK QUOTES", "POLICY SHOCK",
     "FED TREND", "GEO TREND", "STRATEGY READ",
-    "TREND TRACKING", "GLOBAL HEADLINES", "EASTMONEY WIRE",
+    "TREND TRACKING", "GLOBAL HEADLINES",
     "HK GURU CHANNELS", "NEWS SENTIMENT",
     "SUMMARY",
 )
@@ -8164,8 +8166,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     if AI_ANALYSIS_ENABLED:
         shown_titles = [str((h or {}).get("title") or "")
                         for h in (gh_headlines or [])[:GH_DISPLAY_N] if isinstance(h, dict)]
-        shown_titles += [str((h or {}).get("title") or "")
-                         for h in (em_headlines or [])[:EM_DISPLAY_N] if isinstance(h, dict)]
         fed_res = build_fed_trend_analysis(data, exclude_titles=shown_titles)
         geo_shown = shown_titles + [str((e or {}).get("title") or "")
                                     for e in (fed_res.get("evidence") or [])]
@@ -8201,18 +8201,15 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["TREND TRACKING"] = (
                 "TREND TRACKING", SECTION_TITLE_TREND, digest, "", "")
 
-    # ⑥ 资讯：全球头条 / 东财快讯 / 港股名家频道（A股资讯已按用户要求移除，其数据不再采集）
+    # ⑥ 资讯：全球头条 / 港股名家频道（2026-10-02 起页面隐藏「东方财富快讯」栏目，
+    #    原始快讯数据仅作为政策因子、策略研判、新闻情绪与数据审计的信号源；
+    #    A股资讯已按用户要求移除，其数据不再采集）
     if gh_headlines:
         gh_items = kit.rows("".join(kit.headline_row(it, i)
                                     for i, it in enumerate(gh_headlines[:GH_DISPLAY_N], 1)))
         blocks["GLOBAL HEADLINES"] = ("GLOBAL HEADLINES", SECTION_TITLE_GLOBAL_HEADLINES,
                                       gh_items, kit.source_badge(google),
                                       _short_source(google))
-    if em_headlines:
-        em_items = kit.rows("".join(kit.em_news_row(it, i)
-                                    for i, it in enumerate(em_headlines[:EM_DISPLAY_N], 1)))
-        blocks["EASTMONEY WIRE"] = ("EASTMONEY WIRE", "东方财富快讯", em_items,
-                                    kit.source_badge(em), _short_source(em))
     if yt_live:
         channel_blocks = "".join(kit.channel_block(ch, c) for c, ch in enumerate(yt_live, 1))
         blocks["HK GURU CHANNELS"] = (
@@ -8475,8 +8472,9 @@ def build_daily_quant_strategy(data):
     # 每个条目：title / source / section（正文栏目名）/ index（栏目内序号，1-based，
     # 与渲染侧展示顺序一致）/ anchor（正文锚点 id）/ shown（该标题是否已在正文
     # 栏目展示）/ time（发布时间，供无序号栏目定位）/ channel（港股频道名）。
-    # 全球头条 / 东财快讯的存储条数 == 展示条数（8/5），shown 恒为 True；
-    # 港股频道每频道存储最多 8 条、正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
+    # 全球头条展示前 GH_DISPLAY_N 条（shown=True）；东财快讯自 2026-10-02 起在页面隐藏
+    # 独立栏目，故 shown=False（命中风险时保留全文展示）；港股频道每频道存储最多 8 条、
+    # 正文只展示前 CHANNEL_TOP_N 条，其余 shown=False。
     headlines_struct = []
     for i, it in enumerate(google_headlines, 1):
         if isinstance(it, dict):
@@ -8492,7 +8490,7 @@ def build_daily_quant_strategy(data):
             headlines_struct.append({
                 "title": it.get("title", ""), "source": "东方财富",
                 "section": "东财快讯", "index": i, "anchor": f"h-em-{i:02d}",
-                "shown": i <= EM_DISPLAY_N,
+                "shown": False,
                 "time": it.get("time") or "", "channel": "",
             })
     for c, ch in enumerate(yt_channels, 1):
