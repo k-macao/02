@@ -93,6 +93,9 @@
      2026-09-09 起页内去重：指数动能只保留聚合（明细数值见【及时秋刀鱼】AI 行情复盘），
      风险提示对正文已展示的标题仅引用定位（栏目 + 序号 + 命中关键词 + 锚点），
      多因子矩阵不再复述雅虎逐只报价。
+     2026-10-02 起加入 MACD(12,26,9) 日线子策略：市场库 → 本次已有日线 →
+     Yahoo / 东财免费源，仅已收盘、足够新鲜的序列；展示交叉、零轴、动能与规则动作，
+     不改变原市场信号分、不把技术信号转换成未经校准的概率。
   10. 「新闻情绪」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
       逐股输出 AI 新闻情绪分与总结评论（含原因）。标题窗口为近
       SENTI_WINDOW_HOURS=72 小时（含历史存档），对窗口内标题逐条词表评分（S，
@@ -360,6 +363,9 @@ HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower
 # A股概念 → 港股观察篮子轮动：独立于港股量化开关；OCTOPUS_SECTOR_ROTATION=0 可关闭。
 SECTOR_ROTATION_ENABLED = str(os.environ.get("OCTOPUS_SECTOR_ROTATION", "1")).strip().lower() not in ("0", "false", "no")
 SECTOR_ROTATION_SOURCE_NAME = "板块轮动量化策略"
+# 策略研判内的 MACD 子策略：独立于港股概率引擎，优先市场库 / 本次日线，缺项补免费源。
+MACD_ENABLED = str(os.environ.get("OCTOPUS_MACD", "1")).strip().lower() not in ("0", "false", "no")
+MACD_SOURCE_NAME = "MACD量化策略"
 # 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
 WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
 WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
@@ -3384,6 +3390,51 @@ def fetch_hk_quant():
 
 
 # ============================================================
+# 策略研判 · MACD 日线策略（不另外增加正文栏目）
+# ============================================================
+def fetch_macd_strategy(data=None):
+    """只在采集阶段取数；渲染 / build_daily_quant_strategy 不读库、不联网。"""
+    if not MACD_ENABLED or not AI_ANALYSIS_ENABLED:
+        return None                   # 关闭时不出正文，也不加入数据审计
+    print("📡 正在计算 MACD 量化策略（市场库 → 已有日线 → Yahoo/东财免费源）...")
+    quant_src = (data or {}).get("港股量化") or {}
+    quant_res = quant_src.get("result") or {}
+    existing = {}
+    for row in list(quant_res.get("indices") or []) + list(quant_res.get("stocks") or []):
+        if isinstance(row, dict) and row.get("code") and row.get("bars"):
+            existing[row["code"]] = row["bars"]
+    try:
+        result = _quant.macd_strategy.run_macd(safe_request, existing=existing)
+    except Exception as exc:
+        print(f"  ⚠️ MACD 策略异常：{type(exc).__name__}")
+        return _source_result(MACD_SOURCE_NAME, "unavailable", result=None,
+                              error=f"MACD 策略异常（{type(exc).__name__}）")
+    if not result.get("available"):
+        print(f"  ⚠️ MACD 策略暂不可用：{result.get('reason')}")
+        return _source_result(MACD_SOURCE_NAME, "unavailable", result=result,
+                              error=result.get("reason") or "日线样本不足")
+    # 将真实命中的主备路由写进本次备用源审计；已有日线复用不虚构网络命中。
+    for row in result["items"]:
+        weekly = (row.get("derived") or {}).get("timeframe") or {}
+        urls = [row.get("source_url"), weekly.get("source_url")]
+        for url in dict.fromkeys(u for u in urls if u):
+            if "eastmoney.com" in url:
+                em_primary = _backup.DATA_LINES["yahoo_bars"]["backups"][1][1]
+                _note_backup_served("yahoo_bars", em_primary, symbol=row["code"])
+                _note_backup_served("em_kline", url)
+            else:
+                _note_backup_served("yahoo_bars", url, symbol=row["code"])
+    cover = result["coverage"]
+    print(f"  ✅ MACD：{cover['valid']}/{cover['total']} 只 · 收盘日 "
+          f"{result['as_of']} ~ {result['latest_as_of']} · 金叉 {result['golden_n']} / 死叉 {result['death_n']}")
+    # 已有库 / 已有日线不因今天计算过而冒充当天行情；不使用 snapshot 绕过日期检查。
+    today = datetime.now(CST).strftime("%Y-%m-%d")
+    return _source_result(MACD_SOURCE_NAME, "success", result=result,
+                          content_date=result["as_of"],
+                          is_today=any(row["as_of"] == today for row in result["items"]))
+
+
+# ============================================================
 # 【滚滚翻车鱼】板块轮动量化策略
 # ============================================================
 def _sector_rotation_is_today(content_date, today=None):
@@ -4441,6 +4492,10 @@ def collect_all_data():
 
     data["港股量化"] = fetch_hk_quant()
     time.sleep(0.5)
+
+    macd_src = fetch_macd_strategy(data)
+    if macd_src is not None:
+        data[MACD_SOURCE_NAME] = macd_src
 
     # 「时间节点」财经日历先抓：逐日表格要用窗口内的 ★★★ 日程做「事件日提醒」
     # （日程不参与概率计算，缺席也只是少一行提醒，不影响预测）。
@@ -5809,6 +5864,8 @@ def gz_ai_analysis_block(res):
         ("策略信号", _esc(signal)),
         ("核心判断", _esc(res.get("reason") or "—")),
     ]))
+    out.append(_quant.macd_strategy.render_strategy(res.get("macd"), GUIZANG_KIT,
+                                                    limit=9 if LITE_ENABLED else 0))
     # 板块趋势跟踪：量化趋势分榜（价格动量60% + 资金流30% + 舆情10%）
     sectors = res.get("quant_sectors") or []
     if sectors:
@@ -7956,6 +8013,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 板块轮动是独立的 A股概念库 + 港股观察篮子来源；仅外部调用确实传入时计入审计。
     if isinstance(data.get(SECTOR_ROTATION_SOURCE_NAME), dict):
         source_items.append((SECTOR_ROTATION_SOURCE_NAME, data[SECTOR_ROTATION_SOURCE_NAME]))
+    if isinstance(data.get(MACD_SOURCE_NAME), dict):
+        source_items.append((MACD_SOURCE_NAME, data[MACD_SOURCE_NAME]))
     # 前瞻日程（「时间节点」栏目）：关掉采集时不进审计，总源数保持不变。
     # 它是「今日抓取的日程快照」而非当天发布的内容，因此不计入当天源（当天检验不受影响）。
     if isinstance(data.get("财经日历"), dict):
@@ -8120,10 +8179,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "GEO TREND", "AI趋势分析（地缘政治）", kit.trend_topic_block(geo_res),
                 kit.ai_badge(), "")
 
-    # ④ 策略研判（倾向 / 结论已置顶，此处只展开依据）
-    if ai_result.get("available"):
+    # ④ 策略研判（倾向 / 结论已置顶，此处只展开依据；MACD 是栏内子块）
+    strategy_html = kit.ai_block(ai_result) if ai_result.get("available") else \
+        _quant.macd_strategy.render_strategy(ai_result.get("macd"), kit,
+                                              limit=9 if LITE_ENABLED else 0)
+    if strategy_html:
         blocks["STRATEGY READ"] = (
-            "STRATEGY READ", "策略研判", kit.ai_block(ai_result), kit.badge("量化策略", "ai"), "",
+            "STRATEGY READ", "策略研判", strategy_html, kit.badge("量化策略", "ai"), "",
         )
         # 兼容旧 kicker 的锚点引用（如风险提示中的 AI READ 引用）
         blocks["AI READ"] = blocks["STRATEGY READ"]
@@ -8388,6 +8450,8 @@ def build_daily_quant_strategy(data):
     google = data.get("全球头条", {}) or {}
     em = data.get("东财快讯", {}) or {}
     yt = data.get("港股名家频道", {}) or {}
+    macd_src = data.get(MACD_SOURCE_NAME) or {}
+    macd_result = (macd_src.get("result") or {}) if MACD_ENABLED and macd_src.get("status") == "success" else {}
 
     google_headlines = google.get("headlines", []) or []
     em_headlines = em.get("headlines", []) or []
@@ -8479,8 +8543,11 @@ def build_daily_quant_strategy(data):
     points = max(-100, min(100, round(points)))
 
     has_data = bool(changes) or bool(present) or bool(all_text)
-    if not has_data or not AI_ANALYSIS_ENABLED:
+    if not AI_ANALYSIS_ENABLED:
         return {"available": False}
+    if not has_data:
+        # MACD 单独可用时仍渲染策略子块，但不把技术状态伪装成跨市场中性分 / 概率。
+        return {"available": False, "macd": macd_result}
 
     sentiment_label, sentiment_en = _ai_label(points)
     sentiment_color = C_GREEN if points > 8 else (C_RED if points < -8 else C_AMBER)
@@ -8696,6 +8763,7 @@ def build_daily_quant_strategy(data):
         "quant_sectors": quant_sectors,
         "regime": regime,
         "quant_signal": quant_signal,
+        "macd": macd_result,
         "risk_note": risk_note,
         "tech_rows": tech_rows,
         "tech_stats": tech_stats,
@@ -8892,7 +8960,9 @@ def _ai_analysis_block(res):
     watch_html = _pixel_panel("QUANT ALLOC // 量化配置 · 趋势跟踪", watch_body, C_LEMON, "⌖")
 
     note_html = _note("策略研判由公开数据经确定性规则合成 // RULESET v3 // 趋势分=价格60%+资金30%+舆情10% + 风险控制 // 非投资建议，决策需独立判断")
-    return hero + conclusion_html + sectors_html + tech_html + risk_html + watch_html + note_html
+    macd_html = _quant.macd_strategy.render_strategy(res.get("macd"), PIXEL_KIT,
+                                                    limit=9 if LITE_ENABLED else 0)
+    return hero + conclusion_html + macd_html + sectors_html + tech_html + risk_html + watch_html + note_html
 
 
 # 兼容并行分支旧名入口（每日量化策略渲染入口）

@@ -1532,6 +1532,105 @@ def latest_day(root: str = DB_ROOT) -> Optional[Dict[str, Any]]:
     return docs[-1] if docs else None
 
 
+def load_daily_bars(*, symbols: Optional[Sequence[str]] = None, root: str = DB_ROOT,
+                    docs: Optional[Sequence[Dict[str, Any]]] = None,
+                    now: Optional[datetime] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """只读重建已收盘日线，供 MACD 等研究使用；绝不把三档快照当成三根日 K。
+
+    优先用 eod_close / eod_close_tdx 的实际行情日；指数另可用 ≥2 源一致、
+    有收盘后报价时间的共识价。原采集时刻尚未收盘的日 K 永远不采纳，即使
+    现在已经收盘；同一行情日去重，不以文件名 / 抓取日为行情日期。
+    个股的东财前复权与通达信未复权序列分组，选择最长一组，不混接价格口径。
+    已知除权除息落在个股序列窗口内时不供数，交给免费源重取完整历史。
+    """
+    from octopus_quant import providers
+
+    moment = _now(now)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=CST)
+    wanted = set(symbols) if symbols is not None else None
+    groups: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]] = {}
+    actions: Dict[str, set] = {}
+    index_symbols = {code for _name, code, _mk in CORE_SYMBOLS[:9]}
+
+    def _moment(text):
+        try:
+            parsed = datetime.fromisoformat(str(text))
+            return parsed.replace(tzinfo=CST) if parsed.tzinfo is None else parsed
+        except (TypeError, ValueError):
+            return None
+
+    def _add(sym, bar, collected, source, basis, rank):
+        if not isinstance(bar, dict):
+            return
+        day = str(bar.get("date") or "")[:10]
+        close = _num(bar.get("close"), None)
+        if close is None or close <= 0 or not providers.is_session_closed(sym, day, now=collected):
+            return
+        row = {"date": day, "close": close, "open": _num(bar.get("open")),
+               "high": _num(bar.get("high")), "low": _num(bar.get("low")),
+               "volume": _num(bar.get("volume")), "source": source, "price_basis": basis,
+               "collected_at": collected.isoformat(), "_rank": rank}
+        dates = groups.setdefault((sym, basis), {})
+        previous = dates.get(day)
+        if not previous or (rank, row["collected_at"]) >= (previous["_rank"], previous["collected_at"]):
+            dates[day] = row
+
+    for doc in (docs if docs is not None else load_days(root)):
+        if not isinstance(doc, dict):
+            continue
+        slots = doc.get("slots") or {}
+        if not isinstance(slots, dict):
+            continue
+        for slot_doc in slots.values():
+            if not isinstance(slot_doc, dict):
+                continue
+            collected = _moment(slot_doc.get("pulled_at"))
+            if collected is None or collected > moment:
+                continue
+            corporate_actions = slot_doc.get("corporate_actions") or {}
+            if isinstance(corporate_actions, dict):
+                for sym, entries in corporate_actions.items():
+                    for entry in (entries if isinstance(entries, (list, tuple)) else []):
+                        if isinstance(entry, dict) and entry.get("date"):
+                            actions.setdefault(sym, set()).add(str(entry["date"])[:10])
+            quotes = slot_doc.get("quotes") or {}
+            if not isinstance(quotes, dict):
+                continue
+            for sym, quote in quotes.items():
+                if (not isinstance(sym, str) or (wanted is not None and sym not in wanted)
+                        or not isinstance(quote, dict)):
+                    continue
+                is_index = sym.startswith("^") or sym in index_symbols
+                _add(sym, quote.get("eod_close"), collected, "市场库·东财日K",
+                     "指数点位" if is_index else "东财前复权留存", 2)
+                _add(sym, quote.get("eod_close_tdx"), collected, "市场库·通达信日K",
+                     "指数点位" if is_index else "未复权", 1)
+                cons = quote.get("consensus") or {}
+                if not isinstance(cons, dict):
+                    continue
+                # 原始报价时间必须真的在收盘后；只用指数共识，不混入个股复权序列。
+                stamp = _moment(quote.get("quote_time"))
+                if (not is_index or stamp is None or stamp > collected + timedelta(minutes=5)
+                        or (_num(cons.get("n_agree")) or 0) < 2
+                        or cons.get("verdict") in ("冲突", "分歧", "无数据")):
+                    continue
+                day = stamp.astimezone(providers.market_timezone(sym)).strftime("%Y-%m-%d")
+                if providers.is_session_closed(sym, day, now=stamp):
+                    _add(sym, {**quote, "date": day, "close": cons.get("price")},
+                         collected, "市场库·收盘共识", "指数点位", 0)
+
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for (sym, _basis), dates in groups.items():
+        bars = [dates[d] for d in sorted(dates)]
+        if any(bars[0]["date"] <= d <= bars[-1]["date"] for d in actions.get(sym, ())):
+            continue
+        current = result.get(sym) or []
+        if (len(bars), bars[-1]["date"]) > (len(current), current[-1]["date"] if current else ""):
+            result[sym] = [{k: v for k, v in bar.items() if k != "_rank"} for bar in bars]
+    return result
+
+
 def is_trading_day(date_str: str) -> bool:
     """粗判交易日：周一~周五。法定节假日由 self-check 的 freshness 项以「无当天行情」体现。"""
     try:

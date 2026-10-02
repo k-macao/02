@@ -28,12 +28,12 @@
 """
 from __future__ import annotations
 
-from . import features, liquidity, probability, providers, render, sector_rotation, stats
+from . import features, liquidity, macd_derivatives, macd_strategy, probability, providers, render, sector_rotation, stats
 from .engine import (FORECAST_HORIZONS, JOURNAL_FILENAME, VALIDATE_HORIZONS,
                      QuantEngine, run_quant)
 
 __all__ = [
-    "features", "liquidity", "probability", "providers", "render", "sector_rotation", "stats",
+    "features", "liquidity", "macd_derivatives", "macd_strategy", "probability", "providers", "render", "sector_rotation", "stats",
     "QuantEngine", "run_quant",
     "FORECAST_HORIZONS", "VALIDATE_HORIZONS", "JOURNAL_FILENAME",
 ]
