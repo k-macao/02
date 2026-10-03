@@ -5267,18 +5267,17 @@ def _gz_num(text):
 
 
 def _gz_flow_rows(pairs):
-    """键值对上下分行：标题（标签）独占一行，具体内容换到下一行展示。
-
-    一条键值只花 <br> + 一层 <b> 标记，手机端标题与内容上下分行不拥挤，同时保持一页推体积。
-    """
-    lines = []
+    """微信正文的简单双列表：左侧项目，右侧内容。"""
+    rows = []
     for label, value in pairs:
-        if label in (None, ""):
-            lines.append(str(value))
-        else:
-            lines.append(f'{label}<br><b style="color:{GZ_INK}">{value}</b>')
-    return (f'<div style="padding:4px 0;color:{GZ_META}">'
-            + "<br>".join(lines) + "</div>")
+        rows.append(f'<tr><td width="28%" valign="top" style="border-bottom:1px solid {GZ_HAIR};'
+                    f'color:{GZ_META}">{label or ""}</td>'
+                    f'<td valign="top" style="border-bottom:1px solid {GZ_HAIR};'
+                    f'color:{GZ_INK}">{value}</td></tr>')
+    return (f'<table width="100%" cellpadding="4" cellspacing="0" '
+            f'style="width:100%!important;font-size:{GZ_FS_TABLE}px;'
+            f'line-height:1.55;table-layout:fixed;word-break:break-word">'
+            f'{"".join(rows)}</table>')
 
 
 def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths=None):
@@ -5725,11 +5724,16 @@ def gz_calendar_block(res, date_str=None):
 
 
 def _gz_news_card(marker, title, sub="", anchor=None):
-    """一条资讯：标题先行，来源与时间安静地跟在下面；细线分隔，不用卡片底色。"""
+    """资讯文字按序号、内容两列展示，适配微信单列屏幕。"""
     attr = f' id="{_esc(anchor)}"' if anchor else ""
     meta = f'<br><small style="color:{GZ_FAINT}">{sub}</small>' if sub else ""
-    return (f'<div{attr} style="padding:5px 0;border-top:1px solid {GZ_HAIR_SOFT};color:{GZ_INK}">'
-            f'{title}{meta}</div>')
+    return (f'<table width="100%" cellpadding="0" cellspacing="0"{attr} '
+            f'style="width:100%!important;border-collapse:collapse;'
+            f'font-size:{GZ_FS_TABLE}px;color:{GZ_INK};">'
+            f'<tr><td width="32" valign="top" style="padding:6px 4px;'
+            f'border-bottom:1px solid {GZ_HAIR_SOFT};color:{GZ_META};">{marker}</td>'
+            f'<td valign="top" style="padding:6px 4px;border-bottom:1px solid {GZ_HAIR_SOFT};'
+            f'word-break:break-word;line-height:1.55;">{title}{meta}</td></tr></table>')
 
 
 def gz_headline_row(it, index=None):
