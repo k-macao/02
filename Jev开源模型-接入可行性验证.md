@@ -108,7 +108,21 @@ $ python3 output/jev_bridge.py --demo --base http://127.0.0.1:8811
 
 这段是**回声服务**（`tools/jev_mock_server.py`，标准库实现同一套协议）跑出来的，概率本身没有预测力——它验证的是协议、结构校验、收敛护栏、缺席降级、留痕结算这五层。**权重只影响"概率准不准"，不影响这五层**，所以这五层可以在这里被钉死。
 
-### 3.5 全仓回归（确认没有踩到既有功能）
+### 3.5 CI 探针预演（把工作流里的 shell 原样在本地跑一遍）
+
+```text
+=== [protocol-offline] 🧪 跑接入层回归（纯标准库） ===        → Ran 35 tests OK
+=== [protocol-offline] 🌀 协议回环自检 ===                     → ✅ 就绪：mock-jev-echo
+  [choice] dir → up {'up': 0.99, 'flat': 0.005, 'down': 0.005}
+  [noul]   p_up → P=0.9950（置信 0.995）
+  合并：P(7日涨)=0.7600 | 量化基准=0.5600 | 来源=noul | 收敛=True
+=== [protocol-offline] 🛡️ 断言护栏生效 ===                     → ✅ 收敛护栏成立
+=== [edgejev-runtime] 🌐 探测 Hugging Face 可达性 ===          → ⚠️ 不可达（脚本按预期降级）
+```
+
+也就是说：**探针工作流的第 ①② 步现在就能跑通**（本地已按步骤逐个复现），只有第 ③ 步（真权重）和 `edgejev` 命令本身需要外网/runner 环境。
+
+### 3.6 全仓回归（确认没有踩到既有功能）
 
 ```text
 $ python3 -m unittest discover -s tests
