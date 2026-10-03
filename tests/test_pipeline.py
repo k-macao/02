@@ -3135,11 +3135,18 @@ class EconCalendarTests(unittest.TestCase):
 
     def test_section_body_carries_window_summary_and_star_levels(self):
         res, _ = self._fetch()
-        html = self._report(self._data(res))
+        with pipeline.notes_mode():          # 「筛选口径」是过程说明：--notes 下可见
+            html = self._report(self._data(res))
         for text in ("窗口摘要", "时间窗口", "时间点合计", "央行议息 / 重要会议",
                      "中国关键读数", "美国关键读数", "最密集日", "筛选口径",
                      pipeline._calendar_table_label(), "★★★", "美联储议息会议"):
             self.assertIn(text, html, f"摘要/正文缺少 {text}")
+        plain_html = self._report(self._data(res))      # 入门版：数字摘要都在，筛选过程不出
+        for text in ("窗口摘要", "时间点合计", "最密集日", pipeline._calendar_table_label(),
+                     "★★★", "美联储议息会议"):
+            self.assertIn(text, plain_html, f"入门版缺少 {text}")
+        self.assertNotIn("筛选口径", plain_html)
+        self.assertNotIn("规则合成，非方向判断", plain_html)
         self.assertIn("未来 30 天", html)
         # 每个列出的时间点都要能看到地区与类型标签（数据 / 事件 / 动态）
         self.assertIn("数据", html)
@@ -3458,6 +3465,9 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("个交易日", html)
         self.assertIn("P(7日涨)", html)
+        self.assertNotIn("先存档后结算", html)       # 入门版（默认）：口径披露不出
+        with pipeline.notes_mode():
+            html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
         self.assertIn("先存档后结算", html)
 
     def test_risk_reference_uses_new_headline_title(self):
@@ -3669,16 +3679,26 @@ class MarketReviewMergeTests(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_badge_and_caption_report_each_source_separately(self):
         for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
+            with pipeline.notes_mode():          # 来源名属于说明文字：--notes 下副标题列全
+                badge, caption = pipeline._market_review_meta(kit, self._market(), self._pan())
+                self.assertIn("报价", badge)
+                self.assertIn("A股全景", badge)
+                self.assertEqual(caption, "Yahoo Finance Chart ＋ 东方财富·A股全景")
+
+                badge, caption = pipeline._market_review_meta(kit, None, self._pan())
+                self.assertNotIn("报价", badge)
+                self.assertEqual(caption, "东方财富·A股全景 · 暂缺：报价")
+            # 入门版（默认）：徽标照旧，副标题只留「暂缺」提示
             badge, caption = pipeline._market_review_meta(kit, self._market(), self._pan())
             self.assertIn("报价", badge)
-            self.assertIn("A股全景", badge)
-            self.assertEqual(caption, "Yahoo Finance Chart ＋ 东方财富·A股全景")
-
+            self.assertEqual(caption, "")
             badge, caption = pipeline._market_review_meta(kit, None, self._pan())
-            self.assertNotIn("报价", badge)
-            self.assertEqual(caption, "东方财富·A股全景 · 暂缺：报价")
+            self.assertEqual(caption, "暂缺：报价")
 
             badge, caption = pipeline._market_review_meta(kit, self._market(), None)
+            self.assertEqual(caption, "暂缺：A股全景")
+            with pipeline.notes_mode():
+                badge, caption = pipeline._market_review_meta(kit, self._market(), None)
             self.assertEqual(caption, "Yahoo Finance Chart · 暂缺：A股全景")
 
             badge, caption = pipeline._market_review_meta(kit, None, None)
@@ -3712,7 +3732,8 @@ class MarketReviewMergeTests(unittest.TestCase):
 
     def test_audit_sources_unchanged_by_merge(self):
         """合并的是栏目，不是数据线：两路来源仍各自留痕，审计源数与门禁不变。"""
-        html = pipeline.generate_report(self._data(), "2026年9月29日 · 周二", "20260929")
+        with pipeline.notes_mode():
+            html = pipeline.generate_report(self._data(), "2026年9月29日 · 周二", "20260929")
         # 栏目副标题同时给出两路来源名（合并前分别在两个栏目里各写一次）
         self.assertIn("Yahoo Finance Chart ＋ 东方财富·A股全景", html)
         meta = pipeline._report_meta(html)

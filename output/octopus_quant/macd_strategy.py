@@ -326,8 +326,13 @@ def run_macd(fetch_json=None, *, existing=None, db_root=None, specs=None, now=No
     }
 
 
-def render_strategy(result, kit, *, limit=0):
-    """注入主题套件渲染，不取数。关键公式 / 规则用正文而非可被主题隐藏的脚注。"""
+def render_strategy(result, kit, *, limit=0, plain=False):
+    """注入主题套件渲染，不取数。关键公式 / 规则用正文而非可被主题隐藏的脚注。
+
+    plain=True（入门版，2026-10-03）：只留覆盖行、信号表、派生命中与缺项 / 数据提醒；
+    供数来源 / 根数 / 最近交叉日、计算口径、执行规则、风险口径与「版面收起」这些
+    说明文字、过程文字整段不渲染。--notes / --full（plain=False）逐字回到原样。
+    """
     if not result or not result.get("available") or not result.get("items"):
         return ""
     esc = kit.esc
@@ -351,6 +356,27 @@ def render_strategy(result, kit, *, limit=0):
         ])
     out.append(kit.table(["标的 / 收盘日", "DIF / DEA", "MACD柱", "状态", "基础动作"], rows,
                          aligns=("left", "right", "right", "left", "left")))
+    if plain:
+        # 入门版：最近一次交叉（日期）是结论，压成一行；供数来源 / 根数不出。
+        crosses = []
+        for row in shown:
+            cross = row.get("last_cross")
+            if cross:
+                name = "金叉" if cross["kind"] == "golden" else "死叉"
+                crosses.append(f"{row['label']} 最近{name} {cross['date']}")
+        if crosses:
+            out.append(kit.kv([("最近交叉", esc(" · ".join(crosses)))]))
+        # 派生命中照常展示（缺项 / 数据提醒也保留），其余说明文字不出。
+        out.append(derived.render_derivatives(shown, kit, full=False, plain=True))
+        rules = []
+        missing = [row["label"] for row in result.get("missing") or []]
+        if missing:
+            rules.append(("暂缺", "、".join(missing)))
+        for warning in result.get("warnings") or []:
+            rules.append(("数据提醒", warning))
+        if rules:
+            out.append(kit.kv([(esc(label), esc(text)) for label, text in rules]))
+        return "".join(out)
     provenance = []
     for row in shown:
         cross = row.get("last_cross")

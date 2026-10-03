@@ -344,7 +344,8 @@ class PipelineAndFreshnessTests(unittest.TestCase):
                         pipeline.REPORT_SECTION_ORDER.index("MARKET REVIEW"))
 
         for theme, kit in (("guizang", pipeline.GUIZANG_KIT), ("pixel", pipeline.PIXEL_KIT)):
-            html = pipeline.generate_report(data, "2026年10月1日 · 周四", "20261001", theme=theme)
+            with pipeline.notes_mode():          # 权重表 / 映射限制 / 方法参考属于说明文字
+                html = pipeline.generate_report(data, "2026年10月1日 · 周四", "20261001", theme=theme)
             self.assertIn("【滚滚翻车鱼】板块轮动量化策略", html, theme)
             self.assertIn("技术面 35% · 资金面 35% · 基本面 10% · 行业板块 10% · 事件驱动 10%", html)
             self.assertIn("仓库内白名单关键词", html)
@@ -353,6 +354,15 @@ class PipelineAndFreshnessTests(unittest.TestCase):
             kicks = [row[0] for row in pipeline._collect_report_parts(data, kit)["sections"]]
             self.assertIn("SECTOR ROTATION", kicks)
             self.assertLess(kicks.index("SECTOR ROTATION"), kicks.index("MARKET REVIEW"))
+            # 入门版（默认）：评分 / 篮子 / 行情日期在，权重表与方法论整段不出，只留一句提示
+            plain_html = pipeline.generate_report(data, "2026年10月1日 · 周四", "20261001", theme=theme)
+            self.assertIn("【滚滚翻车鱼】板块轮动量化策略", plain_html, theme)
+            self.assertIn("概念覆盖", plain_html, theme)
+            self.assertIn("行情日期", plain_html, theme)
+            self.assertIn("港股观察篮子", plain_html, theme)
+            self.assertIn("人工维护，不是官方成分", plain_html, theme)
+            for text in ("五维权重", "非标准 JdK RRG", "GitHub 方法参考", "映射命中词", "可用权重"):
+                self.assertNotIn(text, plain_html, f"{theme}: {text}")
 
     def test_source_registry_and_off_switch(self):
         from backup_sources import DATA_LINES

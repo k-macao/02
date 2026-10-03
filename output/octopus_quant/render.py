@@ -29,6 +29,15 @@ MISS = '<span style="font-weight:700;">■ 暂缺</span>'
 # 精简模式开关：pipeline 启动时会用自己的 LITE_ENABLED 覆盖（--full / OCTOPUS_LITE=0）。
 LITE = str(os.environ.get("OCTOPUS_LITE", "1")).strip().lower() not in ("0", "false", "no")
 
+# 入门版开关（2026-10-03）：精简模式下再把「说明文字 / 过程文字」收掉——方法论脚注、
+# 口径行、校准细节、来源过程只在 --notes / --full 时出现；数字与结论一个不删。
+# pipeline 启动时按 OCTOPUS_NOTES / --notes 覆盖；LITE=False 时本开关无效（全量照旧）。
+PLAIN = str(os.environ.get("OCTOPUS_NOTES", "0")).strip().lower() not in ("1", "true", "yes")
+
+
+def _plain():
+    return bool(LITE) and bool(PLAIN)
+
 # 精简模式下个股概率表的留行数：最强 5 只 + 最弱 3 只（短线客只关心两头）。
 LITE_STOCK_HEAD = 5
 LITE_STOCK_TAIL = 3
@@ -156,16 +165,22 @@ def render_forecast(res, kit):
             adjustments.append(f'波动率 {p5["vol_adjust"]*100:+.1f}pp')
         if p5.get("perf_adjust") is not None and abs(p5["perf_adjust"]) > 1e-6:
             adjustments.append(f'表现 {p5["perf_adjust"]*100:+.1f}pp')
-        if freshness_note:
-            out.append(kit.kv([("数据时效", " · ".join(freshness_note) + " · 每日 09:00 前更新（港股开盘前）")]))
-        if adjustments:
-            out.append(kit.kv([("动态调整", " · ".join(adjustments) + "（已含在概率中，有界 ±5pp，波动率与表现收缩额外）")]))
+        if _plain():
+            # 入门版：只留「哪天收盘 → 预测哪天」；生成时间、更新节奏、三重调整、预测目标
+            # （与数据时效重复）都是过程说明，--notes 再看。
+            if as_of:
+                out.append(kit.kv([("数据时效", freshness_note[0])]))
         else:
-            out.append(kit.kv([("动态调整", "流动性/波动率/历史表现三重动态调整（本次无显著修正，概率为模型原始校准值）")]))
+            if freshness_note:
+                out.append(kit.kv([("数据时效", " · ".join(freshness_note) + " · 每日 09:00 前更新（港股开盘前）")]))
+            if adjustments:
+                out.append(kit.kv([("动态调整", " · ".join(adjustments) + "（已含在概率中，有界 ±5pp，波动率与表现收缩额外）")]))
+            else:
+                out.append(kit.kv([("动态调整", "流动性/波动率/历史表现三重动态调整（本次无显著修正，概率为模型原始校准值）")]))
 
-        out.append(kit.kv([("预测目标",
-                            f'{esc(res.get("as_of") or "—")} 收盘后 → '
-                            f'{esc(res.get("target_label") or "下一交易日")}')]))
+            out.append(kit.kv([("预测目标",
+                                f'{esc(res.get("as_of") or "—")} 收盘后 → '
+                                f'{esc(res.get("target_label") or "下一交易日")}')]))
 
     # ---- 指数概率表 ----
     rows = []
@@ -191,12 +206,14 @@ def render_forecast(res, kit):
              (f' · 期望 {(p5.get("bands") or {}).get("mu_pct", 0):+.1f}%'
               if p5.get("bands") else "")))
     if rows:
-        out.append(kit.sub("指数概率（校准后）"))
+        out.append(kit.sub("指数概率" if _plain() else "指数概率（校准后）"))
         out.append(kit.table(
             ["标的", "现价", "涨跌", "1日", "5日", "20日", "趋势"],
             rows, aligns=("left", "right", "right", "right", "right", "right", "right")))
         out.append(kit.kv(bands_pairs))
-        if LITE:
+        if _plain():
+            pass                  # 入门版：方法论脚注不出
+        elif LITE:
             # 精简模式：方法论长注压成一行（校准口径 + 三重调整 + 概率夹，一个不删；
             # 权重细则与「短高长低属正常」的解释指回全量版）。
             out.append(kit.note("概率 = 五因子综合分经自身历史校准（分桶 + 保序 + 逻辑回归）后的上涨频率，"
@@ -214,6 +231,20 @@ def render_forecast(res, kit):
     # ---- 模型可信度（推进式回测）----
     val = res.get("validation") or {}
     v1 = val.get(1)
+    if _plain() and v1:
+        # 入门版：自检只报「命中率 vs 基准」与留痕命中——z 值 / Brier / 对数损失 /
+        # 回测口径这些统计过程文字 --notes 再看。
+        v5 = val.get(5) or {}
+        check = [("模型自检",
+                  f'1日命中 {v1["hit_rate"] * 100:.0f}%（基准 {v1["base_rate"] * 100:.0f}%）'
+                  + (f' · 5日命中 {v5["hit_rate"] * 100:.0f}%（基准 {v5["base_rate"] * 100:.0f}%）'
+                     if v5 else ""))]
+        jr = res.get("journal") or {}
+        if jr.get("n") and jr.get("hit_rate") is not None:
+            check.append(("预测复盘", f'已结算 {jr["n"]} 次 · 方向命中 {prob(jr["hit_rate"], 0)}'))
+        out.append(kit.sub("模型可信度"))
+        out.append(kit.kv(check))
+        return "".join(out)
     if LITE and v1:
         # 精简模式：**自检数字一个不删**，六行键值 + 校准曲线表 + 复盘表压成三行结论
         # （命中率 / 显著性 / Brier / 留痕命中全在），被折叠的表格如实点名、指回全量版。
@@ -339,21 +370,26 @@ def render_hk_probability(res, kit):
              f'{esc(tr["label"])} · ↑{probs.get("up", 0):.0f}% / '
              f'↓{probs.get("down", 0):.0f}% / →{probs.get("flat", 0):.0f}%'
              + (f'<br><span style="font-weight:400;">{esc(tr["note"])}</span>'
-                if tr.get("note") else "")))
+                if tr.get("note") and not _plain() else "")))
     if rows:
-        out.append(kit.sub("指数趋势与波动（统计口径）"))
+        # 入门版：小标题不带「统计口径」，趋势状态不附「60日回归 t / R² / 均线排列」推导行，
+        # 指标定义脚注不出；表格数字一个不少。
+        out.append(kit.sub("指数趋势与波动" if _plain() else "指数趋势与波动（统计口径）"))
         out.append(kit.table(
             ["标的", "MA20", "MA60", "RSI14", "动量z", "年化波动%", "波动分位", "趋势t"],
             rows, aligns=("left", "right", "right", "right", "right", "right",
                           "right", "right")))
         out.append(kit.kv(state_pairs))
-        out.append(kit.note("动量z = 20 日收益相对自身一年分布；趋势t = 60 日回归斜率 t 值"
-                            "（|t|>2 才算趋势成立）；↑↓→ 三态概率各自夹在 5%~85%，"
-                            "绝不出现「0% / 100%」的假确定性。"))
+        if not _plain():
+            out.append(kit.note("动量z = 20 日收益相对自身一年分布；趋势t = 60 日回归斜率 t 值"
+                                "（|t|>2 才算趋势成立）；↑↓→ 三态概率各自夹在 5%~85%，"
+                                "绝不出现「0% / 100%」的假确定性。"))
 
     # ---- 因子贡献（恒指）----
+    #    入门版整段不出：五因子 → 综合分 → 校准概率是推导过程，结论（5 日概率）已在
+    #    预测表里；--notes / --full 照常输出。
     primary = res.get("primary")
-    if primary and primary.get("factors"):
+    if primary and primary.get("factors") and not _plain():
         names = {"mom": "动量 MOM", "trd": "趋势 TRD", "rev": "反转 REV",
                  "vol": "量能 VOL", "flow": "资金 FLOW"}
         pairs = []
@@ -445,22 +481,27 @@ def render_hk_probability(res, kit):
                 flow_txt,
                 signal_word(p5),
             ])
-        title = (f'个股概率（{len(rows)} 只 · 按 5 日上涨概率排序）' if not hidden_n else
-                 f'个股概率（最强 {LITE_STOCK_HEAD} + 最弱 {LITE_STOCK_TAIL} 只 · '
-                 f'共 {len(stocks)} 只，按 5 日上涨概率排序）')
+        if not hidden_n:
+            title = f'个股概率（{len(rows)} 只 · 按 5 日上涨概率排序）'
+        elif _plain():
+            title = (f'个股概率（最强 {LITE_STOCK_HEAD} + 最弱 {LITE_STOCK_TAIL} 只 · '
+                     f'另 {hidden_n} 只未列）')
+        else:
+            title = (f'个股概率（最强 {LITE_STOCK_HEAD} + 最弱 {LITE_STOCK_TAIL} 只 · '
+                     f'共 {len(stocks)} 只，按 5 日上涨概率排序）')
         out.append(kit.sub(title))
         out.append(kit.table(
             ["标的", "现价", "涨跌", "5日", "20日", "量比", "主力净额", "信号"],
             rows, aligns=("left", "right", "right", "right", "right", "right",
                           "right", "right")))
-        if hidden_n:
+        if hidden_n and not _plain():
             out.append(kit.note(f'中间 {hidden_n} 只（概率 45%~55% 的「震荡档」）已折叠，'
                                 "--full 看全表；概率是排名不是荐股，隔夜就可能换一批。"))
 
     # ---- 市场宽度 ----
     b = res.get("breadth") or {}
     if b.get("available"):
-        out.append(kit.sub("港股宽度（个股池统计）"))
+        out.append(kit.sub("港股宽度" if _plain() else "港股宽度（个股池统计）"))
         if LITE:
             # 精简模式：七行键值压成两行（数字一个不少，只是并排站）
             out.append(kit.kv([
@@ -516,7 +557,7 @@ def render_liquidity(res, kit):
             num(s.get("z20"), 2, comma=False),
             (f'{s["pct60"]*100:.0f}%' if s.get("pct60") is not None else MISS),
         ])
-    out.append(kit.sub("南向 / 北向资金（成交总额口径）"))
+    out.append(kit.sub("南向 / 北向资金" if _plain() else "南向 / 北向资金（成交总额口径）"))
     out.append(kit.table(
         ["方向", "最新", "环比", "vs20日均", "5日均", "20日均", "z值", "分位"],
         rows, aligns=("left", "right", "right", "right", "right", "right",
@@ -527,7 +568,8 @@ def render_liquidity(res, kit):
             ("南向解读", esc(liquidity.flow_label(south))),
             ("数据日期", esc(south.get("date") or "—")),
         ]))
-    out.append(kit.note(esc(liq.get("policy_note") or "")))
+    if not _plain():                 # 入门版：口径 / 政策说明脚注不出
+        out.append(kit.note(esc(liq.get("policy_note") or "")))
 
     # ---- 量能 ----
     t = liq.get("turnover") or {}
@@ -535,7 +577,7 @@ def render_liquidity(res, kit):
         out.append(kit.sub("港股大盘成交与量能"))
         pairs = []
         if t.get("market_amount_yi"):
-            pairs.append(("恒指成交额（东财口径）", yi(t["market_amount_yi"])))
+            pairs.append(("恒指成交额" if _plain() else "恒指成交额（东财口径）", yi(t["market_amount_yi"])))
         pairs.extend([
             ("量比（20日均量基准）", num(t.get("ratio"), 2, comma=False)),
             ("量能 z 值", num(t.get("z"), 2, comma=False)),
@@ -553,8 +595,9 @@ def render_liquidity(res, kit):
         out.append(kit.sub("流动性深度与集中度"))
         # Amihud 的绝对量级取决于指数成交量口径，**只有分位可跨期比较**，
         # 因此这里只展示分位，不展示会误导人的原始数值。
+        # 入门版：标签去掉学术名，只说「交易拥挤度」+ 分位；说明脚注不出。
         pairs = [
-            ("冲击成本（Amihud）",
+            ("交易拥挤度" if _plain() else "冲击成本（Amihud）",
              (f'{d["amihud_pct"]*100:.0f}% 分位（越低越宽松）'
               if d.get("amihud_pct") is not None else MISS)),
         ]
@@ -567,9 +610,10 @@ def render_liquidity(res, kit):
         if d.get("total_yi"):
             pairs.append(("样本合计成交额", yi(d["total_yi"])))
         out.append(kit.kv(pairs))
-        out.append(kit.note("Amihud = 均值(|日收益| ÷ 成交额)：数值越大，同样资金造成的价格冲击"
-                            "越大、流动性越差；绝对量级随口径变化，请以「分位」纵向比较。"
-                            "CR5 越高说明资金越扎堆、市场广度越弱。"))
+        if not _plain():
+            out.append(kit.note("Amihud = 均值(|日收益| ÷ 成交额)：数值越大，同样资金造成的价格冲击"
+                                "越大、流动性越差；绝对量级随口径变化，请以「分位」纵向比较。"
+                                "CR5 越高说明资金越扎堆、市场广度越弱。"))
         if d.get("top"):
             out.append(kit.table(
                 ["成交额前五", "成交额", "涨跌"],
@@ -580,7 +624,7 @@ def render_liquidity(res, kit):
     # ---- 个股资金流 ----
     ff = liq.get("fundflow") or {}
     if ff.get("available"):
-        out.append(kit.sub("龙头主力资金流（东财口径）"))
+        out.append(kit.sub("龙头主力资金流" if _plain() else "龙头主力资金流（东财口径）"))
         out.append(kit.kv([
             ("样本", f'{ff["n"]} 只'),
             ("主力净额合计", yi(ff.get("net_total_yi"), 2)),
@@ -597,7 +641,12 @@ def render_liquidity(res, kit):
         ]))
         names = {"turnover": "大盘量能", "south": "南向活跃度", "ratio": "南北向比",
                  "amihud": "冲击成本（反向）", "cr5": "集中度（反向）"}
-        if comps and LITE:
+        if comps and _plain():
+            # 入门版：分项只给「名字 + 得分」，权重与依据（z 值 / 分位的推导）不出
+            out.append(kit.kv([(
+                "分项", " · ".join(
+                    f'{esc(names.get(k, k))} {v["score"]:.0f}' for k, v in comps.items()))]))
+        elif comps and LITE:
             # 精简模式：四行评分表压成一行（得分 + 权重 + 依据原样保留，只是并排站）
             out.append(kit.kv([(
                 "分项", " · ".join(
@@ -609,7 +658,7 @@ def render_liquidity(res, kit):
                 [[esc(names.get(k, k)), f'{v["score"]:.0f}', f'{v["weight"]*100:.0f}%',
                   esc(v.get("note") or "—")] for k, v in comps.items()],
                 aligns=("left", "right", "right", "left")))
-    if liq.get("delta_prob"):
+    if liq.get("delta_prob") and not _plain():      # 入门版：对概率的修正属于推导过程
         out.append(kit.kv([("对概率的修正",
                             f'{liq["delta_prob"]*100:+.1f} 个百分点（量能与深度，有界 ±5pp；'
                             f'南向已计入 FLOW 因子，不重复计算）')]))

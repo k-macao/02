@@ -316,7 +316,12 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
         data = {"每周走势预测": source}
         date_display = "2026年4月10日 · 周五"
         for theme in ("guizang", "pixel"):
-            html = pipeline.generate_report(data, date_display, "20260410", theme=theme)
+            plain_html = pipeline.generate_report(data, date_display, "20260410", theme=theme)
+            self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, plain_html, theme)
+            self.assertIn("P(7日涨)", plain_html, theme)
+            self.assertNotIn("无未来函数口径", plain_html, theme)   # 入门版：口径披露不出
+            with pipeline.notes_mode():
+                html = pipeline.generate_report(data, date_display, "20260410", theme=theme)
             self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, html, theme)
             self.assertIn("无未来函数口径", html, theme)
             self.assertIn("截断不变性自检通过", html, theme)

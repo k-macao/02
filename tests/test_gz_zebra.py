@@ -14,6 +14,9 @@ MODULE_PATH = Path(__file__).parents[1] / "output" / "pipeline.py"
 spec = importlib.util.spec_from_file_location("pipeline_under_test_zebra", MODULE_PATH)
 pipeline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline)
+# 本文件只测版面交替，用 gz_note 当通用内容块；入门版（默认）下 gz_note 不输出说明文字，
+# 这里固定打开 --notes 语义，让脚注块照常生成。
+pipeline.set_notes_requested(True)
 
 ZEBRA = pipeline.GZ_ZEBRA
 WRAP_OPEN = f'<div style="background:{ZEBRA};padding:4px 8px;margin:2px 0;">'

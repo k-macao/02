@@ -67,6 +67,8 @@ CARD_CHAR_BUDGET = max(200, int(os.environ.get("OCTOPUS_CARD_CHARS", "600") or 6
 
 # 卡片副标（口径披露，诚实标注：规则合成 + 非投资建议）。
 CAPTION = "30 秒读完 · 数字与下文各栏同源 · 非投资建议"
+# 入门版（pipeline.PLAIN()，2026-10-03）：副标与小抄标题去掉口径 / 来源说明，只留一句免责。
+CAPTION_PLAIN = "30 秒读完 · 非投资建议"
 DISCLAIMER = "规则合成 · 非投资建议"
 
 # ------------------------------------------------------------------
@@ -96,6 +98,7 @@ FALLBACK_BEGINNER_TIPS = (
     ("③ 别动手", "数据缺、当天有 ★★★ 大数据、概率五五开——三种情况都先观望，市场天天开门。"),
 )
 TIPS_TITLE = "🐣 新手三句话（百句股票梗库 · 随时配对）"
+TIPS_TITLE_PLAIN = "🐣 新手三句话"
 
 _MEME_CACHE = {"path": None, "mtime_ns": None, "items": ()}
 
@@ -615,8 +618,10 @@ def _line_week(ctx):
     if entry.get("label"):
         p_up = _p0(entry.get("p_up"))
         horizon = entry.get("target_sessions")
-        bits.append(str(entry["label"])
-                    + (f' · P({horizon}日涨) {p_up}' if p_up and horizon else ""))
+        label = str(entry["label"])
+        # 展示文案（_horizon_label）本身已带「P(7日涨) 62%」时不再重复拼一次
+        bits.append(label + (f' · P({horizon}日涨) {p_up}'
+                             if p_up and horizon and "P(" not in label else ""))
     quant = ctx.get("quant") or {}
     head_q = quant.get("headline") or {}
     if head_q.get("available") and head_q.get("p_up") is not None:
