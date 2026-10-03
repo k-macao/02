@@ -2,7 +2,7 @@
 
 > 问题：**测试能否接入 GitHub 开源的 Jev 类似模型策略。**
 > 结论：**能接，而且已经接上了接入层并跑通离线全链路；但"预测力"和"真权重"两件事还没被验证完**——前者只能靠留痕结算慢慢验，后者卡在本沙箱出不了 Hugging Face 的网（CI 探针已备好，一键可跑）。
-> 日期：2026-10-03 · 关联文件：`output/jev_bridge.py`、`tools/jev_mock_server.py`、`tests/test_jev_bridge.py`、`tools/jev-integration-probe.workflow.yml`
+> 日期：2026-10-03 · 关联文件：`output/jev_bridge.py`、`tools/jev_mock_server.py`、`tests/test_jev_bridge.py`、`.github/workflows/jev-integration-probe.yml`
 
 ## 0. 结论速览
 
@@ -31,8 +31,8 @@ python3 output/jev_bridge.py --check --base http://127.0.0.1:8811
 python3 output/jev_bridge.py --demo  --base http://127.0.0.1:8811
 
 # ③ 真权重（需要 Hugging Face 出网，本沙箱做不到；在 GitHub Actions 上可跑）
-cp tools/jev-integration-probe.workflow.yml .github/workflows/jev-integration-probe.yml
-#   提交后手动 Run workflow 勾 build_model，或在提交信息里带 [jev-model]
+#   工作流已在 main 上：2026-10-04 由 k-macao 提交（.github/workflows/jev-integration-probe.yml）
+#   手动 Run workflow 勾 build_model，或在提交信息里带 [jev-model]
 ```
 
 ## 2. Jev 是什么，开源生态长什么样
@@ -195,7 +195,7 @@ Jev 这类本地模型恰好补这个空：
 
 | 优先级 | 动作 | 说明 |
 |---|---|---|
-| P0 | 跑 CI 探针第 ③ 步 | ⚠️ 本轮用的是 GitHub App 令牌，**没有 `workflows` 权限**，工作流文件推不上去（`Contents` API 也是 403），所以它只以 `tools/jev-integration-probe.workflow.yml` 入库；用你自己的账号 `cp` 到 `.github/workflows/` 推一次即可（工作区里那份已经在 `.github/workflows/` 就位，只差一次提交）|
+| P0 | 跑 CI 探针第 ③ 步 | ✅ 工作流已于 2026-10-04 上到 main（`.github/workflows/jev-integration-probe.yml`，内容与本地验证过的版本逐字一致）。仓库里只需 Run workflow 勾 `build_model`，或提交信息带 `[jev-model]` |
 | P0 | 把 Jev 接进 `fetch_hk_seven_day` 作为第三条引擎 | 复用 `_hk_seven_day_block`：`engine` 加一档 `"jev"`、文案标注「Jev 本地模型 · laya int8 · 概率已按基准收敛」；缺席时行为与现在完全一致 |
 | P1 | 在日报「数据覆盖」里点名 Jev | 与「AI 七日港股暂缺」并列，标明是端点没配还是调用失败 |
 | P1 | 把 35 项回归纳入 CI | 目前仓库没有测试工作流；`tests/test_jev_bridge.py` 纯标准库，30 秒可跑完 |
@@ -208,6 +208,6 @@ Jev 这类本地模型恰好补这个空：
 | `output/jev_bridge.py` | 接入层：闭合快照、三原语提问、结构校验、概率对账、留痕结算、`--check` / `--demo` CLI |
 | `tools/jev_mock_server.py` | 协议兼容回声服务（标准库）：无权重 / 无 Key / 无外网也能验证接入层 |
 | `tests/test_jev_bridge.py` | 35 项离线回归：配置、闭合自检、协议、结构校验、收敛护栏、跨题独立性、401/500/超时/断连降级、留痕结算 |
-| `tools/jev-integration-probe.workflow.yml` | CI 探针（复制到 `.github/workflows/` 即启用）：①离线回归 ②运行时 + HF 可达性 ③真权重端到端 |
+| `.github/workflows/jev-integration-probe.yml` | CI 探针（2026-10-04 已上 main）：①离线回归 ②运行时 + HF 可达性 ③真权重端到端 |
 
 > 免责：本文与新增代码均为研究/工程验证，概率不是保证，不构成投资建议。
