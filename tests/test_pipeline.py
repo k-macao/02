@@ -589,19 +589,23 @@ class GuizangThemeTests(unittest.TestCase):
 
     设计契约：全量内容压进单条微信消息（一页推）、纯内联样式、无 <style> / class /
     远程图片，克莱因蓝 #002FA7 是页面上唯一的有色，其余层级全部由灰阶承担。
+    2026-10-03 起默认主题改为 dossier，本类是 guizang 专属契约，一律显式 theme="guizang"。
     """
 
     def _html(self):
         return pipeline.generate_report(NewLayoutRenderingTests()._rich_data(),
-                                        "2026年8月2日 · 周日", "20260802")
+                                        "2026年8月2日 · 周日", "20260802",
+                                        theme="guizang")
 
-    def test_default_theme_is_guizang_and_resolves_invalid_to_default(self):
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "guizang")
-        self.assertEqual(pipeline._resolve_push_theme(None), "guizang")
-        self.assertEqual(pipeline._resolve_push_theme(""), "guizang")
-        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "guizang")
+    def test_default_theme_is_dossier_and_resolves_all_themes(self):
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "dossier")
+        self.assertIn("dossier", pipeline.PUSH_THEMES)
+        self.assertEqual(pipeline._resolve_push_theme(None), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme(""), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
         self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
+        self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
 
     def test_type_scale_is_one_page_friendly(self):
         """字号阶梯为「一页推」整体收一档：刊头 26 / 栏目 18 / 正文 14 / 次要 12"""
@@ -879,7 +883,8 @@ class GuizangThemeTests(unittest.TestCase):
         data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
         import test_weekly as tw
         data["每周走势预测"] = tw.WeeklyPipelineIntegrationTests()._source()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="guizang")
         self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
         parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
         self.assertEqual(len(parts or []), 1)
@@ -888,7 +893,8 @@ class GuizangThemeTests(unittest.TestCase):
         """超限时按栏目边界全量分条：每段不超限、栏目不重不漏、正文一格不少"""
         data = SectionReadingOrderTests()._full_data()
         data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
-        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="guizang")
         limit = 6000
         parts = pipeline._split_html_for_push(html, limit)
         self.assertIsNotNone(parts)
@@ -1027,7 +1033,8 @@ class GuizangOnePageTests(unittest.TestCase):
         return data
 
     def test_heavy_day_report_fits_one_message(self):
-        html = pipeline.generate_report(self._heavy_data(), "2026年9月29日 · 周二", "20260929")
+        html = pipeline.generate_report(self._heavy_data(), "2026年9月29日 · 周二", "20260929",
+                                        theme="guizang")
         self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS,
                         "重日日报超过单条上限，一页推失效")
         self.assertLess(len(html), int(pipeline.PUSHPLUS_MAX_CONTENT_CHARS * 0.95),
@@ -3215,10 +3222,6 @@ class EconCalendarTests(unittest.TestCase):
             self.assertEqual(pipeline.calendar_only_report(), 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class OpeningDigestTests(unittest.TestCase):
     def test_digest_uses_analysis_data_conclusion_order_in_both_themes(self):
         data = {"实时行情": pipeline._source_result(
@@ -3743,3 +3746,137 @@ class MarketReviewMergeTests(unittest.TestCase):
         self.assertEqual(meta["total_sources"], 8)
         ok, _ = pipeline.check_push_eligibility(self._data())
         self.assertTrue(ok)
+
+
+class DossierThemeTests(unittest.TestCase):
+    """Dossier 排版（2026-10-03 起默认 · 德国文件 / 档案风 + 包豪斯几何）
+
+    设计契约：牛皮纸文件夹标签（AKTE 编号）、2px 黑粗线、等宽卷宗号、红色
+    RESEARCH 印章、ENDE DER AKTE 档案尾注；包豪斯图标只用 圆/三角/方/菱 等
+    几何字形 × 红蓝黄三原色；内容块与 guizang 同源，纯内联样式、无 <style> /
+    class / 远程资源；分条推送与推送门禁逻辑不变。
+    """
+
+    def _html(self, theme="dossier"):
+        return pipeline.generate_report(
+            ReportFreshnessTests()._sample_data(),
+            "2026年8月1日 · 周六", "20260801", theme=theme)
+
+    # ---------------- 主题注册与解析 ----------------
+    def test_dossier_is_registered_and_default(self):
+        self.assertIn("dossier", pipeline.PUSH_THEMES)
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "dossier")
+        self.assertEqual(pipeline._resolve_push_theme("dossier"), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme("nope"), "dossier")
+
+    def test_dossier_meta_readback_roundtrip(self):
+        html = self._html()
+        self.assertIn('name="octopus-theme" content="dossier"', html)
+        self.assertEqual(pipeline._report_theme(html), "dossier")
+
+    # ---------------- 德国文件 / 卷宗 chrome ----------------
+    def test_german_file_chrome(self):
+        html = self._html()
+        # 卷宗封面：刊名条 + 档号 + 档案元信息表
+        self.assertIn("OCTOPUS · TAGES-AKTE", html)
+        self.assertIn("AKT-20260801", html)
+        self.assertIn("DATE · 日期", html)
+        self.assertIn("QUELLEN · 当天源", html)
+        self.assertIn("SIGNATUR · 档号", html)
+        # 栏目文件夹标签（AKTE 编号，等宽 kicker）
+        self.assertIn("AKTE 00", html)
+        self.assertIn("AKTE 01", html)
+        self.assertIn("border-top:2px solid", html)   # 卷宗黑粗线
+        # 档案尾注
+        self.assertIn("ENDE DER AKTE", html)
+        # 牛皮纸文件夹标签底色
+        self.assertIn(pipeline.D_TAB, html)
+
+    def test_every_section_has_numbered_tab_and_h2(self):
+        html = self._html()
+        tabs = re.findall(r"AKTE (\d\d) · ", html)
+        self.assertGreaterEqual(len(tabs), 3)
+        self.assertEqual(tabs[0], "00")
+        self.assertEqual(tabs, sorted(set(tabs)))          # 编号连续不重
+        # 分条横幅靠 <h2> 取栏目名：每个标签后都跟一个 h2
+        self.assertGreaterEqual(html.count("<h2"), len(tabs))
+
+    def test_dossier_stamp_present_with_notes_absent_in_plain(self):
+        with pipeline.notes_mode():
+            html_notes = self._html()
+        self.assertIn("RESEARCH · 非投资建议", html_notes)
+        self.assertIn("内部资料 · 非投资建议", html_notes)   # 封面大章
+        html_plain = self._html()
+        self.assertNotIn("RESEARCH · 非投资建议", html_plain)
+        self.assertNotIn("内部资料 · 非投资建议", html_plain)
+
+    # ---------------- 包豪斯图标 ----------------
+    def test_bauhaus_icons_are_geometric_and_trichromatic(self):
+        for kicker, spec in pipeline.DOSSIER_ICONS.items():
+            g1, c1, g2, c2 = spec
+            self.assertNotIn("svg", g1 + g2)
+            for color in (c1, c2):
+                self.assertIn(color.upper(),
+                              {pipeline.D_RED.upper(), pipeline.D_BLUE.upper(),
+                               pipeline.D_YELLOW.upper(), pipeline.D_BLACK.upper(),
+                               pipeline.D_INK_STRONG.upper()},
+                              f"{kicker} 图标颜色 {color} 不在三原色/档案黑内")
+        html = self._html()
+        self.assertNotIn("<svg", html)
+        self.assertNotIn("<img", html)
+        self.assertIn("font-size:13px", html)   # 主字形
+
+    def test_dossier_section_icon_fallback_for_unknown_kicker(self):
+        icon = pipeline.dossier_icon("SOME UNKNOWN KICKER")
+        self.assertIn("●", icon)
+        self.assertIn(pipeline.D_BLUE, icon)
+
+    # ---------------- 档案色盘与 guizang 隔离 ----------------
+    def test_dossier_palette_and_no_klein_leak(self):
+        html = self._html()
+        self.assertIn(f"bgcolor=\"{pipeline.D_PAPER}\"", html)
+        self.assertIn(pipeline.D_PAPER, html)
+        self.assertNotIn("#002FA7", html)      # 克莱因蓝不得渗入 dossier
+        self.assertNotIn("#F3F6FF", html)      # 归藏淡蓝底不得渗入
+        self.assertNotIn("#F2F2F2", html)      # 归藏斑马灰不得渗入
+
+    def test_palette_globals_restored_after_render(self):
+        before = {k: getattr(pipeline, k) for k in
+                  ("GZ_KLEIN", "GZ_INK", "GZ_PAPER", "GZ_FONT", "GZ_DARK_GRAY",
+                   "GZ_ZEBRA", "GZ_UP")}
+        self._html()
+        after = {k: getattr(pipeline, k) for k in before}
+        self.assertEqual(before, after)
+        # 还原后 guizang 依旧原盘
+        self.assertIn("#002FA7", self._html("guizang"))
+
+    # ---------------- 微信兼容与分条 ----------------
+    def test_inline_only_and_no_remote_assets(self):
+        html = self._html()
+        self.assertNotIn("<style", html)
+        self.assertNotIn('class="', html)
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<img", html)
+        self.assertIn("font-family:'Courier New'", html)   # 等宽卷宗号
+
+    def test_multipart_split_works_on_dossier_report(self):
+        data = SectionReadingOrderTests()._full_data()
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="dossier")
+        # dossier 卷宗封面 + 尾注比 guizang 重，6000 上限下无拆分空间，取 12000 强制多分条
+        limit = 12000
+        parts = pipeline._split_html_for_push(html, limit)
+        self.assertIsNotNone(parts)
+        self.assertGreater(len(parts), 1)
+        for index, part in enumerate(parts, 1):
+            self.assertLessEqual(len(part), limit, f"第 {index} 条超过单条上限")
+        for title in re.findall(r"<h2[^>]*>([^<]+)</h2>", html):
+            self.assertGreaterEqual(
+                sum(1 for part in parts if f">{title}</h2>" in part), 1,
+                f"栏目「{title}」在分条后丢失")
+
+
+if __name__ == "__main__":
+    unittest.main()

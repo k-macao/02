@@ -94,7 +94,8 @@ class ZebraBandTests(unittest.TestCase):
                 headlines=[{"title": f"头条{i}", "source": "测试源",
                             "published_cst": f"2026-09-30 10:0{i}"} for i in range(4)]),
         }
-        html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930")
+        html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930",
+                                        theme="guizang")
         self.assertIn(f"background:{ZEBRA}", html)
         # 纯内联样式：不引入 <style> / class（微信 PushPlus 清洗安全）
         self.assertNotIn("<style", html)

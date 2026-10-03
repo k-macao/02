@@ -349,9 +349,12 @@ class PipelineWiringTests(unittest.TestCase):
                 patch.object(pipeline._hk7, "llm_config",
                              return_value={"enabled": False, "fallback": "auto",
                                            "key": "", "base": "", "model": "m",
-                                           "timeout": 10}):
+                                           "timeout": 10}), \
+                patch.object(pipeline._jev, "jev_config",
+                             return_value={"enabled": False, "base": "", "key": "",
+                                           "timeout": 10, "mode": "auto"}):
             src = pipeline.fetch_hk_seven_day({})
-        self.assertIsNone(src)              # 默认：没有 Key 就没有这个栏目
+        self.assertIsNone(src)              # 默认：没有 Key、没有 Jev 端点就没有这个栏目
 
     def test_no_key_with_fallback_renders_quant_baseline(self):
         bars = synthetic_bars()
@@ -485,6 +488,145 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertLess(pipeline.REPORT_SECTION_ORDER.index("SECTOR ROTATION"),
                         pipeline.REPORT_SECTION_ORDER.index("MARKET REVIEW"))
         self.assertTrue((OUTPUT_DIR / "octopus_quant" / "sector_rotation.py").exists())
+
+
+# ======================================================================
+# ④b Jev 本地模型作为第三引擎的管线接入（2026-10-03 起）
+# ======================================================================
+class JevPipelineWiringTests(unittest.TestCase):
+    def _disabled_llm(self):
+        return {"enabled": False, "fallback": "auto", "key": "",
+                "base": "", "model": "m", "timeout": 10}
+
+    def _jev_config(self, **over):
+        cfg = {"enabled": True, "base": "http://mock-jev.invalid", "key": "",
+               "timeout": 10, "mode": "auto",
+               "label": "Jev 类型化决策（/v1/systemone）"}
+        cfg.update(over)
+        return cfg
+
+    def _fake_jev_echo(self):
+        """协议兼容的假 /v1/systemone：结构合法，概率温和（不触发收敛）。"""
+        def fake_post(url, payload, headers, timeout):
+            self.assertIn("/v1/systemone", url)
+            answers = {}
+            for qid, qdef in (payload.get("questions") or {}).items():
+                if qdef.get("type") == "choice":
+                    keys = list(qdef["criteria"].keys())
+                    answers[qid] = {"type": "choice", "choice": keys[0],
+                                    "probabilities": {keys[0]: 0.6, keys[1]: 0.3,
+                                                      keys[2]: 0.1},
+                                    "confidence": 0.7}
+                elif qdef.get("type") == "noul":
+                    answers[qid] = {"type": "noul", "noul": 0.62, "confidence": 0.8}
+                else:
+                    answers[qid] = {"type": "score", "score": 2.0,
+                                    "probabilities": {"0": 0.1, "1": 0.2, "2": 0.4,
+                                                      "3": 0.2, "4": 0.1},
+                                    "confidence": 0.6}
+            return {"model": "mock-jev", "answers": answers}
+        return fake_post
+
+    def _fake_request(self, bars):
+        def fake(url, headers=None, params=None, timeout=15, is_json=True):
+            m = re.search(r"chart/([^?/]+)", url)
+            if not m:
+                return None
+            return yahoo_chart_payload(m.group(1), bars)
+        return fake
+
+    def test_fetch_jev_engine_when_no_llm_key(self):
+        """无大模型 Key + 配了 Jev 端点 → 栏目照常出，engine=jev，留痕与渲染都带 Jev。"""
+        bars = synthetic_bars()
+        # 全量版渲染（LITE_ENABLED=False）：引擎行 / 量化基准对账行 / 七日口径行都可见
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline, "LITE_ENABLED", False), \
+                patch.object(pipeline._hk7, "llm_config", return_value=self._disabled_llm()), \
+                patch.object(pipeline._jev, "jev_config", return_value=self._jev_config()), \
+                patch.object(pipeline._jev, "_get_json",
+                             side_effect=lambda *a, **k: {"model": "mock-jev",
+                                                          "backend": "mock",
+                                                          "precision": "n/a"}), \
+                patch.object(pipeline._jev, "_post_json",
+                             side_effect=self._fake_jev_echo()), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+            self.assertEqual(src["status"], "success")
+            # 渲染（全量版，patch 生效期内）：引擎行点名 Jev，量化基准对账行仍在
+            html = pipeline._hk_seven_day_block(src["result"], pipeline.GUIZANG_KIT)
+            self.assertIn("Jev", html)
+            self.assertIn("量化基准 P", html)
+            # 口径行：Jev 引擎不要求文案溯源（模型不产文本），但收敛护栏同一份常量
+            self.assertIn("Jev 概率偏离基准", html)
+            # Jev 研究留痕落盘（与栏内留痕分文件；在 tmp 销毁前检查）
+            self.assertTrue((Path(tmp) / "jev_forecast.json").exists())
+        self.assertEqual(src["result"]["engine"], "jev")
+        self.assertIn("Jev", src["result"]["engine_label"])
+        self.assertTrue(src["jev_note"])
+        self.assertIn("使用中", src["jev_note"])
+
+    def test_fetch_no_key_no_jev_still_absent(self):
+        """无 Key 且无 Jev 端点（默认）→ 整栏缺席，行为不变。"""
+        with patch.object(pipeline._hk7, "llm_config", return_value=self._disabled_llm()), \
+                patch.object(pipeline._jev, "jev_config",
+                             return_value={"enabled": False, "base": "", "key": "",
+                                           "timeout": 10, "mode": "auto"}):
+            self.assertIsNone(pipeline.fetch_hk_seven_day({}))
+
+    def test_fetch_jev_dead_endpoint_falls_back_to_quant(self):
+        """Jev 端点已配但连不上 → 降级量化基准，jev_note 点名失败原因。"""
+        bars = synthetic_bars()
+        dead = self._jev_config(base="http://127.0.0.1:1")
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config", return_value=self._disabled_llm()), \
+                patch.object(pipeline._jev, "jev_config", return_value=dead), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+        self.assertEqual(src["status"], "success")
+        self.assertEqual(src["result"]["engine"], "quant")
+        self.assertIn("回退量化基准", src["jev_note"])
+
+    def test_report_data_coverage_names_jev(self):
+        """「数据覆盖」审计行点名 Jev 端点状态（落地清单 P1）。"""
+        bars = synthetic_bars()
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config", return_value=self._disabled_llm()), \
+                patch.object(pipeline._jev, "jev_config", return_value=self._jev_config()), \
+                patch.object(pipeline._jev, "_get_json",
+                             side_effect=lambda *a, **k: {"model": "mock-jev"}), \
+                patch.object(pipeline._jev, "_post_json",
+                             side_effect=self._fake_jev_echo()), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+        html = pipeline.generate_report_guizang(
+            {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
+            "2026年9月29日", "20260929")
+        self.assertIn("数据覆盖", html)
+        self.assertIn("Jev：使用中", html)
+
+    def test_report_data_coverage_names_jev_absent_when_endpoint_unset(self):
+        """端点未配置时也点名（读者知道 Jev 这条路为什么没走）。"""
+        bars = synthetic_bars()
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(pipeline, "REPORT_DIR", tmp), \
+                patch.object(pipeline._hk7, "llm_config",
+                             return_value={"enabled": False, "fallback": "always",
+                                           "key": "", "base": "", "model": "m",
+                                           "timeout": 10}), \
+                patch.object(pipeline._jev, "jev_config",
+                             return_value={"enabled": False, "base": "", "key": "",
+                                           "timeout": 10, "mode": "auto"}), \
+                patch.object(pipeline, "safe_request", self._fake_request(bars)):
+            src = pipeline.fetch_hk_seven_day({})
+        self.assertEqual(src["result"]["engine"], "quant")
+        self.assertIn("端点未配置", src["jev_note"])
+        html = pipeline.generate_report_guizang(
+            {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
+            "2026年9月29日", "20260929")
+        self.assertIn("Jev：端点未配置", html)
 
 
 # ======================================================================

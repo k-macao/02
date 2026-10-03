@@ -28,14 +28,18 @@
   ② 量化基准层（Quant Baseline）：
        由扩张基准率 + 20 日特征已结算最近邻（K=8，s+7≤t 锚点）作为核心，叠加多因子
        有界微调量（tanh 软压缩，ΔP ∈ [−0.12, +0.12]），夹在 5%~95% 之间；
-  ③ 大模型研判层（Optional LLM）：
-       把结构化预测因子与量化基准作为唯一依据交给大模型；严格三道防线：
-       · 偏离量化基准 >20pp 自动收敛到基准 ±20pp；
-       · 文本数字 100% 溯源，编造数字退回量化文案；
-       · 绝对化措辞（一定/必然/100%…）命中即退回。
+  ③ 研判层（Optional：大模型 / Jev 类型化决策，二选一，优先级 大模型 > Jev > 量化基准）：
+       · 大模型（OpenAI 兼容）：把结构化预测因子与量化基准作为唯一依据交给大模型；
+         严格三道防线：偏离量化基准 >20pp 自动收敛到基准 ±20pp、文本数字 100% 溯源
+         （编造数字退回量化文案）、绝对化措辞（一定/必然/100%…）命中即退回；
+       · Jev 类型化决策（output/jev_bridge.py，本地 /v1/systemone，无 API Key）：
+         只输出类型化值 + 已校准概率，没有自然语言就没有编造数字的入口；概率与量化
+         基准按同一份常量对账（>20pp 收敛、5%~95% 夹边），文案仍走量化模板；
+         留痕单独一份 output/jev_forecast.json（同一套 T+7 结算口径）。
 
 留痕与结算：预测先写入 output/hk7_forecast.json（settled=False），满 7 个交易日后
 按真实收盘回填方向命中与 Brier 得分；样本 <10 只报样本量，不下命中率结论。
+Jev 引擎的预测同时在 output/jev_forecast.json 留一份研究留痕（按 engine 字段区分）。
 """
 from __future__ import annotations
 
@@ -1160,17 +1164,34 @@ def _context_for_prompt(contexts, extra):
 
 def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=None,
                   now=None, targets=None, rng="2y", bars_by_symbol=None,
-                  config=None):
-    """计算 + 大模型研判 + 留痕结算；返回供管线消费的结果字典。
+                  config=None, jev_config=None):
+    """计算 + 研判（大模型 > Jev 类型化决策 > 量化基准）+ 留痕结算；返回供管线消费的结果字典。
+
+    研判引擎优先级（2026-10-03 起新增 Jev 第三引擎，见 output/jev_bridge.py）：
+      · 大模型（config 里有 Key 且调用成功）；
+      · Jev（jev_config 里有端点且调用成功；概率与量化基准按同一份常量对账，
+        另在 jev_forecast.json 留一份研究留痕，同一套 T+7 结算口径）；
+      · 量化基准（两者都不可用时的兜底）。
+    jev_config 缺省时读环境变量（OCTOPUS_JEV_BASE_URL / TYPESAFE_BASE_URL）；
+    未配置端点时行为与引入 Jev 之前完全一致。
 
     可用时：{available: True, asof, target_date, horizon, engine, engine_label, llm_reason,
-             targets: [...], journal, notes, method, grounded}
-    不可用：{available: False, reason}
+             targets: [...], journal, notes, method, grounded, jev: {enabled, ready,
+             tried, used, model, reason, mode, stats}}
+    不可用：{available: False, reason}（同样带 jev 状态，供「数据覆盖」点名）
     """
     now = now or datetime.now(CST)
     extra = extra or {}
     config = config or llm_config()
     targets = targets or TARGETS
+
+    # Jev 类型化决策（第三引擎）：这里只读配置、不发请求；实际调用在 2b 步，
+    # 且仅当大模型没有给出结果时才轮到它（优先级：大模型 > Jev > 量化基准）。
+    import jev_bridge as _jev  # 惰性导入：避免与 jev_bridge 对本模块常量的引用形成循环
+    jcfg = jev_config if jev_config is not None else _jev.jev_config()
+    jev_info = {"enabled": bool(jcfg.get("enabled")), "mode": jcfg.get("mode") or "auto",
+                "ready": False, "tried": False, "used": False, "model": "", "reason": "",
+                "stats": None}
 
     # 1) 取日线并确定基准日
     used, contexts = {}, []
@@ -1190,7 +1211,8 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
 
     if not used:
         return {"available": False,
-                "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）"}
+                "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）",
+                "jev": jev_info}
 
     # 确定基准日，并执行输入闭合性检验（防止未来日期混入证据）
     base_date = next((bars[-1]["date"] for bars in used.values() if bars), "")
@@ -1209,7 +1231,8 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
 
     if not contexts:
         return {"available": False,
-                "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）"}
+                "reason": f"三只指数都没有足够的日线样本（每只至少 {MIN_BARS} 根）",
+                "jev": jev_info}
     if len(contexts) < len(targets):
         missing = [t["name"] for t in targets
                    if t["name"] not in {c["name"] for c in contexts}]
@@ -1217,15 +1240,73 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
     else:
         reason = ""
 
-    # 2) 大模型研判（可选）
+    # 2) 大模型研判（可选，第一优先）
     prompt_ctx = _context_for_prompt(contexts, cleaned_extra)
     llm_payload, llm_error = (None, "未配置大模型 API Key")
     if config.get("enabled"):
         llm_payload, llm_error = call_llm(config, prompt_ctx, post_json=post_json)
-    if not llm_payload and config.get("fallback") == "never":
+
+    # 2b) Jev 类型化决策（第三引擎）：只有大模型没有给出结果、且端点已配置时才调用。
+    #      概率与量化基准按同一份常量对账（>20pp 收敛 / 5%~95% 夹边），模型不产文本；
+    #      它自己的研究留痕写在 jev_forecast.json（同一套 T+7 结算口径）。
+    series = {sym: ([b["date"] for b in bars], [float(b["close"]) for b in bars])
+              for sym, bars in used.items()}
+    jev_items = {}
+    if not llm_payload and jev_info["enabled"]:
+        jev_info["tried"] = True
+        if history_path:
+            jev_journal_path = os.path.join(os.path.dirname(history_path) or ".",
+                                            _jev.JOURNAL_FILENAME)
+            jj = _load_journal(jev_journal_path)   # 先结算已到龄的 Jev 留痕，再签发新的
+            if _settle(jj["entries"], series, now=now):
+                _save_journal(jev_journal_path, jj)
+        else:
+            jev_journal_path = None
+        baseline_map = {c["symbol"]: {"quant_p_up": (c.get("quant") or {}).get("p_up"),
+                                      "name": c.get("short") or c.get("name")}
+                        for c in contexts}
+        jev_result = _jev.run(config=jcfg, contexts=contexts, baseline_map=baseline_map,
+                              journal_path=jev_journal_path, post_json=post_json)
+        jev_info["ready"] = bool(jev_result.get("ready"))
+        jev_info["stats"] = jev_result.get("stats")
+        jev_info["model"] = next((t.get("model_meta", {}).get("model") or ""
+                                  for t in jev_result.get("targets") or []
+                                  if (t.get("model_meta") or {}).get("model")), "")
+        for item in jev_result.get("targets") or []:
+            jev_items[item.get("symbol")] = item
+
+    jev_used = {}
+    for ctx in contexts:
+        item = jev_items.get(ctx["symbol"]) or {}
+        jm = item.get("merged")
+        if jm and jm.get("source") in ("noul", "choice"):
+            jev_used[ctx["symbol"]] = jm
+    jev_info["used"] = bool(jev_used)
+    if not jev_used and jev_info["enabled"] and not llm_payload:
+        if not jev_info["tried"]:
+            jev_info["reason"] = "未调用"
+        elif not jev_info["ready"]:
+            problems = [p for p in ((jev_result or {}).get("problems") or [])
+                        if "always" not in p]
+            jev_info["reason"] = problems[0] if problems else "端点探活失败"
+        else:
+            problems = [p for p in ((jev_result or {}).get("problems") or [])
+                        if "always" not in p]
+            jev_info["reason"] = problems[0] if problems else "模型未返回可用概率"
+
+    # 降级与缺席口径（引入 Jev 后：Jev 顶上了「大模型不可用」的位置，
+    # 只有大模型与 Jev 都拿不到概率时才落到量化基准 / 整栏缺席）：
+    if not llm_payload and not jev_used and config.get("fallback") == "never":
         return {"available": False, "llm_reason": llm_error,
-                "reason": f"大模型不可用（{llm_error}）"}
-    engine = "llm" if llm_payload else "quant"
+                "reason": f"大模型不可用（{llm_error}）", "jev": jev_info}
+    if (not llm_payload and not jev_used and not config.get("enabled")
+            and jev_info["enabled"] and jev_info["mode"] == "always"):
+        return {"available": False, "llm_reason": llm_error,
+                "reason": (f"Jev 端点不可用且 OCTOPUS_JEV_MODE=always → 整栏缺席"
+                           f"（{jev_info.get('reason') or jev_info.get('model') or '原因未知'}）"),
+                "jev": jev_info}
+
+    engine = "llm" if llm_payload else ("jev" if jev_used else "quant")
     for ctx in contexts:
         ctx["engine"] = engine
 
@@ -1237,19 +1318,34 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         merged = {}
         for ctx in contexts:
             d_sum, d_drv, d_rsk = _quant_texts(ctx)
-            merged[ctx["symbol"]] = {
-                "p_up": _clamp((ctx.get("quant") or {}).get("p_up") or 0.5),
-                "quant_p_up": _clamp((ctx.get("quant") or {}).get("p_up") or 0.5),
-                "converged": False, "summary": d_sum, "drivers": d_drv, "risks": d_rsk,
-                "support": None, "resistance": None,
-                "cross_note": "",
-            }
+            q_p = _clamp((ctx.get("quant") or {}).get("p_up") or 0.5)
+            jm = jev_used.get(ctx["symbol"])
+            if jm:
+                # Jev 只给值 + 概率，不给文案：文案一律走量化模板，只附一句概率对账说明
+                merged[ctx["symbol"]] = {
+                    "p_up": _clamp(jm.get("p_up") or q_p),
+                    "quant_p_up": q_p,
+                    "converged": bool(jm.get("converged")),
+                    "summary": d_sum + (f" · {jm.get('note')}" if jm.get("note") else ""),
+                    "drivers": d_drv, "risks": d_rsk,
+                    "support": None, "resistance": None,
+                    "cross_note": "",
+                }
+            else:
+                merged[ctx["symbol"]] = {
+                    "p_up": q_p,
+                    "quant_p_up": q_p,
+                    "converged": False, "summary": d_sum, "drivers": d_drv, "risks": d_rsk,
+                    "support": None, "resistance": None,
+                    "cross_note": "",
+                }
+        notes["targets"] = len(contexts)
+        notes["converged"] = sum(1 for jm in jev_used.values() if jm.get("converged"))
 
-    # 3) 留痕：先结算历史，再按最新锚定日签发（同一锚定日不重复签发）
+    # 3) 留痕：先结算历史，再按最新锚定日签发（同一锚定日不重复签发；
+    #    Jev 引擎的预测同样写进本栏留痕，engine 字段区分，另在 jev_forecast.json 留研究留痕）
     journal = _load_journal(history_path)
     entries = journal.setdefault("entries", [])
-    series = {sym: ([b["date"] for b in bars], [float(b["close"]) for b in bars])
-              for sym, bars in used.items()}
     resolved_today = _settle(entries, series, now=now)
     changed = bool(resolved_today)
     for ctx in contexts:
@@ -1299,12 +1395,17 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         })
     crosses = [c for c in (merged.get(c2["symbol"], {}).get("cross_note")
                            for c2 in contexts) if c]
-    engine_label = (f"大模型 · {config.get('model')}" if engine == "llm"
-                    else "量化多因子规则（无大模型 Key 或调用失败已降级）")
+    if engine == "llm":
+        engine_label = f"大模型 · {config.get('model')}"
+    elif engine == "jev":
+        engine_label = (f"Jev 本地模型 · {jev_info.get('model') or '类型化决策'}"
+                        f" · 概率已按基准收敛")
+    else:
+        engine_label = "量化多因子规则（无大模型 Key 或调用失败已降级）"
     offered = int(notes.get("texts_offered") or 0)
     traced = int(notes.get("texts_traced") or 0)
     grounded = (f"{traced}/{offered}" if (engine == "llm" and offered)
-                else ("—" if engine == "quant" else "0/0"))
+                else ("—" if engine in ("quant", "jev") else "0/0"))
     is_today = any(t["asof"] == now.strftime("%Y-%m-%d") for t in out_targets)
     return {
         "available": True,
@@ -1322,6 +1423,9 @@ def run_seven_day(fetch_json=None, *, history_path=None, extra=None, post_json=N
         "cross_note": crosses[0] if crosses else "",
         "missing": reason,
         "is_today": bool(is_today),
+        "jev": jev_info,
         "method": (f"量化多因子基准（扩张基准率 + 20日特征最近邻 + 动量延展/均值回归 + 均线趋势 + 美股隔夜联动(β) + 南向资金流 + 波动率收缩，s+{HORIZON}≤t 已结算锚点）"
-                   + (" + 大模型合成（概率收敛 + 数字溯源）" if engine == "llm" else "")),
+                   + (" + 大模型合成（概率收敛 + 数字溯源）" if engine == "llm" else "")
+                   + (" + Jev 类型化决策（choice/noul/score，不产文本，概率与基准同常量对账）"
+                      if engine == "jev" else "")),
     }
