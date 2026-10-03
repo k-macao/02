@@ -348,7 +348,8 @@ class PipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(pipeline.build_daily_quant_strategy(data)["score"], old_score)
         for theme in ("guizang", "pixel"):
             with patch.object(pipeline, "safe_request", side_effect=AssertionError("渲染不能联网")), \
-                    patch.object(market_db, "load_daily_bars", side_effect=AssertionError("渲染不能读库")):
+                    patch.object(market_db, "load_daily_bars", side_effect=AssertionError("渲染不能读库")), \
+                    pipeline.notes_mode():            # 计算口径 / 执行规则属于说明文字：--notes 下齐全
                 html = pipeline.generate_report(data, "2026年10月2日", "20261002", theme=theme)
             self.assertEqual(html.count("MACD 量化策略 · 日线"), 1)
             marker = f"{pipeline.SECTION_TITLE_STRATEGY}</h2>" if theme == "guizang" else "// STRATEGY READ"
@@ -356,6 +357,19 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertLess(html.find(marker), html.find("MACD 量化策略 · 日线"))
             for text in ("DIF / DEA", "MACD柱", "2026-09-30", "EMA12−EMA26", "非投资建议", "信号不等于上涨概率", "36 根"):
                 self.assertIn(text, html)
+
+    def test_plain_mode_keeps_macd_table_without_methodology(self):
+        """入门版（默认）：MACD 表格与数字照出，计算口径 / 执行规则 / 风险长文不出。"""
+        data = self._data()
+        for theme in ("guizang", "pixel"):
+            with patch.object(pipeline, "safe_request", side_effect=AssertionError("渲染不能联网")), \
+                    patch.object(market_db, "load_daily_bars", side_effect=AssertionError("渲染不能读库")):
+                html = pipeline.generate_report(data, "2026年10月2日", "20261002", theme=theme)
+            self.assertEqual(html.count("MACD 量化策略 · 日线"), 1)
+            for text in ("DIF / DEA", "MACD柱", "2026-09-30", "退出/规避"):
+                self.assertIn(text, html, theme)
+            for text in ("EMA12−EMA26", "计算口径", "执行规则", "信号不等于上涨概率", "--full"):
+                self.assertNotIn(text, html, theme)
 
     def test_macd_only_still_has_strategy_column_without_fake_market_neutral_score(self):
         for theme in ("guizang", "pixel"):

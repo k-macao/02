@@ -401,10 +401,16 @@ class PipelineWiringTests(unittest.TestCase):
             src = pipeline.fetch_hk_seven_day({})
         self.assertEqual(src["status"], "success")
         self.assertEqual(src["result"]["engine"], "llm")
-        html = pipeline.generate_report_guizang(
+        with pipeline.notes_mode():                  # 溯源条数是过程说明：--notes 下可见
+            html = pipeline.generate_report_guizang(
+                {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
+                "2026年9月29日", "20260929")
+        self.assertIn("文案数字溯源", html)
+        plain_html = pipeline.generate_report_guizang(
             {pipeline.HK7_SOURCE_NAME: src, "_backup_info": {"events": []}},
             "2026年9月29日", "20260929")
-        self.assertIn("文案数字溯源", html)
+        self.assertIn("P(7日涨)", plain_html)       # 入门版：结论在，溯源过程不出
+        self.assertNotIn("文案数字溯源", plain_html)
 
     def test_block_renders_both_themes_and_hides_when_unavailable(self):
         bars = synthetic_bars()
@@ -416,10 +422,16 @@ class PipelineWiringTests(unittest.TestCase):
             src = pipeline.fetch_hk_seven_day({})
         res = src["result"]
         for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
-            html = pipeline._hk_seven_day_block(res, kit)
+            with pipeline.notes_mode():
+                html = pipeline._hk_seven_day_block(res, kit)
             self.assertIn("恒生指数", html)
             self.assertIn("P(7日涨)", html)
             self.assertIn("预测留痕", html)
+            plain_html = pipeline._hk_seven_day_block(res, kit)   # 入门版：未结算就不出留痕状态
+            self.assertIn("恒生指数", plain_html)
+            self.assertIn("P(7日涨)", plain_html)
+            self.assertNotIn("预测留痕", plain_html)
+            self.assertNotIn("七日口径", plain_html)
         self.assertEqual(pipeline._hk_seven_day_block({"available": False}, pipeline.GUIZANG_KIT), "")
         self.assertEqual(pipeline._hk_seven_day_block({"available": True, "targets": []},
                                                       pipeline.GUIZANG_KIT), "")

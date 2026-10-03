@@ -380,10 +380,16 @@ def analyze_derivatives(bars, sequence, *, code, base, now, weekly=None):
     return records
 
 
-def render_derivatives(items, kit, *, full=False):
-    """短版保留全部状态与命中/缺项依据，长版另展开未命中的数值依据。"""
+def render_derivatives(items, kit, *, full=False, plain=False):
+    """短版保留全部状态与命中/缺项依据，长版另展开未命中的数值依据。
+
+    plain=True（入门版）：有命中才出表（只列命中标的 + 命中依据），全部未触发时
+    压成一行「本次命中：无 · … 未触发 · … 数据不足」；规则说明、未命中数值依据、缺项原因一律不出。
+    """
     if not any(row.get("derived") for row in items):
         return ""
+    if plain:
+        return _render_derivatives_plain(items, kit)
     esc = kit.esc
     rows, evidence, folded = [], [], 0
     for row in items:
@@ -432,4 +438,55 @@ def render_derivatives(items, kit, *, full=False):
     if folded and not full:
         rules.append(("精简展开", f"收起 {folded} 项未命中的数值依据；命中与缺项仍完整披露，--full 查看全部。"))
     out.append(kit.kv([(esc(label), esc(text)) for label, text in rules]))
+    return "".join(out)
+
+
+def _render_derivatives_plain(items, kit):
+    """入门版派生研判：只讲结果——哪只标的命中了什么；没命中就一句话。"""
+    esc = kit.esc
+    hits = []
+    for row in items:
+        derived = row.get("derived") or {}
+        cells, details = [], []
+        for key in KEYS:
+            record = derived.get(key)
+            if not record or not record.get("available") or not record.get("active"):
+                continue
+            summary = record["summary"]
+            if key == "divergence" and record.get("confirmed_at"):
+                summary += " · " + record["confirmed_at"][5:]
+            color = kit.warn_color
+            if record.get("signal") in ("trim_warning", "reversion_exit"):
+                color = kit.bad_color
+            elif record.get("signal") == "trend_confirmation":
+                color = kit.ok_color
+            cells.append(f'<span style="color:{color};font-weight:700">{esc(record["name"])} · {esc(summary)}</span>')
+            if record.get("detail"):
+                details.append(f"{record['name']}：{record['detail']}")
+        if cells:
+            hits.append((str(row["label"]), "<br>".join(cells), details))
+    out = [kit.sub("MACD 派生研判")]
+    if not hits:
+        # 「未触发」与「数据不足」分开说：某项在所有标的上都不可用时，不冒充成未触发。
+        checked, lacking = [], []
+        for key in KEYS:
+            records = [(row.get("derived") or {}).get(key) for row in items]
+            if any(r and r.get("available") for r in records):
+                checked.append(NAMES[key])
+            elif any(records):
+                lacking.append(NAMES[key])
+        bits = []
+        if checked:
+            bits.append(" / ".join(checked) + " 未触发")
+        if lacking:
+            bits.append(" / ".join(lacking) + " 数据不足")
+        out.append(kit.kv([("本次命中", esc("无 · " + " · ".join(bits)))]))
+        return "".join(out)
+    out.append(kit.table(["标的", "命中"],
+                         [[f"<b>{esc(label)}</b>", cells] for label, cells, _d in hits],
+                         aligns=("left", "left")))
+    evidence = [(esc(label + "·依据"), "<br>".join(esc(text) for text in details))
+                for label, _cells, details in hits if details]
+    if evidence:
+        out.append(kit.kv(evidence))
     return "".join(out)

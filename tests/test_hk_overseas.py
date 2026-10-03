@@ -293,15 +293,29 @@ def sample_source_result():
 class SectionRenderTests(unittest.TestCase):
     def test_both_themes_render_rows_and_sources(self):
         res = sample_source_result()
+        with pipeline.notes_mode():                  # 来源标签属于说明文字：--notes 下必须齐全
+            for kit, name in ((pipeline.GUIZANG_KIT, "guizang"), (pipeline.PIXEL_KIT, "pixel")):
+                html = kit.hk_quotes_block(res)
+                self.assertIn("恒生指数", html, name)
+                self.assertIn("645.50", html, name)
+                self.assertIn("阿里巴巴-W", html, name)
+                self.assertIn("1,234.56", html, name)
+                self.assertIn("Yahoo Finance", html, name)
+                self.assertIn("YH", html, name)          # 每行标供数来源
+                self.assertIn("+BR", html, name)         # 浏览器补齐的字段有标记
+
+    def test_plain_mode_keeps_numbers_but_drops_source_tags(self):
+        """入门版（默认）：行情数字一个不少，逐行来源标签 / 数据源脚注不出。"""
+        res = sample_source_result()
         for kit, name in ((pipeline.GUIZANG_KIT, "guizang"), (pipeline.PIXEL_KIT, "pixel")):
             html = kit.hk_quotes_block(res)
             self.assertIn("恒生指数", html, name)
             self.assertIn("645.50", html, name)
-            self.assertIn("阿里巴巴-W", html, name)
             self.assertIn("1,234.56", html, name)
-            self.assertIn("Yahoo Finance", html, name)
-            self.assertIn("YH", html, name)          # 每行标供数来源
-            self.assertIn("+BR", html, name)         # 浏览器补齐的字段有标记
+            self.assertIn("10-02", html, name)              # 行情日期保留
+            self.assertNotIn("Yahoo Finance", html, name)
+            self.assertNotIn("+BR", html, name)
+            self.assertNotIn("来源</td>", html, name)
 
     def test_missing_field_renders_dash_not_fabrication(self):
         res = sample_source_result()

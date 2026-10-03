@@ -259,6 +259,12 @@ class PipelineIntegrationTests(unittest.TestCase):
                 self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
             self.assertIn("鲜鲜解读", html, theme)
             self.assertIn("🦑", html, theme)
+            # 入门版（默认）：每栏重复的免责副行不出，全篇只在页脚保留一句
+            self.assertNotIn(ren.DISCLAIMER, html, theme)
+            with self.pipeline.notes_mode():
+                html = self.pipeline.generate_report(
+                    self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
+            self.assertIn("鲜鲜解读", html, theme)
             self.assertIn(ren.DISCLAIMER, html, theme)
 
     def test_ren_disabled_by_flag(self):

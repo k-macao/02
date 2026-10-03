@@ -347,6 +347,14 @@ class ForecastDatesRenderingTests(unittest.TestCase):
         self.assertIn("（截至 09-25 · 滞后）", pairs["港股"])
         self.assertIn("（截至 09-25 · 滞后）", pairs["A股"])
         self.assertIn("数据提示", pairs)
+        # 入门版（默认）：数据提示压成一句——落后的市场 / 日期 / 最新交易日都在，逐指数清单不列
+        self.assertIn("A股、港股行情截至 09-25", pairs["数据提示"])
+        self.assertIn("09-28", pairs["数据提示"])
+        self.assertNotIn("上游行情源尚未更新", pairs["数据提示"])
+        with pipeline.notes_mode():
+            pairs = dict((k, _strip(v)) for k, v in
+                         pipeline._conclusion_pairs(pipeline.GUIZANG_KIT, ai, m,
+                                                    {"status": "unavailable"}, {}, None, None))
         self.assertIn("恒生指数 09-25", pairs["数据提示"])
         self.assertIn("09-28", pairs["数据提示"])
 

@@ -497,7 +497,8 @@ class CardRenderingTests(unittest.TestCase):
 
     def test_lite_mode_collapses_long_form_and_discloses(self):
         data = self._data()
-        html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        with self.pipeline.notes_mode():          # 精简 + 说明文字（--notes）
+            html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
         # 方法论长注折叠成一句，但结论与自检数字仍在
         self.assertIn("模型自检", html)
         self.assertIn("无未来函数口径", html)
@@ -505,6 +506,19 @@ class CardRenderingTests(unittest.TestCase):
         # 日程只列近端，并如实披露折叠条数
         self.assertIn("今明 + 近端 ★★★ 时间点（北京时间）", html)
         self.assertIn("精简版面", html)
+
+    def test_plain_mode_keeps_conclusions_and_drops_methodology(self):
+        """入门版（默认，2026-10-03）：结论与自检数字在，口径 / 折叠披露 / 重复免责不出。"""
+        data = self._data()
+        html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        self.assertIn("模型自检", html)
+        self.assertIn("今明 + 近端 ★★★ 时间点（北京时间）", html)
+        self.assertIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html)
+        self.assertIn(short.CAPTION_PLAIN, html)
+        self.assertIn(short.TIPS_TITLE_PLAIN, html)
+        for text in ("无未来函数口径", "先存档后结算", "精简版面", "--full 看全文",
+                     "数字与下文各栏同源", "百句股票梗库", "规则合成 · 大白话翻译"):
+            self.assertNotIn(text, html, text)
 
     def test_card_absent_when_no_data_at_all(self):
         html = self.pipeline.generate_report({}, "2026年8月2日 · 周日", "20260802")
