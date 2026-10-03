@@ -8,6 +8,11 @@ on:
         type: boolean
         default: false
         required: false
+      full:
+        description: "全量长版：恢复长文、完整表格与方法细节，不生成短线速查卡"
+        type: boolean
+        default: false
+        required: false
 
 jobs:
   octopus-manual-push:
@@ -41,14 +46,24 @@ jobs:
         run: |
           set -euo pipefail
           NO_PUSH="${{ github.event.inputs.no_push || 'false' }}"
+          FULL="${{ github.event.inputs.full || 'false' }}"
+          PIPELINE_ARGS=()
+
+          if [ "$FULL" = "true" ]; then
+            echo "版面模式：全量长版（恢复长文、表格与方法细节；不出短线速查卡）"
+            PIPELINE_ARGS+=(--full)
+          else
+            echo "版面模式：默认精简版"
+          fi
 
           if [ "$NO_PUSH" = "true" ]; then
             echo "运行模式：仅生成，不推送"
-            python3 output/pipeline.py --no-push
+            PIPELINE_ARGS+=(--no-push)
           else
             echo "运行模式：抓取最新数据 → 生成 → 推送"
-            python3 output/pipeline.py
           fi
+
+          python3 output/pipeline.py "${PIPELINE_ARGS[@]}"
 
       - name: 📤 提交生成的日报
         if: always()

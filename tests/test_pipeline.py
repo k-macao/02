@@ -3775,6 +3775,15 @@ class DossierThemeTests(unittest.TestCase):
         self.assertIn('name="octopus-theme" content="dossier"', html)
         self.assertEqual(pipeline._report_theme(html), "dossier")
 
+    def test_full_mode_keeps_dossier_style_and_omits_short_card(self):
+        with patch.object(pipeline, "LITE_ENABLED", False), \
+             patch.object(pipeline._quant.render, "LITE", False):
+            html = self._html()
+        self.assertIn('name="octopus-theme" content="dossier"', html)
+        self.assertIn("OCTOPUS · TAGES-AKTE", html)
+        self.assertIn("ENDE DER AKTE", html)
+        self.assertNotIn(pipeline.SECTION_TITLE_SHORT_CARD, html)
+
     # ---------------- 德国文件 / 卷宗 chrome ----------------
     def test_german_file_chrome(self):
         html = self._html()
