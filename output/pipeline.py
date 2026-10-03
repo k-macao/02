@@ -559,19 +559,21 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 # ============================================================
 # 推送主题（2026-08-21 起，一对一 / 一对多推送共用）
 # ============================================================
-# guizang —— 默认主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
+# guizang —— 归藏主题：参考 guizang-ppt-skill 的 Style A「电子杂志 × 电子墨水」
 #   （github.com/op7418/guizang-ppt-skill），改造成适合微信阅读的竖版长页面：
 #   白色正文、黑底白字的紧凑标题、圆体字与 2px 实线分隔。微信优先：单列满宽；
 #   行情 / 全景 / 情绪总览 / 政策冲击 / 数据审计等结构化数据用键值表整合。
 #   图标在白底独立显示，正文与次要文字保持纯黑 / 深灰；不依赖颜色区分涨跌。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
 # pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
-PUSH_THEMES = ("guizang", "pixel")
-DEFAULT_PUSH_THEME = "guizang"
+# dossier —— 2026-10-03 起默认主题：德国文件 / 档案风 + 包豪斯几何图标
+#   （牛皮纸文件夹标签、2px 黑粗线、等宽卷宗号、红章、三原色 圆/三角/方）。
+PUSH_THEMES = ("guizang", "pixel", "dossier")
+DEFAULT_PUSH_THEME = "dossier"
 
 
 def _resolve_push_theme(name=None):
-    """归一化推送主题：空 / 非法值一律回落到默认主题 guizang。"""
+    """归一化推送主题：空 / 非法值一律回落到默认主题 dossier。"""
     theme = name if name is not None else os.environ.get("OCTOPUS_PUSH_THEME", "")
     theme = str(theme or "").strip().lower()
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
@@ -6650,7 +6652,7 @@ def _trend_clues_block(data, kit):
     **覆盖面一个字不少**（20 家源头的名字、条数、更新时间全在），砍掉的只是重复展开的
     样本正文；每个源头 / 分组行都写明「共 N 条」，读者知道折叠了多少。
     """
-    color = GZ_KLEIN if kit is GUIZANG_KIT else C_CYAN
+    color = GZ_KLEIN if _is_guizang_like(kit) else C_CYAN
     per_source = LITE("news_per_source")
     news_total = LITE("news_total")
     site_posts = LITE("site_posts")
@@ -6924,8 +6926,8 @@ def _conclusion_panel(kit, pairs):
                               if label in ("市场倾向", "量化预测", "七日预测")), 0)
     primary_label, primary_value = pairs[primary_index]
     secondary = [pair for i, pair in enumerate(pairs) if i != primary_index]
-    if kit is GUIZANG_KIT:
-        accent, background, ink = GZ_KLEIN, "#F3F6FF", GZ_INK_STRONG
+    if _is_guizang_like(kit):
+        accent, background, ink = GZ_KLEIN, GZ_KLEIN_WASH, GZ_INK_STRONG
     else:
         accent, background, ink = C_LEMON, C_AI_BG, C_INK
     body = (f'<div style="border-left:5px solid {accent};background:{background};'
@@ -7593,7 +7595,7 @@ def _ai_judge_row(note, kit, aspect="", seed=""):
     lc = (bull_c if note["label"] == "偏多"
           else bear_c if note["label"] == "偏空" else flat_c)
     title = f"⌁ AI 研判（{aspect}）" if aspect else "⌁ AI 研判"
-    if kit is GUIZANG_KIT:
+    if _is_guizang_like(kit):
         head = (f'<b style="color:{lc}">{title} {note["mark"]} {note["label"]}</b>'
                 f' · <b style="color:{bull_c}">多头 {note["bull_pct"]}%</b>'
                 f' / <b style="color:{bear_c}">空头 {note["bear_pct"]}%</b>')
@@ -7617,7 +7619,7 @@ def _ren_judgment_row(text, kit):
     🦑 直接写进文字头（guizang 主题的行函数不渲染图标格，两主题都要能看到）；
     副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致。
     """
-    if kit is GUIZANG_KIT:
+    if _is_guizang_like(kit):
         head = f'<b style="color:{GZ_KLEIN}">🦑 鲜鲜解读</b> — {_esc(text)}'
     else:
         head = f'<span style="color:{C_CYAN};font-weight:900;">🦑 鲜鲜解读</span> — {_esc(text)}'
@@ -7972,7 +7974,7 @@ def _hk_seven_day_block(res, kit):
                 else f'（偏离 {float(t.get("deviation") or 0) * 100:+.0f}pp）')
             sub_layers.append(q_info)
 
-        hair_color = GZ_HAIR_SOFT if kit is GUIZANG_KIT else C_HAIR
+        hair_color = GZ_HAIR_SOFT if _is_guizang_like(kit) else C_HAIR
         divider = f'<div style="border-top:1px solid {hair_color};margin:4px 0;"></div>'
         sub = divider.join(sub_layers)
         rows.append(kit.item_row(icon, f'{esc(str(t.get("name") or ""))} · '
@@ -8058,8 +8060,8 @@ def _short_card_section(card_ctx, kit, today_n, total):
     card = _short.build_card(card_ctx)
     if not card:
         return None
-    lead_color = GZ_INK_STRONG if kit is GUIZANG_KIT else C_INK
-    lead_size = GZ_FS_PRICE if kit is GUIZANG_KIT else 15
+    lead_color = GZ_INK_STRONG if _is_guizang_like(kit) else C_INK
+    lead_size = GZ_FS_PRICE if _is_guizang_like(kit) else 15
     html = (f'<div style="font-size:{lead_size}px;font-weight:700;color:{lead_color};'
             f'line-height:1.5;margin:8px 0 14px;overflow-wrap:anywhere;">'
             f'{_esc(card["lead"])}</div>')
@@ -8140,9 +8142,9 @@ def _opening_digest(sections, notes, conclusion, today_n, total, kit):
         name, value = rows[data_row]
         rows[data_row] = (name, value + "<br>" + _esc(coverage))
 
-    lead_color = GZ_INK_STRONG if kit is GUIZANG_KIT else C_INK
-    accent = GZ_KLEIN if kit is GUIZANG_KIT else C_LEMON
-    background = "#F3F6FF" if kit is GUIZANG_KIT else C_AI_BG
+    lead_color = GZ_INK_STRONG if _is_guizang_like(kit) else C_INK
+    accent = GZ_KLEIN if _is_guizang_like(kit) else C_LEMON
+    background = GZ_KLEIN_WASH if _is_guizang_like(kit) else C_AI_BG
     conclusion_html = (
         f'<div style="margin-top:12px;border-left:5px solid {accent};background:{background};'
         f'padding:10px 12px;overflow-wrap:anywhere;">'
@@ -11273,6 +11275,341 @@ GUIZANG_KIT = _RenderKit(
 )
 
 
+# ============================================================
+# Dossier 主题（2026-10-03 新增 · 德国文件 / 档案风 + 包豪斯几何）
+# ------------------------------------------------------------
+#   · 页面设计「德国文件」：牛皮纸文件夹标签（AKTE 01 …）、2px 黑色粗线、
+#     打字机等宽文件编号、档案元信息表（DATE / QUELLEN / SIGNATUR）、
+#     红色 RESEARCH 印章、ENDE DER AKTE 档案尾注；
+#   · 文字排版：DIN 风格系统字栈（不加载远程字体，中文回退系统 CJK 字）
+#     + 等宽文件编号，字距拉开的等宽 kicker，强粗细对比；
+#   · 图标设计「包豪斯」：圆 / 三角 / 方 / 菱 × 红蓝黄三原色的几何组合，
+#     纯 Unicode 字形，无远程图片、不给单条推送加 SVG 重量。
+#   · 实现：内容块复用 guizang 研报渲染器；_dossier_palette 上下文在渲染期间
+#     临时换掉 GZ_* 全局色变量（渲染器在调用时读取全局，故整体换色生效），
+#     栏目头 / 刊头 / 尾注为本主题专属。内容结构、栏目顺序、推送分条逻辑不变。
+# ============================================================
+D_PAPER = "#F7F4EC"        # 档案纸（暖白）
+D_TAB = "#EDE4CE"          # 牛皮纸文件夹标签
+D_TAB_HAIR = "#C9BC9C"     # 标签描边
+D_INK = "#201D18"          # 墨（正文）
+D_INK_STRONG = "#111009"   # 标题 / 最高强调
+D_GRAY = "#3A382F"         # 暖深灰（标签 / 脚注）
+D_BLACK = "#141310"        # 粗线 / 黑条（包豪斯黑）
+D_HAIR = "#B9AF99"         # 栏目分割线
+D_HAIR_SOFT = "#DAD2BD"    # 行间细分隔线
+D_ZEBRA = "#EFEADF"        # 段落交替底
+# 包豪斯三原色（黄取深一档，保证浅底上字形对比）
+D_RED = "#C93A2B"
+D_BLUE = "#1E4E9C"
+D_BLUE_DEEP = "#163C7C"
+D_BLUE_WASH = "#E9EDF6"
+D_YELLOW = "#C8930E"
+# 字栈：DIN 风格系统字（不加载远程字体）；等宽用打字机 Courier 系（档案卷宗感）
+D_FONT = ("'DIN Alternate','Bahnschrift','Avenir Next Condensed','Arial Narrow',"
+          "-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB',"
+          "'Microsoft YaHei',sans-serif")
+D_MONO = "'Courier New',Courier,'SF Mono',Menlo,monospace"
+
+# 渲染期间临时替换的 GZ_* 全局色变量（guizang 渲染器在调用时读全局 → 整体换色）
+_DOSSIER_GZ_SWAP = {
+    "GZ_PAPER": D_PAPER,
+    "GZ_PAPER_TINT": D_PAPER,
+    "GZ_KLEIN": D_BLUE,
+    "GZ_KLEIN_DEEP": D_BLUE_DEEP,
+    "GZ_KLEIN_WASH": D_BLUE_WASH,
+    "GZ_INK": D_INK,
+    "GZ_INK_STRONG": D_INK_STRONG,
+    "GZ_DARK_GRAY": D_GRAY,
+    "GZ_META": D_GRAY,
+    "GZ_FAINT": D_GRAY,
+    "GZ_HAIR": D_HAIR,
+    "GZ_HAIR_SOFT": D_HAIR_SOFT,
+    "GZ_HAIR_INK": D_HAIR,
+    "GZ_ZEBRA": D_ZEBRA,
+    "GZ_CREAM": D_PAPER,
+    "GZ_INK_TINT": D_PAPER,
+    "GZ_UP": D_BLUE, "GZ_DOWN": D_RED, "GZ_FLAT": D_GRAY,
+    "GZ_UP_INK": D_BLUE, "GZ_DOWN_INK": D_RED, "GZ_FLAT_INK": D_GRAY,
+    "GZ_WARN": D_GRAY, "GZ_WARN_INK": D_GRAY,
+    "GZ_PRIMARY": D_BLUE, "GZ_PRIMARY_HOVER": D_BLUE_DEEP,
+    "GZ_PRIMARY_LIGHT": D_BLUE_WASH,
+    "GZ_NEON": D_BLUE,
+    "GZ_FONT": D_FONT,
+    "GZ_SERIF": D_FONT,
+    "GZ_SANS": D_FONT,
+    "GZ_MONO": D_MONO,
+}
+
+
+class _dossier_palette:
+    """渲染 dossier 日报期间临时换 GZ_* 色变量；退出时逐位还原。"""
+
+    def __enter__(self):
+        self._saved = {k: globals()[k] for k in _DOSSIER_GZ_SWAP}
+        for k, v in _DOSSIER_GZ_SWAP.items():
+            globals()[k] = v
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for k, v in self._saved.items():
+            globals()[k] = v
+        return False
+
+
+# 包豪斯图标：kicker → (主字形, 主色, 副字形, 副色)。
+# 形状只用圆 ● / 三角 ▲▼▶ / 方 ■□ / 菱 ◆ / 半圆 ◐◍◎ 等几何字形；
+# 颜色只用三原色 + 档案黑，与德国文件排版同盘。
+DOSSIER_ICONS = {
+    "AI DIGEST": ("■", D_BLACK, "●", D_RED),
+    "FORECAST": ("▲", D_BLUE, "●", D_YELLOW),
+    "SUMMARY": ("■", D_BLACK, "▲", D_RED),
+    "MARKET REVIEW": ("▲", D_RED, "■", D_BLACK),
+    "WEEKLY FORECAST": ("■", D_BLUE, "▲", D_YELLOW),
+    "QUANT FORECAST": ("●", D_RED, "■", D_BLACK),
+    "HK PROBABILITY": ("◍", D_BLUE, "●", D_RED),
+    "LIQUIDITY FLOW": ("≈", D_BLUE, "●", D_BLACK),
+    "SECTOR ROTATION": ("◐", D_BLUE, "▲", D_YELLOW),
+    "ECON CALENDAR": ("▦", D_BLUE, "●", D_YELLOW),
+    "POLICY SHOCK": ("§", D_RED, "■", D_BLACK),
+    "DATA AUDIT": ("✓", D_BLUE, "■", D_YELLOW),
+    "TREND TRACKING": ("◉", D_BLUE, "▲", D_RED),
+    "SHORT CARD": ("▲", D_RED, "●", D_BLUE),
+    "STRATEGY READ": ("◆", D_BLUE, "■", D_RED),
+    "HK QUOTES": ("◍", D_RED, "●", D_BLUE),
+    "GLOBAL HEADLINES": ("▤", D_BLUE, "▲", D_YELLOW),
+    "EASTMONEY WIRE": ("!", D_RED, "■", D_BLACK),
+    "NEWS SENTIMENT": ("◆", D_RED, "●", D_BLUE),
+    "QUANT STRATEGY": ("◆", D_BLUE, "■", D_RED),
+    "QUANT POLICY": ("◉", D_RED, "■", D_BLACK),
+    "FED TREND": ("$", D_BLUE, "●", D_YELLOW),
+    "GEO TREND": ("◎", D_RED, "■", D_BLACK),
+    "AI READ": ("●", D_BLUE, "▲", D_YELLOW),
+    "HK GURU CHANNELS": ("▶", D_BLUE, "■", D_RED),
+}
+
+
+def dossier_icon(kicker_en):
+    """栏目标题前的包豪斯几何图标（主字形 + 小副字形，两色）。"""
+    g1, c1, g2, c2 = DOSSIER_ICONS.get(str(kicker_en or "").strip().upper(),
+                                       ("●", D_BLUE, "■", D_BLACK))
+    return (f'<span style="color:{c1};font-size:13px;">{g1}</span>'
+            f'<span style="color:{c2};font-size:9px;">{g2}</span>'
+            f'<span style="padding-left:6px;"></span>')
+
+
+def dossier_stamp(text="RESEARCH · 非投资建议"):
+    """档案红章：描边方章，等宽字距拉开（入门版不出过程性印章）。"""
+    if PLAIN():
+        return ""
+    return (f'<span style="display:inline-block;border:1px solid {D_RED};'
+            f'color:{D_RED};font-family:{D_MONO};font-size:10px;letter-spacing:0.18em;'
+            f'padding:1px 6px;margin-right:8px;">{_esc(text)}</span>')
+
+
+def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
+    """Dossier 栏目头：牛皮纸文件夹标签（AKTE 编号 + 等宽 kicker）→ 标题（含包豪斯图标）
+    → 红章 / 徽标 / 口径。与 guizang 版同一套内容，只换卷宗式栏目头。
+
+    保留 <h2> 标题结构：分条推送的「承接上条」横幅靠它取栏目名，不能省。
+    """
+    content = content or ""
+    if content.lstrip().startswith("<tr"):
+        content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                   f'style="width:100%!important;border-collapse:collapse;'
+                   f'font-size:{GZ_FS_TABLE}px;color:{D_INK}">{content}</table>')
+    content = _gz_zebra_bands(content)
+    meta_bits = [x for x in (badge_html, caption) if x]
+    meta = (f'<div style="color:{D_GRAY};font-size:{GZ_FS_META}px;'
+            f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
+    head = (
+        f'<div style="margin-top:26px;border-top:2px solid {D_BLACK};'
+        f'color:{D_INK};background:{D_PAPER}">'
+        # 文件夹标签（牛皮纸）：挂在粗线下方的内嵌标签
+        f'<div style="display:inline-block;background:{D_TAB};'
+        f'border:1px solid {D_TAB_HAIR};border-bottom:none;'
+        f'padding:3px 10px 2px;margin-top:-1px;font-family:{D_MONO};font-size:10px;'
+        f'letter-spacing:0.16em;color:{D_INK};">'
+        f'AKTE {num} · {_esc(kicker_en)}</div>'
+        # 标题行：包豪斯图标 + DIN 标题
+        f'<div style="padding:8px 0 0;">'
+        f'<h2 style="margin:0;font-size:{GZ_FS_SECTION}px;font-weight:700;'
+        f'color:{D_INK_STRONG};letter-spacing:0.01em;">'
+        f'{dossier_icon(kicker_en)}{_esc(title)}</h2>'
+        f'<div style="padding-top:3px;">{dossier_stamp()}{meta}</div>'
+        f'</div>'
+    )
+    body = f'{content}</div>'
+    return head + SECTION_BODY_MARK + body
+
+
+def _is_guizang_like(kit):
+    """guizang 与 dossier 同属浅色「研报系」版面：共用同一组取色分支。"""
+    return kit is GUIZANG_KIT or kit is DOSSIER_KIT
+
+
+DOSSIER_KIT = _RenderKit(
+    market_section=gz_market_section,
+    market_review=gz_market_review,
+    hk_quotes_block=gz_hk_quotes_block,
+    channel_block=gz_channel_block,
+    headline_row=gz_headline_row,
+    em_news_row=gz_em_news_row,
+    item_row=gz_item_row,
+    rows=gz_rows,
+    note=gz_note,
+    alert=gz_alert,
+    status_footer=gz_status_footer,
+    source_badge=lambda item: gz_source_badge(item),
+    ai_badge=lambda: gz_badge("AI 合成", "ai"),
+    ai_block=gz_ai_analysis_block,
+    sentiment_block=gz_sentiment_block,
+    sentiment_empty_block=gz_sentiment_empty_block,
+    senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
+    policy_block=gz_policy_block,
+    panorama_block=gz_panorama_block,
+    calendar_block=lambda res, date_str=None: gz_calendar_block(res, date_str=date_str),
+    trend_topic_block=gz_trend_topic_block,
+    # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
+    esc=_esc,
+    table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
+    sub=gz_subsection,
+    # meter 的字色在调用时取当前（已换色的）全局，避免默认参数固化克莱因蓝
+    meter=lambda value, maximum: gz_meter(value, maximum, cells=5,
+                                          lit=GZ_KLEIN, off=GZ_FAINT),
+    badge=lambda text, kind="ok": gz_badge(text, kind),
+    section=dossier_section,
+    kv=gz_kv_table,
+    trend=gz_trend_badge,
+    ok_color=GZ_UP, warn_color=GZ_WARN, bad_color=GZ_DOWN,
+)
+
+
+def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
+    """Dossier 刊头（卷宗封面）：黑条刊名 → 大标题 + 三原色几何 → 档案元信息表 → 红章。"""
+    file_no = f"AKT-{date_str}"
+    icon_block = (f'<span style="color:{D_RED};font-size:15px;">■</span>'
+                  f'<span style="color:{D_BLUE};font-size:12px;padding-left:2px;">●</span>'
+                  f'<span style="color:{D_YELLOW};font-size:10px;padding-left:2px;">▲</span>')
+
+    def _meta_cell(label, value, last=False):
+        border_r = "" if last else f'border-right:1px solid {D_HAIR};'
+        return (f'<td style="border-top:1px solid {D_BLACK};border-bottom:1px solid {D_BLACK};'
+                f'{border_r}padding:5px 8px;vertical-align:bottom;">'
+                f'<div style="font-family:{D_MONO};font-size:9px;letter-spacing:0.18em;'
+                f'color:{D_GRAY};">{label}</div>'
+                f'<div style="font-family:{D_MONO};font-size:12px;font-weight:700;'
+                f'color:{D_INK_STRONG};padding-top:2px;">{value}</div></td>')
+
+    meta_table = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%!important;border-collapse:collapse;margin:10px 0 0;">'
+        f'<tr>{_meta_cell("DATE · 日期", _esc(str(date_display)))}'
+        f'{_meta_cell("QUELLEN · 当天源", f"{today_n}/{total}")}'
+        f'{_meta_cell("SIGNATUR · 档号", _esc(file_no), last=True)}</tr></table>')
+    # 印章是装饰性「研究副本」章（非免责文字本身）：入门版与栏目章一致不出
+    stamp = "" if PLAIN() else (
+        f'<div style="padding-top:8px;text-align:right;">'
+        f'<span style="display:inline-block;border:2px solid {D_RED};color:{D_RED};'
+        f'font-family:{D_MONO};font-size:10px;font-weight:700;letter-spacing:0.22em;'
+        f'padding:3px 8px;">内部资料 · 非投资建议</span></div>')
+    return (
+        f'<div style="padding:4px 0 0;color:{D_INK};background:{D_PAPER}">'
+        # 卷宗黑条刊名（table 布局：微信清洗链路上比 flex 稳）
+        f'<table width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%!important;border-collapse:collapse;background:{D_BLACK};">'
+        f'<tr><td style="padding:5px 8px;font-family:{D_MONO};font-size:11px;font-weight:700;'
+        f'letter-spacing:0.22em;color:{D_PAPER};">OCTOPUS · TAGES-AKTE</td>'
+        f'<td align="right" style="padding:5px 8px;font-family:{D_MONO};font-size:10px;'
+        f'letter-spacing:0.14em;color:{D_PAPER};">{_esc(file_no)}</td></tr></table>'
+        f'<h1 style="margin:10px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:900;'
+        f'color:{D_INK_STRONG};letter-spacing:0.01em;line-height:1.3;">'
+        f'{_esc(REPORT_TITLE)} {icon_block}</h1>'
+        f'<div style="color:{D_GRAY};font-size:{GZ_FS_META}px;line-height:1.7;'
+        f'padding-top:6px;">{_esc(REPORT_TAGLINE)} · 更新于 {_esc(generated_at)}</div>'
+        f'{meta_table}{stamp}</div>'
+    )
+
+
+def generate_report_dossier(data, date_display, date_str, sentiment_history=None,
+                            policy_result=None, news_corpus=None):
+    """Dossier 排版（德国文件 + 包豪斯）：卷宗封面 + 文件夹标签栏目 + 档案尾注。
+
+    内容块与 guizang 同源（同一套研报渲染器），只在 _dossier_palette 渲染期间换成
+    档案纸 / 墨色 / 三原色盘；栏目顺序、分条标记、推送门禁全部不变。
+    整页拼装与灰字强制都在换色期间完成：_enforce_dark_gray_font 会为缺 color 的
+    容器补前景色（取当前全局 GZ_INK*），并把浅灰文字统一为当前 GZ_DARK_GRAY。
+    """
+    with _dossier_palette():
+        # kit 色变量在换色后绑定（ok/warn/bad 供量化呈现层注入）
+        DOSSIER_KIT.ok_color = GZ_UP
+        DOSSIER_KIT.warn_color = GZ_WARN
+        DOSSIER_KIT.bad_color = GZ_DOWN
+        parts = _collect_report_parts(data, DOSSIER_KIT,
+                                      sentiment_history=sentiment_history,
+                                      date_str=date_str,
+                                      policy_result=policy_result,
+                                      news_corpus=news_corpus)
+        sections = parts["sections"]
+        # 栏目头也要在换色期间拼（斑马底等读的是当前全局色）
+        content_html = "".join(
+            PART_BREAK_MARK + DOSSIER_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+            for i, (kicker, title, content, badge, caption) in enumerate(sections[1:], 1))
+        first_section = DOSSIER_KIT.section("00", *sections[0])
+        total = parts["total"]
+        today_n = parts["today_n"]
+        generated_at = _now()
+        # 页脚：档案尾注（入门版只留免责一句）
+        footer_text = (
+            "仅供参考，非投资建议 · 数据来自公开来源，未抓到内容的栏目自动缺席。" if PLAIN() else
+            f'德国档案排版（Dossier） · 包豪斯几何图标 · 三原色 红 {D_RED} / 蓝 {D_BLUE} / 黄 {D_YELLOW} · '
+            '涨跌用 ▲▼■ 双编码表达，不依赖红绿<br>\n'
+            '数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。')
+        masthead = _dossier_masthead(date_display, date_str, today_n, total, generated_at)
+        html = _dossier_html_frame(masthead, first_section, content_html, footer_text,
+                                   date_str, generated_at, today_n, total)
+        return _enforce_dark_gray_font(html, dark_gray=GZ_DARK_GRAY)
+
+
+def _dossier_html_frame(masthead, first_section, content_html, footer_text,
+                        date_str, generated_at, today_n, total):
+    """Dossier 整页外壳（纯内联样式；卷宗封面 + 分条标记 + 档案尾注）。"""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only">
+<meta name="octopus-report-date" content="{date_str}">
+<meta name="octopus-generated-at" content="{generated_at}">
+<meta name="octopus-today-sources" content="{today_n}">
+<meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="dossier">
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
+<title>{REPORT_TITLE}</title>
+</head>
+<body bgcolor="{D_PAPER}" style="margin:0;padding:0;background:{D_PAPER};color:{D_INK};font-family:{D_FONT};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:26px 18px 0;background:{D_PAPER};color:{D_INK};font-family:{D_FONT};font-size:{GZ_FS_BODY}px;line-height:1.75;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+
+{masthead}
+
+{PART_BREAK_MARK}{first_section}
+<div id="report"></div>
+{content_html}
+
+{DOC_FOOT_MARK}
+<div style="margin-top:26px;border-top:2px solid {D_BLACK};padding:12px 0 30px;">
+<div style="font-family:{D_MONO};font-size:10px;letter-spacing:0.24em;color:{D_INK_STRONG};">ENDE DER AKTE · 档案结束</div>
+<div style="color:{D_GRAY};font-size:11px;line-height:1.8;padding-top:6px;">
+{footer_text}
+</div>
+</div>
+
+</div>
+</body>
+</html>"""
+
+
 def _harden_wechat_table_widths(html):
     """把 ``width=100%`` 同步写进内联 style，防止微信把日报压成半屏。
 
@@ -11358,13 +11695,19 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
-    theme: "guizang"（默认 · 简洁白底研报）/ "pixel"（旧版复古像素）。
+    theme: "dossier"（默认 · 德国文件档案风 + 包豪斯几何）/ "guizang"（简洁白底研报）
+    / "pixel"（旧版复古像素）。
     sentiment_history: 跨日情绪基线（新闻情绪用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
     """
     theme = _resolve_push_theme(theme)
-    if theme == "guizang":
+    if theme == "dossier":
+        html = generate_report_dossier(data, date_display, date_str,
+                                       sentiment_history=sentiment_history,
+                                       policy_result=policy_result,
+                                       news_corpus=news_corpus)
+    elif theme == "guizang":
         html = generate_report_guizang(data, date_display, date_str,
                                        sentiment_history=sentiment_history,
                                        policy_result=policy_result,
@@ -12911,7 +13254,8 @@ def main():
   python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
   python3 output/pipeline.py --calendar-only        # 只抓「时间节点」（未来30天影响经济时间点）并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
-  python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题（默认 guizang）
+  python3 output/pipeline.py --theme guizang        # 本次改用归藏白底研报主题（默认 dossier 德国文件档案风）
+  python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题
   python3 output/pipeline.py --notes                # 精简版面里保留说明文字 / 过程文字（默认入门版不出）
   python3 output/pipeline.py --full                 # 全量长版：长文 / 表格 / 方法论注释全部回来
         """
@@ -12934,7 +13278,7 @@ def main():
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--theme", default=None, choices=list(PUSH_THEMES),
-                       help="推送主题：guizang（默认 · 电子杂志×电子墨水）/ pixel（旧版复古像素）")
+                       help="推送主题：dossier（默认 · 德国文件档案风+包豪斯）/ guizang（白底研报）/ pixel（旧版像素）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
     parser.add_argument("--no-quant", action="store_true",
