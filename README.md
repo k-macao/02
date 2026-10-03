@@ -115,6 +115,7 @@ python3 output/push.py                # 完整流程：采集 → 分析 → 生
 | 港股量化引擎 | 日线、五因子、概率校准、资金流动性与滚动回测；输出指数 / 个股概率、区间、流动性分和复盘记录。 | 只用预测时点可得数据；概率夹在 5%–95%；缺失因子不以 0 冒充中性。 |
 | 七日走势预测 | 恒生指数未来 7 个交易日逐日表格，含累计概率、80% 区间、建议仓位与止损止盈参考；AI 七日港股分析作为可选子块。 | 预测先留档，目标交易日后再结算；类比样本必须已结算，并运行截断不变性自检。 |
 | AI 七日港股子块 | 恒指、恒科、国企指数概率与依据。配置大模型后可在受限数据内生成研判，并披露量化基准、降级原因与数字溯源结果。 | 默认没有 API Key 时该子块缺席；可通过 `OCTOPUS_HK7_FALLBACK=1` 改为展示量化基准。模型输出偏离基准过大、数字无法溯源或出现绝对化措辞时回退。 |
+| ◈ Jev 本地研判层（可选第三引擎） | GitHub 开源的 Jev 类**类型化决策**模型（laya / kev / NanoJev 一路的 `POST /v1/systemone`）：只输出值 + 已校准概率，不生成文本。三个原语对应我们的三类判断——方向=choice、涨跌概率=noul、风险等级=score。本地 ONNX 推理，**零 API 成本、推理不出网**。 | 默认未配置端点时整栏缺席（与现有口径一致）；已配置但调用失败则逐标的记因并回退量化基准。护栏复用同一份口径：偏离量化基准 >20pp 收敛、概率夹 5%~95%；因不产文本，数字溯源改为「概率对账 + 来源标注」。多题各自独立作答、不保证自洽，以命题题（noul）为准。详见 [接入可行性验证](./Jev开源模型-接入可行性验证.md) |
 
 量化特征包括：**MOM** 动量、**TRD** 趋势、**REV** 反转、**VOL** 量能和 **FLOW** 资金。概率校准、滚动样本外回测、预测留痕与日后结算都在页面或对应 JSON 中披露；预测结果用于研究参考，不代表确定性行情判断。
 
@@ -248,6 +249,9 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 | 量化 | `OCTOPUS_HK7_FALLBACK=1` / `=0` | `1`：无 Key 也展示量化基准；默认 `auto`：无 Key 时子块缺席、已配置 Key 但调用失败时回退；`0`：大模型不可用时子块缺席 |
 | 大模型 | `OCTOPUS_LLM_API_KEY` | 可选；支持 OpenAI 兼容接口。默认地址 `https://api.deepseek.com/v1`、模型 `deepseek-chat` |
 | 大模型 | `OCTOPUS_LLM_BASE_URL`、`OCTOPUS_LLM_MODEL`、`OCTOPUS_LLM_TIMEOUT` | 自定义接口、模型与超时；超时默认 60 秒 |
+| Jev 本地模型 | `OCTOPUS_JEV_BASE_URL`（或 `TYPESAFE_BASE_URL`） | 可选；指向任一本地的 Jev 协议服务（如 `edgejev serve --model ./jev-int8`）。留空 = 该层缺席，行为与现在完全一致 |
+| Jev 本地模型 | `OCTOPUS_JEV_API_KEY`（或 `TYPESAFE_API_KEY`） | 可选；本地服务一般不需要；远端服务需与服务端 `--api-key` 一致 |
+| Jev 本地模型 | `OCTOPUS_JEV_TIMEOUT`、`OCTOPUS_JEV_MODE` | 超时默认 30 秒（夹 3~180）；`MODE=always` 表示端点为必需项，不可用就整栏缺席而不回退 |
 | 港股 | `OCTOPUS_HK_OVERSEAS=0` | 关闭港股境外数据源采集（【深水石斑鱼】港股行情栏目随之缺席）；默认开启 |
 | 港股 | `OCTOPUS_HK_BROWSER=1` | 启用 stealth 浏览器第 4 路读 WAF 站点；默认关闭，需 Node + `tools/patchright-enhanced` 的 npm 依赖 + Chrome |
 | 港股 | `OCTOPUS_HK_CROSSCHECK=1` | 用 Stooq 对主源价格做交叉校验（偏差 >1.5% 写进栏目说明，不覆盖主源数字）；默认关闭 |
@@ -336,12 +340,15 @@ output/
 ├── octopus_lexicon.py      # 50 词活鲜词库
 ├── octopus_weekly.py       # 七日逐日预测
 ├── hk_seven_day.py         # AI 七日港股分析子块
+├── jev_bridge.py           # ◈ Jev 本地研判层：类型化决策（/v1/systemone）接入 + 护栏 + 留痕
 ├── hk_overseas.py          # 🇭🇰 港股境外数据源（Yahoo / Stooq / HKEX / 可选 stealth 浏览器）
 ├── market_db.py            # 🗄️ 市场数据库（隐藏功能）：多源快照 + 交叉验证 + 自检 + AI 数据集
 ├── market_db/              # 每天一个日期文件 YYYYMMDD.json（当天 08:00 / 12:30 / 17:00 三档）
 ├── daily_report_*.html     # 日期归档
 └── latest.html             # 最新日报
 
+tools/jev_mock_server.py    # ◈ Jev 协议兼容回声服务（离线自检用，无权重 / 无 Key / 无外网）
+tools/jev-integration-probe.workflow.yml  # ◈ Jev 接入 CI 探针（复制到 .github/workflows/ 即启用）
 tools/patchright-enhanced/  # 第三方 stealth 浏览器工具（上游 e38ab7a 的本地镜像）：
                             # probe.js 把渲染后的页面文本以 JSON 交给 hk_overseas.py
 ```
@@ -390,6 +397,7 @@ python3 -m unittest discover -s tests
 | `tests/test_macd_strategy.py` | MACD 因果计算与双倍柱、交叉/零轴规则、盘中/美股夏令时、库日线去重、免费主备回退、防日期回退、双主题与推送门禁 |
 | `tests/test_macd_derivatives.py` | 连续收敛/自身历史极值、确认波谷不重绘、布林市场状态与日内路径、真周线/缺周五核验、整段补足、去重与风控、极端值隔离、双主题与原分数不变 |
 | `tests/test_hk_seven_day.py` | AI 七日港股分析、降级与数字溯源 |
+| `tests/test_jev_bridge.py` | ◈ Jev 接入层：配置、闭合输入自检（防未来函数）、协议与结构校验、收敛 / 夹边护栏、跨题独立性提示位、401 / 500 / 超时 / 断连降级、留痕与结算（纯标准库，不需要模型权重） |
 | `tests/test_short_card.py`、`tests/test_ren.py`、`tests/test_lexicon.py` | 短线卡、鲜鲜解读与词库 |
 | `tests/test_push_split.py` | 超长日报分条与栏目续接 |
 | `tests/test_market_db.py` | 市场数据库：多源代码映射、六路取数（含通达信假客户端）、交叉验证判定、自检、日期文件合并、哈希防改写、AI 数据集因果性 |
@@ -544,6 +552,7 @@ stdout 缓冲整段丢失，日志里只剩 `mootdx` 那三行 stderr 提示，�
 | 市场数据库定时任务被取消（通达信通道卡死） | [原因诊断](./通达信通道-作业被取消-原因诊断.md) |
 | 港股行情栏目接入境外数据源 | [接入说明](./港股行情栏目-境外数据源说明.md) |
 | 日报不适合入门：减少说明文字、过程文字 | [改动记录](./入门版-减少说明过程文字.md) |
+| GitHub 开源 Jev 类模型能否接入 | [接入可行性验证](./Jev开源模型-接入可行性验证.md) |
 
 ## 版权与免责声明
 
