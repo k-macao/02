@@ -193,13 +193,21 @@ Jev 这类本地模型恰好补这个空：
 
 ## 7. 落地清单（都是小改动）
 
-| 优先级 | 动作 | 说明 |
+**进度更新（2026-10-03，本轮已按优先级处理完 P0-2 / P1-1）**：
+
+- ✅ **P0-2 Jev 第三引擎已接入** `run_seven_day`（提交 `6d42a47`）：研判优先级 **大模型 > Jev > 量化基准**——无大模型 Key 且配了 `OCTOPUS_JEV_BASE_URL` 时自动启用 Jev；概率与量化基准按**同一份常量**对账（>20pp 收敛 / 5%~95% 夹边），文案走量化模板；Jev 研究留痕单独 `jev_forecast.json`（同一套 T+7 结算），栏内留痕 `engine` 字段区分；端点未配置时行为与引入前逐位一致，调用失败逐标的记因并回退量化基准，`OCTOPUS_JEV_MODE=always` 时端点不可用整栏缺席。渲染层（引擎行 / 量化基准对账行 / 七日口径行 / 合并栏目徽标 / `--hk7-only` 研究模式）全部按 `engine=jev` 如实标注。
+- ✅ **P1-1 「数据覆盖」已点名 Jev**：栏内渲染时，覆盖行追加 `Jev：使用中（模型名）/ 端点未配置（OCTOPUS_JEV_BASE_URL）/ 探活失败 → 回退量化基准（原因）/ 调用失败 → 回退量化基准（原因）`；整栏缺席（strict 模式）时原因里同样带 Jev 状态。
+- ✅ 回归：新增 12 项（`run_seven_day` 三引擎优先级 + 管线接入与渲染，全离线），`tests/test_jev_bridge.py` 42 项、`tests/test_hk_seven_day.py` 41 项，全仓 727 项全绿（1 跳过）。
+- ⏳ **P0-1 真权重探针已触发**（2026-10-03，`[jev-model]` 提交触发第 ③ 步，分支 `arena/01a1037b-02`）：等 job summary 出来后再对外说「真模型已接上」。注意：探针工作流的 `upload-artifact` 需要 `artifacts: write` 权限（工作流顶层原只声明 `contents: read`，最后一步会 403 红掉、但不影响前面的构建 / 服务 / 端到端 / 汇总）；该修复与下面的 `tests.yml` 都**需要 workflows 权限提交**，本地已备好，待有权限的账户补推。
+- ⏳ **P1-2 回归进 CI**：`.github/workflows/tests.yml` 已写好（纯标准库、约 1 分钟：`test_jev_bridge.py` + `test_hk_seven_day.py`），同样卡在 workflows 权限待补推；补推前可在 GitHub UI 手动 Run 验证。
+
+| 优先级 | 动作 | 状态（2026-10-03） |
 |---|---|---|
-| P0 | 跑 CI 探针第 ③ 步 | ✅ 工作流已于 2026-10-04 上到 main（`.github/workflows/jev-integration-probe.yml`，内容与本地验证过的版本逐字一致）。仓库里只需 Run workflow 勾 `build_model`，或提交信息带 `[jev-model]` |
-| P0 | 把 Jev 接进 `fetch_hk_seven_day` 作为第三条引擎 | 复用 `_hk_seven_day_block`：`engine` 加一档 `"jev"`、文案标注「Jev 本地模型 · laya int8 · 概率已按基准收敛」；缺席时行为与现在完全一致 |
-| P1 | 在日报「数据覆盖」里点名 Jev | 与「AI 七日港股暂缺」并列，标明是端点没配还是调用失败 |
-| P1 | 把 35 项回归纳入 CI | 目前仓库没有测试工作流；`tests/test_jev_bridge.py` 纯标准库，30 秒可跑完 |
-| P2 | 真权重跑通后做 A/B | 同一批 history 分别用「量化基准 / Jev / LLM」留痕，按 Brier 分数比较（结算口径已经统一） |
+| P0 | 跑 CI 探针第 ③ 步 | ⏳ 已触发（`[jev-model]` push，分支 `arena/01a1037b-02`）；`artifacts: write` 权限修复待补推 |
+| P0 | 把 Jev 接进 `fetch_hk_seven_day` 作为第三条引擎 | ✅ 已完成（`6d42a47`，见上方进度更新） |
+| P1 | 在日报「数据覆盖」里点名 Jev | ✅ 已完成（`jev_note` 随源结果进覆盖行） |
+| P1 | 把 35 项回归纳入 CI | ⏳ `tests.yml` 已备好，待 workflows 权限补推 |
+| P2 | 真权重跑通后做 A/B | 待 P0-1 出结果；同一批 history 分别用「量化基准 / Jev / LLM」留痕（栏内留痕已带 `engine` 字段），按 Brier 分数比较（结算口径已统一） |
 
 ## 8. 本轮新增文件
 
@@ -209,5 +217,6 @@ Jev 这类本地模型恰好补这个空：
 | `tools/jev_mock_server.py` | 协议兼容回声服务（标准库）：无权重 / 无 Key / 无外网也能验证接入层 |
 | `tests/test_jev_bridge.py` | 35 项离线回归：配置、闭合自检、协议、结构校验、收敛护栏、跨题独立性、401/500/超时/断连降级、留痕结算 |
 | `.github/workflows/jev-integration-probe.yml` | CI 探针（2026-10-04 已上 main）：①离线回归 ②运行时 + HF 可达性 ③真权重端到端 |
+| `.github/workflows/tests.yml` | 回归 CI（2026-10-03 新增，待 workflows 权限补推）：Jev 接入层 + AI 七日港股管线，纯标准库 |
 
 > 免责：本文与新增代码均为研究/工程验证，概率不是保证，不构成投资建议。
