@@ -756,11 +756,14 @@ class GuizangThemeTests(unittest.TestCase):
                     f"{name} 剥离 <body> 后仍有未声明 color 的文本节点：{disk_audit.unstyled[:5]}",
                 )
 
-    def test_kv_and_channel_rows_stack_label_and_value_on_separate_lines(self):
-        """内容表格分行：标题（标签）独占一行，具体内容换到下一行展示，不挤在同一行"""
+    def test_kv_and_channel_rows_use_simple_tables(self):
+        """正文项目和资讯以简单双列表展示。"""
         kv_html = pipeline.gz_kv_table([("市场倾向", "中性 ■"), ("核心判断", "指数温和偏多")])
-        self.assertIn(f'市场倾向<br><b style="color:{pipeline.GZ_INK}">中性 ■</b>', kv_html)
-        self.assertIn(f'核心判断<br><b style="color:{pipeline.GZ_INK}">指数温和偏多</b>', kv_html)
+        self.assertIn("<table", kv_html)
+        self.assertIn("市场倾向</td>", kv_html)
+        self.assertIn("中性 ■</td>", kv_html)
+        self.assertIn("核心判断</td>", kv_html)
+        self.assertIn("指数温和偏多</td>", kv_html)
         self.assertNotIn("市场倾向 · <b", kv_html)
 
         ch_html = pipeline.gz_channel_block({
@@ -777,7 +780,7 @@ class GuizangThemeTests(unittest.TestCase):
         }, ch_idx=1)
         self.assertIn('id="h-hk-01-01"', ch_html)
         self.assertIn('<br><small style="color:#333">2026-09-29 18:00</small>', ch_html)
-        self.assertNotIn("<table", ch_html)
+        self.assertIn("<table", ch_html)
 
     def test_no_washy_text_colors(self):
         """文字可读性硬门禁：任何文字色与白底对比度 ≥ 4.5:1（WCAG AA），禁止浅灰文字回潮。
@@ -868,7 +871,7 @@ class GuizangThemeTests(unittest.TestCase):
         }, 1)
         self.assertLess(html.index("港股市场观察"), html.index("测试来源"))
         self.assertIn("2026-09-08 10:00", html)
-        self.assertNotIn("<table", html)   # 资讯行不再套表格壳
+        self.assertIn("<table", html)   # 资讯行以简单双列表展示
 
     def test_full_report_fits_single_push_message(self):
         """一页推：常规栏目的完整日报必须在单条上限内，且拆分为恰好 1 条"""
