@@ -3923,7 +3923,7 @@
    "slot": "1700",
    "label": "盘后 17:00",
    "date": "2026-10-03",
-   "pulled_at": "2026-10-03 17:57:50",
+   "pulled_at": "2026-10-03 22:08:15",
    "scheduled_at": "2026-10-03 17:00:00",
    "trading_day": false,
    "sources": {
@@ -3933,7 +3933,7 @@
      "status": "ok",
      "host": "push2.eastmoney.com",
      "error": null,
-     "elapsed_ms": 2152,
+     "elapsed_ms": 3352,
      "quote_time": "2026-10-03 04:00:00",
      "price_peer": true,
      "symbols": 36
@@ -3944,7 +3944,7 @@
      "status": "ok",
      "host": "hq.sinajs.cn",
      "error": null,
-     "elapsed_ms": 953,
+     "elapsed_ms": 952,
      "quote_time": "2026-10-02 16:08",
      "price_peer": true,
      "symbols": 32
@@ -3955,7 +3955,7 @@
      "status": "ok",
      "host": "qt.gtimg.cn",
      "error": null,
-     "elapsed_ms": 1104,
+     "elapsed_ms": 1786,
      "quote_time": "2809-48-32 14:78:78",
      "price_peer": true,
      "symbols": 37
@@ -3966,7 +3966,7 @@
      "status": "ok",
      "host": "query1.finance.yahoo.com",
      "error": null,
-     "elapsed_ms": 990,
+     "elapsed_ms": 1223,
      "quote_time": "2026-10-03 05:15:59",
      "price_peer": true,
      "symbols": 35
@@ -3977,10 +3977,10 @@
      "status": "ok",
      "host": "push2his.eastmoney.com",
      "error": null,
-     "elapsed_ms": 6317,
+     "elapsed_ms": 10888,
      "quote_time": "2026-10-02",
      "price_peer": false,
-     "symbols": 36
+     "symbols": 35
     },
     "tdx": {
      "key": "tdx",
@@ -3988,7 +3988,7 @@
      "status": "failed",
      "host": "",
      "error": "8.129.13.54:7709 TCP 预检失败（TimeoutError）；120.24.149.49:7709 TCP 预检失败（TimeoutError）；47.113.94.204:7709 TCP 预检失败（TimeoutError）",
-     "elapsed_ms": 11146,
+     "elapsed_ms": 11677,
      "quote_time": null,
      "price_peer": true,
      "symbols": 0
@@ -6128,28 +6128,8 @@
       "prev_close": 71.7,
       "prev_close_sources": 4,
       "median_all": 70.2,
-      "eod_close_check": {
-       "source": "em_kline",
-       "close": 70.2,
-       "date": "2026-10-02",
-       "close_kind": null,
-       "consensus_prev_close": 71.7,
-       "dev_pct": 2.0921,
-       "ok": false,
-       "kline_close": 70.2,
-       "kline_date": "2026-10-02"
-      },
-      "eod_close_checks": [
-       {
-        "source": "em_kline",
-        "close": 70.2,
-        "date": "2026-10-02",
-        "close_kind": null,
-        "consensus_prev_close": 71.7,
-        "dev_pct": 2.0921,
-        "ok": false
-       }
-      ],
+      "eod_close_check": null,
+      "eod_close_checks": [],
       "by_source": {
        "eastmoney": {
         "price": 70.2,
@@ -6182,15 +6162,7 @@
       },
       "symbol": "3690.HK"
      },
-     "eod_close": {
-      "close": 70.2,
-      "date": "2026-10-02",
-      "open": 70.3,
-      "high": 70.8,
-      "low": 68.85,
-      "volume": 22485255.0,
-      "amount": 1572220880.0
-     },
+     "eod_close": null,
      "eod_close_tdx": null
     },
     "1810.HK": {
@@ -7818,7 +7790,7 @@
     "consensus_ok": true
    },
    "self_check": {
-    "score": 100,
+    "score": 96,
     "ok": true,
     "checks": [
      {
@@ -7829,9 +7801,9 @@
      },
      {
       "name": "schedule_window",
-      "ok": true,
+      "ok": false,
       "warn_only": true,
-      "detail": "拉取时刻距计划 ±58 分钟（容差 180）"
+      "detail": "拉取时刻距计划 ±308 分钟（容差 180）"
      },
      {
       "name": "sources_min",
@@ -7882,11 +7854,13 @@
       "detail": "本时段存在当天行情"
      }
     ],
-    "alerts": []
+    "alerts": [
+     "提示·schedule_window：拉取时刻距计划 ±308 分钟（容差 180）"
+    ]
    },
    "integrity": {
     "algo": "sha256",
-    "hash": "532a0df184eb7f57aa36efdee754861ece03dc62608ac4581724ff88803c77ed"
+    "hash": "9266553a93d05b2cbb0c1ae15e5e6f4b98be0fb9f283e3bd29ee0f92783ed3a7"
    }
   }
  },
@@ -7907,11 +7881,19 @@
     "sources_ok": 5,
     "symbols_ok": 37,
     "score": 100
+   },
+   {
+    "slot": "1700",
+    "pulled_at": "2026-10-03 22:08:15",
+    "overwrote": true,
+    "sources_ok": 5,
+    "symbols_ok": 37,
+    "score": 96
    }
   ],
-  "pull_count": 2
+  "pull_count": 3
  },
- "updated_at": "2026-10-03 17:57:50",
+ "updated_at": "2026-10-03 22:08:15",
  "ai": {
   "row_count": 74,
   "symbols": 37,
@@ -7952,6 +7934,6 @@
  },
  "integrity": {
   "algo": "sha256",
-  "hash": "1a54b9aa01196b6c7028a301107201b938209a26cbf2c8379b5b36f34b917750"
+  "hash": "714cc04795f8cb30773d9958622130ccc5f867d9375fd522d77fcb49188c4dc4"
  }
 }
