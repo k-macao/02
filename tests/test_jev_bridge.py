@@ -7,6 +7,9 @@
   配置解析 → 闭合输入自检 → 协议调用 → 结构校验 → 概率对账（收敛 / 夹边 / 回退）
   → 缺席降级 → 留痕与结算。
 
+2026-10-03 起新增 ``TestRunSevenDayEngine``：把 Jev 钉进 ``hk_seven_day.run_seven_day``
+的三引擎优先级（大模型 > Jev > 量化基准），同样只用回声服务，不发任何真实网络请求。
+
 真实模型与回声服务的差别只有一个：概率的预测力。协议、护栏、留痕这三层与权重无关，
 所以这几层可以在这里被完全钉死；权重那一层由 GitHub Actions 上的真实模型探针负责
 （见 .github/workflows/jev-integration-probe.yml）。
@@ -14,11 +17,13 @@
 import importlib.util
 import json
 import os
+import random
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from datetime import date, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -39,6 +44,41 @@ def start_mock(scenario="", api_key="", latency=0.0):
     srv = ThreadingHTTPServer(("127.0.0.1", 0), mock.make_handler(scenario, api_key, latency))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{srv.server_address[1]}", srv
+
+
+def weekday_dates(n, start=date(2025, 1, 6)):
+    dates, d = [], start
+    while len(dates) < n:
+        if d.weekday() < 5:
+            dates.append(d.isoformat())
+        d += timedelta(days=1)
+    return dates
+
+
+def synthetic_bars(n=320, seed=42, start=date(2025, 1, 6)):
+    """与 tests/test_hk_seven_day.py 同一口径的合成日线（纯标准库，可离线跑）。"""
+    rng = random.Random(seed)
+    closes, x = [], 24500.0
+    for _ in range(n):
+        x *= 1 + rng.gauss(0.0002, 0.011)
+        closes.append(x)
+    dates = weekday_dates(n, start=start)
+    return [{"date": dates[i], "open": c, "high": c * 1.012, "low": c * 0.988,
+             "close": c, "volume": 1.2e8} for i, c in enumerate(closes)]
+
+
+def bars_by_symbol(n=320, seed=42):
+    return {"^HSI": synthetic_bars(n, seed=seed),
+            "^HSTECH": synthetic_bars(n, seed=seed + 1),
+            "^HSCE": synthetic_bars(n, seed=seed + 2)}
+
+
+def quant_config(**over):
+    """hk_seven_day.run_seven_day 的 config 形参（大模型配置；测试里默认未启用）。"""
+    cfg = {"enabled": False, "key": "", "base": "https://example.invalid/v1",
+           "model": "test-model", "timeout": 10, "fallback": "auto"}
+    cfg.update(over)
+    return cfg
 
 
 def demo_ctx(**over):
@@ -454,6 +494,133 @@ class TestCli(unittest.TestCase):
                 self.assertFalse(any(f in data["entries"][0] for f in ("actual_ret", "hit")))
         finally:
             srv.shutdown()
+
+
+# ======================================================================
+# Jev 接进 run_seven_day：三引擎优先级 大模型 > Jev > 量化基准（2026-10-03 新增）
+# 全部离线：Jev 用回声服务，大模型用注入的假 post_json，不发任何真实网络请求。
+# ======================================================================
+class TestRunSevenDayEngine(unittest.TestCase):
+    def _cfg(self, base):
+        return jb.jev_config({"OCTOPUS_JEV_BASE_URL": base})
+
+    def _run(self, tmp, cfg=None, config=None, post_json=None, bars=None):
+        return hk7.run_seven_day(
+            None, bars_by_symbol=bars or bars_by_symbol(),
+            history_path=os.path.join(tmp, hk7.JOURNAL_FILENAME),
+            post_json=post_json, config=config or quant_config(),
+            jev_config=cfg if cfg is not None else jb.jev_config({}))
+
+    def test_no_llm_no_jev_keeps_quant_baseline(self):
+        """既无大模型 Key 也无 Jev 端点 → engine=quant，行为与引入前逐位一致。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            res = self._run(tmp, cfg=jb.jev_config({}))
+        self.assertTrue(res["available"])
+        self.assertEqual("quant", res["engine"])
+        self.assertFalse(res["jev"]["enabled"])
+        self.assertFalse(res["jev"]["tried"])
+
+    def test_jev_used_when_no_llm_key(self):
+        """无大模型 Key + 配了 Jev 端点 → engine=jev，概率经对账、夹边后落在合法区间。"""
+        base, srv = start_mock()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                res = self._run(tmp, cfg=self._cfg(base))
+        finally:
+            srv.shutdown()
+        self.assertTrue(res["available"])
+        self.assertEqual("jev", res["engine"])
+        self.assertTrue(res["jev"]["enabled"])
+        self.assertTrue(res["jev"]["tried"])
+        self.assertTrue(res["jev"]["used"])
+        self.assertIn("Jev", res["engine_label"])
+        for t in res["targets"]:
+            self.assertGreaterEqual(t["p_up"], hk7.PROB_FLOOR)
+            self.assertLessEqual(t["p_up"], hk7.PROB_CAP)
+            self.assertIsNotNone(t.get("quant_p_up"))
+
+    def test_jev_writes_both_journals(self):
+        """本栏留痕记 engine=jev；Jev 研究留痕单独一份 jev_forecast.json。"""
+        base, srv = start_mock()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                hk7j = os.path.join(tmp, hk7.JOURNAL_FILENAME)
+                self._run(tmp, cfg=self._cfg(base))
+                hk7data = json.loads(Path(hk7j).read_text(encoding="utf-8"))
+                self.assertTrue(any(e.get("engine") == "jev" for e in hk7data["entries"]))
+                jevj = os.path.join(tmp, jb.JOURNAL_FILENAME)
+                self.assertTrue(Path(jevj).exists())
+                jevdata = json.loads(Path(jevj).read_text(encoding="utf-8"))
+                self.assertTrue(any(e.get("engine", "").startswith("jev")
+                                    for e in jevdata["entries"]))
+        finally:
+            srv.shutdown()
+
+    def test_jev_no_duplicate_issue_same_anchor(self):
+        base, srv = start_mock()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cfg = self._cfg(base)
+                for _ in range(2):                    # 同一锚定日重复运行
+                    self._run(tmp, cfg=cfg)
+                jevj = os.path.join(tmp, jb.JOURNAL_FILENAME)
+                jevdata = json.loads(Path(jevj).read_text(encoding="utf-8"))
+                self.assertEqual(3, len(jevdata["entries"]))  # 3 标的 × 1 锚定日
+        finally:
+            srv.shutdown()
+
+    def test_llm_takes_priority_over_jev(self):
+        """大模型可用时优先用大模型，Jev 端点即使配了也不被调用。"""
+        base, srv = start_mock()
+        urls = []
+
+        def fake_post(url, body, headers, timeout):
+            urls.append(url)
+            self.assertIn("chat/completions", url)   # 绝不该出现 /v1/systemone
+            return {"choices": [{"message": {"content": json.dumps({
+                "targets": [{"code": s, "p_up": 0.55, "summary": "中性震荡",
+                              "drivers": ["动能延续"], "risks": ["波动放大"],
+                              "support": 24000, "resistance": 25000}
+                             for s in ("^HSI", "^HSTECH", "^HSCE")],
+                "cross_note": ""}, ensure_ascii=False)}}]}
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                res = self._run(tmp, cfg=self._cfg(base),
+                                config=quant_config(enabled=True, key="k"),
+                                post_json=fake_post)
+        finally:
+            srv.shutdown()
+        self.assertEqual("llm", res["engine"])
+        self.assertFalse(res["jev"]["tried"])
+        self.assertTrue(all("systemone" not in u for u in urls))
+
+    def test_jev_endpoint_down_falls_back_to_quant(self):
+        """Jev 端点连不上 → engine=quant 兜底，原因如实记录，不抛异常。"""
+        cfg = self._cfg("http://127.0.0.1:1")        # 必然连不上
+        with tempfile.TemporaryDirectory() as tmp:
+            res = self._run(tmp, cfg=cfg)
+        self.assertTrue(res["available"])
+        self.assertEqual("quant", res["engine"])
+        self.assertTrue(res["jev"]["enabled"])
+        self.assertTrue(res["jev"]["tried"])
+        self.assertFalse(res["jev"]["used"])
+        self.assertTrue(res["jev"]["reason"])
+
+    def test_jev_extreme_probability_converges_in_run(self):
+        """极端概率在 run 级被收敛：最终 p_up 必须落在量化基准 ±MAX_PROB_DEVIATION 内。"""
+        base, srv = start_mock(scenario="extreme")
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                res = self._run(tmp, cfg=self._cfg(base))
+        finally:
+            srv.shutdown()
+        self.assertEqual("jev", res["engine"])
+        for t in res["targets"]:
+            self.assertLessEqual(abs(t["p_up"] - t["quant_p_up"]),
+                                 hk7.MAX_PROB_DEVIATION + 1e-9)
+            self.assertGreaterEqual(t["p_up"], hk7.PROB_FLOOR)
+            self.assertLessEqual(t["p_up"], hk7.PROB_CAP)
 
 
 if __name__ == "__main__":

@@ -194,13 +194,20 @@
       审计标签 / 留痕文件各自保留）：恒生指数 / 恒生科技 / 国企指数三只标的、未来 7 个
       交易日（按交易日计数、假期顺延）的收盘上涨概率 + 依据 / 风险 / 三道防线。量化基准
       复用 octopus_weekly 的因果引擎（视界 7：扩张基准率 + 20 日特征最近邻、s+7≤t 已结算
-      锚点、截断不变性自检、5%~95% 夹逼）；大模型（OpenAI 兼容 /chat/completions：
-      OCTOPUS_LLM_API_KEY / OCTOPUS_LLM_BASE_URL / OCTOPUS_LLM_MODEL）只在给定数据内做
-      合成研判——概率偏离量化基准 >20pp 即收敛、文案数字必须能在本次数据里溯源、
-      绝对化措辞与编造数字一律回退量化口径。OCTOPUS_HK7_FALLBACK 三档：默认 auto ——
-      未配置 Key 时该子块缺席且不进审计，已配置但调用失败才降级量化基准；=1 没有 Key 也
-      降级渲染；=0 任何大模型不可用都整子块缺席。预测先存档（output/hk7_forecast.json，
+      锚点、截断不变性自检、5%~95% 夹逼）；研判引擎按优先级三选一——
+      ① 大模型（OpenAI 兼容 /chat/completions：OCTOPUS_LLM_API_KEY /
+      OCTOPUS_LLM_BASE_URL / OCTOPUS_LLM_MODEL）只在给定数据内做合成研判：概率偏离量化
+      基准 >20pp 即收敛、文案数字必须能在本次数据里溯源、绝对化措辞与编造数字一律回退
+      量化口径；② Jev 类型化决策本地模型（output/jev_bridge.py，2026-10-03 接入，
+      OCTOPUS_JEV_BASE_URL / OCTOPUS_JEV_API_KEY / OCTOPUS_JEV_MODE）：只输出值 + 已校准
+      概率（不产文本、无编数字入口），概率与量化基准按同一份常量对账（>20pp 收敛），
+      端点未配置即缺席、调用失败逐标的记因并回退量化基准，研究留痕单独一份
+      output/jev_forecast.json（同一套 T+7 结算口径）；③ 量化基准兜底。
+      OCTOPUS_HK7_FALLBACK 三档：默认 auto —— 大模型 Key 与 Jev 端点都未配置时该子块
+      缺席且不进审计，已配置但调用失败才降级量化基准；=1 都没有也降级渲染；
+      =0 任何研判引擎不可用都整子块缺席。预测先存档（output/hk7_forecast.json，
       settled=False），满 7 个交易日按真实收盘结算，样本 <10 只报样本量。
+      「数据覆盖」审计里会点名 Jev 端点状态（未配置 / 探活失败 / 调用失败 / 使用中）。
       OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
 
   19. 栏目更名（2026-09-29 按用户要求，只改标题文字，内容 / 顺序 / 抓取 / 推送门禁
@@ -368,6 +375,7 @@ import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
 import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
+import jev_bridge as _jev  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
 import backup_sources as _backup  # noqa: E402
 import dedup as _dedup  # noqa: E402
@@ -3815,40 +3823,73 @@ def _hk7_extra_context(data):
     return extra
 
 
+def _hk7_jev_note(res):
+    """Jev 端点状态一行（「数据覆盖」审计点名用，绝不静默；见 Jev 文档落地清单 P1）。
+
+    覆盖四种状态：使用中（带模型名）/ 端点可用但本次未调用（大模型在用或数据不足）/
+    探活或调用失败（带原因，已回退量化基准）/ 端点未配置。
+    """
+    jev = (res or {}).get("jev") or {}
+    if jev.get("used"):
+        return f"使用中（{jev.get('model') or '本地端点'}）"
+    if not jev.get("enabled"):
+        return "端点未配置（OCTOPUS_JEV_BASE_URL）"
+    if not jev.get("tried"):
+        return "端点可用，本次未调用（大模型在用）" if (res or {}).get("engine") == "llm" \
+            else "端点可用，本次未调用"
+    if not jev.get("ready"):
+        return f"探活失败 → 回退量化基准（{jev.get('reason') or '端点不可达'}）"
+    return f"调用失败 → 回退量化基准（{jev.get('reason') or '模型未返回可用概率'}）"
+
+
 def fetch_hk_seven_day(data=None):
-    """AI 七日港股走势分析概率（大模型研判 + 量化基准留痕），失败时如实降级。
+    """AI 七日港股走势分析概率（大模型 > Jev 类型化决策 > 量化基准，三路留痕），失败如实降级。
 
     取代原「每日量化策略（行业轮动）」栏目：三只港股指数、未来 7 个交易日升跌概率。
-    返回 ``None`` = 「本次没有这个栏目」：未配置大模型 Key（且未开启降级）或本次已关闭
-    → 上层不写 data 键，既不渲染也不进数据覆盖审计。已配置 Key 但大模型不可用时按
-    OCTOPUS_HK7_FALLBACK 决定：auto 降级为量化基准（栏内标注原因）、never 整栏缺席并
-    按「暂缺」进审计（run_seven_day 返回 available=False，错误原因透传给审计）。
+    研判引擎优先级：大模型（Key 已配置且调用成功）> Jev 本地模型（端点已配置且调用
+    成功）> 量化基准兜底。Jev 端点未配置时行为与引入前完全一致。
+    返回 ``None`` = 「本次没有这个栏目」：大模型 Key 与 Jev 端点都未配置（且未开启
+    降级）或本次已关闭 → 上层不写 data 键，既不渲染也不进数据覆盖审计。已配置但研判
+    引擎不可用时按 OCTOPUS_HK7_FALLBACK 决定：auto 降级为量化基准（栏内标注原因）、
+    never 整栏缺席并按「暂缺」进审计（run_seven_day 返回 available=False，错误原因与
+    Jev 状态透传给审计）。「数据覆盖」审计里会点名 Jev 端点状态（jev_note）。
     """
     print("📡 正在做 AI 七日港股走势分析概率（恒指 / 恒科 / 国企 · 未来 7 个交易日）...")
     if not HK7_ENABLED:
         print("  ⏭ 该栏目已关闭（OCTOPUS_HK7=0 / --no-hk7）：整栏缺席，不进审计")
         return None
     config = _hk7.llm_config()
-    if not config.get("enabled") and config.get("fallback") != "always":
-        print("  ⏭ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）：本栏目整体缺席（不进审计）"
-              "；如需没有 Key 也看量化基准：OCTOPUS_HK7_FALLBACK=1")
+    jev_cfg = _jev.jev_config()
+    if not config.get("enabled") and not jev_cfg.get("enabled") \
+            and config.get("fallback") != "always":
+        print("  ⏭ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）且未配置 Jev 端点"
+              "（OCTOPUS_JEV_BASE_URL）：本栏目整体缺席（不进审计）；如需都没有研判引擎"
+              "也看量化基准：OCTOPUS_HK7_FALLBACK=1")
         return None
-    if not config.get("enabled"):
-        print("  ⚠️ 未配置大模型 API Key（OCTOPUS_LLM_API_KEY）→ OCTOPUS_HK7_FALLBACK=1："
+    if not config.get("enabled") and not jev_cfg.get("enabled"):
+        print("  ⚠️ 大模型 API Key 与 Jev 端点都未配置 → OCTOPUS_HK7_FALLBACK=1："
               "降级为量化基准")
+    elif not config.get("enabled"):
+        print(f"  ℹ️ 未配置大模型 API Key → 启用 Jev 本地模型（{jev_cfg.get('base')}）")
     try:
         res = _hk7.run_seven_day(
             safe_request,
             history_path=os.path.join(REPORT_DIR, HK7_HISTORY_FILENAME),
-            extra=_hk7_extra_context(data or {}), config=config)
+            extra=_hk7_extra_context(data or {}), config=config, jev_config=jev_cfg)
     except Exception as exc:                  # 该栏目异常不影响日报其它栏目
         print(f"  ⚠️ AI 七日港股走势分析概率异常：{exc}")
-        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None, error=str(exc))
+        jev_note = ("端点已配置，本次执行异常中断" if jev_cfg.get("enabled")
+                    else "端点未配置（OCTOPUS_JEV_BASE_URL）")
+        return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
+                              error=str(exc), jev_note=jev_note)
 
     if not res.get("available"):
-        print(f"  ⚠️ AI 七日港股走势分析概率暂不可用：{res.get('reason')}")
+        jev_note = _hk7_jev_note(res)
+        print(f"  ⚠️ AI 七日港股走势分析概率暂不可用：{res.get('reason')} · Jev：{jev_note}")
         return _source_result(HK7_SOURCE_NAME, "unavailable", result=None,
-                              error=str(res.get("reason") or "数据不足"))
+                              error=f"{str(res.get('reason') or '数据不足')} · Jev：{jev_note}",
+                              jev_note=jev_note)
+    jev_note = _hk7_jev_note(res)
     print(f"  ✅ AI 七日港股：锚定 {res.get('asof')} 收盘 · {res.get('engine_label')}"
           + (f" · 数字溯源 {res.get('grounded')}" if res.get("engine") == "llm" else ""))
     for t in res.get("targets") or []:
@@ -3857,12 +3898,15 @@ def fetch_hk_seven_day(data=None):
               + ("，已收敛" if t.get("converged") else "") + "）")
     if res.get("missing"):
         print(f"  ⚠️ {res['missing']}")
-    if res.get("engine") != "llm":
-        print(f"  ⚠️ 大模型降级原因：{res.get('llm_reason')}")
+    if res.get("engine") == "jev":
+        print(f"  ℹ️ Jev 本地模型在用：{jev_note}")
+    elif res.get("engine") != "llm":
+        print(f"  ⚠️ 大模型降级原因：{res.get('llm_reason')} · Jev：{jev_note}")
     return _source_result(
         HK7_SOURCE_NAME, "success", is_today=res.get("is_today", False),
         content_date=res.get("asof"), result=res,
-        llm_error=(res.get("llm_reason") if res.get("engine") != "llm" else None))
+        llm_error=(res.get("llm_reason") if res.get("engine") != "llm" else None),
+        jev_note=jev_note)
 
 
 def _calendar_events_for_weekly(cal_result):
@@ -6569,7 +6613,8 @@ def _weekly_merged_meta(kit, weekly_src, hk7_src):
         missing.append("逐日表格")
     if hk_ok:
         eng = _res(hk7_src).get("engine")
-        badges.append(kit.badge("大模型研判" if eng == "llm" else "量化降级", "ai"))
+        eng_badge = {"llm": "大模型研判", "jev": "Jev 本地模型"}.get(eng, "量化降级")
+        badges.append(kit.badge(eng_badge, "ai"))
         nm = _short_source(hk7_src)
         if nm:
             names.append(nm)
@@ -6961,6 +7006,12 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
     cover = f"当天 {today_n}/{total} 源"
     if missing:
         cover += " · 暂缺：" + "、".join(missing)
+    # Jev 端点名点（Jev 文档落地清单 P1）：栏内渲染时，端点是未配置 / 探活失败 /
+    # 调用失败 / 使用中，读者在数据覆盖里一眼可见（与「AI 七日港股暂缺」并列口径）。
+    _hk7_item = next((s for n, s in source_items if n == HK7_SOURCE_NAME), None)
+    _jev_note = (_hk7_item or {}).get("jev_note") if isinstance(_hk7_item, dict) else ""
+    if _jev_note:
+        cover += f" · Jev：{_jev_note}"
     pairs.append(("数据覆盖", _esc(cover)))
     # 每条数据线 1 主源 + 2 备用源：本次哪几路由备用源顶上，读者需要知道数据来自哪一路。
     # 入门版也保留：只在备用源真被启用时出现一行，属于「数据从哪来」的底线披露，不算过程文字。
@@ -7864,6 +7915,9 @@ def _hk_seven_day_block(res, kit):
                     f'（按交易日计数，假期顺延{t_str}） · 概率夹 5%~95% · 非投资建议')
         if res.get("engine") == "llm":
             head_sub += f' · 文案数字溯源 {esc(str(res.get("grounded") or "—"))} 条'
+        elif res.get("engine") == "jev":
+            head_sub += (f' · Jev 类型化决策（{esc(str((res.get("jev") or {}).get("model") or "本地端点"))}）'
+                         f' · 只出值与概率、不产文本 · 概率与基准同常量对账')
         else:
             head_sub += (f' · 大模型不可用（{esc(str(res.get("llm_reason") or "未配置 Key"))}）'
                          f'→ 量化基准')
@@ -7912,7 +7966,7 @@ def _hk_seven_day_block(res, kit):
             sub_layers.append(f'依据：{drivers}')
         if risks:
             sub_layers.append(f'风险：{risks}')
-        if res.get("engine") == "llm" and not plain:
+        if res.get("engine") in ("llm", "jev") and not plain:
             q_info = f'量化基准 P {float(t.get("quant_p_up") or 0.5) * 100:.0f}%' + (
                 '（已按基准收敛）' if t.get("converged")
                 else f'（偏离 {float(t.get("deviation") or 0) * 100:+.0f}pp）')
@@ -7961,12 +8015,18 @@ def _hk_seven_day_block(res, kit):
 
     self_check = next((str(t.get("self_check") or "") for t in targets
                        if t.get("self_check")), "")
+    if res.get("engine") == "jev":
+        guard_txt = (f' · Jev 概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛'
+                     f'（同一份常量） · 模型只出值 + 概率、不产文本，没有编造数字的入口'
+                     f' · 研究留痕 jev_forecast.json（同一套 T+7 结算口径）')
+    else:
+        guard_txt = (f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
+                     f'文案数字须可溯源，否则回退量化口径')
     note_sub = (f'目标日 = 锚定日后第 {horizon} 个交易日（按交易日计数，'
                 f'数据里没有那根 K 线就不结算） · 量化基准只用 ≤t 数据、相似样本标签须已结算'
                 + (f' · 截断不变性自检通过（{esc(self_check)}）' if self_check else '')
                 + f' · 预测因子体系（动量延展/均值回归 + 均线趋势 + RSI14超买超卖 + 美股隔夜联动β + 南向资金流 + 波动率收缩）'
-                + f' · 大模型概率偏离基准 >{int(_hk7.MAX_PROB_DEVIATION * 100)}pp 即收敛、'
-                f'文案数字须可溯源，否则回退量化口径 · 非投资建议')
+                + guard_txt + ' · 非投资建议')
     rows.append(kit.item_row("⚖", "<b>七日口径</b>", note_sub))
     return kit.rows("".join(rows))
 
@@ -12764,8 +12824,10 @@ def hk7_only_report():
     target_dt_str = f"（至目标日 {r.get('target_date')}）" if r.get('target_date') else ""
     print(f"\n【锚定】{r.get('asof')} 收盘 · 未来 {r.get('horizon')} 个交易日{target_dt_str}"
           f" · 引擎：{r.get('engine_label')}")
-    if r.get("engine") != "llm":
-        print(f"  大模型降级原因：{r.get('llm_reason')}")
+    if r.get("engine") == "jev":
+        print(f"  Jev 状态：{_hk7_jev_note(r)}")
+    elif r.get("engine") != "llm":
+        print(f"  大模型降级原因：{r.get('llm_reason')} · Jev：{_hk7_jev_note(r)}")
     print("─" * 60)
     for t in r.get("targets") or []:
         print(f"\n  {t['name']}（{t['code']}） {t['label']}")
