@@ -198,12 +198,17 @@ Jev 这类本地模型恰好补这个空：
 - ✅ **P0-2 Jev 第三引擎已接入** `run_seven_day`（提交 `6d42a47`）：研判优先级 **大模型 > Jev > 量化基准**——无大模型 Key 且配了 `OCTOPUS_JEV_BASE_URL` 时自动启用 Jev；概率与量化基准按**同一份常量**对账（>20pp 收敛 / 5%~95% 夹边），文案走量化模板；Jev 研究留痕单独 `jev_forecast.json`（同一套 T+7 结算），栏内留痕 `engine` 字段区分；端点未配置时行为与引入前逐位一致，调用失败逐标的记因并回退量化基准，`OCTOPUS_JEV_MODE=always` 时端点不可用整栏缺席。渲染层（引擎行 / 量化基准对账行 / 七日口径行 / 合并栏目徽标 / `--hk7-only` 研究模式）全部按 `engine=jev` 如实标注。
 - ✅ **P1-1 「数据覆盖」已点名 Jev**：栏内渲染时，覆盖行追加 `Jev：使用中（模型名）/ 端点未配置（OCTOPUS_JEV_BASE_URL）/ 探活失败 → 回退量化基准（原因）/ 调用失败 → 回退量化基准（原因）`；整栏缺席（strict 模式）时原因里同样带 Jev 状态。
 - ✅ 回归：新增 12 项（`run_seven_day` 三引擎优先级 + 管线接入与渲染，全离线），`tests/test_jev_bridge.py` 42 项、`tests/test_hk_seven_day.py` 41 项，全仓 727 项全绿（1 跳过）。
-- ⏳ **P0-1 真权重探针已触发**（2026-10-03，`[jev-model]` 提交触发第 ③ 步，分支 `arena/01a1037b-02`）：等 job summary 出来后再对外说「真模型已接上」。注意：探针工作流的 `upload-artifact` 需要 `artifacts: write` 权限（工作流顶层原只声明 `contents: read`，最后一步会 403 红掉、但不影响前面的构建 / 服务 / 端到端 / 汇总）；该修复与下面的 `tests.yml` 都**需要 workflows 权限提交**，本地已备好，待有权限的账户补推。
+- ⏳ **P0-1 真权重探针已触发、第 ③ 步失败待查**（2026-10-03，`[jev-model]` 提交触发，run [37154501409](https://github.com/k-macao/02/actions/runs/37154501409)）：
+  - ✅ 第 ① 步（接入层离线回归）与第 ② 步（PyPI 装 edgejev + `edgejev info` + HF 可达性探测）在 runner 上**全绿**；
+  - ❌ 第 ③ 步在「构建本地 ONNX 模型」一步快速失败（整 run 仅 1m19s，装完 torch+edgejev[build] 后 `edgejev build` 对 laya、kev 两个后端都没成功）——**本沙箱读不到 CI 日志**（GitHub 日志存储域被出口策略拦，和 HF 一样），需要打开上面的 run 链接看构建步骤最后 ~20 行。
+  - 排查线索（2026-10-03 实查）：`edgejev 0.3.2` 的 laya 后端默认模型是 `convaiinnovations/laya-multilingual`（mmBERT-base 322M，仓库仍在、公开）；构建走 `laya.load(...)`（PyPI 最新 `laya 0.3.25`）。而 laya 0.3.20 起 checkpoint 重排过（英文版换成 ModernBERT-large 421M，mmBERT-base 挪到 `laya-multilingual` / `laya` 仓库的 `multilingual/` 子目录）——**快速失败最像 `laya.load` 与新版仓库布局 / API 不匹配，或 runner 到 HF 的下载被拦**。本地已确认 `edgejev build` 支持 `--model <HF id> --subfolder <目录>`，可据此换 `--model convaiinnovations/laya`（或 `--subfolder multilingual`）/ 升级 `edgejev` 重试。
+  - 探针工作流已加两处修复（本地待补推，需 workflows 权限）：`artifacts: write`（`upload-artifact` 原会 403 红掉最后一步）；构建日志 tee 到文件、失败时把尾部 40 行直接写进 job summary（不用翻长日志）。
+  - 按 §6 口径：**真权重没跑通之前，对外只说「接入层已接上、真模型待 CI 探针」**。
 - ⏳ **P1-2 回归进 CI**：`.github/workflows/tests.yml` 已写好（纯标准库、约 1 分钟：`test_jev_bridge.py` + `test_hk_seven_day.py`），同样卡在 workflows 权限待补推；补推前可在 GitHub UI 手动 Run 验证。
 
 | 优先级 | 动作 | 状态（2026-10-03） |
 |---|---|---|
-| P0 | 跑 CI 探针第 ③ 步 | ⏳ 已触发（`[jev-model]` push，分支 `arena/01a1037b-02`）；`artifacts: write` 权限修复待补推 |
+| P0 | 跑 CI 探针第 ③ 步 | ❌ 已触发但构建步失败（run 37154501409，①② 绿）：待看日志尾部定位（线索见上方进度更新）；`artifacts: write` 与日志可见性修复待补推 |
 | P0 | 把 Jev 接进 `fetch_hk_seven_day` 作为第三条引擎 | ✅ 已完成（`6d42a47`，见上方进度更新） |
 | P1 | 在日报「数据覆盖」里点名 Jev | ✅ 已完成（`jev_note` 随源结果进覆盖行） |
 | P1 | 把 35 项回归纳入 CI | ⏳ `tests.yml` 已备好，待 workflows 权限补推 |
