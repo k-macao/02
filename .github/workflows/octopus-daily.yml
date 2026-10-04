@@ -95,4 +95,69 @@ jobs:
           if [ -n "${OCTOPUS_LLM_API_KEY:-}" ]; then
             echo "◧ 大模型：已配置 Key（${OCTOPUS_LLM_BASE_URL:-默认 https://api.deepseek.com} / ${OCTOPUS_LLM_MODEL:-默认 deepseek-flash}）"
           else
-            echo "◧ 
+            echo "◧ 大模型：未配置 OCTOPUS_LLM_API_KEY → AI 七日港股走势分析概率整栏缺席"
+          fi
+
+          if [ "$LLM_CHECK" = "true" ]; then
+            echo "运行模式：大模型 API 探活（不生成日报）"
+            python3 output/pipeline.py --llm-check
+          elif [ "$HK7_ONLY" = "true" ]; then
+            echo "运行模式：只跑 AI 七日港股走势分析概率（研究模式，不推送）"
+            python3 output/pipeline.py --hk7-only
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "运行模式：预览模式（不推送）"
+            python3 output/pipeline.py --dry-run
+          elif [ "$NO_PUSH" = "true" ]; then
+            echo "运行模式：手动指定静默更新（--no-push，不推微信）"
+            python3 output/pipeline.py --no-push
+          elif [ "$EVENT_NAME" = "schedule" ] && [ "$CURRENT_HOUR" != "09" ] && [ "$CURRENT_HOUR" != "10" ] && [ "$CURRENT_HOUR" != "21" ] && [ "$CURRENT_HOUR" != "22" ]; then
+            echo "运行模式：定时盘中静默更新（当前北京时间 ${CURRENT_HOUR} 时，不推微信，仅更新数据与网页）"
+            python3 output/pipeline.py --no-push
+          else
+            echo "运行模式：全流程生成并推送微信（当前北京时间 ${CURRENT_HOUR} 时）"
+            python3 output/pipeline.py
+          fi
+
+      - name: 📤 提交生成的日报
+        # 即使推送失败，只要文件生成了就提交
+        if: always()
+        run: |
+          set -euo pipefail
+          # 通配符匹配失败不报错，兼容无日报文件的场景
+          # 留痕 JSON 必须一起提交，否则「预测留痕 / 命中率」每次都会从零开始：
+          #   hk7_forecast.json    → ◧ AI 七日港股走势分析概率（满 7 个交易日结算）
+          #   weekly_forecast.json → 🗓️ 每周量化走势预测（满 5 个交易日结算）
+          #
+          # 提交与推送交给 tools/safe_push.sh：本作业要跑 2~15 分钟，期间 main 可能被
+          # PR 合并 / 手动抓取推送 / 市场数据库作业推动，裸 `git push origin HEAD` 会被拒
+          # （2026-10-02~04 实测三次，其中一次与 PR 合并只差 5 秒，详见
+          #   自动更新推送被拒-原因诊断.md）。被拒后它把本次改动重放到远端最新提交之上：
+          #   · 日报 HTML 以本次为准（本次是更晚完成的一轮）；
+          #   · 留痕 JSON 按 tools/merge_generated.py 的规则并集（两边条目都不丢）；
+          #   · 别人的代码 / 文档一律保留远端版本，绝不回退。
+          COMMIT_TIME=$(TZ='Asia/Macau' date +'%Y-%m-%d %H:%M')
+          bash tools/safe_push.sh \
+            --branch "${GITHUB_REF_NAME:-main}" \
+            --message "📰 自动更新 ${COMMIT_TIME}" \
+            -- output/daily_report_*.html output/latest.html \
+               output/sentiment_history.json output/news_history.json \
+               output/quant_history.json output/hk7_forecast.json \
+               output/weekly_forecast.json
+
+      - name: 🧯 推送失败兜底：把生成物存成 Artifact
+        # 万一还是推不上去（远端持续在动 / 权限或保护分支问题），至少把这轮的日报与
+        # 预测留痕留下来，可以人工补提交，不至于「白跑一轮、留痕从零开始」
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: octopus-unpushed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/daily_report_*.html
+            output/latest.html
+            output/sentiment_history.json
+            output/news_history.json
+            output/quant_history.json
+            output/hk7_forecast.json
+            output/weekly_forecast.json
+          if-no-files-found: ignore
+          retention-days: 14
