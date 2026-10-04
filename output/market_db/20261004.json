@@ -3811,7 +3811,7 @@
    "slot": "1700",
    "label": "盘后 17:00",
    "date": "2026-10-04",
-   "pulled_at": "2026-10-04 18:41:04",
+   "pulled_at": "2026-10-04 22:36:54",
    "scheduled_at": "2026-10-04 17:00:00",
    "trading_day": false,
    "sources": {
@@ -3821,7 +3821,7 @@
      "status": "ok",
      "host": "push2.eastmoney.com",
      "error": null,
-     "elapsed_ms": 2493,
+     "elapsed_ms": 2290,
      "quote_time": "2026-10-03 04:00:00",
      "price_peer": true,
      "symbols": 36
@@ -3832,7 +3832,7 @@
      "status": "ok",
      "host": "hq.sinajs.cn",
      "error": null,
-     "elapsed_ms": 1147,
+     "elapsed_ms": 907,
      "quote_time": "2026-10-02 16:08",
      "price_peer": true,
      "symbols": 32
@@ -3843,7 +3843,7 @@
      "status": "ok",
      "host": "qt.gtimg.cn",
      "error": null,
-     "elapsed_ms": 1509,
+     "elapsed_ms": 1063,
      "quote_time": "2809-48-32 14:78:78",
      "price_peer": true,
      "symbols": 37
@@ -3854,7 +3854,7 @@
      "status": "ok",
      "host": "query1.finance.yahoo.com",
      "error": null,
-     "elapsed_ms": 1068,
+     "elapsed_ms": 1059,
      "quote_time": "2026-10-03 05:15:59",
      "price_peer": true,
      "symbols": 35
@@ -3865,7 +3865,7 @@
      "status": "ok",
      "host": "push2his.eastmoney.com",
      "error": null,
-     "elapsed_ms": 8809,
+     "elapsed_ms": 8985,
      "quote_time": "2026-10-02",
      "price_peer": false,
      "symbols": 36
@@ -3876,7 +3876,7 @@
      "status": "failed",
      "host": "",
      "error": "8.129.13.54:7709 TCP 预检失败（TimeoutError）；120.24.149.49:7709 TCP 预检失败（TimeoutError）；47.113.94.204:7709 TCP 预检失败（TimeoutError）",
-     "elapsed_ms": 11251,
+     "elapsed_ms": 11294,
      "quote_time": null,
      "price_peer": true,
      "symbols": 0
@@ -7706,7 +7706,7 @@
     "consensus_ok": true
    },
    "self_check": {
-    "score": 100,
+    "score": 96,
     "ok": true,
     "checks": [
      {
@@ -7717,9 +7717,9 @@
      },
      {
       "name": "schedule_window",
-      "ok": true,
+      "ok": false,
       "warn_only": true,
-      "detail": "拉取时刻距计划 ±101 分钟（容差 180）"
+      "detail": "拉取时刻距计划 ±337 分钟（容差 180）"
      },
      {
       "name": "sources_min",
@@ -7770,11 +7770,13 @@
       "detail": "非交易日（休市）：沿用最近收盘，不计缺陷"
      }
     ],
-    "alerts": []
+    "alerts": [
+     "提示·schedule_window：拉取时刻距计划 ±337 分钟（容差 180）"
+    ]
    },
    "integrity": {
     "algo": "sha256",
-    "hash": "a1d1cd35d6e450f8a0216857b692cd2cc0b102385a06144cada2a33ba860194d"
+    "hash": "03b90143b3a74e690d6b62d461ec7fe9bc8b8cacebe9d118504837b847525274"
    }
   }
  },
@@ -7795,11 +7797,19 @@
     "sources_ok": 5,
     "symbols_ok": 37,
     "score": 100
+   },
+   {
+    "slot": "1700",
+    "pulled_at": "2026-10-04 22:36:54",
+    "overwrote": true,
+    "sources_ok": 5,
+    "symbols_ok": 37,
+    "score": 96
    }
   ],
-  "pull_count": 2
+  "pull_count": 3
  },
- "updated_at": "2026-10-04 18:41:04",
+ "updated_at": "2026-10-04 22:36:54",
  "ai": {
   "row_count": 74,
   "symbols": 37,
@@ -7840,6 +7850,6 @@
  },
  "integrity": {
   "algo": "sha256",
-  "hash": "a67f4db834d7dba670098095dcacf170975b1b71ad4c0d3d3e47fd3ce9eb4c7a"
+  "hash": "b78d9d6ffc73cc6af7c292429813c43788d017d0bad9b3745f1008b35b903bb5"
  }
 }
