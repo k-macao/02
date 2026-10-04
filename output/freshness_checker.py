@@ -28,7 +28,8 @@ FRESHNESS_THRESHOLDS = {
     "热门榜单": {"max_lag_days": 3, "type": "trading", "desc": "东财热门榜，交易日收盘后"},
     "港股量化引擎": {"max_lag_days": 4, "type": "trading", "desc": "港股量化，恒指日线，允许周一跑周五数据"},
     "每周量化走势预测": {"max_lag_days": 7, "type": "trading", "desc": "七日预测，基于日线（未来 7 个交易日），允许一周滞后"},
-    "每日量化策略（行业轮动）": {"max_lag_days": 5, "type": "trading", "desc": "行业轮动，基于日线"},
+    # 2026-10-04 起栏目名随「申万一级 31 行业固定股票池」版本更新（旧名已随 09-29 的下线失效）
+    "申万一级行业轮动策略": {"max_lag_days": 5, "type": "trading", "desc": "申万一级 31 行业日线（东财板块指数 / 申万官方兜底）"},
     "板块轮动量化策略": {"max_lag_days": 4, "type": "trading", "desc": "A股概念快照与港股日线/快照；以结果中最近数据日期检查"},
     "MACD量化策略": {"max_lag_days": 4, "type": "trading", "desc": "MACD 已收盘日线；按有效标的中最早收盘日保守检查"},
     # 港股境外数据源（2026-10-02）：Yahoo / Stooq / HKEX，交易日行情，快照性质（snapshot=True）

@@ -251,7 +251,7 @@ class SentimentFactorTests(unittest.TestCase):
                   "fetch_hk_channels", "fetch_google_news", "fetch_fed_trend",
                   "fetch_geo_trend", "fetch_eastmoney_news", "fetch_hot_stocks",
                   "fetch_hk_quant", "fetch_weekly_forecast", "fetch_hk_seven_day",
-                  "fetch_econ_calendar")
+                  "fetch_econ_calendar", "fetch_industry_rotation")
         platforms = {
             "Reddit": pipeline._public_site_result(
                 "Reddit", [{"title": "Sample", "url": "https://www.reddit.com/r/stocks/comments/1/x/",
@@ -300,7 +300,7 @@ class SentimentFactorTests(unittest.TestCase):
                   "fetch_hk_channels", "fetch_google_news", "fetch_fed_trend",
                   "fetch_geo_trend", "fetch_eastmoney_news", "fetch_hot_stocks",
                   "fetch_hk_quant", "fetch_weekly_forecast", "fetch_hk_seven_day",
-                  "fetch_econ_calendar")
+                  "fetch_econ_calendar", "fetch_industry_rotation")
         with patch.object(pipeline, "time", types.SimpleNamespace(sleep=lambda s: None)):
             mocks = [patch.object(pipeline, fn, return_value={"status": "unavailable"})
                      for fn in legacy]

@@ -370,6 +370,8 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 import octopus_quant as _quant  # noqa: E402
 from octopus_quant import sector_rotation as _sector_rotation  # noqa: E402
+# A股申万一级行业轮动（2026-10-04 移植回上线）：独立于港股「板块轮动」，可整体关闭。
+from octopus_quant import industry_rotation as _industry_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
@@ -389,6 +391,11 @@ HK_QUANT_STOCKS = str(os.environ.get("OCTOPUS_QUANT_STOCKS", "1")).strip().lower
 # A股概念 → 港股观察篮子轮动：独立于港股量化开关；OCTOPUS_SECTOR_ROTATION=0 可关闭。
 SECTOR_ROTATION_ENABLED = str(os.environ.get("OCTOPUS_SECTOR_ROTATION", "1")).strip().lower() not in ("0", "false", "no")
 SECTOR_ROTATION_SOURCE_NAME = "板块轮动量化策略"
+# 申万一级行业轮动（A股 31 个行业 · 周度评分 + 月度纯多头组合）：与港股「板块轮动」
+# 完全独立（不同股票池、不同数据线、不同存档键），OCTOPUS_INDUSTRY_ROTATION=0 可关闭。
+INDUSTRY_ROTATION_ENABLED = str(os.environ.get("OCTOPUS_INDUSTRY_ROTATION", "1")).strip().lower() not in ("0", "false", "no")
+INDUSTRY_ROTATION_SOURCE_NAME = "申万一级行业轮动策略"
+INDUSTRY_ROTATION_SOURCE_LABEL = "东方财富 · 申万一级行业指数日线（31 个）"
 # 策略研判内的 MACD 子策略：独立于港股概率引擎，优先市场库 / 本次日线，缺项补免费源。
 MACD_ENABLED = str(os.environ.get("OCTOPUS_MACD", "1")).strip().lower() not in ("0", "false", "no")
 MACD_SOURCE_NAME = "MACD量化策略"
@@ -3735,6 +3742,67 @@ def fetch_sector_rotation(data=None):
 
 
 # ============================================================
+# 【巡游旗鱼】申万一级行业轮动（2026-10-04 移植 #84）
+# ------------------------------------------------------------
+# 与港股【滚滚翻车鱼】板块轮动（A股概念 → 港股观察篮子）的分工：
+#   · 本条是 **A股自身** 的行业轮动——申万一级 31 个行业，周度胜率/赔率评分 + 月度纯多头组合；
+#   · 股票池是固定表 octopus_quant.industry_rotation.SW_L1_SECTORS（801xxx ↔ 东财 BKxxxx），
+#     主流程零 clist 调用（该大页列表在境外出口被 502 拒绝，且东财已改为三级混排）；
+#   · 单行业在东财三主机都取不到日线时，逐行业走申万宏源官方指数发布接口兜底（不混源）；
+#   · 可评分行业少于 max(5, 60%×31)=19 → 整栏缺席，并落盘诊断（news_history.json）。
+# ============================================================
+def fetch_industry_rotation():
+    """独立 A股行业轮动数据源；失败不影响其它栏目。
+
+    失败时把判死原因打到日志（日K 口径 / 覆盖 / 锚点日 / 评分 / 存档哪一环不过），
+    并已由 industry_rotation 落盘诊断，便于隔日核查。
+    """
+    if not INDUSTRY_ROTATION_ENABLED:
+        return _source_result(INDUSTRY_ROTATION_SOURCE_LABEL, "unavailable", result=None,
+                              error="行业轮动已关闭（OCTOPUS_INDUSTRY_ROTATION=0）")
+    print("📡 正在计算申万一级行业轮动（31 个行业 · 周度评分 + 月度纯多头组合）...")
+    try:
+        result = _industry_rotation.run(
+            safe_request, state_path=os.path.join(REPORT_DIR, NEWS_HISTORY_FILENAME),
+            now=datetime.now(CST))
+    except Exception as exc:                     # 单栏失败绝不拖垮整份日报
+        result = {"available": False, "reason": f"运行异常：{exc}", "diag": {}}
+    if not result.get("available"):
+        diag = result.get("diag") or {}
+        detail = " · ".join(f"{k}={diag[k]}" for k in
+                            ("universe", "fqt", "kline_series", "missing", "asof",
+                             "scored", "required")
+                            if diag.get(k) not in (None, [], {}))
+        print(f"  ⚠️ 行业轮动栏目缺席：{result.get('reason')}"
+              + (f"（{detail}）" if detail else ""))
+        return _source_result(INDUSTRY_ROTATION_SOURCE_LABEL, "unavailable",
+                              error=result.get("reason"), result=result)
+    diag = result.get("diag") or {}
+    sources = result.get("sources") or {}
+    src_note = " / ".join(f"{k}={v}" for k, v in sorted(sources.items()))
+    # 备用源命中登记（总结「数据覆盖」一行点名）：镜像 = 备用源1，申万官方 = 备用源2
+    if diag.get("em_mirror"):
+        _note_backup_served("sw_industry_index", _backup.candidates("sw_industry_index", sw_code="")[1][1])
+    if diag.get("sw_fallback"):
+        first_sw = next((sw for code, _n, sw in _industry_rotation.SW_L1_SECTORS
+                         if code == diag["sw_fallback"][0]), "")
+        _note_backup_served("sw_industry_index",
+                            _backup.candidates("sw_industry_index", sw_code=first_sw)[2][1],
+                            sw_code=first_sw)
+    print(f"  ✅ 行业轮动：锚点 {result['asof']} · 有效 {result['scored_count']}/"
+          f"{result['universe_count']} 个行业 · 月度持仓"
+          f"{'沿用' if diag.get('state') == 'reused' else '新建'}"
+          f"（复权口径 fqt={diag.get('fqt')}"
+          + (f" · 日线来源 {src_note}" if src_note else "")
+          + (f" · 未取到 {','.join(result['missing'])}" if result.get("missing") else "")
+          + (f" · 名称漂移 {list(diag['renamed'])}" if diag.get("renamed") else "")
+          + "）")
+    return _source_result(INDUSTRY_ROTATION_SOURCE_LABEL, "success",
+                          is_today=result["asof"] == _today_str(),
+                          content_date=result["asof"], result=result)
+
+
+# ============================================================
 # 每周量化走势预测：未来 7 个交易日逐日表格（恒指升跌方向 / 概率 / 理由 / 分析 / AI 操作建议）
 # ------------------------------------------------------------
 # 方法来自 GitHub 无未来函数（look-ahead）量化工程实践调研：
@@ -4655,6 +4723,10 @@ def collect_all_data():
     data[SECTOR_ROTATION_SOURCE_NAME] = fetch_sector_rotation(data)
     time.sleep(0.5)
 
+    # 申万一级行业轮动（A股 31 个行业）：固定股票池 + 板块指数日线，失败整栏缺席。
+    data[INDUSTRY_ROTATION_SOURCE_NAME] = fetch_industry_rotation()
+    time.sleep(0.5)
+
     # === 新增：全栏目新鲜度检查 ===
     print("\n🕐 正在检查全栏目数据新鲜度...")
     try:
@@ -4952,6 +5024,8 @@ _SECTION_ICON_META = {
     "LIQUIDITY FLOW": ("≈", "FLOW", C_CYAN, "#092836"),
     "WEEKLY FORECAST": ("◆", "WEEK-FX", C_LEMON, C_AI_BG),
     "SECTOR ROTATION": ("↻", "ROTATE", C_CYAN, "#092836"),
+    # 申万一级行业轮动（2026-10-04 移植）：与港股板块轮动的 ↻/ROTATE 区分开
+    "INDUSTRY ROTATION": ("◑", "INDUST", C_LEMON, C_FLAT_BG),
     # 港股行情（2026-10-02 新增）：境外数据源（Yahoo / Stooq / HKEX / 可选浏览器）
     "HK QUOTES": ("◍", "HK-MKT", C_CYAN, "#092836"),
 }
@@ -7086,6 +7160,8 @@ SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
 SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
 SECTION_TITLE_SECTOR_ROTATION = "【滚滚翻车鱼】板块轮动量化策略"
+# 2026-10-04 新增：原「每日量化策略（行业轮动）」的申万一级 31 行业版本（PR #84 的移植版）
+SECTION_TITLE_INDUSTRY_ROTATION = "【巡游旗鱼】申万一级行业轮动"
 SECTION_TITLE_HK_QUOTES = "【深水石斑鱼】港股行情"
 SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
 SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
@@ -7095,7 +7171,8 @@ SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
 # 方法与计算过程不放在导读；数据栏目保留可核对数字，结论收尾并视觉强调。
 REPORT_ANALYSIS_SECTIONS = (
     "STRATEGY READ", "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
-    "WEEKLY FORECAST", "SECTOR ROTATION", "POLICY SHOCK", "FED TREND", "GEO TREND",
+    "WEEKLY FORECAST", "SECTOR ROTATION", "INDUSTRY ROTATION",
+    "POLICY SHOCK", "FED TREND", "GEO TREND",
 )
 # 2026-10-02 起 GLOBAL HEADLINES（【无敌帝王蟹】全球头条）与 HK GURU CHANNELS
 # （港股名家频道）按用户要求从页面隐藏，与此前隐藏的 EASTMONEY WIRE（东方财富快讯）
@@ -8361,6 +8438,128 @@ def _render_sector_rotation(source, kit):
     return kit.rows("".join(out))
 
 
+def _pct_text(value, digits=2, dash="—"):
+    """带正负号的百分比文本（None → 占位符），不依赖颜色。"""
+    try:
+        return f"{float(value) * 100:+.{digits}f}%" if value is not None else dash
+    except (TypeError, ValueError):
+        return dash
+
+
+def _industry_rotation_block(res, kit):
+    """展示全行业评分与五行业纯多头月度持仓，两主题共用。
+
+    栏目结构：口径行 → 行业宽度 → 全行业评分表（综合分排序，附动量 / MA20 背景因子）→
+    月度持仓（含自执行日以来的组合表现与全行业等权基准）→ 规则行。
+    全部数字来自本次抓取的日线与存档持仓，缺失项显示「—」，绝不补造。
+    """
+    if not res.get("available"):
+        return ""
+    state = res.get("state") or {}
+    holdings = state.get("holdings") or []
+    if len(holdings) != 5:
+        return ""
+    esc = kit.esc
+    universe_label = str(res.get("universe_label") or "").strip()
+    sources = res.get("sources") or {}
+    source_bits = []
+    em_total = int(sources.get("eastmoney") or 0) + int(sources.get("eastmoney_mirror") or 0)
+    if em_total:
+        source_bits.append(f'东方财富 {em_total}'
+                           + (f'（镜像 {int(sources["eastmoney_mirror"])}）'
+                              if sources.get("eastmoney_mirror") else ""))
+    if sources.get("sw_official"):
+        source_bits.append(f'申万官方 {int(sources["sw_official"])}')
+    missing = res.get("missing") or []
+    head_sub = "近一周=最近5个交易日；历史12个不重叠5日窗口（不含当前周）"
+    if source_bits:
+        head_sub += f' · 日线来源：{" / ".join(source_bits)}'
+    if missing:
+        head_sub += f' · 未取到日线：{esc("、".join(str(m) for m in missing[:8]))}'
+        if len(missing) > 8:
+            head_sub += f' 等 {len(missing)} 个'
+    out = [kit.item_row("▤", f'截至 {esc(res["asof"])} 收盘 · '
+                        + (f'{esc(universe_label)} · ' if universe_label else "")
+                        + f'有效 {res["scored_count"]}/{res["universe_count"]} 个行业指数',
+                        head_sub)]
+
+    breadth = res.get("breadth") or {}
+    if breadth.get("total"):
+        total = int(breadth["total"])
+        bits = [f'近5日上涨 {int(breadth.get("up_week") or 0)}/{total} 个行业']
+        if breadth.get("above_ma20") is not None:
+            bits.append(f'站上 MA20 {int(breadth["above_ma20"])}/{total} 个')
+        if breadth.get("avg_week") is not None:
+            bits.append(f'全行业等权近5日 {_pct_text(breadth["avg_week"])}')
+        out.append(kit.item_row("◐", "行业宽度 · " + " · ".join(bits),
+                                "上涨行业占比与均线上方占比越高，轮动越偏普涨；反之为少数行业抱团"))
+
+    table_rows = []
+    for rank, sec in enumerate(res["scores"], 1):
+        # 名次并入行业列（8 列，与流动性表同宽度量级，手机上不挤）
+        table_rows.append([
+            f'{rank:02d} {esc(sec["name"])}<br><span style="font-size:11px;">{esc(sec["code"])}</span>',
+            f'<b>{sec["score"]:.2f}</b>',
+            _pct_text(sec.get("week_return")),
+            f'{sec["win_rate"] * 100:.1f}%',
+            f'{sec["odds"]:.2f}',
+            _pct_text(sec.get("ret20"), 1),
+            _pct_text(sec.get("ret60"), 1),
+            _pct_text(sec.get("ma20_gap"), 1),
+        ])
+    out.append(kit.sub("全行业评分（综合分降序 · 名次在前）"))
+    out.append(kit.table(["行业", "综合分", "近5日", "胜率", "赔率", "20日", "60日", "vs MA20"],
+                         table_rows,
+                         aligns=("left", "right", "right", "right", "right",
+                                 "right", "right", "right")))
+
+    tracking = res.get("tracking") or {}
+    tracked = {r["code"]: r for r in (tracking.get("holdings") or [])}
+    reb_sub = f'建仓/调仓锚点 {esc(state["rebalance_date"])} 收盘；当月不随每日评分换仓'
+    if tracking.get("exec_date"):
+        reb_sub += f' · 执行日 {esc(tracking["exec_date"])} 收盘起算表现'
+    else:
+        reb_sub += " · 待下一交易日执行"
+    hold_rows = [kit.item_row("↺", f'纯多头组合 · {esc(state["month"])} 月度持仓', reb_sub)]
+    for h in holdings:
+        sub = f'目标权重 {h["weight"]:.2%} · 建仓时得分 {h["score"]:.2f}'
+        tr = tracked.get(h["code"]) or {}
+        if tr.get("since_exec") is not None:
+            sub += f' · 执行日以来 {_pct_text(tr["since_exec"])}'
+        hold_rows.append(kit.item_row("+", f'{esc(h["name"])} ({esc(h["code"])})', sub))
+    if tracking.get("portfolio") is not None:
+        perf = f'组合执行日以来 {_pct_text(tracking["portfolio"])}'
+        if tracking.get("benchmark") is not None:
+            excess = (tracking["portfolio"] - tracking["benchmark"]) * 100
+            excess = 0.0 if abs(excess) < 0.005 else excess      # 避免 -0.00pp
+            perf += (f' · 全行业等权 {_pct_text(tracking["benchmark"])}'
+                     f'（{int(tracking.get("benchmark_n") or 0)} 个行业）· 超额 {excess:+.2f}pp')
+        hold_rows.append(kit.item_row("Σ", perf,
+                                      "权重固定为目标权重、不含调仓费用与滑点的持有期收益；"
+                                      "样本仅一个月度周期，不代表策略长期表现"))
+    elif tracking.get("pending"):
+        hold_rows.append(kit.item_row("Σ", "组合表现待执行日收盘后起算",
+                                      "信号在锚点收盘后产生，按下一交易日收盘执行，不把信号日涨跌计入组合"))
+    hold_rows.append(kit.item_row("⚖", '规则：综合分=胜率×80% + [赔率/(1+赔率)]×20%（乘100）；'
+                                  '胜率=正收益周占比，赔率=平均正收益/平均负收益绝对值。'
+                                  '得分前五，权重=各自得分/前五总分。20日/60日/vs MA20 只作背景，不参与排序。',
+                                  '每月首次成功采集后按收盘信号确定目标权重，下一交易日执行；'
+                                  '不含滑点/费用，非投资建议；历史胜率不是未来成功概率。'))
+    out.append(kit.rows("".join(hold_rows)))
+    return "".join(out)
+def _render_industry_rotation(source, kit):
+    """两套主题共用：【巡游旗鱼】申万一级行业轮动。
+
+    内容来自 octopus_quant.industry_rotation.run() 的结果字典（res["result"]）：
+    口径行 → 行业宽度 → 全行业评分表 → 月度持仓与执行日以来表现 → 规则行。
+    数据不足时 run() 直接判定整栏缺席，这里只负责排版，绝不补造数字。
+    """
+    result = (source or {}).get("result") or {}
+    if not isinstance(result, dict):
+        return ""
+    return _industry_rotation_block(result, kit)
+
+
 def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                             policy_result=None, news_corpus=None):
     """提取逐栏目内容与当天检验统计（两主题共用；仅渲染套件不同）。
@@ -8401,6 +8600,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 板块轮动是独立的 A股概念库 + 港股观察篮子来源；仅外部调用确实传入时计入审计。
     if isinstance(data.get(SECTOR_ROTATION_SOURCE_NAME), dict):
         source_items.append((SECTOR_ROTATION_SOURCE_NAME, data[SECTOR_ROTATION_SOURCE_NAME]))
+    # 申万一级行业轮动：独立数据线（固定股票池 + 板块指数日K + 申万官方兜底），同样按需进审计。
+    if isinstance(data.get(INDUSTRY_ROTATION_SOURCE_NAME), dict):
+        source_items.append((INDUSTRY_ROTATION_SOURCE_NAME, data[INDUSTRY_ROTATION_SOURCE_NAME]))
     if isinstance(data.get(MACD_SOURCE_NAME), dict):
         source_items.append((MACD_SOURCE_NAME, data[MACD_SOURCE_NAME]))
     # 前瞻日程（「时间节点」栏目）：关掉采集时不进审计，总源数保持不变。
@@ -8498,6 +8700,18 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             blocks["SECTOR ROTATION"] = (
                 "SECTOR ROTATION", SECTION_TITLE_SECTOR_ROTATION, rotation_html,
                 kit.source_badge(rotation_src), _short_source(rotation_src))
+
+    # ⑦b 【巡游旗鱼】申万一级行业轮动（2026-10-04 移植 #84 上线）：
+    #     股票池 = 申万一级 31 个行业固定表（不再依赖被 502 的 clist 大页列表）；
+    #     口径行 → 行业宽度 → 全行业评分表（含 20/60 日与 vs MA20 背景因子）→ 月度持仓与
+    #     自执行日以来表现（对照全行业等权）→ 规则行。数据不足则整栏缺席，不补造行情。
+    industry_src = data.get(INDUSTRY_ROTATION_SOURCE_NAME) or {}
+    if industry_src.get("status") == "success":
+        industry_html = _render_industry_rotation(industry_src, kit)
+        if industry_html:
+            blocks["INDUSTRY ROTATION"] = (
+                "INDUSTRY ROTATION", SECTION_TITLE_INDUSTRY_ROTATION, industry_html,
+                kit.source_badge(industry_src), _short_source(industry_src))
 
     # ⓪ 时间节点（原「未来 N 天影响经济时间点」，2026-09-29 改名）：
     #    开头栏目——先看清日程窗口，再读今天的盘；窗口天数仍在栏目内「窗口摘要 · 时间窗口」显示。
@@ -11402,6 +11616,7 @@ DOSSIER_ICONS = {
     "HK PROBABILITY": ("◍", D_BLUE, "●", D_RED),
     "LIQUIDITY FLOW": ("≈", D_BLUE, "●", D_BLACK),
     "SECTOR ROTATION": ("◐", D_BLUE, "▲", D_YELLOW),
+    "INDUSTRY ROTATION": ("◆", D_YELLOW, "■", D_BLACK),
     "ECON CALENDAR": ("▦", D_BLUE, "●", D_YELLOW),
     "POLICY SHOCK": ("§", D_RED, "■", D_BLACK),
     "DATA AUDIT": ("✓", D_BLUE, "■", D_YELLOW),

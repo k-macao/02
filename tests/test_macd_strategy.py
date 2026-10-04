@@ -432,7 +432,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         legacy = ("fetch_market_snapshot", "fetch_market_panorama", "fetch_gov_policy",
                   "fetch_hk_channels", "fetch_google_news", "fetch_fed_trend", "fetch_geo_trend",
                   "fetch_eastmoney_news", "fetch_hot_stocks", "fetch_hk_quant", "fetch_weekly_forecast",
-                  "fetch_sector_rotation")
+                  "fetch_sector_rotation", "fetch_industry_rotation")
         with ExitStack() as stack:
             for fn in legacy:
                 stack.enter_context(patch.object(pipeline, fn, return_value={"status": "unavailable"}))
