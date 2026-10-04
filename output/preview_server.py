@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """本地预览：首页展示 latest.html —— 与实际 PushPlus 推送的完整页面保持一致（仅开发用）。
 
-- `/` 或 `/index.html` → 最新一份日报（latest.html，即真正推送到微信的 HTML）；
-- `/sample`           → guizang 排版示例（日报排版示例.html，示例数据）；
+- `/`、`/index.html` 或 `/sample` → 最新一份日报（latest.html）；
+- `/legacy-sample` → 旧的 guizang 排版示例（日报排版示例.html，示例数据）；
 - 其余路径 → output/ 目录静态文件（如 daily_report_*.html）。
+注意：超长日报在微信会保持原版式分条发送，预览页展示完整文件。
 """
 import http.server
 import os
@@ -39,23 +40,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html", "/sample"):
             if os.path.isfile(LATEST):
-                # 首页 = 实际 PushPlus 完整页面（一对一 / 一对多推送同一份 HTML）
+                # 最新日报：微信超长时按原样分条，不再降级成另一套纯文本版式。
                 self.path = "/latest.html"
             else:
                 self._simple_page(404, "暂无 latest.html")
                 return
-        elif path == "/sample":
+        elif path == "/legacy-sample":
             self.path = "/日报排版示例.html"
         return super().do_GET()
 
     def do_HEAD(self):
         path = urllib.parse.urlparse(self.path).path
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html", "/sample"):
             if os.path.isfile(LATEST):
                 self.path = "/latest.html"
-        elif path == "/sample":
+        elif path == "/legacy-sample":
             self.path = "/日报排版示例.html"
         return super().do_HEAD()
 

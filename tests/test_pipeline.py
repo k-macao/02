@@ -1049,23 +1049,24 @@ class GuizangOnePageTests(unittest.TestCase):
                       "hk_n": 3, "items": per_source} for i in range(1, 21)])
         return data
 
-    def test_heavy_day_report_fits_one_message(self):
+    def test_heavy_day_report_keeps_original_theme_when_split(self):
         html = pipeline.generate_report(self._heavy_data(), "2026年9月29日 · 周二", "20260929",
                                         theme="guizang")
-        # 重日完整样式 HTML 可能超过平台上限；实际推送路径会在精简表格版能少发消息时选它。
-        # 两条发送函数都 mock 掉，不访问 PushPlus，只核验最终送出的消息数与长度。
+        # 真实重日会超过平台上限；不允许为了少发一条而改成无主题的文字版。
         with (
             patch.object(pipeline, "_push_html_parts", return_value=True) as multipart,
             patch.object(pipeline, "_push_one_message", return_value=True) as single,
+            patch.object(pipeline, "_compact_html_for_push", side_effect=AssertionError("丢失风格")),
         ):
             self.assertTrue(pipeline.push_to_wechat("重日报测试", html, token="test-token"))
-        if multipart.called:
-            delivered = multipart.call_args.args[1]
-        else:
-            delivered = [single.call_args.args[1]]
-        self.assertEqual(len(delivered), 1, "重日日报应精简后仍一页推完")
-        self.assertLess(len(delivered[0]), int(pipeline.PUSHPLUS_MAX_CONTENT_CHARS * 0.95),
-                        "重日日报逼近单条上限，缺少安全余量")
+        self.assertFalse(single.called)
+        delivered = multipart.call_args.args[1]
+        self.assertGreaterEqual(len(delivered), 2)
+        for part in delivered:
+            self.assertLessEqual(len(part), pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
+            self.assertIn('name="octopus-theme" content="guizang"', part)
+            self.assertNotIn("推送精简排版", part)
+            self.assertIn(pipeline.GZ_KLEIN, part)
 
     def test_heavy_day_report_keeps_every_section(self):
         """全量：重日栏目一个都不能少，只靠排版瘦身换一页"""
