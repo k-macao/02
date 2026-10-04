@@ -14,6 +14,12 @@ on:
         default: false
         required: false
 
+# 与「🐙 章鱼AI · 每日自动推送」共用一把锁（详见 octopus-daily.yml 的同名注释）：
+# 两个作业生成同一批文件、推同一个分支，并行跑必然有一方推送被拒。
+concurrency:
+  group: octopus-report
+  cancel-in-progress: false
+
 jobs:
   octopus-manual-push:
     runs-on: ubuntu-latest
@@ -69,15 +75,31 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          git config user.name "octopus-bot"
-          git config user.email "bot@octopus.ai"
+          # 与定时作业提交同一批文件（含三个留痕 JSON）：手动跑一轮同样会发出预测，
+          # 漏提交就等于把这轮的留痕丢掉，命中率统计会缺样本。
+          # 提交与推送交给 tools/safe_push.sh（被拒后重放到远端最新提交之上，
+          # 留痕 JSON 并集合并、别人的改动不回退），原因见 自动更新推送被拒-原因诊断.md。
+          COMMIT_DATE=$(TZ='Asia/Macau' date +%Y-%m-%d)
+          bash tools/safe_push.sh \
+            --branch "${GITHUB_REF_NAME:-main}" \
+            --message "📰 手动抓取推送 ${COMMIT_DATE}" \
+            -- output/daily_report_*.html output/latest.html \
+               output/sentiment_history.json output/news_history.json \
+               output/quant_history.json output/hk7_forecast.json \
+               output/weekly_forecast.json
 
-          git add output/daily_report_*.html output/latest.html output/sentiment_history.json output/news_history.json 2>/dev/null || true
-
-          if git diff --cached --quiet; then
-            echo "无新内容，跳过提交。"
-          else
-            COMMIT_DATE=$(TZ='Asia/Macau' date +%Y-%m-%d)
-            git commit -m "📰 手动抓取推送 ${COMMIT_DATE}"
-            git push origin HEAD
-          fi
+      - name: 🧯 推送失败兜底：把生成物存成 Artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: octopus-manual-unpushed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/daily_report_*.html
+            output/latest.html
+            output/sentiment_history.json
+            output/news_history.json
+            output/quant_history.json
+            output/hk7_forecast.json
+            output/weekly_forecast.json
+          if-no-files-found: ignore
+          retention-days: 14
