@@ -3847,16 +3847,16 @@ class DossierThemeTests(unittest.TestCase):
         self.assertNotIn("内部资料 · 非投资建议", html_plain)
 
     # ---------------- 包豪斯图标 ----------------
-    def test_bauhaus_icons_are_geometric_and_trichromatic(self):
+    def test_bauhaus_icons_are_geometric_and_duotone(self):
+        """图标只用几何字形 × 荧光绿 / 鲜红 / 黑：不再有蓝、黄两种旧强调色。"""
+        allowed = {pipeline.D_GREEN_INK.upper(), pipeline.D_RED.upper(),
+                   pipeline.D_BLACK.upper(), pipeline.D_INK_STRONG.upper()}
         for kicker, spec in pipeline.DOSSIER_ICONS.items():
             g1, c1, g2, c2 = spec
             self.assertNotIn("svg", g1 + g2)
             for color in (c1, c2):
-                self.assertIn(color.upper(),
-                              {pipeline.D_RED.upper(), pipeline.D_BLUE.upper(),
-                               pipeline.D_YELLOW.upper(), pipeline.D_BLACK.upper(),
-                               pipeline.D_INK_STRONG.upper()},
-                              f"{kicker} 图标颜色 {color} 不在三原色/档案黑内")
+                self.assertIn(color.upper(), allowed,
+                              f"{kicker} 图标颜色 {color} 不在荧光绿/鲜红/黑之内")
         html = self._html()
         self.assertNotIn("<svg", html)
         self.assertNotIn("<img", html)
@@ -3865,16 +3865,84 @@ class DossierThemeTests(unittest.TestCase):
     def test_dossier_section_icon_fallback_for_unknown_kicker(self):
         icon = pipeline.dossier_icon("SOME UNKNOWN KICKER")
         self.assertIn("●", icon)
-        self.assertIn(pipeline.D_BLUE, icon)
+        self.assertIn(pipeline.D_GREEN_INK, icon)
 
-    # ---------------- 档案色盘与 guizang 隔离 ----------------
-    def test_dossier_palette_and_no_klein_leak(self):
+    # ---------------- 色盘：浅灰底 + 黑标题 + 深灰正文 + 荧光绿/鲜红 ----------------
+    def test_dossier_palette_and_no_old_colors_leak(self):
+        """设计契约（2026-10-04 换色）：浅灰底、黑标题、深灰正文，强调色只有荧光绿与鲜红。"""
         html = self._html()
         self.assertIn(f"bgcolor=\"{pipeline.D_PAPER}\"", html)
         self.assertIn(pipeline.D_PAPER, html)
         self.assertNotIn("#002FA7", html)      # 克莱因蓝不得渗入 dossier
         self.assertNotIn("#F3F6FF", html)      # 归藏淡蓝底不得渗入
         self.assertNotIn("#F2F2F2", html)      # 归藏斑马灰不得渗入
+        # 旧配色（浅黄牛皮纸底 / 暖墨 / 红蓝黄三原色）必须全部退场
+        for old in ("#F7F4EC", "#EDE4CE", "#EFEADF", "#201D18", "#111009", "#3A382F",
+                    "#141310", "#B9AF99", "#C9BC9C", "#DAD2BD", "#E9EDF6",
+                    "#C93A2B", "#1E4E9C", "#163C7C", "#C8930E"):
+            self.assertNotIn(old, html, f"旧配色 {old} 不应再出现在 dossier 日报里")
+
+    def test_dossier_palette_values_and_contrast_floor(self):
+        """色值本身也守契约：黑标题、深灰正文、荧光绿/鲜红两支突出色，落字版过 AA 4.5:1。"""
+        self.assertEqual(pipeline.D_INK, "#333333")          # 正文深灰
+        self.assertEqual(pipeline.D_INK_STRONG, "#000000")   # 标题纯黑
+        self.assertEqual(pipeline.D_BLACK, "#000000")
+        self.assertEqual(pipeline.D_GREEN, "#39FF14")        # 荧光绿
+        self.assertEqual(pipeline.D_RED, "#FF1F1F")          # 鲜红
+        self.assertEqual(pipeline.D_TAB, pipeline.D_GREEN)   # 高亮标签 = 荧光绿块
+
+        def _lum(hex_color):
+            h = hex_color.lstrip("#")
+            channels = []
+            for i in (0, 2, 4):
+                c = int(h[i:i + 2], 16) / 255
+                channels.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+            r, g, b = channels
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        def _contrast(a, b):
+            la, lb = _lum(a), _lum(b)
+            hi, lo = max(la, lb), min(la, lb)
+            return (hi + 0.05) / (lo + 0.05)
+
+        paper = pipeline.D_PAPER
+        # 浅灰画布：比旧牛皮纸更冷更灰（R=G=B），也不是归藏那种纯白
+        self.assertEqual(paper, "#F1F1F1")
+        self.assertTrue(paper[1:3] == paper[3:5] == paper[5:7], "画布必须是中性浅灰")
+        self.assertLess(paper, "#FFFFFF")
+        # 灰字强制门禁不会被浅灰画布触发（> #E8 的中性灰是底不是字）
+        self.assertFalse(pipeline._is_light_or_mid_gray_hex(paper))
+        # 正文 / 次要文字都在浅灰底上过 WCAG AA
+        for color in (pipeline.D_INK, pipeline.D_GRAY, pipeline.D_GREEN_INK, pipeline.D_RED_INK):
+            self.assertGreaterEqual(round(_contrast(color, paper), 2), 4.5,
+                                    f"{color} 在浅灰底上对比度不足 4.5:1")
+        # 荧光绿 / 鲜红是填充色：块内黑字必须够亮够清楚
+        self.assertGreaterEqual(_contrast(pipeline.D_INK_STRONG, pipeline.D_GREEN), 12)
+        # 荧光绿 / 鲜红在浅灰底上不能当作小字色（只做填充），所以另给落字深档
+        self.assertLess(_contrast(pipeline.D_GREEN, paper), 3)
+        self.assertLess(_contrast(pipeline.D_RED, paper), 4.5)
+        # 涨 = 绿、跌 = 红（与像素主题、量化表一致），用落字版
+        self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_UP"], pipeline.D_GREEN_INK)
+        self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_DOWN"], pipeline.D_RED_INK)
+        self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN_WASH"], pipeline.D_GREEN)
+        self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN"], pipeline.D_GREEN_INK)
+        self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN_DEEP"], pipeline.D_GREEN_DEEP)
+
+    def test_dossier_has_no_klein_leak_in_quant_tables(self):
+        """行情复盘里的 MACD 量化表是按 GUIZANG_KIT 渲染的（历史实现）：
+        档案色板必须连 kit 色槽一起换，否则克莱因蓝漏进浅灰页，换色后尤其扎眼。"""
+        import test_plain_mode as tpm
+        data = tpm._rich_data()                     # 含 MACD 量化策略 + 行情复盘
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="dossier")
+        self.assertIn("MACD 量化策略", html)
+        self.assertNotIn("#002FA7", html)
+        # 退出换色后 kit 色槽还原：guizang 依旧克莱因蓝，不带 dossier 色
+        self.assertEqual(pipeline.GUIZANG_KIT.ok_color, pipeline.GZ_UP)
+        guizang = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                           theme="guizang")
+        self.assertIn("#002FA7", guizang)
+        self.assertNotIn(pipeline.D_GREEN, guizang)
 
     def test_palette_globals_restored_after_render(self):
         before = {k: getattr(pipeline, k) for k in

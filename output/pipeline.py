@@ -574,7 +574,8 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
 # pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
 # dossier —— 2026-10-03 起默认主题：德国文件 / 档案风 + 包豪斯几何图标
-#   （牛皮纸文件夹标签、2px 黑粗线、等宽卷宗号、红章、三原色 圆/三角/方）。
+#   （荧光绿高亮标签、2px 黑粗线、等宽卷宗号、鲜红印章、圆/三角/方几何图标）：
+#   浅灰底 #F1F1F1 + 黑标题 + 深灰正文 #333，突出色只有 荧光绿 #39FF14 / 鲜红 #FF1F1F。
 PUSH_THEMES = ("guizang", "pixel", "dossier")
 DEFAULT_PUSH_THEME = "dossier"
 
@@ -11523,34 +11524,47 @@ GUIZANG_KIT = _RenderKit(
 
 # ============================================================
 # Dossier 主题（2026-10-03 新增 · 德国文件 / 档案风 + 包豪斯几何）
+# 2026-10-04 换色：浅黄牛皮纸 → 浅灰底 / 黑标题 / 深灰正文 / 荧光绿 + 鲜红
 # ------------------------------------------------------------
-#   · 页面设计「德国文件」：牛皮纸文件夹标签（AKTE 01 …）、2px 黑色粗线、
+#   · 页面设计「德国文件」：荧光绿高亮文件夹标签（AKTE 01 …）、2px 黑色粗线、
 #     打字机等宽文件编号、档案元信息表（DATE / QUELLEN / SIGNATUR）、
-#     红色 RESEARCH 印章、ENDE DER AKTE 档案尾注；
+#     鲜红 RESEARCH 印章、ENDE DER AKTE 档案尾注；
+#   · 色盘（2026-10-04 定稿）：
+#       ‑ 底：浅灰画布 #F1F1F1（斑马底 #E4E4E4、分隔线 #C9C9C9，全部中性灰，
+#         不再有任何暖黄 / 牛皮纸色）；
+#       ‑ 字：标题纯黑 #000000，正文深灰 #333333，次要信息 #4A4A4A（7.8:1）；
+#       ‑ 突出色只有两支：荧光绿 #39FF14 与 鲜红 #FF1F1F。
+#         两支都按「填充用原色、落字用深一档」分档使用：
+#           · 填充 / 描边 / 图形 → 荧光绿 #39FF14（配黑字，对比度 15.5:1）、
+#             鲜红 #FF1F1F（印章描边、警示描边）；
+#           · 浅灰底上的小字 → 深绿 #0F7A2B（4.8:1）、深红 #D01818（4.9:1），
+#             守住 WCAG AA，避免「浅底荧光字看不清」的老问题。
 #   · 文字排版：DIN 风格系统字栈（不加载远程字体，中文回退系统 CJK 字）
 #     + 等宽文件编号，字距拉开的等宽 kicker，强粗细对比；
-#   · 图标设计「包豪斯」：圆 / 三角 / 方 / 菱 × 红蓝黄三原色的几何组合，
+#   · 图标设计「包豪斯」：圆 / 三角 / 方 / 菱 × 荧光绿 / 鲜红 / 黑 的几何组合，
 #     纯 Unicode 字形，无远程图片、不给单条推送加 SVG 重量。
 #   · 实现：内容块复用 guizang 研报渲染器；_dossier_palette 上下文在渲染期间
 #     临时换掉 GZ_* 全局色变量（渲染器在调用时读取全局，故整体换色生效），
 #     栏目头 / 刊头 / 尾注为本主题专属。内容结构、栏目顺序、推送分条逻辑不变。
 # ============================================================
-D_PAPER = "#F7F4EC"        # 档案纸（暖白）
-D_TAB = "#EDE4CE"          # 牛皮纸文件夹标签
-D_TAB_HAIR = "#C9BC9C"     # 标签描边
-D_INK = "#201D18"          # 墨（正文）
-D_INK_STRONG = "#111009"   # 标题 / 最高强调
-D_GRAY = "#3A382F"         # 暖深灰（标签 / 脚注）
-D_BLACK = "#141310"        # 粗线 / 黑条（包豪斯黑）
-D_HAIR = "#B9AF99"         # 栏目分割线
-D_HAIR_SOFT = "#DAD2BD"    # 行间细分隔线
-D_ZEBRA = "#EFEADF"        # 段落交替底
-# 包豪斯三原色（黄取深一档，保证浅底上字形对比）
-D_RED = "#C93A2B"
-D_BLUE = "#1E4E9C"
-D_BLUE_DEEP = "#163C7C"
-D_BLUE_WASH = "#E9EDF6"
-D_YELLOW = "#C8930E"
+# ---- 浅灰色阶（画布 / 斑马底 / 分隔线）----
+D_PAPER = "#F1F1F1"        # 浅灰画布（页面底；黑条上的反白字同色，> #E8 不会被灰字强制改写）
+D_TAB = "#39FF14"          # 文件夹标签底：荧光绿高亮块，配黑字（15.5:1）
+D_TAB_HAIR = "#000000"     # 标签描边（黑）
+D_HAIR = "#C9C9C9"         # 栏目分割线
+D_HAIR_SOFT = "#DDDDDD"    # 行间细分隔线
+D_ZEBRA = "#E4E4E4"        # 段落交替底（比画布深一档的浅灰）
+# ---- 文字：黑标题 + 深灰正文 ----
+D_INK = "#333333"          # 正文（深灰，浅灰底上 11.2:1）
+D_INK_STRONG = "#000000"   # 标题 / 最高强调（纯黑）
+D_GRAY = "#4A4A4A"         # 次要深灰（标签 / 表头 / 脚注，7.8:1）
+D_BLACK = "#000000"        # 粗线 / 黑条（标题条与 2px 粗线）
+# ---- 突出色：荧光绿 + 鲜红（各分「填充原色 / 落字深档」两档）----
+D_GREEN = "#39FF14"        # 荧光绿：高亮块底 / 黑底上的反白字 / 图形（配黑字 15.5:1）
+D_GREEN_INK = "#0F7A2B"    # 荧光绿落字版（浅灰底上 4.8:1）：小标题 / 关键数值 / ▲ 涨
+D_GREEN_DEEP = "#0A5C20"   # 深绿再深一档（链接按下 / 需要更重时）
+D_RED = "#FF1F1F"          # 鲜红：印章描边 / 警示描边 / 图形
+D_RED_INK = "#D01818"      # 鲜红落字版（浅灰底上 4.9:1）：▼ 跌 / 暂缺 / 印章文字
 # 字栈：DIN 风格系统字（不加载远程字体）；等宽用打字机 Courier 系（档案卷宗感）
 D_FONT = ("'DIN Alternate','Bahnschrift','Avenir Next Condensed','Arial Narrow',"
           "-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB',"
@@ -11561,9 +11575,10 @@ D_MONO = "'Courier New',Courier,'SF Mono',Menlo,monospace"
 _DOSSIER_GZ_SWAP = {
     "GZ_PAPER": D_PAPER,
     "GZ_PAPER_TINT": D_PAPER,
-    "GZ_KLEIN": D_BLUE,
-    "GZ_KLEIN_DEEP": D_BLUE_DEEP,
-    "GZ_KLEIN_WASH": D_BLUE_WASH,
+    "GZ_KLEIN": D_GREEN_INK,
+    "GZ_KLEIN_DEEP": D_GREEN_DEEP,
+    # 结论 / AI 判定块底：荧光绿高亮块，块内黑字（副标题用落字深绿 4.9:1）
+    "GZ_KLEIN_WASH": D_GREEN,
     "GZ_INK": D_INK,
     "GZ_INK_STRONG": D_INK_STRONG,
     "GZ_DARK_GRAY": D_GRAY,
@@ -11575,12 +11590,12 @@ _DOSSIER_GZ_SWAP = {
     "GZ_ZEBRA": D_ZEBRA,
     "GZ_CREAM": D_PAPER,
     "GZ_INK_TINT": D_PAPER,
-    "GZ_UP": D_BLUE, "GZ_DOWN": D_RED, "GZ_FLAT": D_GRAY,
-    "GZ_UP_INK": D_BLUE, "GZ_DOWN_INK": D_RED, "GZ_FLAT_INK": D_GRAY,
+    "GZ_UP": D_GREEN_INK, "GZ_DOWN": D_RED_INK, "GZ_FLAT": D_GRAY,
+    "GZ_UP_INK": D_GREEN_INK, "GZ_DOWN_INK": D_RED_INK, "GZ_FLAT_INK": D_GRAY,
     "GZ_WARN": D_GRAY, "GZ_WARN_INK": D_GRAY,
-    "GZ_PRIMARY": D_BLUE, "GZ_PRIMARY_HOVER": D_BLUE_DEEP,
-    "GZ_PRIMARY_LIGHT": D_BLUE_WASH,
-    "GZ_NEON": D_BLUE,
+    "GZ_PRIMARY": D_GREEN_INK, "GZ_PRIMARY_HOVER": D_GREEN_DEEP,
+    "GZ_PRIMARY_LIGHT": D_GREEN,
+    "GZ_NEON": D_GREEN_INK,
     "GZ_FONT": D_FONT,
     "GZ_SERIF": D_FONT,
     "GZ_SANS": D_FONT,
@@ -11589,73 +11604,93 @@ _DOSSIER_GZ_SWAP = {
 
 
 class _dossier_palette:
-    """渲染 dossier 日报期间临时换 GZ_* 色变量；退出时逐位还原。"""
+    """渲染 dossier 日报期间临时换 GZ_* 色变量；退出时逐位还原。
+
+    同时临时覆盖 GUIZANG_KIT / DOSSIER_KIT 的 ok / warn / bad 三个色槽：
+    行情复盘栏目里的 MACD 量化表是按 GUIZANG_KIT 渲染的（历史实现），
+    色槽若不一起换，档案页里就会漏出克莱因蓝 —— 这一漏色在 2026-10-04 换色时
+    由 tests/test_pipeline.py::test_dossier_palette_and_no_old_colors_leak 看守。
+    """
+
+    _KIT_SLOTS = ("ok_color", "warn_color", "bad_color")
+    _KIT_COLORS = {"ok_color": D_GREEN_INK, "warn_color": D_GRAY, "bad_color": D_RED_INK}
 
     def __enter__(self):
         self._saved = {k: globals()[k] for k in _DOSSIER_GZ_SWAP}
         for k, v in _DOSSIER_GZ_SWAP.items():
             globals()[k] = v
+        self._saved_kit = {}
+        for kit in (GUIZANG_KIT, DOSSIER_KIT):
+            self._saved_kit[id(kit)] = (kit, {s: getattr(kit, s) for s in self._KIT_SLOTS})
+            for slot, value in self._KIT_COLORS.items():
+                setattr(kit, slot, value)
         return self
 
     def __exit__(self, exc_type, exc, tb):
         for k, v in self._saved.items():
             globals()[k] = v
+        for kit, slots in self._saved_kit.values():
+            for slot, value in slots.items():
+                setattr(kit, slot, value)
         return False
 
 
 # 包豪斯图标：kicker → (主字形, 主色, 副字形, 副色)。
 # 形状只用圆 ● / 三角 ▲▼▶ / 方 ■□ / 菱 ◆ / 半圆 ◐◍◎ 等几何字形；
-# 颜色只用三原色 + 档案黑，与德国文件排版同盘。
+# 颜色只用荧光绿 / 鲜红 / 黑，与德国文件排版同盘（绿色取落字深绿，浅灰底上才看得清）。
 DOSSIER_ICONS = {
     "AI DIGEST": ("■", D_BLACK, "●", D_RED),
-    "FORECAST": ("▲", D_BLUE, "●", D_YELLOW),
+    "FORECAST": ("▲", D_GREEN_INK, "●", D_RED),
     "SUMMARY": ("■", D_BLACK, "▲", D_RED),
     "MARKET REVIEW": ("▲", D_RED, "■", D_BLACK),
-    "WEEKLY FORECAST": ("■", D_BLUE, "▲", D_YELLOW),
+    "WEEKLY FORECAST": ("■", D_GREEN_INK, "▲", D_RED),
     "QUANT FORECAST": ("●", D_RED, "■", D_BLACK),
-    "HK PROBABILITY": ("◍", D_BLUE, "●", D_RED),
-    "LIQUIDITY FLOW": ("≈", D_BLUE, "●", D_BLACK),
-    "SECTOR ROTATION": ("◐", D_BLUE, "▲", D_YELLOW),
-    "INDUSTRY ROTATION": ("◆", D_YELLOW, "■", D_BLACK),
-    "ECON CALENDAR": ("▦", D_BLUE, "●", D_YELLOW),
+    "HK PROBABILITY": ("◍", D_GREEN_INK, "●", D_RED),
+    "LIQUIDITY FLOW": ("≈", D_GREEN_INK, "●", D_BLACK),
+    "SECTOR ROTATION": ("◐", D_GREEN_INK, "▲", D_RED),
+    "INDUSTRY ROTATION": ("◆", D_RED, "■", D_BLACK),
+    "ECON CALENDAR": ("▦", D_GREEN_INK, "●", D_RED),
     "POLICY SHOCK": ("§", D_RED, "■", D_BLACK),
-    "DATA AUDIT": ("✓", D_BLUE, "■", D_YELLOW),
-    "TREND TRACKING": ("◉", D_BLUE, "▲", D_RED),
-    "SHORT CARD": ("▲", D_RED, "●", D_BLUE),
-    "STRATEGY READ": ("◆", D_BLUE, "■", D_RED),
-    "HK QUOTES": ("◍", D_RED, "●", D_BLUE),
-    "GLOBAL HEADLINES": ("▤", D_BLUE, "▲", D_YELLOW),
+    "DATA AUDIT": ("✓", D_GREEN_INK, "■", D_RED),
+    "TREND TRACKING": ("◉", D_GREEN_INK, "▲", D_RED),
+    "SHORT CARD": ("▲", D_RED, "●", D_GREEN_INK),
+    "STRATEGY READ": ("◆", D_GREEN_INK, "■", D_RED),
+    "HK QUOTES": ("◍", D_RED, "●", D_GREEN_INK),
+    "GLOBAL HEADLINES": ("▤", D_GREEN_INK, "▲", D_RED),
     "EASTMONEY WIRE": ("!", D_RED, "■", D_BLACK),
-    "NEWS SENTIMENT": ("◆", D_RED, "●", D_BLUE),
-    "QUANT STRATEGY": ("◆", D_BLUE, "■", D_RED),
+    "NEWS SENTIMENT": ("◆", D_RED, "●", D_GREEN_INK),
+    "QUANT STRATEGY": ("◆", D_GREEN_INK, "■", D_RED),
     "QUANT POLICY": ("◉", D_RED, "■", D_BLACK),
-    "FED TREND": ("$", D_BLUE, "●", D_YELLOW),
+    "FED TREND": ("$", D_GREEN_INK, "●", D_RED),
     "GEO TREND": ("◎", D_RED, "■", D_BLACK),
-    "AI READ": ("●", D_BLUE, "▲", D_YELLOW),
-    "HK GURU CHANNELS": ("▶", D_BLUE, "■", D_RED),
+    "AI READ": ("●", D_GREEN_INK, "▲", D_RED),
+    "HK GURU CHANNELS": ("▶", D_GREEN_INK, "■", D_RED),
 }
 
 
 def dossier_icon(kicker_en):
     """栏目标题前的包豪斯几何图标（主字形 + 小副字形，两色）。"""
     g1, c1, g2, c2 = DOSSIER_ICONS.get(str(kicker_en or "").strip().upper(),
-                                       ("●", D_BLUE, "■", D_BLACK))
+                                       ("●", D_GREEN_INK, "■", D_BLACK))
     return (f'<span style="color:{c1};font-size:13px;">{g1}</span>'
             f'<span style="color:{c2};font-size:9px;">{g2}</span>'
             f'<span style="padding-left:6px;"></span>')
 
 
 def dossier_stamp(text="RESEARCH · 非投资建议"):
-    """档案红章：描边方章，等宽字距拉开（入门版不出过程性印章）。"""
+    """档案鲜红章：描边方章，等宽字距拉开（入门版不出过程性印章）。
+
+    描边用鲜红原色 #FF1F1F，章面文字用落字深红 #D01818（浅灰底上 4.9:1）。
+    """
     if PLAIN():
         return ""
     return (f'<span style="display:inline-block;border:1px solid {D_RED};'
-            f'color:{D_RED};font-family:{D_MONO};font-size:10px;letter-spacing:0.18em;'
+            f'color:{D_RED_INK};font-family:{D_MONO};font-size:10px;letter-spacing:0.18em;'
             f'padding:1px 6px;margin-right:8px;">{_esc(text)}</span>')
 
 
 def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
-    """Dossier 栏目头：牛皮纸文件夹标签（AKTE 编号 + 等宽 kicker）→ 标题（含包豪斯图标）
+    """Dossier 栏目头：荧光绿高亮标签（AKTE 编号 + 等宽 kicker）→ 标题（含包豪斯图标）
     → 红章 / 徽标 / 口径。与 guizang 版同一套内容，只换卷宗式栏目头。
 
     保留 <h2> 标题结构：分条推送的「承接上条」横幅靠它取栏目名，不能省。
@@ -11675,11 +11710,11 @@ def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
         f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
         f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_INK};">'
         f'<tr><td valign="top" style="padding:0;color:{D_INK};">'
-        # 文件夹标签（牛皮纸）：挂在粗线下方的内嵌标签
+        # 文件夹标签：挂在粗线下的荧光绿高亮块，配黑字（15.5:1）
         f'<div style="display:inline-block;background:{D_TAB};'
         f'border:1px solid {D_TAB_HAIR};border-bottom:none;'
         f'padding:3px 10px 2px;margin-top:-1px;font-family:{D_MONO};font-size:10px;'
-        f'letter-spacing:0.16em;color:{D_INK};">'
+        f'letter-spacing:0.16em;color:{D_INK_STRONG};">'
         f'AKTE {num} · {_esc(kicker_en)}</div>'
         # 标题行：包豪斯图标 + DIN 标题
         f'<div style="padding:8px 0 0;">'
@@ -11736,11 +11771,12 @@ DOSSIER_KIT = _RenderKit(
 
 
 def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
-    """Dossier 刊头（卷宗封面）：黑条刊名 → 大标题 + 三原色几何 → 档案元信息表 → 红章。"""
+    """Dossier 刊头（卷宗封面）：黑条刊名 + 荧光绿档号 → 大标题（黑）+ 几何图标 → 档案元信息表 → 鲜红章。"""
     file_no = f"AKT-{date_str}"
-    icon_block = (f'<span style="color:{D_RED};font-size:15px;">■</span>'
-                  f'<span style="color:{D_BLUE};font-size:12px;padding-left:2px;">●</span>'
-                  f'<span style="color:{D_YELLOW};font-size:10px;padding-left:2px;">▲</span>')
+    # 标题后的几何记号：荧光绿方块 + 鲜红圆点 + 黑三角（突出色只在两色之内）
+    icon_block = (f'<span style="color:{D_GREEN};font-size:15px;">■</span>'
+                  f'<span style="color:{D_RED};font-size:12px;padding-left:2px;">●</span>'
+                  f'<span style="color:{D_BLACK};font-size:10px;padding-left:2px;">▲</span>')
 
     def _meta_cell(label, value, last=False):
         border_r = "" if last else f'border-right:1px solid {D_HAIR};'
@@ -11760,20 +11796,22 @@ def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
     # 印章是装饰性「研究副本」章（非免责文字本身）：入门版与栏目章一致不出
     stamp = "" if PLAIN() else (
         f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
-        f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_RED};">'
-        f'<tr><td align="right" style="padding-top:8px;color:{D_RED};">'
-        f'<span style="display:inline-block;border:2px solid {D_RED};color:{D_RED};'
+        f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_RED_INK};">'
+        f'<tr><td align="right" style="padding-top:8px;color:{D_RED_INK};">'
+        f'<span style="display:inline-block;border:2px solid {D_RED};color:{D_RED_INK};'
         f'font-family:{D_MONO};font-size:10px;font-weight:700;letter-spacing:0.22em;'
         f'padding:3px 8px;">内部资料 · 非投资建议</span></td></tr></table>')
     return (
         f'<div style="padding:4px 0 0;color:{D_INK};background:{D_PAPER}">'
-        # 卷宗黑条刊名（table 布局：微信清洗链路上比 flex 稳）
+        # 卷宗黑条刊名（table 布局：微信清洗链路上比 flex 稳）+ 荧光绿档号高亮块
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="width:100%!important;border-collapse:collapse;background:{D_BLACK};">'
         f'<tr><td style="padding:5px 8px;font-family:{D_MONO};font-size:11px;font-weight:700;'
         f'letter-spacing:0.22em;color:{D_PAPER};">OCTOPUS · TAGES-AKTE</td>'
         f'<td align="right" style="padding:5px 8px;font-family:{D_MONO};font-size:10px;'
-        f'letter-spacing:0.14em;color:{D_PAPER};">{_esc(file_no)}</td></tr></table>'
+        f'letter-spacing:0.14em;color:{D_PAPER};">'
+        f'<span style="background:{D_GREEN};color:{D_INK_STRONG};padding:1px 6px;">'
+        f'{_esc(file_no)}</span></td></tr></table>'
         f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
         f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_INK};">'
         f'<tr><td valign="top" style="padding-top:10px;color:{D_INK};">'
@@ -11791,15 +11829,13 @@ def generate_report_dossier(data, date_display, date_str, sentiment_history=None
     """Dossier 排版（德国文件 + 包豪斯）：卷宗封面 + 文件夹标签栏目 + 档案尾注。
 
     内容块与 guizang 同源（同一套研报渲染器），只在 _dossier_palette 渲染期间换成
-    档案纸 / 墨色 / 三原色盘；栏目顺序、分条标记、推送门禁全部不变。
+    浅灰底 / 黑标题 / 深灰正文 / 荧光绿 + 鲜红突出色；栏目顺序、分条标记、推送门禁全部不变。
     整页拼装与灰字强制都在换色期间完成：_enforce_dark_gray_font 会为缺 color 的
     容器补前景色（取当前全局 GZ_INK*），并把浅灰文字统一为当前 GZ_DARK_GRAY。
     """
     with _dossier_palette():
-        # kit 色变量在换色后绑定（ok/warn/bad 供量化呈现层注入）
-        DOSSIER_KIT.ok_color = GZ_UP
-        DOSSIER_KIT.warn_color = GZ_WARN
-        DOSSIER_KIT.bad_color = GZ_DOWN
+        # ok / warn / bad 三个色槽由 _dossier_palette 统一换（含行情复盘里按
+        # GUIZANG_KIT 渲染的量化表），退出时还原，不再在这里临时绑定、遗留全局态
         parts = _collect_report_parts(data, DOSSIER_KIT,
                                       sentiment_history=sentiment_history,
                                       date_str=date_str,
@@ -11817,8 +11853,8 @@ def generate_report_dossier(data, date_display, date_str, sentiment_history=None
         # 页脚：档案尾注（入门版只留免责一句）
         footer_text = (
             "仅供参考，非投资建议 · 数据来自公开来源，未抓到内容的栏目自动缺席。" if PLAIN() else
-            f'德国档案排版（Dossier） · 包豪斯几何图标 · 三原色 红 {D_RED} / 蓝 {D_BLUE} / 黄 {D_YELLOW} · '
-            '涨跌用 ▲▼■ 双编码表达，不依赖红绿<br>\n'
+            f'德国档案排版（Dossier） · 浅灰底 + 黑标题 + 深灰正文 · 突出色 荧光绿 {D_GREEN} / 鲜红 {D_RED} · '
+            '涨 ▲ / 跌 ▼ 同时给符号与正负号，不只靠颜色区分<br>\n'
             '数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。')
         masthead = _dossier_masthead(date_display, date_str, today_n, total, generated_at)
         html = _dossier_html_frame(masthead, first_section, content_html, footer_text,
@@ -12645,13 +12681,14 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
                 f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
                 f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
     if theme == "dossier":
+        # 分条横幅与栏目标签同款：荧光绿高亮块 + 黑字（15.5:1）
         return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_TAB}" '
                 f'style="width:100%!important;border-collapse:collapse;margin:12px 0;'
                 f'background:{D_TAB};border-top:2px solid {D_BLACK};border-bottom:1px solid {D_HAIR};'
-                f'color:{D_INK};">'
+                f'color:{D_INK_STRONG};">'
                 f'<tr><td style="padding:7px 10px;font-family:{D_MONO};font-size:11px;'
-                f'font-weight:700;color:{D_INK};line-height:1.6;">'
-                f'<span style="color:{D_RED};">■</span> AKTE · {text}</td></tr></table>')
+                f'font-weight:700;color:{D_INK_STRONG};line-height:1.6;">'
+                f'<span style="color:{D_INK_STRONG};">■</span> AKTE · {text}</td></tr></table>')
     return (f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
             f'bgcolor="{GZ_INK}" style="width:100%!important;border-collapse:collapse;'
             f'table-layout:fixed;background:{GZ_INK};margin:0 0 8px;">'
@@ -12887,7 +12924,7 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
     if template == "html":
         if _report_theme(content_html) == "dossier":
             # 生成时在档案色板下做灰字保护；推送前再次保护也必须使用同一色板。
-            # 否则暖灰 #3A382F 会被改成归藏 #333，漏色容器也会补成 #222。
+            # 否则档案深灰 #4A4A4A 会被改成归藏 #333，漏色容器也会补成 #222。
             with _dossier_palette():
                 content_html = _enforce_dark_gray_font(content_html, dark_gray=D_GRAY)
         else:
