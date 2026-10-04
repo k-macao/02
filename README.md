@@ -273,7 +273,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 |---|---|
 | GitHub 定时任务 | `.github/workflows/octopus-daily.yml` 当前设置为每天北京时间 09:00 至 21:00 每两小时自动运行（对应 UTC 01:00~13:00 奇数整点，共 7 次）；09:00 早盘前与 21:00 晚间复盘推送到微信，盘中时段静默更新数据与网页（`--no-push`）。 |
 | GitHub 定时任务（隐藏功能） | `.github/workflows/market-db.yml` 每天北京时间 08:00 / 12:30 / 17:00 各跑一次，把多源行情快照落库到 `output/market_db/` 并提交；不推微信、不进日报。 |
-| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选只生成、不推送。与定时作业共用一把并发锁（`octopus-report`）：撞上时**排队**而不是并行生成同一批文件。 |
+| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选**只生成、不推送**，或勾选**全量长版**（`--full`：恢复长文 / 完整表格 / 方法细节，仍使用默认 dossier 风格，不出短线速查卡）。与定时作业共用一把并发锁（`octopus-report`）：撞上时**排队**而不是并行生成同一批文件。 |
 | Jev 接入探针（手动 / 相关文件变更时） | `.github/workflows/jev-integration-probe.yml`：① 接入层离线回归（无权重 / 无 Key / 无外网，约 30 秒）② 开源本地运行时安装 + Hugging Face 可达性 ③ 真权重端到端（需勾 `build_model` 或提交信息带 `[jev-model]`，产出 ONNX 目录 Artifact）。只读仓库、不提交、不改文件。 |
 | 本地手动运行 | `./output/manual_push.sh`；`--force` 可强制推送，`--no-push` 只生成。 |
 | 自有服务器定时任务 | 使用 cron 调用 `./output/auto_push.sh`。 |
