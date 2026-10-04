@@ -295,16 +295,18 @@ class StyledDeliveryTests(unittest.TestCase):
     """推送的真实 HTML 不能悄悄退化为另一套白底纯文本风格。"""
 
     def test_dossier_color_protection_uses_dossier_palette(self):
-        # 生成时已经使用档案暖灰；推送端二次加固不应改成归藏的 #333/#222。
+        # 生成时已经使用档案深灰；推送端二次加固不应改成归藏的 #222。
         html = ('<meta name="octopus-theme" content="dossier">'
-                '<div style="color:#3A382F">暖灰</div>'
-                '<div style="background:#F7F4EC">未设字色</div>')
+                '<div style="color:#4A4A4A">档案深灰</div>'
+                '<div style="background:#F1F1F1">未设字色</div>')
         with patch.object(pipeline, "_push_one_message", return_value=True) as send:
             self.assertTrue(pipeline.push_to_wechat("上水日报", html, token="test-token"))
         sent = send.call_args.args[1]
-        self.assertIn('color:#3A382F">暖灰', sent)
-        self.assertIn('background:#F7F4EC;color:#201D18">未设字色', sent)
-        self.assertNotIn('color:#333', sent)
+        self.assertIn(f'color:{pipeline.D_GRAY}">档案深灰', sent)
+        self.assertIn(f'background:{pipeline.D_PAPER};color:{pipeline.D_INK}">未设字色', sent)
+        self.assertNotIn('color:#222', sent)
+        # 浅灰画布 #F1F1F1 不能被灰字强制门禁误判成「浅灰文字」而改深
+        self.assertIn(f'color:{pipeline.D_INK}"', sent)
 
     def test_dossier_stays_dossier_above_single_message_limit(self):
         masthead = pipeline._dossier_masthead("2026年10月4日 · 周日", "20261004", 2, 3,

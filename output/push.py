@@ -11,8 +11,8 @@
   python3 output/push.py --list                 # 列出已生成的日报（不清理）
 
 页面风格（一对一 / 一对多推送共用同一份日报 HTML）:
-  默认主题 dossier（德国文件 / 档案风 + 包豪斯几何：档案纸底色、牛皮纸文件夹标签、
-  2px 黑粗线、等宽卷宗号、红色 RESEARCH 印章、圆/三角/方三原色图标；
+  默认主题 dossier（德国文件 / 档案风 + 包豪斯几何：浅灰底 + 黑标题 + 深灰正文，
+  荧光绿高亮标签、2px 黑粗线、等宽卷宗号、鲜红 RESEARCH 印章、圆/三角/方几何图标；
   纯内联样式，无 JS / 外部 CSS / WebGL，兼容 PushPlus / 微信详情页）。
   切回归藏白底研报: python3 output/push.py --theme guizang
   切回旧版像素主题: python3 output/push.py --theme pixel

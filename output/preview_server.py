@@ -23,7 +23,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         body = (
             "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='UTF-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'></head>"
-            "<body style='margin:0;background:#F1EFEA;color:#0A0A0B;"
+            "<body style='margin:0;background:#F1F1F1;color:#0A0A0B;"
             "font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;'>"
             "<div style='max-width:640px;margin:80px auto;padding:0 20px;text-align:center;'>"
             f"<div style='font-size:15px;font-weight:700;'>{message}</div>"
