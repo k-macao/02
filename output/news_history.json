@@ -5175,13 +5175,59 @@
    "date": "2026-10-04"
   }
  ],
- "updated_cst": "2026-10-04 20:57:46",
+ "updated_cst": "2026-10-04 21:01:53",
  "industry_rotation_diag": {
-  "ran_at": "2026-10-04 20:57:31",
+  "ran_at": "2026-10-04 21:01:40",
   "cutoff": "2026-10-04",
   "universe": 31,
   "universe_kind": "sw_l1_fixed",
-  "fqt": null,
-  "reason": "行业日K接口未返回数据（东财前复权/不复权两种口径均无有效日线，申万官方源亦无数据）"
+  "fqt": "0",
+  "kline_series": 31,
+  "sources": {
+   "eastmoney": 31
+  },
+  "missing": [],
+  "asof": "2026-09-30",
+  "asof_hits": 31,
+  "scored": 31,
+  "required": 19,
+  "state": "built",
+  "holdings": 5
+ },
+ "industry_rotation": {
+  "month": "2026-09",
+  "rebalance_date": "2026-09-30",
+  "holdings": [
+   {
+    "code": "BK1210",
+    "name": "交通运输",
+    "score": 75.31799877632092,
+    "weight": 0.20778742223750557
+   },
+   {
+    "code": "BK1202",
+    "name": "房地产",
+    "score": 72.91950246821317,
+    "weight": 0.2011704465715965
+   },
+   {
+    "code": "BK0464",
+    "name": "石油石化",
+    "score": 72.91624107478476,
+    "weight": 0.20116144903389768
+   },
+   {
+    "code": "BK0437",
+    "name": "煤炭",
+    "score": 72.37762938644507,
+    "weight": 0.19967552619838175
+   },
+   {
+    "code": "BK0433",
+    "name": "农林牧渔",
+    "score": 68.9448454072758,
+    "weight": 0.1902051559586186
+   }
+  ]
  }
 }
