@@ -1,6 +1,7 @@
 """无需网络的日报新鲜度回归测试。"""
 import datetime as dt
 import importlib.util
+from html.parser import HTMLParser
 import os
 import re
 import sys
@@ -680,7 +681,8 @@ class GuizangThemeTests(unittest.TestCase):
         for name in ("latest.html", "日报排版示例.html", "daily_report_20260929.html"):
             p = output_dir / name
             if p.is_file():
-                disk_html = p.read_text(encoding="utf-8")
+                # --push-only 与常规推送都会先应用灰字强制；审计实际送达内容，而非历史原文件。
+                disk_html = pipeline._enforce_dark_gray_font(p.read_text(encoding="utf-8"))
                 disk_colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", disk_html))
                 for c in disk_colors:
                     self.assertFalse(
@@ -889,14 +891,16 @@ class GuizangThemeTests(unittest.TestCase):
         parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
         self.assertEqual(len(parts or []), 1)
 
-    def test_multipart_split_keeps_every_section_and_cell(self):
-        """超限时按栏目边界全量分条：每段不超限、栏目不重不漏、正文一格不少"""
+    def test_multipart_split_keeps_every_section_and_visible_text(self):
+        """超限时按栏目边界全量分条：每段不超限、栏目不重不漏、可见文本节点不丢"""
         data = SectionReadingOrderTests()._full_data()
         data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
         html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
                                         theme="guizang")
         limit = 6000
-        parts = pipeline._split_html_for_push(html, limit)
+        # 测试用 6,000 字小上限会人为放大分条数；提高仅测试用的条数上限，
+        # 验证完整分页时每个栏目与可见文本节点都保留（生产默认仍为 12 条）。
+        parts = pipeline._split_html_for_push(html, limit, max_parts=30)
         self.assertIsNotNone(parts)
         self.assertGreater(len(parts), 1)
         for index, part in enumerate(parts, 1):
@@ -910,12 +914,25 @@ class GuizangThemeTests(unittest.TestCase):
             self.assertEqual(
                 hits, 1 + cont,
                 f"栏目「{title}」在 {len(parts)} 条里出现 {hits} 次，其中 {cont} 条标了「承接上条（续）」")
-        def flat(chunk):
-            return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", re.sub(r"<!--.*?-->", "", chunk, flags=re.S)))
-        joined = flat("".join(parts))
-        cells = [flat(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", html, re.S)]
-        missing = [cell for cell in cells if cell and cell not in joined]
-        self.assertEqual(missing[:3], [], f"{len(missing)} 个单元格文字在分条后丢失")
+        class VisibleText(HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.nodes = []
+
+            def handle_data(self, data):
+                text = re.sub(r"\s+", "", data)
+                if text:
+                    self.nodes.append(text)
+
+        def visible_nodes(fragment):
+            parser = VisibleText()
+            parser.feed(fragment)
+            return parser.nodes
+
+        delivered = "".join(visible_nodes("".join(parts)))
+        source_nodes = visible_nodes(html)
+        missing = [node for node in source_nodes if node not in delivered]
+        self.assertEqual(missing[:3], [], f"{len(missing)} 个可见文本节点在分条后丢失")
 
 
 class GuizangOnePageTests(unittest.TestCase):
@@ -923,7 +940,7 @@ class GuizangOnePageTests(unittest.TestCase):
 
     口径：全量内容（含量化三段真实引擎产物、60 条日程、五路资讯、多平台趋势线索）
     渲染后 ≤ PUSHPLUS_MAX_CONTENT_CHARS，「按栏目分条」只需 1 条 → 微信端一页推。
-    真正超限的极重日仍按栏目边界全量分条（见 test_multipart_split_keeps_every_section_and_cell），不截断、不摘要。
+    真正超限的极重日仍按栏目边界全量分条（见 test_multipart_split_keeps_every_section_and_visible_text），不截断、不摘要。
     """
 
     def _heavy_data(self):
@@ -1035,12 +1052,20 @@ class GuizangOnePageTests(unittest.TestCase):
     def test_heavy_day_report_fits_one_message(self):
         html = pipeline.generate_report(self._heavy_data(), "2026年9月29日 · 周二", "20260929",
                                         theme="guizang")
-        self.assertLess(len(html), pipeline.PUSHPLUS_MAX_CONTENT_CHARS,
-                        "重日日报超过单条上限，一页推失效")
-        self.assertLess(len(html), int(pipeline.PUSHPLUS_MAX_CONTENT_CHARS * 0.95),
+        # 重日完整样式 HTML 可能超过平台上限；实际推送路径会在精简表格版能少发消息时选它。
+        # 两条发送函数都 mock 掉，不访问 PushPlus，只核验最终送出的消息数与长度。
+        with (
+            patch.object(pipeline, "_push_html_parts", return_value=True) as multipart,
+            patch.object(pipeline, "_push_one_message", return_value=True) as single,
+        ):
+            self.assertTrue(pipeline.push_to_wechat("重日报测试", html, token="test-token"))
+        if multipart.called:
+            delivered = multipart.call_args.args[1]
+        else:
+            delivered = [single.call_args.args[1]]
+        self.assertEqual(len(delivered), 1, "重日日报应精简后仍一页推完")
+        self.assertLess(len(delivered[0]), int(pipeline.PUSHPLUS_MAX_CONTENT_CHARS * 0.95),
                         "重日日报逼近单条上限，缺少安全余量")
-        parts = pipeline._split_html_for_push(html, pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
-        self.assertEqual(len(parts or []), 1)
 
     def test_heavy_day_report_keeps_every_section(self):
         """全量：重日栏目一个都不能少，只靠排版瘦身换一页"""

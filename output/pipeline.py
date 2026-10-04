@@ -5877,8 +5877,7 @@ def gz_masthead_cell(label, value, value_color=GZ_CREAM, first=False):
 
 
 
-# 顶层块识别标记（与 gz_subsection / _gz_news_card 的输出模板逐字对应）
-_GZ_SUBSECTION_SIG = f"margin-top:12px;color:{GZ_META};font-weight:700"
+# 顶层块识别器：用于把正文块包装成微信兼容表格，并将子标题与首个内容块归组。
 _GZ_ZEBRA_TAG_RE = re.compile(
     r'<!--.*?-->|<(/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|\'[^\']*\'|[^>"\'])*)(/?)>',
     re.S,
@@ -5926,45 +5925,74 @@ def _gz_top_level_spans(html):
     return spans
 
 
-def _gz_zebra_bands(content):
-    """栏目内部段落灰底交替：相邻顶层块按 纯白 ↔ 浅灰 #F2F2F2 两档背景轮流铺底。
+def _gz_content_table(inner, band):
+    """将一个非表格内容块装进微信兼容的全宽表格，并以单元格留白清楚分段。"""
+    stripped = (inner or "").strip()
+    # 行情/资讯等已经是完整表格时直接保留，避免不必要的嵌套和推送体积膨胀。
+    if stripped.lower().startswith("<table") and len(_gz_top_level_spans(stripped)) == 1:
+        return inner
+    background = GZ_ZEBRA if band % 2 else GZ_PAPER
+    return (
+        f'<table width="100%" cellpadding="8" cellspacing="0" bgcolor="{background}" '
+        f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;'
+        f'background:{background};color:{GZ_INK};font-size:{GZ_FS_BODY}px;line-height:1.75;'
+        f'word-break:break-word;overflow-wrap:break-word;">'
+        f'<tr><td valign="top" style="border-bottom:1px solid {GZ_HAIR_SOFT};">'
+        f'{inner}</td></tr></table>'
+    )
 
-    - 每个顶层块（键值段 / 资讯卡片 / 表格 / 脚注 / 提示…）独立成带，奇数带铺灰；
-      内容本身的标签与样式一个字不改，只在外面套一层带 padding 的灰底 div；
-    - 子节标题（gz_subsection）并进紧随其后的首块，避免「标题白、表格灰」断裂；
-    - 灰底带自带宽 8px 内衬，正文与纯白带左缘有呼吸差，读视线跟着色带走；
-    - 全内联样式，微信 PushPlus 清洗不掉 background，与整页白底不冲突。
+
+def _gz_zebra_bands(content):
+    """将栏目正文拆成清晰的全宽表格块，交替铺底并保留子标题与正文的归属关系。
+
+    - 每个顶层内容块（键值段 / 说明 / 提示）放入全宽单列表格；原生数据表 / 资讯表不再嵌套；
+    - 表格统一提供内边距、1.75 行高与浅色分隔，提升微信窄屏阅读节奏；
+    - 子节标题并入紧随其后的首块，避免「标题与对应数据」被拆开；
+    - 表外文字块以白底与浅灰/档案纸底交替，底色写在 table 上，兼容 PushPlus 清洗。
     """
-    if not content or "<" not in content:
+    if not content:
         return content
     spans = _gz_top_level_spans(content)
-    if len(spans) < 2:   # 只有一块（或纯表格）无需交替
-        return content
-    # 分组：子节标题与其后首块同带
+    if not spans:
+        # 也覆盖测试、插件或未来栏目传入的纯文本 HTML 片段，避免正文游离在表格之外。
+        return _gz_content_table(content, 0) if content.strip() else content
+
+    # 分组：子节标题与其后首块同表；颜色检测按样式属性识别，兼容 dossier 动态色盘。
     groups = []
     i = 0
     while i < len(spans):
         s, e = spans[i]
-        if (content[s:e].startswith("<div")
-                and _GZ_SUBSECTION_SIG in content[s:min(e, s + 160)]
-                and i + 1 < len(spans)):
+        chunk = content[s:min(e, s + 240)]
+        is_subsection = (
+            chunk.startswith("<div")
+            and re.search(r'\bmargin-top\s*:\s*12px', chunk, re.I)
+            and re.search(r'\bfont-weight\s*:\s*700', chunk, re.I)
+        )
+        if is_subsection and i + 1 < len(spans):
             groups.append((s, spans[i + 1][1]))
             i += 2
         else:
             groups.append((s, e))
             i += 1
+
     out = []
     cursor = 0
-    for bi, (s, e) in enumerate(groups):
-        out.append(content[cursor:s])          # 带间空白原样保留
-        inner = content[s:e]
-        if bi % 2 == 1:
-            out.append(f'<div style="background:{GZ_ZEBRA};'
-                       f'padding:4px 8px;margin:2px 0;">{inner}</div>')
+    band = 0
+    for s, e in groups:
+        gap = content[cursor:s]
+        if gap.strip():
+            out.append(_gz_content_table(gap, band))
+            band += 1
         else:
-            out.append(inner)
+            out.append(gap)                    # 空白 / 隐形推进注释原样保留
+        out.append(_gz_content_table(content[s:e], band))
+        band += 1
         cursor = e
-    out.append(content[cursor:])
+    tail = content[cursor:]
+    if tail.strip():
+        out.append(_gz_content_table(tail, band))
+    else:
+        out.append(tail)
     return "".join(out)
 
 
@@ -5978,17 +6006,21 @@ def gz_section(num, kicker_en, title, content, badge_html="", caption=""):
         content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
                    f'style="width:100%!important;border-collapse:collapse;'
                    f'font-size:{GZ_FS_TABLE}px;color:{GZ_INK}">{content}</table>')
-    # 段落灰底交替：栏目内相邻内容块 纯白 ↔ 浅灰 轮流铺底（表格体已先合成为单块）
+    # 微信正文逐内容块表格化；数据表保留原结构，文字说明也有稳定内边距与分段。
     content = _gz_zebra_bands(content)
     meta_bits = [x for x in (badge_html, caption) if x]
     meta = (f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;'
             f'padding-top:4px">{" · ".join(meta_bits)}</div>') if meta_bits else ""
     head = (
         f'<div style="padding:28px 0 0;border-top:1px solid {GZ_HAIR};color:{GZ_INK};background:{GZ_PAPER}">'
-        f'<div style="padding-top:12px;color:{GZ_KLEIN};font-size:11px;'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{GZ_PAPER};color:{GZ_INK};">'
+        f'<tr><td valign="top" style="padding:12px 0 0;color:{GZ_INK};">'
+        f'<div style="color:{GZ_KLEIN};font-size:11px;'
         f'font-weight:700;letter-spacing:0.12em">{num} · {_esc(kicker_en)}</div>'
         f'<h2 style="margin:4px 0 0;font-size:{GZ_FS_SECTION}px;'
         f'color:{GZ_INK_STRONG}">{_esc(title)}</h2>{meta}'
+        f'</td></tr></table>'
     )
     body = f'{content}</div>'
     # 栏目标记：栏目头与正文之间留一个不可见锚点，供「超长日报按栏目装箱合并推送」时
@@ -11425,6 +11457,9 @@ def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
     head = (
         f'<div style="margin-top:26px;border-top:2px solid {D_BLACK};'
         f'color:{D_INK};background:{D_PAPER}">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_INK};">'
+        f'<tr><td valign="top" style="padding:0;color:{D_INK};">'
         # 文件夹标签（牛皮纸）：挂在粗线下方的内嵌标签
         f'<div style="display:inline-block;background:{D_TAB};'
         f'border:1px solid {D_TAB_HAIR};border-bottom:none;'
@@ -11437,7 +11472,7 @@ def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
         f'color:{D_INK_STRONG};letter-spacing:0.01em;">'
         f'{dossier_icon(kicker_en)}{_esc(title)}</h2>'
         f'<div style="padding-top:3px;">{dossier_stamp()}{meta}</div>'
-        f'</div>'
+        f'</div></td></tr></table>'
     )
     body = f'{content}</div>'
     return head + SECTION_BODY_MARK + body
@@ -11509,10 +11544,12 @@ def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
         f'{_meta_cell("SIGNATUR · 档号", _esc(file_no), last=True)}</tr></table>')
     # 印章是装饰性「研究副本」章（非免责文字本身）：入门版与栏目章一致不出
     stamp = "" if PLAIN() else (
-        f'<div style="padding-top:8px;text-align:right;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_RED};">'
+        f'<tr><td align="right" style="padding-top:8px;color:{D_RED};">'
         f'<span style="display:inline-block;border:2px solid {D_RED};color:{D_RED};'
         f'font-family:{D_MONO};font-size:10px;font-weight:700;letter-spacing:0.22em;'
-        f'padding:3px 8px;">内部资料 · 非投资建议</span></div>')
+        f'padding:3px 8px;">内部资料 · 非投资建议</span></td></tr></table>')
     return (
         f'<div style="padding:4px 0 0;color:{D_INK};background:{D_PAPER}">'
         # 卷宗黑条刊名（table 布局：微信清洗链路上比 flex 稳）
@@ -11522,12 +11559,15 @@ def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
         f'letter-spacing:0.22em;color:{D_PAPER};">OCTOPUS · TAGES-AKTE</td>'
         f'<td align="right" style="padding:5px 8px;font-family:{D_MONO};font-size:10px;'
         f'letter-spacing:0.14em;color:{D_PAPER};">{_esc(file_no)}</td></tr></table>'
-        f'<h1 style="margin:10px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:900;'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_INK};">'
+        f'<tr><td valign="top" style="padding-top:10px;color:{D_INK};">'
+        f'<h1 style="margin:0;font-size:{GZ_FS_DISPLAY}px;font-weight:900;'
         f'color:{D_INK_STRONG};letter-spacing:0.01em;line-height:1.3;">'
         f'{_esc(REPORT_TITLE)} {icon_block}</h1>'
         f'<div style="color:{D_GRAY};font-size:{GZ_FS_META}px;line-height:1.7;'
         f'padding-top:6px;">{_esc(REPORT_TAGLINE)} · 更新于 {_esc(generated_at)}</div>'
-        f'{meta_table}{stamp}</div>'
+        f'</td></tr></table>{meta_table}{stamp}</div>'
     )
 
 
@@ -11598,11 +11638,14 @@ def _dossier_html_frame(masthead, first_section, content_html, footer_text,
 {content_html}
 
 {DOC_FOOT_MARK}
-<div style="margin-top:26px;border-top:2px solid {D_BLACK};padding:12px 0 30px;">
+<div style="margin-top:26px;border-top:2px solid {D_BLACK};">
+<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_PAPER}" style="width:100%!important;border-collapse:collapse;background:{D_PAPER};color:{D_INK};">
+<tr><td valign="top" style="padding:12px 0 30px;color:{D_INK};">
 <div style="font-family:{D_MONO};font-size:10px;letter-spacing:0.24em;color:{D_INK_STRONG};">ENDE DER AKTE · 档案结束</div>
 <div style="color:{D_GRAY};font-size:11px;line-height:1.8;padding-top:6px;">
 {footer_text}
 </div>
+</td></tr></table>
 </div>
 
 </div>
@@ -11745,6 +11788,9 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
     # 刊头：一行克莱因蓝刊名 → 标题 → 一行灰meta（日期 / 当天源 / 更新时间）
     masthead = (
         f'<div style="padding:4px 0 0;color:{GZ_INK};background:{GZ_PAPER}">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{GZ_PAPER};color:{GZ_INK};">'
+        f'<tr><td valign="top" style="padding:0;color:{GZ_INK};">'
         f'<div style="color:{GZ_KLEIN};font-size:11px;font-weight:700;'
         f'letter-spacing:0.18em;line-height:1.6">OCTOPUS QUANT</div>'
         f'<h1 style="margin:6px 0 0;font-size:{GZ_FS_DISPLAY}px;font-weight:700;'
@@ -11753,7 +11799,7 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
         f'<div style="color:{GZ_FAINT};font-size:{GZ_FS_META}px;line-height:1.7;'
         f'padding-top:8px">{_esc(REPORT_TAGLINE)} · {_esc(date_display)} · '
         f'当天源 {today_n}/{total} · 更新于 {_esc(generated_at)}</div>'
-        f'</div>')
+        f'</td></tr></table></div>')
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -11778,8 +11824,11 @@ def generate_report_guizang(data, date_display, date_str, sentiment_history=None
 {content_html}
 
 {DOC_FOOT_MARK}
-<div style="margin-top:26px;border-top:1px solid {GZ_HAIR};padding:12px 0 30px;color:{GZ_FAINT};font-size:11px;line-height:1.8">
+<div style="margin-top:26px;border-top:1px solid {GZ_HAIR};">
+<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{GZ_PAPER}" style="width:100%!important;border-collapse:collapse;background:{GZ_PAPER};color:{GZ_FAINT};font-size:11px;line-height:1.8;">
+<tr><td valign="top" style="padding:12px 0 30px;color:{GZ_FAINT};">
 {footer_text}
+</td></tr></table>
 </div>
 
 </div>
@@ -12096,11 +12145,31 @@ class _PushTextExtractor(HTMLParser):
         return text
 
 
+def _compact_table_rows(text):
+    """精简推送正文按段落生成表格行（由外层表格统一承担字号、颜色与行距）。"""
+    paragraphs = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return "".join(f'<tr><td style="border-bottom:1px solid #ddd;">{line}</td></tr>'
+                   for line in paragraphs)
+
+
+def _compact_paragraph_table(text, *, color="#222"):
+    """把刊头 / 页脚等精简版文字按段落装入独立表格。"""
+    rows = _compact_table_rows(text)
+    if not rows:
+        return ""
+    return (
+        f'<table width="100%" cellpadding="6" cellspacing="0" bgcolor="#FFFFFF" '
+        f'style="width:100%!important;border-collapse:collapse;background:#FFFFFF;'
+        f'color:{color};font-size:14px;line-height:1.7;word-break:break-word;'
+        f'overflow-wrap:anywhere;">{rows}</table>'
+    )
+
+
 def _compact_html_for_push(html):
     """生成轻量推送版，保留原文所有可见文字和超链接，移除重复装饰/复杂表格包装。
 
     完整、原样的精美 HTML 仍保存于磁盘与 GitHub；此版本只用于在平台单条字数限制下
-    尽量减少微信消息条数。输出仍按栏目分段，因此压缩后仍超限时可以安全续拆。
+    尽量减少微信消息条数。正文按段落重排成紧凑表格行，栏目仍可安全续拆。
     """
     first_break = html.find(PART_BREAK_MARK)
     foot_at = html.find(DOC_FOOT_MARK)
@@ -12133,9 +12202,16 @@ def _compact_html_for_push(html):
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
         '<div style="max-width:680px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;'
         'font-size:15px;line-height:1.7;color:#111;background:#FFFFFF;color-scheme:light;">'
-        '<h1 style="font-size:22px;line-height:1.4;margin:0 0 4px;color:#111;background:#FFFFFF;">章鱼 AI · 上水日报</h1>'
-        f'<div style="font-size:12px;color:{GZ_DARK_GRAY};margin-bottom:12px;">推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</div>'
-        f'<div style="font-size:13px;line-height:1.6;color:{GZ_INK};margin-bottom:12px;">{intro}</div>'
+        '<table width="100%" cellpadding="6" cellspacing="0" bgcolor="#FFFFFF" '
+        'style="width:100%!important;border-collapse:collapse;background:#FFFFFF;color:#111;">'
+        '<tr><td style="border-bottom:2px solid #111;">'
+        '<h1 style="font-size:22px;line-height:1.4;margin:0;color:#111;background:#FFFFFF;">'
+        '章鱼 AI · 上水日报</h1></td></tr></table>'
+        f'<table width="100%" cellpadding="5" cellspacing="0" bgcolor="#FFFFFF" '
+        f'style="width:100%!important;border-collapse:collapse;background:#FFFFFF;color:{GZ_DARK_GRAY};'
+        f'font-size:12px;line-height:1.6;">'
+        f'<tr><td>推送精简排版 · 保留全文文字与原文链接 · {_html_escape(report_date)}</td></tr></table>'
+        f'{_compact_paragraph_table(intro, color=GZ_INK)}'
     )
     output = [shell]
     for number, section in enumerate(sections, 1):
@@ -12152,14 +12228,27 @@ def _compact_html_for_push(html):
             content = content[len(title):].lstrip(" \n")
         if not title:
             title = f"日报栏目 {number}"
-        output.append(
-            f'{PART_BREAK_MARK}<section style="padding:10px 0 14px;border-top:1px solid #ddd;color:{GZ_INK};background:#FFFFFF;">'
-            f'<h2 style="font-size:18px;line-height:1.5;margin:0 0 6px;font-weight:700;color:#111;">'
-            f'{_html_escape(title)}</h2>'
-            f'<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;color:{GZ_INK};">{content}</div>'
-            '</section>'
+        section_table = (
+            f'<table width="100%" cellpadding="6" cellspacing="0" bgcolor="#FFFFFF" '
+            f'style="width:100%!important;border-collapse:collapse;table-layout:fixed;'
+            f'background:#FFFFFF;color:{GZ_INK};font-size:14px;line-height:1.7;'
+            f'word-break:break-word;overflow-wrap:anywhere;">'
+            f'<tr><td style="border-bottom:2px solid #111;color:#111;">'
+            f'<h2 style="font-size:18px;line-height:1.5;margin:0;font-weight:700;color:#111;">'
+            f'{_html_escape(title)}</h2></td></tr>'
+            f'{_compact_table_rows(content)}</table>'
         )
-    output.append(f'{DOC_FOOT_MARK}<div style="border-top:1px solid #ddd;padding-top:8px;font-size:12px;color:{GZ_DARK_GRAY};background:#FFFFFF;">{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</div></div></body></html>')
+        output.append(
+            f'{PART_BREAK_MARK}<section style="padding:10px 0 14px;border-top:1px solid #ddd;'
+            f'color:{GZ_INK};background:#FFFFFF;">{section_table}</section>'
+        )
+    output.append(
+        f'{DOC_FOOT_MARK}<table width="100%" cellpadding="6" cellspacing="0" bgcolor="#FFFFFF" '
+        f'style="width:100%!important;border-collapse:collapse;border-top:1px solid #ddd;'
+        f'background:#FFFFFF;color:{GZ_DARK_GRAY};font-size:12px;line-height:1.8;">'
+        f'<tr><td>{footer}<br>推送精简排版；完整排版及日报文件请查看存档。</td></tr>'
+        f'</table></div></body></html>'
+    )
     return _enforce_dark_gray_font("".join(output))
 
 

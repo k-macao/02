@@ -1,9 +1,6 @@
-"""栏目内段落灰底交替（_gz_zebra_bands / gz_section）回归测试。
-
-2026-09-30 需求：栏目内部的相邻内容块（小节标题+首块 / 资讯卡片 / 表格 /
-脚注 / 提示）按 纯白 ↔ 浅灰 #F2F2F2 两档背景交替铺底，读视线跟着色带走。
-"""
+"""微信推送日报的栏目正文表格化与段落留白回归测试。"""
 import importlib.util
+import re
 import sys
 import types
 import unittest
@@ -14,29 +11,31 @@ MODULE_PATH = Path(__file__).parents[1] / "output" / "pipeline.py"
 spec = importlib.util.spec_from_file_location("pipeline_under_test_zebra", MODULE_PATH)
 pipeline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline)
-# 本文件只测版面交替，用 gz_note 当通用内容块；入门版（默认）下 gz_note 不输出说明文字，
-# 这里固定打开 --notes 语义，让脚注块照常生成。
+# 本文件只测版面，用 gz_note 当通用内容块；打开 --notes 语义让脚注照常生成。
 pipeline.set_notes_requested(True)
 
 ZEBRA = pipeline.GZ_ZEBRA
-WRAP_OPEN = f'<div style="background:{ZEBRA};padding:4px 8px;margin:2px 0;">'
+PAPER = pipeline.GZ_PAPER
 
 
 def top_level_chunks(html):
-    """把内容串拆回顶层块序列，便于断言交替顺序。"""
+    """把内容串拆回顶层块序列，便于断言一块一表、顺序不变。"""
     return [html[a:b] for a, b in pipeline._gz_top_level_spans(html)]
 
 
 class ZebraBandTests(unittest.TestCase):
-    def test_alternates_white_and_gray_per_top_level_block(self):
+    def test_every_non_table_content_block_gets_its_own_table(self):
         content = "".join(pipeline.gz_note(f"块{i}") for i in (1, 2, 3, 4))
         banded = pipeline._gz_zebra_bands(content)
-        # 奇数带（第 2、4 块）铺灰，偶数带（第 1、3 块）保持纯白原样
-        self.assertIn(WRAP_OPEN + pipeline.gz_note("块2") + "</div>", banded)
-        self.assertIn(WRAP_OPEN + pipeline.gz_note("块4") + "</div>", banded)
-        self.assertEqual(banded.count(f"background:{ZEBRA}"), 2)
-        self.assertNotIn(WRAP_OPEN + pipeline.gz_note("块1"), banded)
-        self.assertNotIn(WRAP_OPEN + pipeline.gz_note("块3"), banded)
+        chunks = top_level_chunks(banded)
+        self.assertEqual(len(chunks), 4)
+        for i, chunk in enumerate(chunks):
+            self.assertTrue(chunk.startswith("<table"), chunk[:100])
+            self.assertIn(f"块{i + 1}", chunk)
+            expected = PAPER if i % 2 == 0 else ZEBRA
+            self.assertIn(f'bgcolor="{expected}"', chunk)
+        self.assertIn("padding=\"8\"", banded)
+        self.assertIn("line-height:1.75", banded)
 
     def test_no_content_loss_and_order_preserved(self):
         content = (
@@ -50,11 +49,8 @@ class ZebraBandTests(unittest.TestCase):
         banded = pipeline._gz_zebra_bands(content)
         for token in ("脚注甲", "<!--BODY-->", "子节标题", "脚注乙", "<table", "</table>"):
             self.assertIn(token, banded)
-        # 剥掉灰底包装层后，应还原出全部原始块（顺序不变）
-        stripped = banded.replace(WRAP_OPEN, "").replace("</div>" + pipeline.gz_note("脚注乙"),
-                                                         pipeline.gz_note("脚注乙"))
-        for token in ("脚注甲", "子节标题", "脚注乙"):
-            self.assertIn(token, stripped)
+        self.assertLess(banded.index("脚注甲"), banded.index("子节标题"))
+        self.assertLess(banded.index("子节标题"), banded.index("脚注乙"))
 
     def test_subsection_heading_joins_following_block(self):
         content = (
@@ -63,29 +59,41 @@ class ZebraBandTests(unittest.TestCase):
             + pipeline.gz_data_table(["指标", "值"], [["预算", "10%"]])
         )
         banded = pipeline._gz_zebra_bands(content)
-        # 第 0 带 = 引子（白），第 1 带 = 子节标题 + 表格（同一层灰底）
-        head_at = banded.index("风险预算")
-        wrap_open = banded.rfind(WRAP_OPEN, 0, head_at)
-        self.assertGreater(wrap_open, banded.index("引子</div>"))
-        table_at = banded.index("<table", head_at)
-        wrap_close = banded.index("</div>", table_at)
-        # 标题与表格之间不得再出现灰底开标签（同带）；带内 = 包装层 + 子标题，恰好 2 个 <div>
-        self.assertEqual(banded.count("<div", wrap_open, wrap_close), 2)
+        chunks = top_level_chunks(banded)
+        self.assertEqual(len(chunks), 2)
+        self.assertIn("引子", chunks[0])
+        self.assertIn("风险预算", chunks[1])
+        self.assertIn("预算", chunks[1])
+        # 标题与对应数据处于同一版面表格中；其中保留原始数据表（内层 table）。
+        self.assertEqual(chunks[1].count("<table"), 2)
 
-    def test_news_cards_are_individually_banded(self):
+    def test_existing_news_tables_stay_individual_and_are_not_nested(self):
         cards = "".join(pipeline.gz_item_row("◆", f"条目{i}") for i in range(3))
         banded = pipeline._gz_zebra_bands(cards)
-        self.assertEqual(banded.count(f"background:{ZEBRA}"), 1)  # 仅第 2 张卡铺灰
-        self.assertIn(WRAP_OPEN + pipeline.gz_item_row("◆", "条目1") + "</div>", banded)
+        chunks = top_level_chunks(banded)
+        self.assertEqual(len(chunks), 3)
+        for i, chunk in enumerate(chunks):
+            self.assertTrue(chunk.startswith("<table"))
+            self.assertIn(f"条目{i}", chunk)
+            self.assertEqual(chunk.count("<table"), 1)
 
-    def test_single_block_and_plain_table_body_untouched(self):
+    def test_single_block_plain_text_and_raw_table_are_safe(self):
         lone = pipeline.gz_note("唯一一块")
-        self.assertEqual(pipeline._gz_zebra_bands(lone), lone)
+        banded_lone = pipeline._gz_zebra_bands(lone)
+        self.assertTrue(banded_lone.startswith("<table"))
+        self.assertIn("唯一一块", banded_lone)
+
+        raw = pipeline._gz_zebra_bands("没有标签的正文")
+        self.assertTrue(raw.startswith("<table"))
+        self.assertIn("没有标签的正文", raw)
+
         trs = "<tr><td>甲</td></tr><tr><td>乙</td></tr>"
-        # <tr> 开头的内容在 gz_section 里先合成整表，再整块跳过交替（不许把 <tr> 包进 div）
         section = pipeline.gz_section("01", "TEST", "标题", trs)
-        self.assertIn("<table", section)
-        self.assertNotIn(f'<div style="background:{ZEBRA}', section)
+        body = section.split(pipeline.SECTION_BODY_MARK, 1)[1]
+        self.assertIn("<table", body)
+        self.assertIn("甲", body)
+        self.assertIn("乙", body)
+        self.assertEqual(body.count("<table"), body.count("</table>"))
 
     def test_banding_covers_full_report_and_stays_inline_only(self):
         data = {
@@ -94,14 +102,33 @@ class ZebraBandTests(unittest.TestCase):
                 headlines=[{"title": f"头条{i}", "source": "测试源",
                             "published_cst": f"2026-09-30 10:0{i}"} for i in range(4)]),
         }
-        html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930",
-                                        theme="guizang")
-        self.assertIn(f"background:{ZEBRA}", html)
-        # 纯内联样式：不引入 <style> / class（微信 PushPlus 清洗安全）
-        self.assertNotIn("<style", html)
-        self.assertNotIn('class="', html)
-        # 标签守恒：灰底包裹不破坏 div 配对
-        self.assertEqual(html.count("<div"), html.count("</div>"))
+        for theme, expected_paper in (("guizang", PAPER), ("dossier", pipeline.D_PAPER)):
+            with self.subTest(theme=theme):
+                html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930",
+                                                theme=theme)
+                self.assertIn(f'bgcolor="{expected_paper}"', html)
+                self.assertIn(f'bgcolor="{pipeline.GZ_ZEBRA}"' if theme == "guizang"
+                              else f'bgcolor="{pipeline.D_ZEBRA}"', html)
+                # 纯内联样式：不引入 <style> / class（微信 PushPlus 清洗安全）
+                self.assertNotIn("<style", html)
+                self.assertNotIn('class="', html)
+                # 包装表格不破坏 div 配对。
+                self.assertEqual(html.count("<div"), html.count("</div>"))
+
+                # 刊头和栏目标题也由表格承载；可见栏目正文按块表格化。
+                for heading in (m.start() for m in re.finditer(r"<h[12]\b", html)):
+                    self.assertGreater(html.rfind("<table", 0, heading),
+                                       html.rfind("</table>", 0, heading))
+                body = html[html.find(pipeline.PART_BREAK_MARK) + len(pipeline.PART_BREAK_MARK):
+                            html.find(pipeline.DOC_FOOT_MARK)]
+                for section in [x for x in body.split(pipeline.PART_BREAK_MARK) if x.strip()]:
+                    if pipeline.SECTION_BODY_MARK not in section:
+                        continue  # 页面级 #report 锚点不属于栏目正文
+                    section_body = section.split(pipeline.SECTION_BODY_MARK, 1)[1]
+                    for chunk in top_level_chunks(section_body):
+                        if 'id="report"' in chunk:
+                            continue
+                        self.assertTrue(chunk.lstrip().startswith("<table"), chunk[:100])
 
 
 if __name__ == "__main__":
