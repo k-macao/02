@@ -273,7 +273,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 |---|---|
 | GitHub 定时任务 | `.github/workflows/octopus-daily.yml` 当前设置为每天北京时间 09:00 至 21:00 每两小时自动运行（对应 UTC 01:00~13:00 奇数整点，共 7 次）；09:00 早盘前与 21:00 晚间复盘推送到微信，盘中时段静默更新数据与网页（`--no-push`）。 |
 | GitHub 定时任务（隐藏功能） | `.github/workflows/market-db.yml` 每天北京时间 08:00 / 12:30 / 17:00 各跑一次，把多源行情快照落库到 `output/market_db/` 并提交；不推微信、不进日报。 |
-| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选只生成、不推送。 |
+| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选只生成、不推送。与定时作业共用一把并发锁（`octopus-report`）：撞上时**排队**而不是并行生成同一批文件。 |
 | Jev 接入探针（手动 / 相关文件变更时） | `.github/workflows/jev-integration-probe.yml`：① 接入层离线回归（无权重 / 无 Key / 无外网，约 30 秒）② 开源本地运行时安装 + Hugging Face 可达性 ③ 真权重端到端（需勾 `build_model` 或提交信息带 `[jev-model]`，产出 ONNX 目录 Artifact）。只读仓库、不提交、不改文件。 |
 | 本地手动运行 | `./output/manual_push.sh`；`--force` 可强制推送，`--no-push` 只生成。 |
 | 自有服务器定时任务 | 使用 cron 调用 `./output/auto_push.sh`。 |
@@ -286,6 +286,16 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 ```
 
 GitHub 定时任务可能受平台负载影响而延迟；若发送失败，工作流会失败退出，不会静默显示成功。
+
+三个工作流的提交推送统一走 `tools/safe_push.sh`：作业从「检出那一刻的 main」出发跑几分钟，
+期间 main 可能被 PR 合并 / 另一个工作流推动，裸 `git push` 会被拒（`! [rejected] … (fetch first)`）
+并让这一轮的日报与预测留痕全部丢在 runner 上。被拒后脚本会把本次改动**重放**到远端最新提交之上再推
+（最多 5 次，退避 + 抖动）：日报 HTML 以本次为准，5 个留痕 JSON 按
+`tools/merge_generated.py` 的规则做并集（已结算留痕与官方溯源不被降级、两边条目都不丢），
+市场数据库文件因自带 sha256 自校验而整份取本次，**别人的代码与文档一律保留远端版本**。
+不是「远端前进」类的失败（权限 / 保护分支 / 钩子拒绝）会立即失败并打印 git 原始输出，不做无谓重试；
+万一 5 次都推不上去，这一轮的生成物会作为 Artifact 保留 14 天，可人工补提交。
+回归见 `tests/test_safe_push.py`，事故复盘见 `自动更新推送被拒-原因诊断.md`。
 
 本地查看实际报告或排版示例：
 
