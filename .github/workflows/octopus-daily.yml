@@ -30,6 +30,14 @@ on:
         default: false
         required: false
 
+# 与「🐙 章鱼AI · 手动抓取推送」共用一把锁：两个作业生成同一批文件、推同一个分支，
+# 并行跑必然有一方 `git push` 被拒（2026-10-03 18:39 UTC 实测：本作业与手动作业相差
+# 37 秒启动，手动方先推成功，本作业被拒 → 日报与留痕全部没进库）。
+# 排队而不取消：取消会打断「已经推到微信、还没提交留痕」的那一轮。
+concurrency:
+  group: octopus-report
+  cancel-in-progress: false
+
 jobs:
   octopus-daily:
     runs-on: ubuntu-latest
@@ -87,47 +95,4 @@ jobs:
           if [ -n "${OCTOPUS_LLM_API_KEY:-}" ]; then
             echo "◧ 大模型：已配置 Key（${OCTOPUS_LLM_BASE_URL:-默认 https://api.deepseek.com} / ${OCTOPUS_LLM_MODEL:-默认 deepseek-flash}）"
           else
-            echo "◧ 大模型：未配置 OCTOPUS_LLM_API_KEY → AI 七日港股走势分析概率整栏缺席"
-          fi
-
-          if [ "$LLM_CHECK" = "true" ]; then
-            echo "运行模式：大模型 API 探活（不生成日报）"
-            python3 output/pipeline.py --llm-check
-          elif [ "$HK7_ONLY" = "true" ]; then
-            echo "运行模式：只跑 AI 七日港股走势分析概率（研究模式，不推送）"
-            python3 output/pipeline.py --hk7-only
-          elif [ "$DRY_RUN" = "true" ]; then
-            echo "运行模式：预览模式（不推送）"
-            python3 output/pipeline.py --dry-run
-          elif [ "$NO_PUSH" = "true" ]; then
-            echo "运行模式：手动指定静默更新（--no-push，不推微信）"
-            python3 output/pipeline.py --no-push
-          elif [ "$EVENT_NAME" = "schedule" ] && [ "$CURRENT_HOUR" != "09" ] && [ "$CURRENT_HOUR" != "10" ] && [ "$CURRENT_HOUR" != "21" ] && [ "$CURRENT_HOUR" != "22" ]; then
-            echo "运行模式：定时盘中静默更新（当前北京时间 ${CURRENT_HOUR} 时，不推微信，仅更新数据与网页）"
-            python3 output/pipeline.py --no-push
-          else
-            echo "运行模式：全流程生成并推送微信（当前北京时间 ${CURRENT_HOUR} 时）"
-            python3 output/pipeline.py
-          fi
-
-      - name: 📤 提交生成的日报
-        # 即使推送失败，只要文件生成了就提交
-        if: always()
-        run: |
-          set -euo pipefail
-          git config user.name "octopus-bot"
-          git config user.email "bot@octopus.ai"
-
-          # 通配符匹配失败不报错，兼容无日报文件的场景
-          # 留痕 JSON 必须一起提交，否则「预测留痕 / 命中率」每次都会从零开始：
-          #   hk7_forecast.json    → ◧ AI 七日港股走势分析概率（满 7 个交易日结算）
-          #   weekly_forecast.json → 🗓️ 每周量化走势预测（满 5 个交易日结算）
-          git add output/daily_report_*.html output/latest.html output/sentiment_history.json output/news_history.json output/quant_history.json output/hk7_forecast.json output/weekly_forecast.json 2>/dev/null || true
-
-          if git diff --cached --quiet; then
-            echo "无新内容，跳过提交。"
-          else
-            COMMIT_TIME=$(TZ='Asia/Macau' date +'%Y-%m-%d %H:%M')
-            git commit -m "📰 自动更新 ${COMMIT_TIME}"
-            git push origin HEAD
-          fi
+            echo "◧ 
