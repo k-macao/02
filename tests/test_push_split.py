@@ -291,6 +291,54 @@ class SplitHtmlForPushTests(unittest.TestCase):
         self.assertIn("完整日报", parts[-1])
 
 
+class StyledDeliveryTests(unittest.TestCase):
+    """推送的真实 HTML 不能悄悄退化为另一套白底纯文本风格。"""
+
+    def test_dossier_color_protection_uses_dossier_palette(self):
+        # 生成时已经使用档案暖灰；推送端二次加固不应改成归藏的 #333/#222。
+        html = ('<meta name="octopus-theme" content="dossier">'
+                '<div style="color:#3A382F">暖灰</div>'
+                '<div style="background:#F7F4EC">未设字色</div>')
+        with patch.object(pipeline, "_push_one_message", return_value=True) as send:
+            self.assertTrue(pipeline.push_to_wechat("上水日报", html, token="test-token"))
+        sent = send.call_args.args[1]
+        self.assertIn('color:#3A382F">暖灰', sent)
+        self.assertIn('background:#F7F4EC;color:#201D18">未设字色', sent)
+        self.assertNotIn('color:#333', sent)
+
+    def test_dossier_stays_dossier_above_single_message_limit(self):
+        masthead = pipeline._dossier_masthead("2026年10月4日 · 周日", "20261004", 2, 3,
+                                               "2026-10-04 19:31:04")
+        def section(n, text):
+            body = f'<div style="color:{pipeline.D_INK};">{text}</div>'
+            return pipeline.dossier_section(n, "MARKET", "市场简报", body)
+
+        html = pipeline._dossier_html_frame(
+            masthead, section("00", "甲" * 4300),
+            pipeline.PART_BREAK_MARK + section("01", "乙" * 4300),
+            "仅供参考", "20261004", "2026-10-04 19:31:04", 2, 3)
+        limit = 9000
+        self.assertGreater(len(html), limit)
+        with (patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", limit),
+              patch.object(pipeline, "_push_html_parts", return_value=True) as send_parts,
+              patch.object(pipeline, "_push_one_message") as send_one,
+              patch.object(pipeline, "_compact_html_for_push",
+                           side_effect=AssertionError("风格丢失"))):
+            self.assertTrue(pipeline.push_to_wechat("上水日报", html, token="test-token"))
+        send_one.assert_not_called()
+        sent = send_parts.call_args.args[1]
+        self.assertGreater(len(sent), 1)
+        for part in sent:
+            self.assertLessEqual(len(part), limit)
+            self.assertTrue(_balanced(part))
+            self.assertIn('name="octopus-theme" content="dossier"', part)
+            self.assertIn("AKTE", part)
+            self.assertIn(pipeline.D_TAB, part)  # 分条横幅也应与档案纸风格一致
+            self.assertNotIn("推送精简排版", part)
+        self.assertEqual("".join(sent).count("甲"), 4300)
+        self.assertEqual("".join(sent).count("乙"), 4300)
+
+
 class PushRateLimitTests(unittest.TestCase):
     """PushPlus 频率限制排队：窗口内请求数达上限时先等待，再放行。"""
 

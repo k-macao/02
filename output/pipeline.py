@@ -12644,6 +12644,14 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
                 f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
                 f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
                 f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
+    if theme == "dossier":
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_TAB}" '
+                f'style="width:100%!important;border-collapse:collapse;margin:12px 0;'
+                f'background:{D_TAB};border-top:2px solid {D_BLACK};border-bottom:1px solid {D_HAIR};'
+                f'color:{D_INK};">'
+                f'<tr><td style="padding:7px 10px;font-family:{D_MONO};font-size:11px;'
+                f'font-weight:700;color:{D_INK};line-height:1.6;">'
+                f'<span style="color:{D_RED};">■</span> AKTE · {text}</td></tr></table>')
     return (f'<table width="100%" border="0" cellpadding="0" cellspacing="0" '
             f'bgcolor="{GZ_INK}" style="width:100%!important;border-collapse:collapse;'
             f'table-layout:fixed;background:{GZ_INK};margin:0 0 8px;">'
@@ -12877,7 +12885,13 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
     if template == "html":
-        content_html = _enforce_dark_gray_font(content_html)
+        if _report_theme(content_html) == "dossier":
+            # 生成时在档案色板下做灰字保护；推送前再次保护也必须使用同一色板。
+            # 否则暖灰 #3A382F 会被改成归藏 #333，漏色容器也会补成 #222。
+            with _dossier_palette():
+                content_html = _enforce_dark_gray_font(content_html, dark_gray=D_GRAY)
+        else:
+            content_html = _enforce_dark_gray_font(content_html)
     if template == "html" and len(content_html) <= PUSHPLUS_MAX_CONTENT_CHARS:
         # 归藏简洁排版的目标：全量内容压进单条消息（一页推）
         print(f"  📄 日报 {len(content_html):,} 字 ≤ 单条上限 "
@@ -12885,21 +12899,9 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
     if template == "html" and len(content_html) > PUSHPLUS_MAX_CONTENT_CHARS:
         parts = _split_html_for_push(content_html, PUSHPLUS_MAX_CONTENT_CHARS,
                                      report_name) if PUSHPLUS_MULTIPART else None
-        if PUSHPLUS_MULTIPART:
-            compact_html = _compact_html_for_push(content_html)
-            compact_parts = None
-            if compact_html:
-                compact_parts = (_split_html_for_push(compact_html, PUSHPLUS_MAX_CONTENT_CHARS,
-                                                      report_name)
-                                 if len(compact_html) > PUSHPLUS_MAX_CONTENT_CHARS
-                                 else [compact_html])
-            # 长报表优先用「精简排版」完整送达；仅当它确实减少消息条数时才切换，
-            # 否则保留原有精美 HTML 分条，避免为了压缩而改变短报表的阅读体验。
-            if compact_parts and (not parts or len(compact_parts) < len(parts)):
-                print(f"  📚 日报 {len(content_html):,} 字；精简排版保留全文文字与链接，"
-                      f"预计由 {len(parts) if parts else '多'} 条减少至 {len(compact_parts)} 条"
-                      f"（完整精美版仍保存在日报文件中）")
-                return _push_html_parts(title, compact_parts, token=token, topic=topic)
+        # 不再为了减少微信消息条数自动改用 _compact_html_for_push：该函数只保留
+        # 纯文本/链接，丢掉 dossier、pixel 等主题的排版与颜色。超过单条上限时
+        # 按原 HTML 分条，确保手机收到的版面与 latest.html 完全同款。
         if parts:
             print(f"  📚 日报 {len(content_html):,} 字 > 单条上限 "
                   f"{PUSHPLUS_MAX_CONTENT_CHARS:,} 字 → 已尽量合并为 {len(parts)} 条"
@@ -13706,6 +13708,9 @@ def main():
 
     # --push-only 模式：推送已有文件，同样执行「当天检验」
     if args.push_only:
+        if args.theme:
+            print("⚠️ --push-only 只发送已有 HTML；--theme 不会给旧文件换肤。"
+                  "请重新生成日报后再推送。")
         push_path = newest_report_path() if args.push_only == "__LATEST__" else args.push_only
         if not push_path or not os.path.isfile(push_path):
             print(f"❌ 文件不存在: {push_path or '没有可推送的日报'}")
