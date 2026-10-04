@@ -127,19 +127,14 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           set -euo pipefail
-          git config user.name "octopus-bot"
-          git config user.email "bot@octopus.ai"
-
-          git add output/market_db/ 2>/dev/null || true
-
-          if git diff --cached --quiet; then
-            echo "无新内容，跳过提交。"
-          else
-            COMMIT_TIME=$(TZ='Asia/Macau' date +'%Y-%m-%d %H:%M')
-            git commit -m "🗄️ 市场数据库 ${COMMIT_TIME}"
-            # 日报工作流可能同时在推同一分支：被拒时 rebase 后重试（库文件是纯追加，冲突概率极低）
-            git push origin HEAD || {
-              git pull --rebase --autostash origin HEAD
-              git push origin HEAD
-            }
-          fi
+          # 日报工作流可能同时在推同一分支：被拒时由 tools/safe_push.sh 把本次改动
+          # 重放到远端最新提交之上再推（最多 5 次）。原先这里是一次性的
+          # `git pull --rebase --autostash origin HEAD`，有两个毛病：只重试一次，
+          # 且一旦 rebase 撞车就把作业留在半截 rebase 状态里、本次落库内容丢失。
+          # 库文件自带 sha256 自校验，不做内容级合并：整份以本次为准（哈希才自洽），
+          # 同日三档本来就由本作业按先后顺序累加，concurrency 也保证不会自己撞自己。
+          COMMIT_TIME=$(TZ='Asia/Macau' date +'%Y-%m-%d %H:%M')
+          bash tools/safe_push.sh \
+            --branch "${GITHUB_REF_NAME:-main}" \
+            --message "🗄️ 市场数据库 ${COMMIT_TIME}" \
+            -- output/market_db/
