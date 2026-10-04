@@ -120,9 +120,10 @@ class SectionUnitTests(unittest.TestCase):
         units = pipeline._split_section_units([_section("01", "行情速览", "<p>甲</p>")])
         header, title, content = units[0]
         self.assertEqual(title, "行情速览")
-        # guizang 版式：栏目头以标题行结尾，正文自带闭合外层 div（头 + 正文才是完整栏目）
-        self.assertTrue(header.endswith("</h2>"))
-        self.assertTrue(content.startswith("<div"))
+        # guizang 版式：栏目头表格化；正文段落另起表格，外层 div 在正文末闭合。
+        self.assertTrue(header.endswith("</table>"))
+        self.assertIn("</h2>", header)
+        self.assertTrue(content.startswith("<table"))
         self.assertTrue(content.endswith("</div>"))
         self.assertNotIn(pipeline.SECTION_BODY_MARK, header + content)
 
