@@ -11807,7 +11807,7 @@ def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="width:100%!important;border-collapse:collapse;background:{D_BLACK};">'
         f'<tr><td style="padding:5px 8px;font-family:{D_MONO};font-size:11px;font-weight:700;'
-        f'letter-spacing:0.22em;color:{D_PAPER};">OCTOPUS · TAGES-AKTE</td>'
+        f'letter-spacing:0.22em;color:{D_PAPER};">OCTOPUS · Fresh-keeping</td>'
         f'<td align="right" style="padding:5px 8px;font-family:{D_MONO};font-size:10px;'
         f'letter-spacing:0.14em;color:{D_PAPER};">'
         f'<span style="background:{D_GREEN};color:{D_INK_STRONG};padding:1px 6px;">'

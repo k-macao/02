@@ -3806,7 +3806,7 @@ class DossierThemeTests(unittest.TestCase):
              patch.object(pipeline._quant.render, "LITE", False):
             html = self._html()
         self.assertIn('name="octopus-theme" content="dossier"', html)
-        self.assertIn("OCTOPUS · TAGES-AKTE", html)
+        self.assertIn("OCTOPUS · Fresh-keeping", html)
         self.assertIn("ENDE DER AKTE", html)
         self.assertNotIn(pipeline.SECTION_TITLE_SHORT_CARD, html)
 
@@ -3814,7 +3814,7 @@ class DossierThemeTests(unittest.TestCase):
     def test_german_file_chrome(self):
         html = self._html()
         # 卷宗封面：刊名条 + 档号 + 档案元信息表
-        self.assertIn("OCTOPUS · TAGES-AKTE", html)
+        self.assertIn("OCTOPUS · Fresh-keeping", html)
         self.assertIn("AKT-20260801", html)
         self.assertIn("DATE · 日期", html)
         self.assertIn("QUELLEN · 当天源", html)
