@@ -148,7 +148,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_clist": {
         "name": "东方财富 榜单列表（clist）",
         "used_by": ("热门榜单", "【及时秋刀鱼】AI 行情复盘·板块热力",
-                    "每日量化策略·行业列表", "资金流动性·港股成交榜",
+                    "资金流动性·港股成交榜",
                     "【滚滚翻车鱼】板块轮动量化策略·A股概念库"),
         "primary": ("东方财富 push2", _em(EM_PUSH2_HOSTS[0], "/api/qt/clist/get")),
         "backups": (
@@ -160,7 +160,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_kline": {
         "name": "东方财富 日K（push2his）",
         "used_by": ("【及时秋刀鱼】AI 行情复盘·上日成交额",
-                    "每日量化策略·行业指数日线", "日线序列备用",
+                    "【巡游旗鱼】申万一级行业轮动·板块指数日K备用", "日线序列备用",
                     "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线备用"),
         "primary": ("东方财富 push2his", _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get")),
         "backups": (
@@ -168,6 +168,23 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
             ("东方财富 63.push2his（同格式镜像）", _em(EM_PUSH2HIS_HOSTS[2], "/api/qt/stock/kline/get"), True),
         ),
         "note": "",
+    },
+    "sw_industry_index": {
+        "name": "申万一级行业指数日线（31 个 · 东财板块指数 / 申万官方）",
+        "used_by": ("【巡游旗鱼】申万一级行业轮动",),
+        "primary": ("东方财富 push2his 板块指数日K（secid=90.BKxxxx）",
+                    _em(EM_PUSH2HIS_HOSTS[0], "/api/qt/stock/kline/get")),
+        "backups": (
+            ("东方财富 91.push2his（同格式镜像）",
+             _em(EM_PUSH2HIS_HOSTS[1], "/api/qt/stock/kline/get"), True),
+            ("申万宏源研究所 官方指数发布（801xxx，独立源）",
+             "https://www.swsresearch.com/institute-sw/api/index_publish/trend/?swindexcode={sw_code}&period=DAY",
+             False),
+        ),
+        "note": "股票池为固定表 octopus_quant.industry_rotation.SW_L1_SECTORS（申万一级 801xxx ↔ 东财 BKxxxx，"
+                "2026-09-29 逐个按 kline 返回的公司名核对），不再依赖 clist 大页列表（境外出口被 502 拒绝）；"
+                "官方源适配器 industry_rotation.fetch_sw_series，整段历史一次返回且通常滞后一个交易日，"
+                "只在东财三主机都取不到该行业时逐行业兜底，同一行业绝不混源",
     },
     "em_datacenter": {
         "name": "东方财富 数据中心报表（沪深港通成交 / 财经日历）",
