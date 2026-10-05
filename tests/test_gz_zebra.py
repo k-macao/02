@@ -102,13 +102,16 @@ class ZebraBandTests(unittest.TestCase):
                 headlines=[{"title": f"头条{i}", "source": "测试源",
                             "published_cst": f"2026-09-30 10:0{i}"} for i in range(4)]),
         }
-        for theme, expected_paper in (("guizang", PAPER), ("dossier", pipeline.D_PAPER)):
+        for theme, expected_paper, expected_zebra in (
+                ("guizang", PAPER, pipeline.GZ_ZEBRA),
+                ("dossier", pipeline.D_PAPER, pipeline.D_ZEBRA),
+                # 2026-10-05 起的默认暗色主题：卡片 #2C2C2E / 卡内条纹 #232325
+                ("forum", pipeline.F_CARD, pipeline.F_STRIPE)):
             with self.subTest(theme=theme):
                 html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930",
                                                 theme=theme)
                 self.assertIn(f'bgcolor="{expected_paper}"', html)
-                self.assertIn(f'bgcolor="{pipeline.GZ_ZEBRA}"' if theme == "guizang"
-                              else f'bgcolor="{pipeline.D_ZEBRA}"', html)
+                self.assertIn(f'bgcolor="{expected_zebra}"', html)
                 # 纯内联样式：不引入 <style> / class（微信 PushPlus 清洗安全）
                 self.assertNotIn("<style", html)
                 self.assertNotIn('class="', html)

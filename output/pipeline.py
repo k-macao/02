@@ -331,6 +331,7 @@ import os
 import sys
 import time
 import argparse
+import colorsys
 import random
 import re
 import glob
@@ -573,15 +574,18 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 #   图标在白底独立显示，正文与次要文字保持纯黑 / 深灰；不依赖颜色区分涨跌。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
 # pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
-# dossier —— 2026-10-03 起默认主题：德国文件 / 档案风 + 包豪斯几何图标
-#   （荧光绿高亮标签、2px 黑粗线、等宽卷宗号、鲜红印章、圆/三角/方几何图标）：
+# dossier —— 2026-10-03 起的德国文件 / 档案风 + 包豪斯几何图标（可切换回退）：
 #   浅灰底 #F1F1F1 + 黑标题 + 深灰正文 #333，突出色只有 荧光绿 #39FF14 / 鲜红 #FF1F1F。
-PUSH_THEMES = ("guizang", "pixel", "dossier")
-DEFAULT_PUSH_THEME = "dossier"
+# forum   —— 2026-10-05 起默认主题：暗色社区仪表盘（Dark Mode Community Dashboard）：
+#   深灰底 #1C1C1E + 卡片 #2C2C2E + 1px rgba(255,255,255,0.08) 描边与圆角，
+#   正文近白 #F2F2F7 / 次要中灰 #A1A1AA，彩色微型图标（黄闪电 / 红火焰 / 绿行情 /
+#   紫机器人 / 橙文档 / 青日历），区块标题为「大写 + 拉开字距」微标题。
+PUSH_THEMES = ("guizang", "pixel", "dossier", "forum")
+DEFAULT_PUSH_THEME = "forum"
 
 
 def _resolve_push_theme(name=None):
-    """归一化推送主题：空 / 非法值一律回落到默认主题 dossier。"""
+    """归一化推送主题：空 / 非法值一律回落到默认主题 forum。"""
     theme = name if name is not None else os.environ.get("OCTOPUS_PUSH_THEME", "")
     theme = str(theme or "").strip().lower()
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
@@ -11729,8 +11733,12 @@ def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
 
 
 def _is_guizang_like(kit):
-    """guizang 与 dossier 同属浅色「研报系」版面：共用同一组取色分支。"""
-    return kit is GUIZANG_KIT or kit is DOSSIER_KIT
+    """guizang / dossier / forum 共用同一套研报渲染器与取色分支。
+
+    dossier 是浅色档案版，forum 是暗色社区版：两者的内容块都由 guizang 渲染器
+    产出，只是渲染期间由各自的 palette 上下文换掉 GZ_* 全局色。
+    """
+    return kit is GUIZANG_KIT or kit is DOSSIER_KIT or kit is FORUM_KIT
 
 
 DOSSIER_KIT = _RenderKit(
@@ -11904,6 +11912,393 @@ def _dossier_html_frame(masthead, first_section, content_html, footer_text,
 </html>"""
 
 
+# ============================================================
+# 论坛暗色主题 forum（2026-10-05 起默认）
+# ------------------------------------------------------------
+# 设计语言（用户提供的暗色社区仪表盘参考稿）：
+#  · 底色 #1C1C1E（页面画布）/ #2C2C2E（卡片容器）/ #232325（卡内条纹）
+#    / #3A3A3C（控件与内嵌块）
+#  · 1px rgba(255,255,255,0.08) 描边 + 8~14px 圆角，内容一律装进卡片
+#  · 正文近白 #F2F2F7、标题纯白 #FFFFFF、次要信息中灰 #A1A1AA
+#  · 彩色微型图标砖：黄 ⚡ / 红 🔥 / 绿 📈 / 紫 🤖 / 橙 📄 / 青 📅
+#  · 区块小标题「大写 + 拉开字距」（tracking-wider）；按钮 / 胶囊用
+#    「顶亮渐变 + 浅色内描边 + 柔和投影」做出轻微立体按压感
+#  · 所有可见文字在 #1C1C1E / #2C2C2E 上都 ≥ WCAG AA 4.5:1（tests 看守）
+# 实现：内容块复用 guizang 研报渲染器（同一套 _collect_report_parts），
+#       渲染期间由 _forum_palette 上下文整体换色；刊头 / 栏目卡 / 尾注为本主题专属。
+#       纯内联样式，无 <style> / class / 远程图片；推送分条与推送门禁逻辑完全不变。
+# ============================================================
+F_BG = "#1C1C1E"           # 页面画布（深灰，不是纯黑）
+F_CARD = "#2C2C2E"         # 卡片容器
+F_STRIPE = "#232325"       # 卡内条纹 / 顶栏（比卡片深一档）
+F_CONTROL = "#3A3A3C"      # 控件块 / 顶亮渐变的高光端
+F_HAIR_SOLID = "#3A3A3C"   # 1px 描边的纯色兜底（不支持 rgba 的客户端）
+F_HAIR = "rgba(255,255,255,0.08)"   # 规范要求的 1px 细描边
+F_INK = "#F2F2F7"          # 正文近白
+F_INK_STRONG = "#FFFFFF"   # 标题纯白
+F_MUTED = "#A1A1AA"        # 次要信息中灰（卡片上 5.4:1）
+F_ON_FILL = "#1C1C1E"      # 亮色填充块上的深色字（配黄 / 绿 / 青底）
+F_ACCENT = "#FFD60A"       # 主强调：闪电黄
+F_ACCENT_DEEP = "#FFC400"
+F_RED = "#FF6B6B"          # 落字红（卡片上 5.0:1）
+F_RED_FILL = "#FF453A"     # 填充红：图标 / 描边（只做填充，不落小字）
+F_GREEN = "#32D74B"
+F_PURPLE = "#D8B4FE"       # 落字紫（卡片上 7.9:1）
+F_PURPLE_FILL = "#BF5AF2"  # 填充紫：图标（只做填充）
+F_ORANGE = "#FF9F0A"
+F_CYAN = "#64D2FF"
+F_BLUE = "#409CFF"         # 链接 / 交互蓝
+F_BLUE_DEEP = "#6FB4FF"
+F_WASH = "#2E2718"         # 结论 / AI 块：深琥珀底（配黄强调）
+# 暗色主题允许出现的文字色（其余一律由 _enforce_dark_mode_font 归一化）
+FORUM_TEXT_ALLOWED = (
+    F_INK, F_INK_STRONG, F_MUTED, F_ON_FILL, F_ACCENT, F_ACCENT_DEEP,
+    F_RED, F_GREEN, F_PURPLE, F_ORANGE, F_CYAN, F_BLUE, F_BLUE_DEEP,
+)
+# 字栈：系统无衬线栈（Inter / SF Pro / 苹方优先，不加载远程字体）；等宽用于编号与微标题
+F_FONT = ("-apple-system,BlinkMacSystemFont,'Inter','SF Pro Text','PingFang SC',"
+          "'Hiragino Sans GB','Microsoft YaHei',sans-serif")
+F_MONO = "'SF Mono',Menlo,Consolas,'Courier New',monospace"
+
+# 渲染期间临时替换的 GZ_* 全局色变量（guizang 渲染器在调用时读全局 → 整体换色）
+_FORUM_GZ_SWAP = {
+    "GZ_PAPER": F_CARD,
+    "GZ_PAPER_TINT": F_CARD,
+    "GZ_KLEIN": F_ACCENT,
+    "GZ_KLEIN_DEEP": F_ACCENT_DEEP,
+    "GZ_KLEIN_WASH": F_WASH,
+    "GZ_INK": F_INK,
+    "GZ_INK_STRONG": F_INK_STRONG,
+    "GZ_DARK_GRAY": F_MUTED,
+    "GZ_META": F_MUTED,
+    "GZ_FAINT": F_MUTED,
+    "GZ_HAIR": F_HAIR_SOLID,
+    "GZ_HAIR_SOFT": "#323234",
+    "GZ_HAIR_INK": F_HAIR_SOLID,
+    "GZ_ZEBRA": F_STRIPE,
+    "GZ_CREAM": F_INK,
+    "GZ_INK_TINT": F_INK,
+    "GZ_UP": F_GREEN, "GZ_DOWN": F_RED, "GZ_FLAT": F_MUTED,
+    "GZ_UP_INK": F_GREEN, "GZ_DOWN_INK": F_RED, "GZ_FLAT_INK": F_MUTED,
+    "GZ_WARN": F_ORANGE, "GZ_WARN_INK": F_ORANGE,
+    "GZ_PRIMARY": F_BLUE, "GZ_PRIMARY_HOVER": F_BLUE_DEEP,
+    "GZ_PRIMARY_LIGHT": F_CONTROL,
+    "GZ_NEON": F_PURPLE,
+    "GZ_FONT": F_FONT,
+    "GZ_SERIF": F_FONT,
+    "GZ_SANS": F_FONT,
+    "GZ_MONO": F_MONO,
+}
+
+
+class _forum_palette:
+    """渲染 forum 日报期间临时换 GZ_* 色变量（退出时逐位还原）。
+
+    与 _dossier_palette 同构：MACD 量化表等历史实现按 GUIZANG_KIT 渲染，
+    kit 的 ok / warn / bad 三个色槽必须一起换，否则浅色研报的克莱因蓝 /
+    深灰会漏进暗色卡片。由 tests/test_pipeline.py::ForumThemeTests 看守。
+    """
+
+    _KIT_SLOTS = ("ok_color", "warn_color", "bad_color")
+    _KIT_COLORS = {"ok_color": F_GREEN, "warn_color": F_ORANGE, "bad_color": F_RED}
+
+    def __enter__(self):
+        self._saved = {k: globals()[k] for k in _FORUM_GZ_SWAP}
+        for k, v in _FORUM_GZ_SWAP.items():
+            globals()[k] = v
+        self._saved_kit = {}
+        for kit in (GUIZANG_KIT, FORUM_KIT):
+            self._saved_kit[id(kit)] = (kit, {s: getattr(kit, s) for s in self._KIT_SLOTS})
+            for slot, value in self._KIT_COLORS.items():
+                setattr(kit, slot, value)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for k, v in self._saved.items():
+            globals()[k] = v
+        for kit, slots in self._saved_kit.values():
+            for slot, value in slots.items():
+                setattr(kit, slot, value)
+        return False
+
+
+# 彩色微型图标：kicker → (字形, 颜色)。字形用系统 emoji / 几何符号，不用图片与 SVG。
+FORUM_ICONS = {
+    "AI DIGEST": ("⚡", F_ACCENT),          # 闪电：速览，一眼看完
+    "FORECAST": ("🔮", F_PURPLE),           # 紫色：预判 / AI
+    "SUMMARY": ("📌", F_ORANGE),
+    "SHORT CARD": ("⚡", F_ACCENT),
+    "MARKET REVIEW": ("📈", F_GREEN),       # 绿色：行情
+    "WEEKLY FORECAST": ("🗓", F_CYAN),
+    "QUANT FORECAST": ("🤖", F_PURPLE),  # 紫色机器人：量化
+    "HK PROBABILITY": ("🎲", F_PURPLE),
+    "LIQUIDITY FLOW": ("💧", F_CYAN),
+    "SECTOR ROTATION": ("🌀", F_ORANGE),
+    "INDUSTRY ROTATION": ("🧭", F_ORANGE),
+    "ECON CALENDAR": ("📅", F_CYAN),
+    "POLICY SHOCK": ("📄", F_ORANGE),       # 橙色文档：政策
+    "DATA AUDIT": ("✅", F_GREEN),
+    "TREND TRACKING": ("📊", F_GREEN),
+    "STRATEGY READ": ("🧮", F_PURPLE),
+    "HK QUOTES": ("🏦", F_CYAN),
+    "GLOBAL HEADLINES": ("🌏", F_CYAN),
+    "EASTMONEY WIRE": ("📰", F_ORANGE),
+    "NEWS SENTIMENT": ("🔥", F_RED),   # 红色火焰：热度
+    "QUANT STRATEGY": ("🤖", F_PURPLE),
+    "QUANT POLICY": ("📄", F_ORANGE),
+    "FED TREND": ("💵", F_GREEN),
+    "GEO TREND": ("🌏", F_CYAN),
+    "AI READ": ("🤖", F_PURPLE),
+    "HK GURU CHANNELS": ("📺", F_RED),
+}
+# 图标砖配色：主色 → (砖底, 砖描边)，深色低饱和，衬托高饱和字形
+FORUM_TILE_TINT = {
+    F_ACCENT: ("#2E2712", "#5C4B10"),
+    F_RED_FILL: ("#2E1B1C", "#5C2A2C"),
+    F_RED: ("#2E1B1C", "#5C2A2C"),
+    F_GREEN: ("#152A1B", "#22522F"),
+    F_PURPLE_FILL: ("#291D33", "#4B2F61"),
+    F_PURPLE: ("#291D33", "#4B2F61"),
+    F_ORANGE: ("#2E2413", "#5C3F12"),
+    F_CYAN: ("#132A32", "#1F4C5C"),
+}
+
+
+def forum_icon(kicker_en):
+    """彩色微型图标砖：圆角小方块 + 高饱和字形（纯 Unicode，无图片 / SVG）。"""
+    glyph, color = FORUM_ICONS.get(str(kicker_en or "").strip().upper(), ("●", F_ACCENT))
+    wash, border = FORUM_TILE_TINT.get(color, ("#2E2712", "#5C4B10"))
+    return (f'<span style="display:inline-block;width:22px;height:22px;text-align:center;'
+            f'border-radius:7px;background:{wash};border:1px solid {border};'
+            f'color:{color};font-size:12px;vertical-align:middle;">{glyph}</span>')
+
+
+def forum_stamp(text="非投资建议"):
+    """暗色胶囊标签（入门版不出过程性标签）。"""
+    if PLAIN():
+        return ""
+    return (f'<span style="display:inline-block;padding:1px 9px;border-radius:999px;'
+            f'border:1px solid {F_HAIR};background:{F_STRIPE};color:{F_MUTED};'
+            f'font-size:10px;line-height:17px;">{_esc(text)}</span>')
+
+
+def forum_chip(label, value, accent=F_INK_STRONG):
+    """顶亮渐变胶囊：左小写标签（拉开字距）+ 右高对比数值，轻微立体按压感。"""
+    return (f'<span style="display:inline-block;margin:5px 6px 0 0;padding:3px 10px;'
+            f'border-radius:9px;border:1px solid {F_HAIR};background:{F_STRIPE};'
+            f'background:linear-gradient(180deg,{F_CONTROL} 0%,{F_STRIPE} 100%);'
+            f'box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 2px rgba(0,0,0,0.45);'
+            f'color:{F_MUTED};font-size:11px;line-height:18px;white-space:nowrap;">'
+            f'<span style="color:{F_MUTED};font-family:{F_MONO};font-size:10px;'
+            f'letter-spacing:0.1em;">{_esc(label)}</span> '
+            f'<b style="color:{accent};">{_esc(value)}</b></span>')
+
+
+def forum_section(num, kicker_en, title, content, badge_html="", caption=""):
+    """Forum 栏目卡：彩色微图标 + 大写微标题（字距拉开）+ 纯白标题 → 暗色卡片正文。
+
+    保留 <h2> 标题结构：分条推送的「承接上条」横幅靠它取栏目名，不能省。
+    """
+    content = content or ""
+    if content.lstrip().startswith("<tr"):
+        content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                   f'style="width:100%!important;border-collapse:collapse;'
+                   f'font-size:{GZ_FS_TABLE}px;color:{F_INK}">{content}</table>')
+    content = _gz_zebra_bands(content)
+    meta_bits = [x for x in (badge_html, caption) if x]
+    meta = (f'<div style="color:{F_MUTED};font-size:{GZ_FS_META}px;padding-top:5px">'
+            f'{" · ".join(meta_bits)}</div>') if meta_bits else ""
+    # 微标题行与标题同表不同行：图标砖 + 大写 kicker 居左，编号胶囊居右，
+    # 标题行整行合并——既少一层表、也让 h2 始终落在表格内（微信排版稳定）。
+    head = (
+        f'<div style="margin-top:14px;border:1px solid {F_HAIR};border-radius:14px;'
+        f'background:{F_CARD};color:{F_INK};overflow:hidden;">'
+        f'<table width="100%" style="border-collapse:collapse;color:{F_INK};">'
+        f'<tr><td style="padding:12px 0 0 14px;color:{F_MUTED};">'
+        f'{forum_icon(kicker_en)}'
+        f'<span style="padding-left:8px;font-family:{F_MONO};font-size:10px;'
+        f'letter-spacing:0.18em;color:{F_MUTED};">{_esc(kicker_en)}</span>'
+        + f'</td><td align="right" style="padding:12px 14px 0 0;color:{F_MUTED};">'
+        f'<span style="font-family:{F_MONO};font-size:10px;color:{F_MUTED};'
+        f'letter-spacing:0.08em;">#{num}</span>'
+        f'</td></tr>'
+        f'<tr><td colspan="2" style="padding:0 14px 13px;color:{F_INK};">'
+        f'<h2 style="margin:8px 0 0;font-size:{GZ_FS_SECTION}px;font-weight:700;'
+        f'color:{F_INK_STRONG};">{_esc(title)}</h2>'
+        f'{meta}</td></tr></table>'
+    )
+    body = f'{content}</div>'
+    return head + SECTION_BODY_MARK + body
+
+
+def _forum_masthead(date_display, date_str, today_n, total, generated_at):
+    """Forum 刊头（社区面板首页）：状态条（LIVE + 日期）+ 大标题 + 分段控件式元信息。"""
+    top = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_STRIPE}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{F_STRIPE};'
+        f'color:{F_MUTED};">'
+        f'<tr><td style="padding:8px 14px;color:{F_MUTED};font-family:{F_MONO};font-size:10px;'
+        f'font-weight:700;letter-spacing:0.22em;">OCTOPUS · MARKET QUEST</td>'
+        f'<td align="right" style="padding:7px 12px 7px 0;color:{F_MUTED};">'
+        f'<span style="display:inline-block;padding:1px 8px;border-radius:999px;'
+        f'border:1px solid #22522F;background:#152A1B;color:{F_GREEN};'
+        f'font-family:{F_MONO};font-size:10px;letter-spacing:0.1em;line-height:17px;">'
+        f'● LIVE</span></td></tr></table>')
+    icon_block = (f'<span style="color:{F_ACCENT};font-size:14px;">⚡</span>'
+                  f'<span style="color:{F_RED};font-size:13px;padding-left:3px;">🔥</span>'
+                  f'<span style="color:{F_GREEN};font-size:12px;padding-left:3px;">▲</span>')
+    stamp = forum_stamp()
+    hero = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_CARD}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{F_CARD};'
+        f'color:{F_INK};">'
+        f'<tr><td valign="top" style="padding:14px 14px 13px;color:{F_INK};">'
+        f'<h1 style="margin:0;font-size:{GZ_FS_DISPLAY}px;font-weight:800;'
+        f'color:{F_INK_STRONG};letter-spacing:0.01em;line-height:1.3;">'
+        f'{_esc(REPORT_TITLE)} {icon_block}</h1>'
+        f'<div style="color:{F_MUTED};font-size:{GZ_FS_META}px;line-height:1.7;'
+        f'padding-top:6px;">{_esc(REPORT_TAGLINE)} · 更新于 {_esc(generated_at)}'
+        + (f' {stamp}' if stamp else '')
+        + f'</div>'
+        f'<div style="padding-top:6px;">'
+        + forum_chip("DATE", str(date_display))
+        + f'<span style="padding-left:4px;color:{F_MUTED};font-size:11px;">'
+        f'SOURCES <b style="color:{F_GREEN};">{today_n}/{total}</b></span>'
+        + f'</div></td></tr></table>')
+    return (
+        f'<div style="border:1px solid {F_HAIR_SOLID};border:1px solid {F_HAIR};'
+        f'border-radius:14px;background:{F_CARD};color:{F_INK};overflow:hidden;">'
+        f'{top}{hero}</div>')
+
+
+def _forum_footer(footer_text):
+    """Forum 尾注：一行符号图例 + 免责 / 数据来源说明（收尾归档卡片）。"""
+    def legend(text, color):
+        return (f'<span style="display:inline-block;margin-right:10px;'
+                f'color:{color};font-size:11px;white-space:nowrap;">{text}</span>')
+    legend_html = (legend(f"▲ 涨", F_GREEN) + legend(f"▼ 跌", F_RED)
+                   + legend(f"■ 平", F_MUTED) + legend("🤖 AI 合成", F_PURPLE))
+    return (
+        f'<div style="margin-top:14px;border:1px solid {F_HAIR_SOLID};'
+        f'border:1px solid {F_HAIR};border-radius:14px;background:{F_CARD};'
+        f'color:{F_INK};overflow:hidden;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_CARD}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{F_CARD};'
+        f'color:{F_INK};">'
+        f'<tr><td valign="top" style="padding:12px 14px 30px;color:{F_INK};">'
+        f'<div style="font-family:{F_MONO};font-size:10px;font-weight:700;'
+        f'letter-spacing:0.22em;color:{F_MUTED};">SESSION END · 归档结束</div>'
+        f'<div style="padding-top:4px;">{legend_html}</div>'
+        f'<div style="color:{F_MUTED};font-size:11px;line-height:1.8;padding-top:8px;">'
+        f'{footer_text}</div>'
+        f'</td></tr></table></div>')
+
+
+def generate_report_forum(data, date_display, date_str, sentiment_history=None,
+                          policy_result=None, news_corpus=None):
+    """Forum 排版（暗色社区仪表盘）：状态条刊头 + 卡片栏目 + 分段控件尾注。
+
+    内容块与 guizang / dossier 同源（同一套研报渲染器），只在 _forum_palette
+    渲染期间换成 暗底 / 卡片 / 近白正文 / 彩色图标；栏目顺序、分条标记、
+    推送门禁全部不变。整页拼装与暗色字色归一都在换色期间完成。
+    """
+    with _forum_palette():
+        parts = _collect_report_parts(data, FORUM_KIT,
+                                      sentiment_history=sentiment_history,
+                                      date_str=date_str,
+                                      policy_result=policy_result,
+                                      news_corpus=news_corpus)
+        sections = parts["sections"]
+        content_html = "".join(
+            PART_BREAK_MARK + FORUM_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+            for i, (kicker, title, content, badge, caption) in enumerate(sections[1:], 1))
+        first_section = FORUM_KIT.section("00", *sections[0])
+        total = parts["total"]
+        today_n = parts["today_n"]
+        generated_at = _now()
+        footer_text = (
+            "仅供参考，非投资建议 · 数据来自公开来源，未抓到内容的栏目自动缺席。"
+            if PLAIN() else
+            f'暗色社区排版（Forum） · 画布 {F_BG} + 卡片 {F_CARD} + 1px {F_HAIR} 描边 · '
+            f'正文 {F_INK} / 次要 {F_MUTED} · 涨 ▲ 绿、跌 ▼ 红，符号与颜色双编码<br>\n'
+            '数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。')
+        masthead = _forum_masthead(date_display, date_str, today_n, total, generated_at)
+        html = _forum_html_frame(masthead, first_section, content_html, footer_text,
+                                 date_str, generated_at, today_n, total)
+        return _enforce_dark_mode_font(html, bg=F_BG, ink=F_INK, muted=F_MUTED)
+
+
+def _forum_html_frame(masthead, first_section, content_html, footer_text,
+                      date_str, generated_at, today_n, total):
+    """Forum 整页外壳（纯内联样式；深灰画布 + 卡片 + 分条标记 + 尾注）。"""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark only">
+<meta name="octopus-report-date" content="{date_str}">
+<meta name="octopus-generated-at" content="{generated_at}">
+<meta name="octopus-today-sources" content="{today_n}">
+<meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="forum">
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
+<title>{REPORT_TITLE}</title>
+</head>
+<body bgcolor="{F_BG}" style="margin:0;padding:0;background:{F_BG};color:{F_INK};font-family:{F_FONT};font-size:{GZ_FS_BODY}px;line-height:1.7;color-scheme:dark;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:18px 14px 0;background:{F_BG};color:{F_INK};font-family:{F_FONT};font-size:{GZ_FS_BODY}px;line-height:1.7;color-scheme:dark;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+
+{masthead}
+
+{PART_BREAK_MARK}{first_section}
+<div id="report"></div>
+{content_html}
+
+{DOC_FOOT_MARK}
+{_forum_footer(footer_text)}
+
+</div>
+</body>
+</html>"""
+
+
+FORUM_KIT = _RenderKit(
+    market_section=gz_market_section,
+    market_review=gz_market_review,
+    hk_quotes_block=gz_hk_quotes_block,
+    channel_block=gz_channel_block,
+    headline_row=gz_headline_row,
+    em_news_row=gz_em_news_row,
+    item_row=gz_item_row,
+    rows=gz_rows,
+    note=gz_note,
+    alert=gz_alert,
+    status_footer=gz_status_footer,
+    source_badge=lambda item: gz_source_badge(item),
+    ai_badge=lambda: gz_badge("AI 合成", "ai"),
+    ai_block=gz_ai_analysis_block,
+    sentiment_block=gz_sentiment_block,
+    sentiment_empty_block=gz_sentiment_empty_block,
+    senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
+    policy_block=gz_policy_block,
+    panorama_block=gz_panorama_block,
+    calendar_block=lambda res, date_str=None: gz_calendar_block(res, date_str=date_str),
+    trend_topic_block=gz_trend_topic_block,
+    # ---- 量化栏目需要的排版原语（注入给 octopus_quant.render）----
+    esc=_esc,
+    table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
+    sub=gz_subsection,
+    # meter 的字色在调用时取当前（已换色的）全局，避免默认参数固化旧色
+    meter=lambda value, maximum: gz_meter(value, maximum, cells=5,
+                                          lit=GZ_KLEIN, off=GZ_FAINT),
+    badge=lambda text, kind="ok": gz_badge(text, kind),
+    section=forum_section,
+    kv=gz_kv_table,
+    trend=gz_trend_badge,
+    ok_color=F_GREEN, warn_color=F_ORANGE, bad_color=F_RED,
+)
+
+
 def _harden_wechat_table_widths(html):
     """把 ``width=100%`` 同步写进内联 style，防止微信把日报压成半屏。
 
@@ -11985,18 +12380,132 @@ def _enforce_dark_gray_font(html, dark_gray=GZ_DARK_GRAY):
     return _BLOCK_STYLE_TAG_RE.sub(_ensure_block_color, html)
 
 
+def _rel_lum(hex_color):
+    """WCAG 相对亮度（支持 #rgb / #rrggbb；非法值按黑处理）。"""
+    h = str(hex_color or "").lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return 0.0
+    try:
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return 0.0
+
+    def _f(v):
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * _f(r) + 0.7152 * _f(g) + 0.0722 * _f(b)
+
+
+def _contrast_ratio(hex_a, hex_b):
+    """两色 WCAG 对比度（1.0 ~ 21.0）。"""
+    la, lb = _rel_lum(hex_a), _rel_lum(hex_b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+# 色相吸附表：任意历史彩色字都归到这七支主题强调色里最接近的一支（色相距离最近）。
+FORUM_HUE_SNAP = (
+    (F_RED, 0.0),        # 红
+    (F_ORANGE, 0.09),    # 橙
+    (F_ACCENT, 0.14),    # 黄
+    (F_GREEN, 0.375),    # 绿
+    (F_CYAN, 0.533),     # 青
+    (F_BLUE, 0.583),     # 蓝
+    (F_PURPLE, 0.764),   # 紫
+)
+
+
+def _hue_distance(a, b):
+    """两色相的最短圆周距离（0 ~ 0.5）。"""
+    d = abs(a - b) % 1.0
+    return min(d, 1.0 - d)
+
+
+def _dark_text_color_for(hex_color, bg=F_BG, ink=F_INK, muted=F_MUTED):
+    """把任意字色归一到暗色主题色板：灰阶落到近白 / 中灰，彩色按色相吸附强调色。
+
+    暗底上不存在「看不清」的余地：历史浅色主题的深灰 #222~#555、克莱因蓝
+    #002FA7、荧光绿 #39FF14 等都会被收进主题色板（近白、中灰或七支强调色），
+    保证整页只用一套颜色，且任何一支在 #1C1C1E 与 #2C2C2E 上都 ≥ 4.5:1。
+    """
+    h = str(hex_color or "").lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return ink
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return ink
+    if max(r, g, b) - min(r, g, b) <= 18:              # 灰阶
+        lum = _rel_lum(hex_color)
+        if lum >= 0.9:                                 # 纯白系：就是标题白
+            return F_INK_STRONG
+        return muted if lum >= 0.16 else ink           # 中亮 → 次要灰；偏暗 → 近白
+    hue = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)[0]
+    return min(FORUM_HUE_SNAP, key=lambda item: _hue_distance(hue, item[1]))[0]
+
+
+def _enforce_dark_mode_font(html, bg=F_BG, ink=F_INK, strong=F_INK_STRONG,
+                            muted=F_MUTED, allowed=None):
+    """暗色主题版「字色保护」：把每个内联 `color:` 归一到暗色主题可用色板。
+
+    1) 已在主题色板（allowed）里的字色原样保留；其余一律改写——灰阶按亮度落到
+       近白 / 中灰，彩色保持色相提亮到暗底上 ≥ 4.5:1，避免历史浅色主题的深灰、
+       克莱因蓝、浅灰小字落进暗色卡片后「消失」或「发糊」；
+    2) 为带内联 style 却没写 `color:` 的块级标签（div/table/section/p/h1/h2/small）
+       补齐前景色，保证 PushPlus `v-html` 剥离 <body> 后每个文本节点都有显式颜色。
+    仅改写 / 补齐文字前景色，不触碰 background-color 与 border 颜色。
+    """
+    if not html:
+        return html
+    allowed_set = {str(c).upper() for c in (allowed or FORUM_TEXT_ALLOWED)}
+    cache = {}
+
+    def _fix(match):
+        color = match.group(2)
+        key = color.upper()
+        if key in allowed_set:
+            return match.group(0)
+        rep = cache.get(key)
+        if rep is None:
+            rep = _dark_text_color_for(color, bg=bg, ink=ink, muted=muted)
+            cache[key] = rep
+        return f"{match.group(1)}{rep}"
+
+    html = _CSS_COLOR_PROP_RE.sub(_fix, html)
+
+    def _ensure_block_color(match):
+        style = match.group("style")
+        if re.search(r'(?<![-\w])color\s*:', style, re.I):
+            return match.group(0)
+        tag = match.group("tag").lower()
+        fallback = strong if tag in ("h1", "h2") else (muted if tag == "small" else ink)
+        sep = "" if (not style or style.rstrip().endswith(";")) else ";"
+        return f"{match.group(1)}{style}{sep}color:{fallback}{match.group('q')}"
+
+    return _BLOCK_STYLE_TAG_RE.sub(_ensure_block_color, html)
+
+
 def generate_report(data, date_display, date_str, theme=None, sentiment_history=None,
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
-    theme: "dossier"（默认 · 德国文件档案风 + 包豪斯几何）/ "guizang"（简洁白底研报）
-    / "pixel"（旧版复古像素）。
+    theme: "forum"（默认 · 暗色社区仪表盘）/ "dossier"（德国文件档案风 + 包豪斯几何）
+    / "guizang"（简洁白底研报）/ "pixel"（旧版复古像素）。
     sentiment_history: 跨日情绪基线（新闻情绪用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
     """
     theme = _resolve_push_theme(theme)
-    if theme == "dossier":
+    if theme == "forum":
+        html = generate_report_forum(data, date_display, date_str,
+                                     sentiment_history=sentiment_history,
+                                     policy_result=policy_result,
+                                     news_corpus=news_corpus)
+    elif theme == "dossier":
         html = generate_report_dossier(data, date_display, date_str,
                                        sentiment_history=sentiment_history,
                                        policy_result=policy_result,
@@ -12680,6 +13189,15 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
                 f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
                 f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
                 f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
+    if theme == "forum":
+        # 暗色分条横幅：卡内亮块 + 闪电黄字，圆角描边与卡片语言一致
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_STRIPE}" '
+                f'style="width:100%!important;border-collapse:collapse;margin:12px 0;'
+                f'background:{F_STRIPE};border:1px solid {F_HAIR_SOLID};'
+                f'border:1px solid {F_HAIR};border-radius:10px;color:{F_INK};">'
+                f'<tr><td style="padding:8px 12px;font-size:11px;line-height:1.6;'
+                f'color:{F_ACCENT};">⚡ '
+                f'{text[2:] if text.startswith("📄 ") else text}</td></tr></table>')
     if theme == "dossier":
         # 分条横幅与栏目标签同款：荧光绿高亮块 + 黑字（15.5:1）
         return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{D_TAB}" '
@@ -12927,6 +13445,10 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
             # 否则档案深灰 #4A4A4A 会被改成归藏 #333，漏色容器也会补成 #222。
             with _dossier_palette():
                 content_html = _enforce_dark_gray_font(content_html, dark_gray=D_GRAY)
+        elif _report_theme(content_html) == "forum":
+            # 暗色主题用「暗色字色保护」：深灰 / 浅灰一律重新落到近白或中灰，
+            # 彩色提亮到暗底上 ≥ 4.5:1；绝不能套用浅色版的灰字强制（会把字改成 #333）。
+            content_html = _enforce_dark_mode_font(content_html)
         else:
             content_html = _enforce_dark_gray_font(content_html)
     if template == "html" and len(content_html) <= PUSHPLUS_MAX_CONTENT_CHARS:
@@ -13597,7 +14119,8 @@ def main():
   python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
   python3 output/pipeline.py --calendar-only        # 只抓「时间节点」（未来30天影响经济时间点）并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
-  python3 output/pipeline.py --theme guizang        # 本次改用归藏白底研报主题（默认 dossier 德国文件档案风）
+  python3 output/pipeline.py --theme dossier       # 本次改用德国档案风（默认 forum 暗色社区仪表盘）
+  python3 output/pipeline.py --theme guizang       # 或用归藏白底研报主题
   python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题
   python3 output/pipeline.py --notes                # 精简版面里保留说明文字 / 过程文字（默认入门版不出）
   python3 output/pipeline.py --full                 # 全量长版：长文 / 表格 / 方法论注释全部回来
@@ -13621,7 +14144,8 @@ def main():
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--theme", default=None, choices=list(PUSH_THEMES),
-                       help="推送主题：dossier（默认 · 德国文件档案风+包豪斯）/ guizang（白底研报）/ pixel（旧版像素）")
+                       help="推送主题：forum（默认 · 暗色社区仪表盘）/ dossier（德国文件档案风+包豪斯）"
+                         " / guizang（白底研报）/ pixel（旧版像素）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
     parser.add_argument("--no-quant", action="store_true",

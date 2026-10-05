@@ -353,10 +353,18 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
                              "content_date": "2026-04-10",
                              "quotes": {"恒生指数": {"price": 24600, "change_pct": 0.38}}}}
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410")
-        # 页首「AI 全篇速览」会先提到各栏目标题，因此用栏目 kicker（只在正文栏目头出现）定位顺序
-        # 归藏简洁排版（2026-09-29 起）栏目头写作「07 · WEEKLY FORECAST」，编号在前
-        i_wk = html.find("· WEEKLY FORECAST<")
-        i_mk = html.find("· MARKET REVIEW<")
+        # 页首「AI 全篇速览」会先提到各栏目标题，因此用栏目 kicker（只在正文栏目头出现）定位顺序。
+        # 归藏 / dossier 档栏目头写作「07 · WEEKLY FORECAST」；2026-10-05 起的暗色 forum
+        # 把编号放到行尾，kicker 单独成段 —— 两种写法都认。
+        def _kicker_at(text, kicker):
+            for anchor in (f"· {kicker}<", f"{kicker}</span>"):
+                at = text.find(anchor)
+                if at > -1:
+                    return at
+            return -1
+
+        i_wk = _kicker_at(html, "WEEKLY FORECAST")
+        i_mk = _kicker_at(html, "MARKET REVIEW")
         self.assertGreater(i_wk, -1)
         self.assertGreater(i_mk, -1)
         self.assertLess(i_wk, i_mk)
