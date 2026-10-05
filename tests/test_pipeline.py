@@ -598,15 +598,17 @@ class GuizangThemeTests(unittest.TestCase):
                                         "2026年8月2日 · 周日", "20260802",
                                         theme="guizang")
 
-    def test_default_theme_is_dossier_and_resolves_all_themes(self):
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "dossier")
-        self.assertIn("dossier", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline._resolve_push_theme(None), "dossier")
-        self.assertEqual(pipeline._resolve_push_theme(""), "dossier")
-        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "dossier")
+    def test_default_theme_is_forum_and_resolves_all_themes(self):
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
+        self.assertEqual(pipeline.PUSH_THEMES,
+                         ("guizang", "pixel", "dossier", "forum"))
+        self.assertEqual(pipeline._resolve_push_theme(None), "forum")
+        self.assertEqual(pipeline._resolve_push_theme(""), "forum")
+        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "forum")
         self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
         self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
         self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme(" Forum "), "forum")
 
     def test_type_scale_is_one_page_friendly(self):
         """字号阶梯为「一页推」整体收一档：刊头 26 / 栏目 18 / 正文 14 / 次要 12"""
@@ -3789,12 +3791,13 @@ class DossierThemeTests(unittest.TestCase):
             "2026年8月1日 · 周六", "20260801", theme=theme)
 
     # ---------------- 主题注册与解析 ----------------
-    def test_dossier_is_registered_and_default(self):
+    def test_dossier_is_registered_and_resolvable(self):
+        """2026-10-05 起默认主题换成暗色 forum；dossier 仍注册可切换（--theme dossier）。"""
         self.assertIn("dossier", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "dossier")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
         self.assertEqual(pipeline._resolve_push_theme("dossier"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
-        self.assertEqual(pipeline._resolve_push_theme("nope"), "dossier")
+        self.assertEqual(pipeline._resolve_push_theme("nope"), pipeline.DEFAULT_PUSH_THEME)
 
     def test_dossier_meta_readback_roundtrip(self):
         html = self._html()
@@ -3979,6 +3982,256 @@ class DossierThemeTests(unittest.TestCase):
             self.assertGreaterEqual(
                 sum(1 for part in parts if f">{title}</h2>" in part), 1,
                 f"栏目「{title}」在分条后丢失")
+
+
+class ForumThemeTests(unittest.TestCase):
+    """暗色社区主题 forum（2026-10-05 起默认）：卡片暗底 + 彩色图标 + 暗色字色保护。
+
+    设计契约：画布 #1C1C1E / 卡片 #2C2C2E / 1px rgba(255,255,255,0.08) 描边 + 圆角；
+    正文 #F2F2F7、标题 #FFFFFF、次要 #A1A1AA、强调 #FFD60A；彩色微型图标
+    （黄闪电 / 红火焰 / 绿行情 / 紫机器人 / 橙文档 / 青日历）；所有可见文字在
+    #1C1C1E 与 #2C2C2E 上都 ≥ WCAG AA 4.5:1；纯内联样式，无 <style> / class /
+    远程资源；分条推送与推送门禁逻辑不变。历史浅色主题（guizang / dossier / pixel）
+    一律不得渗进暗色页面。
+    """
+
+    def _data(self):
+        return NewLayoutRenderingTests()._rich_data()
+
+    def _html(self, theme="forum"):
+        return pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802",
+                                        theme=theme)
+
+    @staticmethod
+    def _bodyless_unstyled(html):
+        """剥离 <body> 后仍没有任何祖先声明 color 的文本节点（PushPlus v-html 场景）。"""
+        from html.parser import HTMLParser
+
+        class _Audit(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack, self.unstyled, self.total = [], [], 0
+
+            def handle_starttag(self, tag, attrs):
+                style = dict(attrs).get("style") or ""
+                m = re.search(r"(?<![-\w])color\s*:\s*([^;\"'\s]+)", style, re.I)
+                self.stack.append((tag.lower(), m.group(1) if m else None))
+
+            def handle_endtag(self, tag):
+                t = tag.lower()
+                for i in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[i][0] == t:
+                        self.stack.pop(i)
+                        break
+
+            def handle_data(self, data):
+                if not data.strip():
+                    return
+                if self.stack and self.stack[-1][0] in ("title", "style", "script"):
+                    return
+                self.total += 1
+                for t, col in reversed(self.stack):
+                    if t == "body":
+                        break
+                    if col:
+                        return
+                self.unstyled.append(data.strip()[:30])
+
+        audit = _Audit()
+        audit.feed(html)
+        return audit
+
+    # ---------------- 主题注册与元信息 ----------------
+    def test_forum_is_registered_and_default(self):
+        self.assertIn("forum", pipeline.PUSH_THEMES)
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
+        self.assertEqual(pipeline._resolve_push_theme(None), "forum")
+        self.assertEqual(pipeline._resolve_push_theme("FORUM"), "forum")
+        self.assertEqual(pipeline._resolve_push_theme(" forum "), "forum")
+
+    def test_forum_meta_readback_and_split_anchors(self):
+        html = self._html()
+        self.assertIn('name="octopus-theme" content="forum"', html)
+        self.assertIn('name="color-scheme" content="dark only"', html)
+        self.assertEqual(pipeline._report_theme(html), "forum")
+        self.assertIn(pipeline.PART_BREAK_MARK, html)
+        self.assertIn(pipeline.DOC_FOOT_MARK, html)
+        self.assertGreaterEqual(html.count("<h2"), 3)
+
+    # ---------------- 暗色色板与卡片 chrome ----------------
+    def test_dark_palette_values_and_card_chrome(self):
+        self.assertEqual(pipeline.F_BG, "#1C1C1E")          # 画布：深灰而非纯黑
+        self.assertEqual(pipeline.F_CARD, "#2C2C2E")        # 卡片容器
+        self.assertEqual(pipeline.F_INK, "#F2F2F7")         # 正文近白
+        self.assertEqual(pipeline.F_INK_STRONG, "#FFFFFF")  # 标题纯白
+        self.assertEqual(pipeline.F_MUTED, "#A1A1AA")       # 次要中灰
+        self.assertEqual(pipeline.F_ACCENT, "#FFD60A")      # 闪电黄
+        html = self._html()
+        self.assertIn(f'bgcolor="{pipeline.F_BG}"', html)
+        self.assertIn(f"background:{pipeline.F_CARD}", html)
+        self.assertIn("border:1px solid rgba(255,255,255,0.08)", html)
+        self.assertIn("border-radius:", html)
+        self.assertIn("linear-gradient(180deg", html)       # 顶亮渐变按钮 / 胶囊
+        for banned in ("<style", 'class="', "<img", "<svg", "<script", "koboyo.com"):
+            self.assertNotIn(banned, html, banned)
+        # 彩色微型图标（emoji / 几何字形）确实进了栏目头
+        self.assertTrue(any(glyph in html for glyph in ("⚡", "📈", "📅", "🤖")))
+
+    def test_every_text_color_is_legible_on_dark(self):
+        """暗色硬门禁：文字色必须是主题色板内的可读色，且在画布与卡片上都 ≥ 4.5:1。"""
+        html = self._html()
+        colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", html))
+        self.assertTrue(colors)
+        allowed = {c.upper() for c in pipeline.FORUM_TEXT_ALLOWED}
+        on_fill = {pipeline.F_ON_FILL.upper(), "#000000"}
+        for color in sorted(colors):
+            self.assertIn(color.upper(), allowed, f"文字色 {color} 不在暗色主题色板内")
+            if color.upper() in on_fill:
+                continue
+            for bg in (pipeline.F_BG, pipeline.F_CARD):
+                ratio = pipeline._contrast_ratio(color, bg)
+                self.assertGreaterEqual(
+                    round(ratio, 2), 4.5,
+                    f"文字色 {color} 在 {bg} 上对比度仅 {ratio:.2f}:1（需 ≥ 4.5:1）")
+
+    def test_no_light_theme_colors_leak_into_forum(self):
+        html = self._html()
+        # 浅色主题的正文 / 强调色不得作为文字色出现
+        for legacy in ("#002FA7", "#00227A", "#333333", "#4A4A4A", "#39FF14",
+                       "#FF1F1F", "#D01818", "#0F7A2B", "#F1F1F1", "#222", "#555"):
+            self.assertNotIn(f"color:{legacy}", html, f"浅色主题色 {legacy} 漏进暗色页面")
+        # dossier 的画布 / 高亮标签、pixel 的街机底也不得出现
+        self.assertNotIn(pipeline.D_PAPER, html)
+        self.assertNotIn(pipeline.D_TAB, html)
+        self.assertNotIn("#050711", html)
+
+    def test_forum_has_no_klein_leak_in_quant_tables(self):
+        """量化栏目（按 GUIZANG_KIT 渲染的历史实现）不得把浅色主题的蓝 / 灰漏进暗色卡片。"""
+        data = SectionReadingOrderTests()._full_data()
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="forum")
+        self.assertIn("量化", html)
+        self.assertNotIn("#002FA7", html)
+        self.assertNotIn(pipeline.D_GREEN_INK, html)
+        # kit 色槽换过又还原：guizang 依旧浅底克莱因蓝
+        self.assertEqual(pipeline.GUIZANG_KIT.ok_color, pipeline.GZ_UP)
+        guizang = self._html("guizang")
+        self.assertIn("#002FA7", guizang)
+        self.assertNotIn(pipeline.F_CARD, guizang)
+
+    def test_forum_palette_globals_restored_after_render(self):
+        keys = ("GZ_KLEIN", "GZ_INK", "GZ_PAPER", "GZ_FONT", "GZ_DARK_GRAY",
+                "GZ_ZEBRA", "GZ_UP")
+        before = {k: getattr(pipeline, k) for k in keys}
+        self._html()
+        self.assertEqual(before, {k: getattr(pipeline, k) for k in keys})
+
+    # ---------------- 暗色字色保护 ----------------
+    def test_enforce_dark_mode_font_rewrites_light_colors_and_fills_missing(self):
+        sample = (
+            '<div style="color:#777;border-top:1px solid #ddd">灰字</div>'
+            '<div style="color:#002FA7">克莱因蓝</div>'
+            '<div style="color:#111">近黑</div>'
+            '<div style="padding:5px 0;border-top:1px solid #eee">无色块文本</div>'
+            '<table style="border-collapse:separate"><tr><td>无色表单元格</td></tr></table>'
+        )
+        out = pipeline._enforce_dark_mode_font(sample)
+        allowed = {c.upper() for c in pipeline.FORUM_TEXT_ALLOWED}
+        colors = re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", out)
+        self.assertGreaterEqual(len(colors), 5)          # 5 处字色（含补齐的两处）
+        for color in colors:
+            self.assertIn(color.upper(), allowed, f"{color} 不在暗色色板内")
+            if color.upper() != pipeline.F_ON_FILL.upper():
+                self.assertGreaterEqual(
+                    round(pipeline._contrast_ratio(color, pipeline.F_BG), 2), 4.5)
+        self.assertIn("border-top:1px solid #ddd", out)  # 分割线不被误改
+        self.assertIn("border-top:1px solid #eee", out)
+        # 彩色的克莱因蓝保持色相提亮，而不是简单变灰
+        self.assertFalse(pipeline._is_light_or_mid_gray_hex(colors[1]))
+        # 无色容器全部补齐了显式前景色（剥离 <body> 后不回退宿主浅灰字）
+        self.assertEqual(out.count("无色块"), out.count("无色块"))
+        audit = self._bodyless_unstyled(out.replace("<body", "<xbody"))
+        self.assertGreaterEqual(audit.total, 4)
+        self.assertEqual(audit.unstyled, [])
+
+    def test_forum_html_colors_every_text_node_without_body(self):
+        from html.parser import HTMLParser
+
+        class _Audit(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack, self.unstyled, self.total = [], [], 0
+
+            def handle_starttag(self, tag, attrs):
+                style = dict(attrs).get("style") or ""
+                m = re.search(r"(?<![-\w])color\s*:\s*([^;\"'\s]+)", style, re.I)
+                self.stack.append((tag.lower(), m.group(1) if m else None))
+
+            def handle_endtag(self, tag):
+                t = tag.lower()
+                for i in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[i][0] == t:
+                        self.stack.pop(i)
+                        break
+
+            def handle_data(self, data):
+                if not data.strip():
+                    return
+                if self.stack and self.stack[-1][0] in ("title", "style", "script"):
+                    return
+                self.total += 1
+                for t, col in reversed(self.stack):
+                    if t == "body":
+                        break
+                    if col:
+                        return
+                self.unstyled.append((data.strip()[:30], "/".join(t for t, _ in self.stack)))
+
+        for theme in ("forum", "dossier", "guizang"):
+            audit = _Audit()
+            audit.feed(self._html(theme))
+            self.assertGreater(audit.total, 50)
+            self.assertEqual(audit.unstyled, [],
+                             f"{theme}：剥离 <body> 后仍有未声明 color 的文本节点 "
+                             f"{audit.unstyled[:5]}")
+
+    # ---------------- 分条推送与推送前保护 ----------------
+    def test_forum_push_protection_keeps_dark_palette(self):
+        """推送前再次保护必须走暗色版：绝不能套用浅色版灰字强制（会把字改成 #333）。"""
+        html = self._html()
+        with patch.object(pipeline, "_push_one_message", return_value=True) as single:
+            self.assertTrue(pipeline.push_to_wechat("暗色主题测试", html, token="test-token"))
+        sent = single.call_args.args[1]
+        self.assertIn('name="octopus-theme" content="forum"', sent)
+        self.assertNotIn("color:#333", sent.lower())
+        self.assertIn(pipeline.F_CARD, sent)
+
+    def test_forum_multipart_split_keeps_theme_and_every_section(self):
+        data = SectionReadingOrderTests()._full_data()
+        data["A股大盘全景"] = MarketPanoramaTests()._panorama_payload()
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="forum")
+        limit = 12000
+        parts = pipeline._split_html_for_push(html, limit)
+        self.assertIsNotNone(parts)
+        self.assertGreater(len(parts), 1)
+        for index, part in enumerate(parts, 1):
+            self.assertLessEqual(len(part), limit, f"第 {index} 条超过单条上限")
+            self.assertIn('name="octopus-theme" content="forum"', part)
+            self.assertIn(pipeline.F_CARD, part)
+            self.assertEqual(part.count("<div"), part.count("</div>"))
+        for title in re.findall(r"<h2[^>]*>([^<]+)</h2>", html):
+            self.assertGreaterEqual(
+                sum(1 for part in parts if f">{title}</h2>" in part), 1,
+                f"栏目「{title}」在分条后丢失")
+
+    def test_forum_chrome_stays_lean_against_dossier(self):
+        """版面契约：暗色版只换视觉，不靠体积膨胀换效果（同数据不得比 dossier 大 3k 以上）。"""
+        forum = self._html("forum")
+        dossier = self._html("dossier")
+        self.assertLessEqual(len(forum), len(dossier) + 3000,
+                             f"forum {len(forum)} vs dossier {len(dossier)}：暗色版面开销过大")
 
 
 if __name__ == "__main__":
