@@ -2,7 +2,7 @@
 
 2026-10-03 用户反馈「阅读不适合入门，减少说明文字，过程文字」→ 默认日报在精简版面
 之上再收一层：方法论 / 口径 / 供数过程 / 折叠披露 / 每栏重复免责整段不渲染；
-结论、数字、鲜鲜解读、今日预判、速查卡、数据日期与「暂缺」点名一个不少。
+结论、数字、AI帮你提鲜、今日预判、速查卡、数据日期与「暂缺」点名一个不少。
 
 守的三条口径：
   · 默认即入门版：OCTOPUS_LITE=1 且未要求说明文字 → PLAIN() 为真；
@@ -169,7 +169,7 @@ class ReportPlainTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             html = self.plain[theme]
             text = _strip(html)
-            for marker in ("结论", "鲜鲜解读", "活鲜度", pipeline.SECTION_TITLE_FORECAST,
+            for marker in ("结论", "AI帮你提鲜", "活鲜度", pipeline.SECTION_TITLE_FORECAST,
                            pipeline.SECTION_TITLE_SHORT_CARD, "新手三句话",
                            "模型自检", "P(7日涨)", "指数概率", "逐日表格",
                            "时间点合计", "最密集日", "数据覆盖", "暂缺：",

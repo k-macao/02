@@ -304,7 +304,7 @@
         「AI 全篇速览」逐栏摘要、像素主题关卡名与推送分条里都不再出现这两栏；
       · 数据侧完全不变：Google News 全球头条与港股名家频道（YouTube / 通用 RSS）
         照旧抓取，仍进数据覆盖审计（当天源 / 总源计数不变）、政策因子、策略研判、
-        新闻情绪归因、逐栏 AI 研判与「鲜鲜解读」的输入，freshness_checker 与
+        新闻情绪归因、逐栏 AI 研判与「AI帮你提鲜」的输入，freshness_checker 与
         backup_sources 的源名 / 阈值不动；
       · 风险提示：命中这两批标题时 shown=False（同东财快讯），保留完整标题展示，
         不再生成指向已隐藏栏目的锚点跳转（h-gh-* / h-hk-* 不再写入页面）；
@@ -376,7 +376,7 @@ from octopus_quant import industry_rotation as _industry_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
-import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（鲜鲜解读 / AI 研判点缀）
+import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（AI帮你提鲜 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import jev_bridge as _jev  # noqa: E402
 import freshness_checker as _freshness  # noqa: E402
@@ -403,7 +403,8 @@ MACD_SOURCE_NAME = "MACD量化策略"
 # 每周量化走势预测开关：OCTOPUS_WEEKLY=0 或 --no-weekly 可整体跳过
 WEEKLY_ENABLED = str(os.environ.get("OCTOPUS_WEEKLY", "1")).strip().lower() not in ("0", "false", "no")
 WEEKLY_HISTORY_FILENAME = _weekly.JOURNAL_FILENAME
-# 「鲜鲜解读」开关（2026-09-29 新增）：每个数据栏目末尾追加一行「🦑 鲜鲜解读」，
+# 「AI帮你提鲜」开关（2026-09-29 新增，原名「鲜鲜解读」，2026-10-06 更名）：每个数据
+# 栏目末尾追加一块「🦑 AI帮你提鲜」内容区（字符图头 + 概率几率条 + 大白话），
 # 把当栏关键数字翻译成大白话 + 网络梗，帮入门读者降低阅读门槛。
 # 纯规则合成（output/octopus_ren.py）：可复现、不伪造数字、数据不足自动缺席。
 # 2026-09-30 起解读末尾按行情状态确定性点缀「🦐 活鲜度」标签 + 一句活鲜比喻，
@@ -7052,13 +7053,13 @@ def _conclusion_panel(kit, pairs):
     return body + "</div>"
 
 
-# 正文不展示的数据源（底层仍供量化用）：总结「数据覆盖」与鲜鲜解读的
+# 正文不展示的数据源（底层仍供量化用）：总结「数据覆盖」与AI帮你提鲜的
 # 「配料表」都不点名它们，避免两处口径漂移。
 _HIDDEN_REPORT_SOURCES = {"A股资讯"}
 
 
 def _missing_source_names(source_items):
-    """暂缺数据源清单（总结栏与鲜鲜解读共用同一份，绝不各算各的）。"""
+    """暂缺数据源清单（总结栏与AI帮你提鲜共用同一份，绝不各算各的）。"""
     return [name for name, s in source_items
             if name not in _HIDDEN_REPORT_SOURCES and s.get("status") != "success"]
 
@@ -7397,7 +7398,7 @@ def build_geo_trend_analysis(data, exclude_titles=()):
 
 
 def _trend_section_stats(data):
-    """趋势跟踪栏目的共享统计（「⌁ AI 研判」行与「🦑 鲜鲜解读」行用同一份数字）。
+    """趋势跟踪栏目的共享统计（「⌁ AI 研判」行与「🦑 AI帮你提鲜」块用同一份数字）。
 
     返回 None 表示没有可用样本（两行都不出现）；否则返回：
       live_platforms [(平台名, 源字典)] / items 样本列表 / bull / bear 多空词计数 /
@@ -7585,7 +7586,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
         notes[kick] = _judge_note(prob, f"{detail} → 预测：{outlook}")
 
     # ④ 趋势跟踪（多平台信息员）：多空词命中 + 热股提取 → 散户与交易员情绪判断
-    #    统计走 _trend_section_stats 共享 helper：「⌁ AI 研判」行与「🦑 鲜鲜解读」行
+    #    统计走 _trend_section_stats 共享 helper：「⌁ AI 研判」行与「🦑 AI帮你提鲜」块
     #    引用同一批数字，不允许两处各算一套。
     trend_stats = _trend_section_stats(data)
     if trend_stats:
@@ -7635,7 +7636,7 @@ def build_section_ai_notes(data, *, policy=None, senti=None, fed_trend=None, geo
             detail += "，热门主题 " + "、".join(_esc(t) for t in themes)
         watch = _esc(themes[0]) if themes else "后续进展"
         notes[kick] = _judge_note(prob, f"{detail} → 预测：头条情绪{label}，关注 {watch}")
-        # 主题列表随研判行一并带出：「鲜鲜解读」与 ⌁ AI 研判共用同一份，不另算一套。
+        # 主题列表随研判行一并带出：「AI帮你提鲜」与 ⌁ AI 研判共用同一份，不另算一套。
         notes[kick]["themes"] = themes
 
     # ⑥ 港股名家频道：更新频道数 + 观点词命中 → 名家观点定调
@@ -7724,19 +7725,92 @@ def _ai_judge_row(note, kit, aspect="", seed=""):
     return kit.item_row("⌁", f"{head} — {text}")
 
 
-def _ren_judgment_row(text, kit):
-    """逐栏「🦑 鲜鲜解读」行（两主题共用）：大白话翻译，垫在每个栏目最后。
+def _ren_judgment_row(text, kit, meta=None):
+    """逐栏「🦑 AI帮你提鲜」内容区块（两主题共用，2026-10-06 由「鲜鲜解读」更名）。
 
+    更鲜明突出的版式（2026-10-06 改版）：
+      · 整块独立描边成区（pixel：青色硬边框 + 实色阴影；guizang 系：克莱因蓝粗左线），
+        在栏目里一眼可辨，是一块自己的内容区域；
+      · 字符图：头部 █▓▒░ 渐变条 + 概率几率条 ▓▓▓▓▓░░░░░（每格 10%，双段上色）；
+      · 概率 / 几率：meta.p_pct 与「⌁ AI 研判」行同源（_garnish_dir 同一套取数），
+        这里只画图不算数；几率「涨 52 ： 48 跌」只是同一概率的另一种写法，不造新数字；
+        栏目没有概率 → 几率条整条缺席，只出字符图头 + 大白话正文（缺数据不装样子）。
     text 由 octopus_ren 规则合成（纯文本，这里统一转义）；
     🦑 直接写进文字头（guizang 主题的行函数不渲染图标格，两主题都要能看到）；
-    副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致。
+    副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致
+    （入门版不出副行，页脚与导读各保留一次「非投资建议」）。
     """
-    if _is_guizang_like(kit):
-        head = f'<b style="color:{GZ_KLEIN}">🦑 鲜鲜解读</b> — {_esc(text)}'
+    gz = _is_guizang_like(kit)
+    meta = meta if isinstance(meta, dict) else {}
+    text = str(text or "")
+    label = str(meta.get("label") or "")
+    p_pct = meta.get("p_pct")
+    meter = _ren.fresh_meter(p_pct)          # None（无概率 / 非法）→ 几率条整条缺席
+    if gz:
+        ink, muted = GZ_INK, GZ_FAINT
+        up_c, dn_c, mid_c = kit.ok_color, kit.bad_color, kit.warn_color
+        # 归藏系无红绿：▓ 用页面唯一的克莱因蓝（强调色）、░ 用深灰——两段一眼可辨，
+        # 方向交给 ▲▼■ + label + 大数字，不靠颜色硬编涨跌。
+        bar_fill_c, bar_empty_c = GZ_KLEIN, GZ_FAINT
+        box = (f'border:1px solid {GZ_HAIR};border-left:4px solid {GZ_KLEIN};'
+               f'background:{GZ_KLEIN_WASH};')
+        head_row = (f'<tr><td style="padding:8px 12px 2px;font-size:13px;font-weight:900;'
+                    f'color:{GZ_KLEIN};line-height:1.5;font-family:{FONT_MONO};">'
+                    f'█▓▒░ {_ren.REN_ICON} <span style="letter-spacing:1px;">{_esc(_ren.REN_TITLE)}</span> ░▒▓█'
+                    f' <span style="font-size:10px;font-weight:700;color:{GZ_FAINT};">'
+                    f'大白话翻译 · FRESH BOOST</span></td></tr>')
     else:
-        head = f'<span style="color:{C_CYAN};font-weight:900;">🦑 鲜鲜解读</span> — {_esc(text)}'
-    # 入门版：每栏重复一遍的口径副行不出（页脚与导读各保留一次「非投资建议」）。
-    return kit.item_row("", head, "" if PLAIN() else _esc(_ren.DISCLAIMER))
+        ink, muted = C_INK, C_MUTED
+        up_c, dn_c, mid_c = C_GREEN, C_RED, C_AMBER
+        bar_empty_c = C_FAINT                # ░ 恒用暗灰；▓ 的颜色在方向分支里定
+        box = f'border:1px solid {C_CYAN};background:#0A0E1D;box-shadow:5px 5px 0 #000;'
+        head_row = (f'<tr><td style="padding:5px 10px;background:{C_CYAN};color:{C_BG};'
+                    f'font-size:11px;font-weight:900;letter-spacing:1px;font-family:{FONT_MONO};">'
+                    f'█▓▒░ {_ren.REN_ICON} {_esc(_ren.REN_TITLE)} ░▒▓█'
+                    f' <span style="font-size:9px;letter-spacing:2px;">// 大白话翻译 · FRESH BOOST</span>'
+                    f'</td></tr>')
+
+    # 方向与上色：偏多 → 涨色 ▲、偏空 → 跌色 ▼、其余 → 中性色 ■（不只靠颜色区分）。
+    if "偏多" in label:
+        mark, dir_c = "▲", up_c
+    elif "偏空" in label:
+        mark, dir_c = "▼", dn_c
+    else:
+        mark, dir_c = "■", mid_c
+    if not gz:
+        bar_fill_c = dir_c            # pixel：▓ 跟方向色（绿 / 红 / 琥珀），░ 用暗灰
+
+    meter_html = ""
+    if meter:
+        p_int = int(round(float(p_pct)))
+        label_html = (f' <span style="font-size:11px;font-weight:900;color:{muted};">'
+                      f'{_esc(label)}</span>') if label else ""
+        bar = (f'<span style="color:{bar_fill_c};">{"▓" * meter["filled"]}</span>'
+               f'<span style="color:{bar_empty_c};">{"░" * meter["empty"]}</span>')
+        meter_html = (
+            f'<tr><td style="padding:9px 12px 0;">'
+            f'<div style="font-size:9px;font-weight:900;letter-spacing:2px;color:{muted};'
+            f'font-family:{FONT_MONO};">涨跌概率 / 几率 ODDS METER</div>'
+            f'<div style="font-size:17px;font-weight:900;color:{dir_c};line-height:1.35;'
+            f'font-family:{FONT_MONO};padding-top:2px;">{mark} 上涨概率 {p_int}%{label_html}</div>'
+            f'<div style="font-size:13px;font-weight:900;line-height:1.5;font-family:{FONT_MONO};'
+            f'letter-spacing:3px;padding-top:1px;">{bar}'
+            f'<span style="font-size:10px;font-weight:700;letter-spacing:0;color:{muted};">'
+            f' 几率 {_esc(meter["odds"])} · 每格 10% · 与研判行同源</span></div></td></tr>')
+
+    divider = (f'<tr><td style="padding:0;"><div style="border-top:1px dashed '
+               f'{GZ_HAIR_SOFT if gz else C_HAIR};margin:8px 12px 0;"></div></td></tr>'
+               ) if meter_html else ""
+    sub_html = (f'<div style="font-size:10px;color:{muted};letter-spacing:.3px;'
+                f'padding-top:6px;line-height:1.6;font-family:{FONT_MONO};">'
+                f'{_esc(_ren.DISCLAIMER)}</div>') if not PLAIN() else ""
+    return (f'<div style="margin-top:10px;">'
+            f'<table width="100%" cellpadding="0" cellspacing="0"'
+            f' style="width:100%!important;border-collapse:collapse;{box}">'
+            f'{head_row}'
+            f'{meter_html}{divider}'
+            f'<tr><td style="padding:9px 12px 10px;font-size:12px;color:{ink};line-height:1.75;'
+            f'font-family:{FONT_MONO};">{_esc(text)}{sub_html}</td></tr></table></div>')
 
 
 def _weekly_daily_table(daily, kit):
@@ -8813,7 +8887,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # ⑥ 资讯：三个资讯栏目（东方财富快讯 / 【无敌帝王蟹】全球头条 / 港股名家频道）
     #    自 2026-10-02 起全部在页面隐藏（用户要求），正文与首屏速览均不再单独展示；
     #    原始抓取数据照旧保留，仅作为 政策因子 / 策略研判 / 新闻情绪 / 逐栏 AI 研判 /
-    #    鲜鲜解读 / 数据审计 的信号源（与「东方财富快讯」隐藏时的口径完全一致）。
+    #    AI帮你提鲜 / 数据审计 的信号源（与「东方财富快讯」隐藏时的口径完全一致）。
     #    A股资讯已按用户要求移除，其数据不再采集。
     #    风险提示命中这些标题时 shown=False（见 build_daily_quant_strategy），
     #    因此保留完整标题、不生成指向已隐藏栏目的死链锚点。
@@ -8862,7 +8936,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             new_sections.append((kick, title, content, badge, caption))
         sections = new_sections
 
-    # ⑨ 逐栏目「🦑 鲜鲜解读」（2026-09-29 新增）：把每栏关键数字翻译成大白话 + 网络梗，
+    # ⑨ 逐栏目「🦑 AI帮你提鲜」（2026-09-29 新增，2026-10-06 更名 + 改版）：把每栏关键数字翻译成大白话 + 网络梗，
     #    帮入门读者降低阅读门槛。规则合成（octopus_ren.py）：可复现、数字全部来自本次
     #    实参（趋势跟踪与数据覆盖与正文共用同一 helper，不另算一套）；数据不足的栏目
     #    自动不加解读；OCTOPUS_REN=0 / --no-ren 整体关闭。非投资建议。
@@ -8883,9 +8957,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         }
         decorated = []
         for kick, title, content, badge, caption in sections:
-            ren_text = _ren.section_ren(kick, ren_ctx)
-            if ren_text:
-                content = content + _ren_judgment_row(ren_text, kit)
+            ren_block = _ren.section_ren_block(kick, ren_ctx)
+            if ren_block:
+                content = content + _ren_judgment_row(ren_block["text"], kit, meta=ren_block)
             decorated.append((kick, title, content, badge, caption))
         sections = decorated
 
@@ -8909,11 +8983,13 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         digest_text = _ren.digest_ren(ren_ctx)
         # 按 kicker 定位「AI 全篇速览」：短线速查卡在正文之后，不影响导读定位。
         if digest_text:
+            digest_meta = _ren.digest_meta(ren_ctx)   # 几率条与今日预判（量化 headline）同源
             for i, (kick, title, content, badge, caption) in enumerate(sections):
                 if kick != "AI DIGEST":
                     continue
                 sections[i] = (kick, title,
-                               content + _ren_judgment_row(digest_text, kit), badge, caption)
+                               content + _ren_judgment_row(digest_text, kit, meta=digest_meta),
+                               badge, caption)
                 break
     return {
         "sections": sections,
@@ -14172,7 +14248,7 @@ def main():
     parser.add_argument("--no-weekly", action="store_true",
                        help="跳过每周量化走势预测（只出常规栏目，运行更快）")
     parser.add_argument("--no-ren", action="store_true",
-                       help="关闭逐栏目「🦑 鲜鲜解读」大白话翻译行（默认开启）")
+                       help="关闭逐栏目「🦑 AI帮你提鲜」大白话翻译块（默认开启）")
     parser.add_argument("--full", action="store_true",
                        help="关闭精简模式：不出「【闪电飞鱼】短线速查卡」，各栏长文 / 表格 / "
                             "方法论注释回到全量长版（等价 OCTOPUS_LITE=0）")
