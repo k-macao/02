@@ -75,8 +75,9 @@
      token 失效、内容违规」等重试无意义的错误不重试、立即失败。日报多次推送仍失败时
      会再发一条纯文本「推送失败」告警（含 PushPlus 返回的 code/msg 与处理建议），
      让微信侧也能感知原因，而不是只看到 Actions 变红。
-  7. 推送标题带当日时分（如 08/01 18:30）：同一天多次手动推送不会因标题完全重复
-     触发反垃圾/去重拦截，也便于区分每一次推送。
+  7. 推送标题固定为「[OCTOPUS] 章鱼 AI · 上水日报 - 08/01 18:30」：前缀是过滤关键词，
+     末尾带当日时分（北京时间），同一天多次手动推送不会因标题完全重复
+     触发反垃圾/去重拦截，也便于区分每一次推送（2026-10-06 起，见 25）。
   7.1 页面风格：复古像素游戏（RETRO PIXEL MARKET QUEST v3）——
      暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
      等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
@@ -309,6 +310,17 @@
       · 风险提示：命中这两批标题时 shown=False（同东财快讯），保留完整标题展示，
         不再生成指向已隐藏栏目的锚点跳转（h-gh-* / h-hk-* 不再写入页面）；
       · 历史归档日报不改写。
+  25. 微信推送标题改版（2026-10-06 按用户要求，只改标题文字，推送内容 / 分条 / 门禁不动）：
+      · 新格式：`[OCTOPUS] 章鱼 AI · 上水日报 - MM/DD HH:MM`（强制推送为
+        `...(强制) - MM/DD HH:MM`，状态报告为 `...(状态) - ...`，超长分条仍追加 ` (i/N)`）；
+      · 前缀由 emoji「🐙」换成方括号关键词「[OCTOPUS]」：emoji 在部分微信客户端与转发链路
+        会被裁掉，关键词既能在消息列表里一眼认出、也能用作过滤规则；
+      · 只影响 PushPlus 的 title 字段：刊头、页面 `<title>`、正文与归档文件名仍用
+        REPORT_TITLE「章鱼 AI · 上水日报」，不加 [OCTOPUS]；
+      · 集中定义在 PUSH_TITLE_PREFIX / PUSH_TITLE_TIME_FMT，--push-only / 常规 / 强制 /
+        状态四条推送路径统一走 build_push_title()，标题不会各写各的；
+      · 「日报未推送提醒」「日报推送失败提醒」两条纯文本告警的标题保持原样
+        （仍带 🐙），它们是提醒而非日报本体，不与 [OCTOPUS] 关键词混在一起。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -4869,8 +4881,25 @@ GZ_PRIMARY_LIGHT = GZ_KLEIN_WASH
 REPORT_TITLE = "章鱼 AI · 上水日报"
 # 说明（副标题）：刊头标题下方一行，页面 <meta name="description"> 与控制台同用
 REPORT_TAGLINE = "每日上水，新鲜活泼"
-# 微信推送标题前缀：与刊头同名，后接 MM/DD HH:MM（分条时再加 (i/n)）
-PUSH_TITLE_PREFIX = f"🐙 {REPORT_TITLE}"
+# 微信推送标题前缀（2026-10-06 改版，见模块说明 25）：「[OCTOPUS] + 刊头同名」，
+# 原为「🐙 + 刊头」。只用于 PushPlus 的 title，页面刊头 / <title> 仍是不带前缀的 REPORT_TITLE。
+PUSH_TITLE_PREFIX = f"[OCTOPUS] {REPORT_TITLE}"
+# 推送标题的时间戳格式：紧跟在「- 」之后，同一天多次推送靠它区分（见推送分条 (i/n)）
+PUSH_TITLE_TIME_FMT = "%m/%d %H:%M"
+
+
+def build_push_title(mode="", when=None):
+    """拼装微信推送标题：``[OCTOPUS] 章鱼 AI · 上水日报(模式) - MM/DD HH:MM``。
+
+    - mode 留空是常规日报；「(强制)」「(状态)」这类标记紧跟刊头，
+      不与日期时间黏在一起，微信窄列表里先看到栏目名、后看到推送时刻；
+    - 时间戳永远排在最后，超长分条追加的 (i/N) 接在其后仍能读出推送时刻；
+    - when 仅供测试注入固定时刻，生产调用留空取北京时间当前时刻。
+    """
+    stamp = (when or datetime.now(CST)).strftime(PUSH_TITLE_TIME_FMT)
+    return f"{PUSH_TITLE_PREFIX}{mode} - {stamp}"
+
+
 # 字体：系统无衬线栈（不加载远程字体）；整页只在容器上写一次，其余元素继承
 GZ_FONT = ("-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB',"
            "'Microsoft YaHei',sans-serif")
@@ -14315,7 +14344,7 @@ def main():
             print("   请重新生成，或使用 --force-push 强制推送。")
             return 1
 
-        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = build_push_title()
         if push_to_wechat(title, html, report_name=os.path.basename(push_path)):
             print("\n🎉 全部完成！")
             return 0
@@ -14436,7 +14465,7 @@ def main():
 
     if can_push:
         print(f"\n📤 当天检验通过：{reason}")
-        title = f"{PUSH_TITLE_PREFIX} {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = build_push_title()
         print(f"📎 正在推送本次生成的 HTML: {output_path}")
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
@@ -14448,7 +14477,7 @@ def main():
     if args.force_push:
         print(f"\n⚠️ 当天检验未通过，但检测到 --force-push，强制推送！")
         print(f"   原因: {reason}")
-        title = f"{PUSH_TITLE_PREFIX}(强制) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = build_push_title("(强制)")
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("强制推送的日报被 PushPlus 拒绝（详见上方 code/msg）",
@@ -14458,7 +14487,7 @@ def main():
     if args.allow_incomplete_push:
         print(f"\n⚠️ 全部数据源不可用，但检测到 --allow-incomplete-push，推送状态报告。")
         print(f"   原因: {reason}")
-        title = f"{PUSH_TITLE_PREFIX}(状态) {datetime.now(CST).strftime('%m/%d %H:%M')}"
+        title = build_push_title("(状态)")
         if push_to_wechat(title, push_html, report_name=os.path.basename(output_path)):
             return _finish(True)
         push_failure_alert("状态报告推送被 PushPlus 拒绝（详见上方 code/msg）",

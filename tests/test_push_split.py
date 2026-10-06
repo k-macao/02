@@ -12,6 +12,7 @@ import re
 import sys
 import types
 import unittest
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
@@ -339,6 +340,65 @@ class StyledDeliveryTests(unittest.TestCase):
             self.assertNotIn("推送精简排版", part)
         self.assertEqual("".join(sent).count("甲"), 4300)
         self.assertEqual("".join(sent).count("乙"), 4300)
+
+
+class PushTitleTests(unittest.TestCase):
+    """微信推送标题（2026-10-06 改版）：[OCTOPUS] 前缀 + 刊头 + 「- 日期时间」。
+
+    标题是用户在微信消息列表里唯一能看到的字段，格式必须稳定：
+      - 前缀是 [OCTOPUS] 关键词，不再是 emoji（emoji 会被部分客户端裁掉）；
+      - 日期时间永远在末尾，(强制) / (状态) 紧跟刊头，分条 (i/N) 接在时间之后。
+    """
+
+    STAMP = datetime(2026, 10, 6, 23, 42, tzinfo=pipeline.CST)
+
+    def test_prefix_is_the_octopus_keyword(self):
+        self.assertEqual(pipeline.PUSH_TITLE_PREFIX, "[OCTOPUS] 章鱼 AI · 上水日报")
+        self.assertNotIn("🐙", pipeline.PUSH_TITLE_PREFIX)
+
+    def test_title_layout(self):
+        self.assertEqual(pipeline.build_push_title(when=self.STAMP),
+                         "[OCTOPUS] 章鱼 AI · 上水日报 - 10/06 23:42")
+
+    def test_mode_marker_sits_before_the_timestamp(self):
+        for mode in ("(强制)", "(状态)"):
+            title = pipeline.build_push_title(mode, when=self.STAMP)
+            self.assertEqual(title, f"[OCTOPUS] 章鱼 AI · 上水日报{mode} - 10/06 23:42")
+            self.assertTrue(title.endswith("- 10/06 23:42"))
+
+    def test_page_title_keeps_the_plain_name(self):
+        """只改推送标题：刊头与页面 <title> 用的 REPORT_TITLE 不带 [OCTOPUS]。"""
+        self.assertEqual(pipeline.REPORT_TITLE, "章鱼 AI · 上水日报")
+        self.assertNotIn("[OCTOPUS]", pipeline.REPORT_TITLE)
+
+    def test_all_push_paths_share_one_builder(self):
+        """四条推送路径（--push-only / 常规 / 强制 / 状态）都走 build_push_title，
+        不再各自拼 PUSH_TITLE_PREFIX，避免哪天只改了一处、标题分叉。"""
+        src = Path(pipeline.__file__).read_text(encoding="utf-8")
+        call_sites = [line for line in src.splitlines()
+                      if line.strip().startswith("title = build_push_title(")]
+        self.assertEqual(len(call_sites), 4)
+        stray = [line for line in src.splitlines()
+                 if re.search(r"^\s*title\s*=.*PUSH_TITLE_PREFIX", line)]
+        self.assertEqual(stray, [], "推送标题必须由 build_push_title 统一拼装")
+
+    def test_multipart_suffix_follows_the_timestamp(self):
+        """超长分条：每条标题为「… - MM/DD HH:MM (i/N)」，推送时刻不被 (i/N) 挤掉。"""
+        html = _report([_section("01", "行情速览", "<p>" + "甲" * 12000 + "</p>"),
+                        _section("02", "全球头条", "<p>" + "乙" * 12000 + "</p>")])
+        sent = []
+        title = pipeline.build_push_title(when=self.STAMP)
+        with patch.object(pipeline, "PUSHPLUS_MAX_CONTENT_CHARS", 10000), \
+                patch.object(pipeline, "PUSHPLUS_MULTIPART", True), \
+                patch.object(pipeline, "PUSHPLUS_PART_DELAY", 0), \
+                patch.object(pipeline, "_push_one_message",
+                             lambda t, c, **kw: sent.append(t) or True):
+            self.assertTrue(pipeline.push_to_wechat(title, html, token="t",
+                                                     report_name="daily_report_test.html"))
+        self.assertGreater(len(sent), 1)
+        for index, got in enumerate(sent, 1):
+            self.assertTrue(got.startswith("[OCTOPUS] 章鱼 AI · 上水日报 - 10/06 23:42 ("))
+            self.assertRegex(got, r"\(%d/%d\)$" % (index, len(sent)))
 
 
 class PushRateLimitTests(unittest.TestCase):
