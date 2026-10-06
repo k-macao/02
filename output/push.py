@@ -11,12 +11,13 @@
   python3 output/push.py --list                 # 列出已生成的日报（不清理）
 
 页面风格（一对一 / 一对多推送共用同一份日报 HTML）:
-  默认主题 dossier（德国文件 / 档案风 + 包豪斯几何：浅灰底 + 黑标题 + 深灰正文，
-  荧光绿高亮标签、2px 黑粗线、等宽卷宗号、鲜红 RESEARCH 印章、圆/三角/方几何图标；
-  纯内联样式，无 JS / 外部 CSS / WebGL，兼容 PushPlus / 微信详情页）。
-  切回归藏白底研报: python3 output/push.py --theme guizang
-  切回旧版像素主题: python3 output/push.py --theme pixel
-  或环境变量: OCTOPUS_PUSH_THEME=dossier|guizang|pixel
+  默认主题 pixel（DOS 复古监视器 / Retro Pixel Market Quest v3：暗色终端底、霓虹色、
+  直角像素块、硬描边、等宽字栈、OCTOPUS_OS 窗口栏与逐栏 LVL 关卡；全内联样式，
+  无 JS / 外部 CSS / WebGL，兼容 PushPlus / 微信详情页）。
+  切换 forum 暗色社区仪表盘: python3 output/push.py --theme forum
+  切换 dossier 德国档案风: python3 output/push.py --theme dossier
+  切换 guizang 白底研报: python3 output/push.py --theme guizang
+  或环境变量: OCTOPUS_PUSH_THEME=pixel|forum|dossier|guizang
 
 推送方式:
   默认 PushPlus「一对一」直发自己（无 topic）；显式设置 PUSHPLUS_TOPIC 才发到群组。

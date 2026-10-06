@@ -157,7 +157,7 @@ class ReportPlainTests(unittest.TestCase):
             self.assertIn(marker, text, marker)
 
     def test_plain_is_materially_shorter_than_notes(self):
-        # 默认主题（谷藏 = 微信推送版）至少砍掉两成文字；旧版像素主题只要求确实更短
+        # guizang 入门版至少砍掉两成文字；pixel 主题只要求确实更短
         for theme, ratio in (("guizang", 0.8), ("pixel", 1.0)):
             plain_len = len(_strip(self.plain[theme]))
             notes_len = len(_strip(self.notes[theme]))

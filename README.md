@@ -2,7 +2,7 @@
 
 > 每日上水，新鲜活泼。
 
-一套自动采集公开市场与资讯数据、生成中文日报、检查新鲜度并推送到微信的 Python 流水线。默认使用 **forum 主题（暗色社区仪表盘 / Dark Mode Community Dashboard）**，可切回 `dossier` 德国档案风、`guizang` 归藏简洁或 `pixel` 像素；概率与策略以规则、量化合成为主，港股七日分析可选接入大模型。所有结果仅供参考，**不构成投资建议**。
+一套自动采集公开市场与资讯数据、生成中文日报、检查新鲜度并推送到微信的 Python 流水线。推送默认使用 **pixel 主题（DOS 复古监视器 / Retro Pixel Market Quest v3）**，也可切换 `forum` 暗色社区仪表盘、`dossier` 德国档案风或 `guizang` 归藏简洁；概率与策略以规则、量化合成为主，港股七日分析可选接入大模型。所有结果仅供参考，**不构成投资建议**。
 
 ## 导航
 
@@ -88,10 +88,10 @@ python3 output/push.py                # 完整流程：采集 → 分析 → 生
 | 入门版（默认） | 2026-10-03 起精简版面只留**结论、数字、动作**：计算口径、执行规则、回测 / 校准细节、数据来源与供数路径、筛选过程、折叠披露（"--full 看全文"）、每栏重复的免责副行整段不渲染，全篇只在页脚保留一句免责。数据日期、"非当天 / 滞后"标记、"暂缺"点名、备用源启用行照常保留。`--notes` 或 `OCTOPUS_NOTES=1` 在精简版面里找回说明文字；`--full` 仍是全量长版。 |
 | 鲜鲜解读 | 每个有数据的栏目可追加一行大白话解释；规则合成、可复现，数字只引用正文数据。`--no-ren` 或 `OCTOPUS_REN=0` 关闭。 |
 | 活鲜词库 | 50 个结构化词条，用于条件驱动的文字点缀；不新增行情数字，不随机堆砌方向判断，与鲜鲜解读共用开关。 |
-| 默认视觉 | 2026-10-05 起默认 **forum**（暗色社区仪表盘）：深灰画布 `#1C1C1E`、卡片容器 `#2C2C2E`、卡内条纹 `#232325`，1px `rgba(255,255,255,0.08)` 描边 + 8~14px 圆角；正文近白 `#F2F2F7`、标题 `#FFFFFF`、次要信息中灰 `#A1A1AA`；彩色微型图标砖（紫 ⚡ / 红 📈 / 红 🔥 / 紫 🤖 / 橙 📄 / 青 📅 / 青 📊 / 绿 ✅），区块标题为「大写 + 拉开字距」微标题，按钮 / 胶囊用顶亮渐变 + 浅色内描边 + 柔和投影。**点缀文字色**（栏目编号 / 区块微标题 / 强调数值 / 图标砖 / 结论块左边条 / 分条横幅 / 刊头 ● LIVE 与 SOURCES）：2026-10-06 起为紫 `#D8B4FE`（深档 `#C77DFF`、结论与 AI 块底 `#241A2E`），此前为闪电黄 `#FFD60A`；克莱因蓝 `#002FA7` 在暗底只有 1.3:1、荧光绿 `#39FF14` 会与跌色撞色，均不作暗底点缀字色。涨跌按 A 股口径：涨红 `#FF6B6B`、跌绿 `#32D74B`（2026-10-06 起，原为绿涨红跌），链接蓝 `#409CFF`；所有可见文字在画布、卡片与结论块底上均 ≥ WCAG AA 4.5:1（对比度门禁）。单列、最大宽度 680px；纯内联样式，适配微信与 PushPlus。正文 14px、表格 13px、次要信息 12px。 |
+| 默认视觉 | 2026-10-07 起默认 **pixel**（DOS 复古监视器 / Retro Pixel Market Quest v3）：暗色终端底 `#050711`，霓虹青 `#39FFB6`、电光蓝 `#22DFFF`、像素黄 `#FFE66D`、品红 `#FF3CAC`；直角像素块、硬边框、实色阶梯阴影与等宽字体，刊头采用 `OCTOPUS_OS v3` 窗口栏，栏目使用 `LVL` 关卡标记和 8-bit 图标，首屏突出 `QUANT CORE` 主控卡。涨跌同时用颜色、▲/▼/■ 与涨跌文字编码；单列、最大宽度 680px，全内联样式与表格布局，适配微信 / PushPlus。可切换 forum 暗色社区、dossier 德国档案或 guizang 白底研报。 |
 | 微信表格排版 | 每个栏目里的说明、结论、资讯与数据块都使用全宽 HTML 表格承载；键值内容逐项成行，普通段落分行留白，表格单元格保留明确行距与分隔。PushPlus 超长精简版也按段落行重排成表格，避免微信窄屏把内容挤成连续长段。 |
 | 可读性保护 | 灰色正文有对比度测试门禁；涨跌同时使用 ▲ / ▼ / ■ 和正负号，不只依赖颜色（forum 暗色主题为 A 股口径：涨 ▲ 红、跌 ▼ 绿；guizang / dossier 等浅色主题仍按各自色板）。 |
-| 其他主题 | `dossier` 德国文件 / 档案风（浅灰底 + 荧光绿 + 鲜红）：`--theme dossier`；`guizang` 归藏白底研报（克莱因蓝/灰阶）：`--theme guizang`；`pixel` 复古像素：`--theme pixel`；均可用 `OCTOPUS_PUSH_THEME=forum|dossier|guizang|pixel` 切换。 |
+| 其他主题 | `forum` 暗色社区仪表盘：`--theme forum`；`dossier` 德国文件 / 档案风（浅灰底 + 荧光绿 + 鲜红）：`--theme dossier`；`guizang` 归藏白底研报（克莱因蓝/灰阶）：`--theme guizang`；默认主题为 DOS 复古监视器 `pixel`。可用 `OCTOPUS_PUSH_THEME=pixel|forum|dossier|guizang` 切换。 |
 
 ### 行情、日程与资讯
 
@@ -215,7 +215,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 | 无数据的栏目 | 不显示空栏目，也不拿历史数据冒充实时值；暂缺来源在“数据覆盖”中说明。 |
 | 推送可恢复错误 | 网络异常、HTTP 429/5xx 或发送频繁等错误按 10 秒、30 秒、60 秒退避重试，最多 4 次；不可恢复错误立即失败。 |
 | 推送仍失败 | 日报发送失败会尝试发送纯文本告警；推送或告警失败以退出码 1 结束，便于 Actions 标红。 |
-| 单条内容超限 | 默认上限按 PushPlus 会员 100,000 字符配置；低于上限一页发送，超限则按原 HTML 在栏目 / 完整标签边界拆分，续片重新带栏目头，**不再自动切换成失去 forum / dossier 等主题的白底纯文字版**。默认最多 12 条、条间 2 秒，并按平台频率限制排队。 |
+| 单条内容超限 | 默认上限按 PushPlus 会员 100,000 字符配置；低于上限一页发送，超限则按原 HTML 在栏目 / 完整标签边界拆分，续片重新带栏目头，**不再自动切换成失去 pixel / forum / dossier 等主题的白底纯文字版**。默认最多 12 条、条间 2 秒，并按平台频率限制排队。 |
 
 **账号额度请按实际情况设置**：PushPlus 文档列出的会员额度为 10 万字、实名用户为 2 万字。可用 `PUSHPLUS_MAX_CONTENT_CHARS` 覆盖默认值。设置 `PUSHPLUS_MULTIPART=0` 会关闭完整分条，改为安全截断并附完整版链接；磁盘归档仍保留完整报告。
 
@@ -234,7 +234,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 | 强制推旧文件 | `python3 output/pipeline.py --force-push-old` | 允许推送无新鲜度标记的旧文件，不推荐 |
 | 列出日报 | `python3 output/pipeline.py --list` | 查看已生成日报 |
 | 查看备用源清单 | `python3 output/pipeline.py --sources` | 离线打印主源与备用源 |
-| 切换主题 | `python3 output/pipeline.py --theme dossier` | 本次运行改用德国档案风（默认 forum 暗色社区仪表盘） |
+| 切换主题 | `python3 output/pipeline.py --theme pixel` / `--theme forum` / `--theme dossier` / `--theme guizang` | 临时选择 Pixel DOS 复古监视器、forum 暗色社区、德国档案风或归藏白底；默认 `pixel` |
 | 精简 + 说明文字 | `python3 output/pipeline.py --notes` | 保留精简版面，找回口径 / 来源 / 方法论等说明文字（默认入门版不出） |
 | 恢复完整长版 | `python3 output/pipeline.py --full` | 关闭短线速查卡与全篇精简，说明文字全部回来 |
 
@@ -255,8 +255,8 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 
 | 范围 | 变量 | 用途 / 默认值 |
 |---|---|---|
-| 页面 | `OCTOPUS_PUSH_THEME=forum` | 默认 `forum`（暗色社区仪表盘）；可选 `dossier` / `guizang` / `pixel` |
-| 页面 | 字号阶梯 | 默认刊头 26px、栏目 18px、关键数字 20px、正文 14px、表格 13px；forum / dossier / 归藏主题字号固定，不提供缩放变量。 |
+| 页面 | `OCTOPUS_PUSH_THEME=pixel` | 默认 `pixel`（DOS 复古监视器 / 8-bit Market Quest）；可选 `forum` / `dossier` / `guizang` |
+| 页面 | 字号阶梯 | Pixel DOS 版使用终端专属固定字号；forum / dossier / guizang 使用刊头 26px、栏目 18px、关键数字 20px、正文 14px、表格 13px。所有主题均不提供缩放变量。 |
 | 页面 | `OCTOPUS_LITE=0` | 关闭精简模式与短线卡，等同 `--full` |
 | 页面 | `OCTOPUS_NOTES=1` | 精简版面里保留说明文字 / 过程文字，等同 `--notes`；默认 0 = 入门版 |
 | 页面 | `OCTOPUS_CARD_CHARS=800` | 短线卡字数预算，默认 600，最少 200 |
@@ -294,7 +294,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 |---|---|
 | GitHub 定时任务 | `.github/workflows/octopus-daily.yml` 当前设置为每天北京时间 09:00 至 21:00 每两小时自动运行（对应 UTC 01:00~13:00 奇数整点，共 7 次）；09:00 早盘前与 21:00 晚间复盘推送到微信，盘中时段静默更新数据与网页（`--no-push`）。 |
 | GitHub 定时任务（隐藏功能） | `.github/workflows/market-db.yml` 每天北京时间 08:00 / 12:30 / 17:00 各跑一次，把多源行情快照落库到 `output/market_db/` 并提交；不推微信、不进日报。 |
-| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选**只生成、不推送**，或勾选**全量长版**（`--full`：恢复长文 / 完整表格 / 方法细节，仍使用默认 forum 暗色风格，不出短线速查卡）。与定时作业共用一把并发锁（`octopus-report`）：撞上时**排队**而不是并行生成同一批文件。 |
+| GitHub 手动运行 | Actions → **🐙 章鱼AI · 手动抓取推送** → **Run workflow**；可勾选**只生成、不推送**，或勾选**全量长版**（`--full`：恢复长文 / 完整表格 / 方法细节，仍使用默认 pixel DOS 复古监视器风格，不出短线速查卡）。与定时作业共用一把并发锁（`octopus-report`）：撞上时**排队**而不是并行生成同一批文件。 |
 | Jev 接入探针（手动 / 相关文件变更时） | `.github/workflows/jev-integration-probe.yml`：① 接入层离线回归（无权重 / 无 Key / 无外网，约 30 秒）② 开源本地运行时安装 + Hugging Face 可达性 ③ 真权重端到端（需勾 `build_model` 或提交信息带 `[jev-model]`，产出 ONNX 目录 Artifact）。只读仓库、不提交、不改文件。 |
 | 本地手动运行 | `./output/manual_push.sh`；`--force` 可强制推送，`--no-push` 只生成。 |
 | 自有服务器定时任务 | 使用 cron 调用 `./output/auto_push.sh`。 |
