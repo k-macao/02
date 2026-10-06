@@ -485,7 +485,8 @@ class CardRenderingTests(unittest.TestCase):
             try:
                 sections = self.pipeline._collect_report_parts(
                     data, self.pipeline.GUIZANG_KIT, date_str="20260802")["sections"]
-                html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+                html = self.pipeline.generate_report(
+                    data, "2026年8月2日 · 周日", "20260802", theme="guizang")
             finally:
                 self.pipeline._quant.render.LITE = True
         self.assertNotIn("SHORT CARD", [s[0] for s in sections])
@@ -498,7 +499,8 @@ class CardRenderingTests(unittest.TestCase):
     def test_lite_mode_collapses_long_form_and_discloses(self):
         data = self._data()
         with self.pipeline.notes_mode():          # 精简 + 说明文字（--notes）
-            html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+            html = self.pipeline.generate_report(
+                data, "2026年8月2日 · 周日", "20260802", theme="guizang")
         # 方法论长注折叠成一句，但结论与自检数字仍在
         self.assertIn("模型自检", html)
         self.assertIn("无未来函数口径", html)
@@ -508,9 +510,10 @@ class CardRenderingTests(unittest.TestCase):
         self.assertIn("精简版面", html)
 
     def test_plain_mode_keeps_conclusions_and_drops_methodology(self):
-        """入门版（默认，2026-10-03）：结论与自检数字在，口径 / 折叠披露 / 重复免责不出。"""
+        """Guizang 入门版：结论与自检数字在，口径 / 折叠披露 / 重复免责不出。"""
         data = self._data()
-        html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        html = self.pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertIn("模型自检", html)
         self.assertIn("今明 + 近端 ★★★ 时间点（北京时间）", html)
         self.assertIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html)
@@ -525,9 +528,10 @@ class CardRenderingTests(unittest.TestCase):
         self.assertNotIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html,
                          "一行数据都没有时整卡必须缺席，不许硬编文案占位")
 
-    def test_report_still_fits_one_push_message(self):
+    def test_guizang_report_still_fits_one_push_message(self):
         data = self._data()
-        html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        html = self.pipeline.generate_report(
+            data, "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertLess(len(html), self.pipeline.PUSHPLUS_MAX_CONTENT_CHARS)
         parts = self.pipeline._split_html_for_push(
             html, self.pipeline.PUSHPLUS_MAX_CONTENT_CHARS)

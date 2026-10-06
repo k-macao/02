@@ -573,19 +573,17 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 #   行情 / 全景 / 情绪总览 / 政策冲击 / 数据审计等结构化数据用键值表整合。
 #   图标在白底独立显示，正文与次要文字保持纯黑 / 深灰；不依赖颜色区分涨跌。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
-# pixel   —— 旧版 Retro Pixel Market Quest 主题（可切换回退，行为保持不变）。
-# dossier —— 2026-10-03 起的德国文件 / 档案风 + 包豪斯几何图标（可切换回退）：
-#   浅灰底 #F1F1F1 + 黑标题 + 深灰正文 #333，突出色只有 荧光绿 #39FF14 / 鲜红 #FF1F1F。
-# forum   —— 2026-10-05 起默认主题：暗色社区仪表盘（Dark Mode Community Dashboard）：
-#   深灰底 #1C1C1E + 卡片 #2C2C2E + 1px rgba(255,255,255,0.08) 描边与圆角，
-#   正文近白 #F2F2F7 / 次要中灰 #A1A1AA，彩色微型图标（黄闪电 / 红火焰 / 绿行情 /
-#   紫机器人 / 橙文档 / 青日历），区块标题为「大写 + 拉开字距」微标题。
-PUSH_THEMES = ("guizang", "pixel", "dossier", "forum")
-DEFAULT_PUSH_THEME = "forum"
+# pixel   —— 2026-10-07 起默认主题：DOS 复古监视器 / Retro Pixel Market Quest v3：
+#   暗色街机终端底 #050711 + 霓虹青 / 电光蓝 / 像素黄 / 品红，直角像素块、硬描边与实色阴影；
+#   等宽字栈、OCTOPUS_OS v3 标题栏、逐栏 LVL 关卡与 AI CORE 主控卡；全内联样式兼容微信。
+# forum   —— 暗色社区仪表盘（Dark Mode Community Dashboard，可切换）：深灰画布 / 卡片、
+#   柔和圆角与紫色点缀；dossier 为德国档案 + 包豪斯风，guizang 为克莱因蓝白底研报。
+PUSH_THEMES = ("pixel", "forum", "dossier", "guizang")
+DEFAULT_PUSH_THEME = "pixel"
 
 
 def _resolve_push_theme(name=None):
-    """归一化推送主题：空 / 非法值一律回落到默认主题 forum。"""
+    """归一化推送主题：空 / 非法值一律回落到默认 DOS 复古监视器主题 pixel。"""
     theme = name if name is not None else os.environ.get("OCTOPUS_PUSH_THEME", "")
     theme = str(theme or "").strip().lower()
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
@@ -11541,12 +11539,12 @@ GUIZANG_KIT = _RenderKit(
 #         两支都按「填充用原色、落字用深一档」分档使用：
 #           · 填充 / 描边 / 图形 → 荧光绿 #39FF14（配黑字，对比度 15.5:1）、
 #             鲜红 #FF1F1F（印章描边、警示描边）；
-#           · 浅灰底上的小字 → 深绿 #0F7A2B（4.8:1）、深红 #D01818（4.9:1），
-#             守住 WCAG AA，避免「浅底荧光字看不清」的老问题。
+#           · 文字与几何字形 → 深绿 #0A6724、深红 #C01010；在画布、斑马灰、
+#             荧光绿强调底上均 ≥4.6:1，覆盖嵌套底色后仍守 WCAG AA。
 #   · 文字排版：DIN 风格系统字栈（不加载远程字体，中文回退系统 CJK 字）
 #     + 等宽文件编号，字距拉开的等宽 kicker，强粗细对比；
-#   · 图标设计「包豪斯」：圆 / 三角 / 方 / 菱 × 荧光绿 / 鲜红 / 黑 的几何组合，
-#     纯 Unicode 字形，无远程图片、不给单条推送加 SVG 重量。
+#   · 图标设计「包豪斯」：圆 / 三角 / 方 / 菱 × 深绿 / 深红 / 黑字色的几何组合，
+#     纯 Unicode 字形；荧光原色只用作填充和描边，保证浅灰底上清晰可辨。
 #   · 实现：内容块复用 guizang 研报渲染器；_dossier_palette 上下文在渲染期间
 #     临时换掉 GZ_* 全局色变量（渲染器在调用时读取全局，故整体换色生效），
 #     栏目头 / 刊头 / 尾注为本主题专属。内容结构、栏目顺序、推送分条逻辑不变。
@@ -11564,11 +11562,11 @@ D_INK_STRONG = "#000000"   # 标题 / 最高强调（纯黑）
 D_GRAY = "#4A4A4A"         # 次要深灰（标签 / 表头 / 脚注，7.8:1）
 D_BLACK = "#000000"        # 粗线 / 黑条（标题条与 2px 粗线）
 # ---- 突出色：荧光绿 + 鲜红（各分「填充原色 / 落字深档」两档）----
-D_GREEN = "#39FF14"        # 荧光绿：高亮块底 / 黑底上的反白字 / 图形（配黑字 15.5:1）
-D_GREEN_INK = "#0F7A2B"    # 荧光绿落字版（浅灰底上 4.8:1）：小标题 / 关键数值 / ▲ 涨
-D_GREEN_DEEP = "#0A5C20"   # 深绿再深一档（链接按下 / 需要更重时）
-D_RED = "#FF1F1F"          # 鲜红：印章描边 / 警示描边 / 图形
-D_RED_INK = "#D01818"      # 鲜红落字版（浅灰底上 4.9:1）：▼ 跌 / 暂缺 / 印章文字
+D_GREEN = "#39FF14"        # 荧光绿：高亮块填充色（块内用黑字，15.5:1）；浅底不直接落字
+D_GREEN_INK = "#0A6724"    # 落字深绿：在浅灰、斑马灰、荧光绿底均 ≥5.2:1
+D_GREEN_DEEP = "#0A5C20"   # 更深一档绿（链接按下 / 需要更重时）
+D_RED = "#FF1F1F"          # 鲜红：填充 / 描边；不直接作为浅底文字色
+D_RED_INK = "#C01010"      # 落字深红：在浅灰、斑马灰、荧光绿底均 ≥4.6:1
 # 字栈：DIN 风格系统字（不加载远程字体）；等宽用打字机 Courier 系（档案卷宗感）
 D_FONT = ("'DIN Alternate','Bahnschrift','Avenir Next Condensed','Arial Narrow',"
           "-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB',"
@@ -11581,7 +11579,7 @@ _DOSSIER_GZ_SWAP = {
     "GZ_PAPER_TINT": D_PAPER,
     "GZ_KLEIN": D_GREEN_INK,
     "GZ_KLEIN_DEEP": D_GREEN_DEEP,
-    # 结论 / AI 判定块底：荧光绿高亮块，块内黑字（副标题用落字深绿 4.9:1）
+    # 结论 / AI 判定块底：荧光绿高亮块，深绿 / 深红落字版在该底上均过 AA。
     "GZ_KLEIN_WASH": D_GREEN,
     "GZ_INK": D_INK,
     "GZ_INK_STRONG": D_INK_STRONG,
@@ -11641,34 +11639,34 @@ class _dossier_palette:
 
 # 包豪斯图标：kicker → (主字形, 主色, 副字形, 副色)。
 # 形状只用圆 ● / 三角 ▲▼▶ / 方 ■□ / 菱 ◆ / 半圆 ◐◍◎ 等几何字形；
-# 颜色只用荧光绿 / 鲜红 / 黑，与德国文件排版同盘（绿色取落字深绿，浅灰底上才看得清）。
+# 颜色只用落字深绿 / 落字深红 / 黑；原色只作荧光填充与描边，确保几何字形在浅灰底上清晰。
 DOSSIER_ICONS = {
-    "AI DIGEST": ("■", D_BLACK, "●", D_RED),
-    "FORECAST": ("▲", D_GREEN_INK, "●", D_RED),
-    "SUMMARY": ("■", D_BLACK, "▲", D_RED),
-    "MARKET REVIEW": ("▲", D_RED, "■", D_BLACK),
-    "WEEKLY FORECAST": ("■", D_GREEN_INK, "▲", D_RED),
-    "QUANT FORECAST": ("●", D_RED, "■", D_BLACK),
-    "HK PROBABILITY": ("◍", D_GREEN_INK, "●", D_RED),
+    "AI DIGEST": ("■", D_BLACK, "●", D_RED_INK),
+    "FORECAST": ("▲", D_GREEN_INK, "●", D_RED_INK),
+    "SUMMARY": ("■", D_BLACK, "▲", D_RED_INK),
+    "MARKET REVIEW": ("▲", D_RED_INK, "■", D_BLACK),
+    "WEEKLY FORECAST": ("■", D_GREEN_INK, "▲", D_RED_INK),
+    "QUANT FORECAST": ("●", D_RED_INK, "■", D_BLACK),
+    "HK PROBABILITY": ("◍", D_GREEN_INK, "●", D_RED_INK),
     "LIQUIDITY FLOW": ("≈", D_GREEN_INK, "●", D_BLACK),
-    "SECTOR ROTATION": ("◐", D_GREEN_INK, "▲", D_RED),
-    "INDUSTRY ROTATION": ("◆", D_RED, "■", D_BLACK),
-    "ECON CALENDAR": ("▦", D_GREEN_INK, "●", D_RED),
-    "POLICY SHOCK": ("§", D_RED, "■", D_BLACK),
-    "DATA AUDIT": ("✓", D_GREEN_INK, "■", D_RED),
-    "TREND TRACKING": ("◉", D_GREEN_INK, "▲", D_RED),
-    "SHORT CARD": ("▲", D_RED, "●", D_GREEN_INK),
-    "STRATEGY READ": ("◆", D_GREEN_INK, "■", D_RED),
-    "HK QUOTES": ("◍", D_RED, "●", D_GREEN_INK),
-    "GLOBAL HEADLINES": ("▤", D_GREEN_INK, "▲", D_RED),
-    "EASTMONEY WIRE": ("!", D_RED, "■", D_BLACK),
-    "NEWS SENTIMENT": ("◆", D_RED, "●", D_GREEN_INK),
-    "QUANT STRATEGY": ("◆", D_GREEN_INK, "■", D_RED),
-    "QUANT POLICY": ("◉", D_RED, "■", D_BLACK),
-    "FED TREND": ("$", D_GREEN_INK, "●", D_RED),
-    "GEO TREND": ("◎", D_RED, "■", D_BLACK),
-    "AI READ": ("●", D_GREEN_INK, "▲", D_RED),
-    "HK GURU CHANNELS": ("▶", D_GREEN_INK, "■", D_RED),
+    "SECTOR ROTATION": ("◐", D_GREEN_INK, "▲", D_RED_INK),
+    "INDUSTRY ROTATION": ("◆", D_RED_INK, "■", D_BLACK),
+    "ECON CALENDAR": ("▦", D_GREEN_INK, "●", D_RED_INK),
+    "POLICY SHOCK": ("§", D_RED_INK, "■", D_BLACK),
+    "DATA AUDIT": ("✓", D_GREEN_INK, "■", D_RED_INK),
+    "TREND TRACKING": ("◉", D_GREEN_INK, "▲", D_RED_INK),
+    "SHORT CARD": ("▲", D_RED_INK, "●", D_GREEN_INK),
+    "STRATEGY READ": ("◆", D_GREEN_INK, "■", D_RED_INK),
+    "HK QUOTES": ("◍", D_RED_INK, "●", D_GREEN_INK),
+    "GLOBAL HEADLINES": ("▤", D_GREEN_INK, "▲", D_RED_INK),
+    "EASTMONEY WIRE": ("!", D_RED_INK, "■", D_BLACK),
+    "NEWS SENTIMENT": ("◆", D_RED_INK, "●", D_GREEN_INK),
+    "QUANT STRATEGY": ("◆", D_GREEN_INK, "■", D_RED_INK),
+    "QUANT POLICY": ("◉", D_RED_INK, "■", D_BLACK),
+    "FED TREND": ("$", D_GREEN_INK, "●", D_RED_INK),
+    "GEO TREND": ("◎", D_RED_INK, "■", D_BLACK),
+    "AI READ": ("●", D_GREEN_INK, "▲", D_RED_INK),
+    "HK GURU CHANNELS": ("▶", D_GREEN_INK, "■", D_RED_INK),
 }
 
 
@@ -11684,7 +11682,7 @@ def dossier_icon(kicker_en):
 def dossier_stamp(text="RESEARCH · 非投资建议"):
     """档案鲜红章：描边方章，等宽字距拉开（入门版不出过程性印章）。
 
-    描边用鲜红原色 #FF1F1F，章面文字用落字深红 #D01818（浅灰底上 4.9:1）。
+    描边用鲜红原色 #FF1F1F，章面文字用落字深红 #C01010（浅灰 / 斑马 / 荧光底均过 AA）。
     """
     if PLAIN():
         return ""
@@ -11781,9 +11779,9 @@ DOSSIER_KIT = _RenderKit(
 def _dossier_masthead(date_display, date_str, today_n, total, generated_at):
     """Dossier 刊头（卷宗封面）：黑条刊名 + 荧光绿档号 → 大标题（黑）+ 几何图标 → 档案元信息表 → 鲜红章。"""
     file_no = f"AKT-{date_str}"
-    # 标题后的几何记号：荧光绿方块 + 鲜红圆点 + 黑三角（突出色只在两色之内）
-    icon_block = (f'<span style="color:{D_GREEN};font-size:15px;">■</span>'
-                  f'<span style="color:{D_RED};font-size:12px;padding-left:2px;">●</span>'
+    # 标题后的几何记号用落字色：原荧光绿方块在浅灰底上几乎不可辨。
+    icon_block = (f'<span style="color:{D_GREEN_INK};font-size:15px;">■</span>'
+                  f'<span style="color:{D_RED_INK};font-size:12px;padding-left:2px;">●</span>'
                   f'<span style="color:{D_BLACK};font-size:10px;padding-left:2px;">▲</span>')
 
     def _meta_cell(label, value, last=False):
@@ -11913,7 +11911,7 @@ def _dossier_html_frame(masthead, first_section, content_html, footer_text,
 
 
 # ============================================================
-# 论坛暗色主题 forum（2026-10-05 起默认）
+# 论坛暗色主题 forum（可切换主题）
 # ------------------------------------------------------------
 # 设计语言（用户提供的暗色社区仪表盘参考稿）：
 #  · 底色 #1C1C1E（页面画布）/ #2C2C2E（卡片容器）/ #232325（卡内条纹）
@@ -12511,8 +12509,8 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
-    theme: "forum"（默认 · 暗色社区仪表盘）/ "dossier"（德国文件档案风 + 包豪斯几何）
-    / "guizang"（简洁白底研报）/ "pixel"（旧版复古像素）。
+    theme: "pixel"（默认 · DOS 复古监视器 / Retro Pixel Market Quest）
+    / "forum"（暗色社区仪表盘）/ "dossier"（德国文件档案风 + 包豪斯几何）/ "guizang"（简洁白底研报）。
     sentiment_history: 跨日情绪基线（新闻情绪用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
@@ -13235,7 +13233,7 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
 
 
 def _report_theme(html):
-    """从日报 HTML 里读出渲染主题（供分条横幅配色）；读不出来按默认主题处理。"""
+    """从日报 HTML 里读出渲染主题（供分条横幅配色）；读不出来按默认 pixel 主题处理。"""
     m = re.search(r'name="octopus-theme"\s+content="([^"]+)"', html or "")
     theme = (m.group(1) if m else "").strip().lower()
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
@@ -14137,9 +14135,10 @@ def main():
   python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
   python3 output/pipeline.py --calendar-only        # 只抓「时间节点」（未来30天影响经济时间点）并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
-  python3 output/pipeline.py --theme dossier       # 本次改用德国档案风（默认 forum 暗色社区仪表盘）
-  python3 output/pipeline.py --theme guizang       # 或用归藏白底研报主题
-  python3 output/pipeline.py --theme pixel          # 本次改用旧版像素主题
+  python3 output/pipeline.py --theme forum         # 改用 forum 暗色社区仪表盘
+  python3 output/pipeline.py --theme dossier       # 改用德国档案风 + 包豪斯几何
+  python3 output/pipeline.py --theme guizang       # 改用归藏白底研报
+  python3 output/pipeline.py --theme pixel         # 默认：DOS 复古监视器 / Retro Pixel Market Quest
   python3 output/pipeline.py --notes                # 精简版面里保留说明文字 / 过程文字（默认入门版不出）
   python3 output/pipeline.py --full                 # 全量长版：长文 / 表格 / 方法论注释全部回来
         """
@@ -14162,8 +14161,8 @@ def main():
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--theme", default=None, choices=list(PUSH_THEMES),
-                       help="推送主题：forum（默认 · 暗色社区仪表盘）/ dossier（德国文件档案风+包豪斯）"
-                         " / guizang（白底研报）/ pixel（旧版像素）")
+                       help="推送主题：pixel（默认 · DOS 复古监视器）/ forum（暗色社区仪表盘）"
+                         " / dossier（德国文件档案风+包豪斯）/ guizang（白底研报）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
     parser.add_argument("--no-quant", action="store_true",

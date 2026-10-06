@@ -535,7 +535,7 @@ class RetroPixelVisualTests(unittest.TestCase):
         data["实时行情"]["quotes"]["深证成指"] = {
             "price": 12345.67, "change_pct": -2.5, "currency": "CNY"
         }
-        # 像素视觉回归固定走 pixel 主题（默认主题自 2026-08-21 起为 guizang）
+        # 像素视觉回归显式走 pixel 主题，不依赖当前推送默认主题
         parts = pipeline._collect_report_parts(data, pipeline.PIXEL_KIT, date_str="20260802")
         kickers = [s[0] for s in parts["sections"]]
         marker = lambda key: f"LVL {kickers.index(key):02d} // {key}"
@@ -566,6 +566,20 @@ class RetroPixelVisualTests(unittest.TestCase):
         self.assertIn("▼ 跌 / DOWN", html)
         self.assertNotIn("<style", html)     # 微信 / PushPlus 仍保持全内联样式
 
+    def test_pixel_default_report_splits_with_theme_and_size_limits(self):
+        data = NewLayoutRenderingTests()._rich_data()
+        with patch.dict(os.environ, {"OCTOPUS_PUSH_THEME": ""}):
+            html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        pieces = pipeline._split_html_for_push(html, 20_000)
+        self.assertIsNotNone(pieces)
+        self.assertGreater(len(pieces), 1)
+        self.assertTrue(all(len(piece) <= 20_000 for piece in pieces))
+        self.assertTrue(all('name="octopus-theme" content="pixel"' in piece
+                            for piece in pieces))
+        joined = "".join(pieces)
+        for kicker in ("MARKET REVIEW", "POLICY SHOCK", "SUMMARY", "FORECAST"):
+            self.assertIn(kicker, joined)
+
     def test_watch_list_keeps_theme_only_and_omits_stock_rows(self):
         """2026-08-06 起 WATCH LIST // 明日关注 不再列出榜单个股，只保留主题行。"""
         data = NewLayoutRenderingTests()._rich_data()
@@ -590,7 +604,8 @@ class GuizangThemeTests(unittest.TestCase):
 
     设计契约：全量内容压进单条微信消息（一页推）、纯内联样式、无 <style> / class /
     远程图片，克莱因蓝 #002FA7 是页面上唯一的有色，其余层级全部由灰阶承担。
-    2026-10-03 起默认主题改为 dossier，本类是 guizang 专属契约，一律显式 theme="guizang"。
+    2026-10-07 起默认主题改为 pixel；本类的归藏视觉契约显式指定 theme="guizang"，
+    另有一项回归锁定新默认主题及所有主题的解析。
     """
 
     def _html(self):
@@ -598,17 +613,22 @@ class GuizangThemeTests(unittest.TestCase):
                                         "2026年8月2日 · 周日", "20260802",
                                         theme="guizang")
 
-    def test_default_theme_is_forum_and_resolves_all_themes(self):
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
+    def test_default_theme_is_pixel_and_resolves_all_themes(self):
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
         self.assertEqual(pipeline.PUSH_THEMES,
-                         ("guizang", "pixel", "dossier", "forum"))
-        self.assertEqual(pipeline._resolve_push_theme(None), "forum")
-        self.assertEqual(pipeline._resolve_push_theme(""), "forum")
-        self.assertEqual(pipeline._resolve_push_theme("nonsense"), "forum")
-        self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
-        self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
-        self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
-        self.assertEqual(pipeline._resolve_push_theme(" Forum "), "forum")
+                         ("pixel", "forum", "dossier", "guizang"))
+        with patch.dict(os.environ, {"OCTOPUS_PUSH_THEME": ""}):
+            self.assertEqual(pipeline._resolve_push_theme(None), "pixel")
+            self.assertEqual(pipeline._resolve_push_theme(""), "pixel")
+            self.assertEqual(pipeline._resolve_push_theme("nonsense"), "pixel")
+            self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
+            self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
+            self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
+            self.assertEqual(pipeline._resolve_push_theme(" Forum "), "forum")
+            default_html = pipeline.generate_report(
+                NewLayoutRenderingTests()._rich_data(), "2026年8月2日 · 周日", "20260802")
+        self.assertIn('name="octopus-theme" content="pixel"', default_html)
+        self.assertIn("OCTOPUS_OS v3.0", default_html)
 
     def test_type_scale_is_one_page_friendly(self):
         """字号阶梯为「一页推」整体收一档：刊头 26 / 栏目 18 / 正文 14 / 次要 12"""
@@ -868,7 +888,8 @@ class GuizangThemeTests(unittest.TestCase):
 
     def test_market_snapshot_table_keeps_labels_and_numbers(self):
         data = ReportFreshnessTests()._sample_data()
-        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801")
+        html = pipeline.generate_report(data, "2026年8月1日 · 周六", "20260801",
+                                        theme="guizang")
         self.assertIn("6,123", html)
         self.assertIn("名称", html)
         self.assertIn("最新价", html)
@@ -1073,7 +1094,8 @@ class GuizangOnePageTests(unittest.TestCase):
     def test_heavy_day_report_keeps_every_section(self):
         """全量：重日栏目一个都不能少，只靠排版瘦身换一页"""
         data = self._heavy_data()
-        html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929")
+        html = pipeline.generate_report(data, "2026年9月29日 · 周二", "20260929",
+                                       theme="guizang")
         titles = [s[1] for s in pipeline._collect_report_parts(
             data, pipeline.GUIZANG_KIT, date_str="20260929")["sections"]]
         # 2026-09-29 起八个栏目改名（只改标题文字）：AI 全篇速览 / 今日预判 /
@@ -1492,7 +1514,8 @@ class MarketPanoramaTests(unittest.TestCase):
     def test_panorama_section_renders_in_guizang_theme(self):
         data = NewLayoutRenderingTests()._rich_data()
         data["A股大盘全景"] = self._panorama_payload()
-        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908")
+        html = pipeline.generate_report(data, "2026年9月8日 · 周二", "20260908",
+                                       theme="guizang")
         self.assertIn(pipeline.SECTION_TITLE_MARKET_REVIEW, html)
         self.assertNotIn("全球大盘全景复盘", html)   # 旧栏目名随合并消失
         # 指数表并入「A股指数」一块：fixture 的 Yahoo 报价没有 as_of，按
@@ -2439,7 +2462,7 @@ class SectionReadingOrderTests(unittest.TestCase):
 
     def test_guizang_section_reading_order(self):
         html = pipeline.generate_report(
-            self._full_data(), "2026年8月2日 · 周日", "20260802")  # 默认 guizang
+            self._full_data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         positions = [html.find(h) for h in self.GUIZANG_ORDER]
         self.assertNotIn(-1, positions, "存在未渲染的栏目标题")
         self.assertEqual(positions, sorted(positions),
@@ -2517,7 +2540,8 @@ class ConciseLayoutTests(unittest.TestCase):
         return data
 
     def test_analysis_data_conclusion_order_and_emphasis(self):
-        html = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
+        html = pipeline.generate_report(
+            self._data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         strategy = html.find(f"{pipeline.SECTION_TITLE_STRATEGY}</h2>")
         market = html.find("【及时秋刀鱼】AI 行情复盘</h2>")
         recap = html.find("总结</h2>")
@@ -2546,7 +2570,8 @@ class ConciseLayoutTests(unittest.TestCase):
             self.assertNotIn("/*", html)                      # 像素脚注
             self.assertNotIn("每个频道列出最新", html)
             self.assertNotIn("非交易时段显示最近收盘", html)
-        guizang = pipeline.generate_report(self._data(), "2026年8月2日 · 周日", "20260802")
+        guizang = pipeline.generate_report(
+            self._data(), "2026年8月2日 · 周日", "20260802", theme="guizang")
         self.assertNotIn("频道简介不应出现", guizang)
         self.assertNotIn("香港著名股評人", guizang)
         self.assertNotIn("策略研判由公开数据经确定性规则合成", guizang)
@@ -3777,7 +3802,7 @@ class MarketReviewMergeTests(unittest.TestCase):
 
 
 class DossierThemeTests(unittest.TestCase):
-    """Dossier 排版（2026-10-03 起默认 · 德国文件 / 档案风 + 包豪斯几何）
+    """可切换 Dossier 排版（德国文件 / 档案风 + 包豪斯几何）
 
     设计契约：牛皮纸文件夹标签（AKTE 编号）、2px 黑粗线、等宽卷宗号、红色
     RESEARCH 印章、ENDE DER AKTE 档案尾注；包豪斯图标只用 圆/三角/方/菱 等
@@ -3792,9 +3817,9 @@ class DossierThemeTests(unittest.TestCase):
 
     # ---------------- 主题注册与解析 ----------------
     def test_dossier_is_registered_and_resolvable(self):
-        """2026-10-05 起默认主题换成暗色 forum；dossier 仍注册可切换（--theme dossier）。"""
+        """dossier 保持注册可切换；默认主题为 DOS 复古监视器 pixel。"""
         self.assertIn("dossier", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
         self.assertEqual(pipeline._resolve_push_theme("dossier"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("nope"), pipeline.DEFAULT_PUSH_THEME)
@@ -3851,8 +3876,8 @@ class DossierThemeTests(unittest.TestCase):
 
     # ---------------- 包豪斯图标 ----------------
     def test_bauhaus_icons_are_geometric_and_duotone(self):
-        """图标只用几何字形 × 荧光绿 / 鲜红 / 黑：不再有蓝、黄两种旧强调色。"""
-        allowed = {pipeline.D_GREEN_INK.upper(), pipeline.D_RED.upper(),
+        """图标只用几何字形 × 落字深绿 / 落字深红 / 黑；原色只用于填充与描边。"""
+        allowed = {pipeline.D_GREEN_INK.upper(), pipeline.D_RED_INK.upper(),
                    pipeline.D_BLACK.upper(), pipeline.D_INK_STRONG.upper()}
         for kicker, spec in pipeline.DOSSIER_ICONS.items():
             g1, c1, g2, c2 = spec
@@ -3890,8 +3915,10 @@ class DossierThemeTests(unittest.TestCase):
         self.assertEqual(pipeline.D_INK, "#333333")          # 正文深灰
         self.assertEqual(pipeline.D_INK_STRONG, "#000000")   # 标题纯黑
         self.assertEqual(pipeline.D_BLACK, "#000000")
-        self.assertEqual(pipeline.D_GREEN, "#39FF14")        # 荧光绿
-        self.assertEqual(pipeline.D_RED, "#FF1F1F")          # 鲜红
+        self.assertEqual(pipeline.D_GREEN, "#39FF14")        # 荧光绿填充
+        self.assertEqual(pipeline.D_RED, "#FF1F1F")          # 鲜红填充
+        self.assertEqual(pipeline.D_GREEN_INK, "#0A6724")    # 落字绿
+        self.assertEqual(pipeline.D_RED_INK, "#C01010")      # 落字红
         self.assertEqual(pipeline.D_TAB, pipeline.D_GREEN)   # 高亮标签 = 荧光绿块
 
         def _lum(hex_color):
@@ -3915,13 +3942,15 @@ class DossierThemeTests(unittest.TestCase):
         self.assertLess(paper, "#FFFFFF")
         # 灰字强制门禁不会被浅灰画布触发（> #E8 的中性灰是底不是字）
         self.assertFalse(pipeline._is_light_or_mid_gray_hex(paper))
-        # 正文 / 次要文字都在浅灰底上过 WCAG AA
-        for color in (pipeline.D_INK, pipeline.D_GRAY, pipeline.D_GREEN_INK, pipeline.D_RED_INK):
-            self.assertGreaterEqual(round(_contrast(color, paper), 2), 4.5,
-                                    f"{color} 在浅灰底上对比度不足 4.5:1")
-        # 荧光绿 / 鲜红是填充色：块内黑字必须够亮够清楚
+        # 正文 / 次要文字 / 涨跌字色要同时适配画布、斑马灰与荧光绿强调底。
+        for color in (pipeline.D_INK, pipeline.D_GRAY, pipeline.D_GREEN_INK,
+                      pipeline.D_RED_INK, pipeline.D_INK_STRONG):
+            for background in (paper, pipeline.D_ZEBRA, pipeline.D_GREEN):
+                self.assertGreaterEqual(round(_contrast(color, background), 2), 4.5,
+                                        f"{color} 在 {background} 上对比度不足 4.5:1")
+        # 荧光绿 / 鲜红是填充色：块内黑字必须够亮够清楚。
         self.assertGreaterEqual(_contrast(pipeline.D_INK_STRONG, pipeline.D_GREEN), 12)
-        # 荧光绿 / 鲜红在浅灰底上不能当作小字色（只做填充），所以另给落字深档
+        # 原荧光色不作为浅底文字 / 图标，避免对比不足。
         self.assertLess(_contrast(pipeline.D_GREEN, paper), 3)
         self.assertLess(_contrast(pipeline.D_RED, paper), 4.5)
         # 涨 = 绿、跌 = 红（与像素主题、量化表一致），用落字版
@@ -3930,6 +3959,80 @@ class DossierThemeTests(unittest.TestCase):
         self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN_WASH"], pipeline.D_GREEN)
         self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN"], pipeline.D_GREEN_INK)
         self.assertEqual(pipeline._DOSSIER_GZ_SWAP["GZ_KLEIN_DEEP"], pipeline.D_GREEN_DEEP)
+
+    def test_rendered_text_contrast_meets_aa_on_actual_backgrounds(self):
+        """生成后的 Dossier 页面也要过 AA，覆盖色盘常量测试漏掉的嵌套底色组合。"""
+        from html.parser import HTMLParser
+
+        class _ContrastAudit(HTMLParser):
+            _COLOR = re.compile(r"(?<![-\w])color\s*:\s*(#[0-9a-f]{3,6})\b", re.I)
+            _BACKGROUND = re.compile(
+                r"(?<![-\w])background(?:-color)?\s*:\s*(#[0-9a-f]{3,6})\b", re.I)
+            _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+                     "link", "meta", "param", "source", "track", "wbr"}
+
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+                self.samples = []
+                self.unstyled = []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                style = attrs.get("style") or ""
+                color_match = self._COLOR.search(style)
+                bg_match = self._BACKGROUND.search(style)
+                color = color_match.group(1).upper() if color_match else None
+                background = (bg_match.group(1).upper() if bg_match else
+                              str(attrs.get("bgcolor") or "").upper() or None)
+                if tag.lower() not in self._VOID:
+                    self.stack.append((tag.lower(), color, background))
+
+            def handle_endtag(self, tag):
+                tag = tag.lower()
+                for index in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[index][0] == tag:
+                        self.stack = self.stack[:index]
+                        break
+
+            def handle_data(self, data):
+                text = data.strip()
+                if not text or (self.stack and self.stack[-1][0] in ("title", "style", "script")):
+                    return
+                color = background = None
+                for tag, fg, bg in reversed(self.stack):
+                    if tag == "body":
+                        break  # PushPlus v-html 会剥掉 body，不能依赖其样式
+                    if color is None and fg:
+                        color = fg
+                    if background is None and bg:
+                        background = bg
+                if color is None or background is None:
+                    self.unstyled.append((text[:40], color, background))
+                else:
+                    self.samples.append((text[:40], color, background))
+
+        html = self._html()
+        audit = _ContrastAudit()
+        audit.feed(html)
+        self.assertGreater(len(audit.samples), 50)
+        self.assertEqual(audit.unstyled, [], f"Dossier 有无色文本或未识别底色：{audit.unstyled[:5]}")
+
+        def _luminance(color):
+            h = color.lstrip("#")
+            channels = []
+            for index in (0, 2, 4):
+                channel = int(h[index:index + 2], 16) / 255
+                channels.append(channel / 12.92 if channel <= 0.04045
+                                else ((channel + 0.055) / 1.055) ** 2.4)
+            r, g, b = channels
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        for text, color, background in audit.samples:
+            light, dark = sorted((_luminance(color), _luminance(background)), reverse=True)
+            ratio = (light + 0.05) / (dark + 0.05)
+            self.assertGreaterEqual(round(ratio, 2), 4.5,
+                                    f"文字「{text}」色 {color} 在 {background} 上仅 {ratio:.2f}:1")
 
     def test_dossier_has_no_klein_leak_in_quant_tables(self):
         """行情复盘里的 MACD 量化表是按 GUIZANG_KIT 渲染的（历史实现）：
@@ -3985,7 +4088,7 @@ class DossierThemeTests(unittest.TestCase):
 
 
 class ForumThemeTests(unittest.TestCase):
-    """暗色社区主题 forum（2026-10-05 起默认）：卡片暗底 + 彩色图标 + 暗色字色保护。
+    """可切换的暗色社区主题 forum：卡片暗底 + 彩色图标 + 暗色字色保护。
 
     设计契约：画布 #1C1C1E / 卡片 #2C2C2E / 1px rgba(255,255,255,0.08) 描边 + 圆角；
     正文 #F2F2F7、标题 #FFFFFF、次要 #A1A1AA、点缀 #D8B4FE（紫，2026-10-06 起，
@@ -4043,10 +4146,10 @@ class ForumThemeTests(unittest.TestCase):
         return audit
 
     # ---------------- 主题注册与元信息 ----------------
-    def test_forum_is_registered_and_default(self):
+    def test_forum_is_registered_and_selectable(self):
         self.assertIn("forum", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "forum")
-        self.assertEqual(pipeline._resolve_push_theme(None), "forum")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
+        self.assertEqual(pipeline._resolve_push_theme(None), "pixel")
         self.assertEqual(pipeline._resolve_push_theme("FORUM"), "forum")
         self.assertEqual(pipeline._resolve_push_theme(" forum "), "forum")
 

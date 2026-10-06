@@ -105,7 +105,7 @@ class ZebraBandTests(unittest.TestCase):
         for theme, expected_paper, expected_zebra in (
                 ("guizang", PAPER, pipeline.GZ_ZEBRA),
                 ("dossier", pipeline.D_PAPER, pipeline.D_ZEBRA),
-                # 2026-10-05 起的默认暗色主题：卡片 #2C2C2E / 卡内条纹 #232325
+                # forum 暗色主题：卡片 #2C2C2E / 卡内条纹 #232325
                 ("forum", pipeline.F_CARD, pipeline.F_STRIPE)):
             with self.subTest(theme=theme):
                 html = pipeline.generate_report(data, "2026年9月30日 · 周三", "20260930",

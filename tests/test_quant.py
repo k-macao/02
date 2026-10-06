@@ -676,7 +676,8 @@ class RenderIntegrationTests(unittest.TestCase):
     def test_report_without_quant_source_does_not_break(self):
         data = {"实时行情": pipeline._source_result("test quote", "unavailable",
                                                 quotes={}, error="offline")}
-        html = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928")
+        html = pipeline.generate_report(data, "2026年9月28日 · 周一", "20260928",
+                                       theme="guizang")
         self.assertNotIn("量化预测总览", html)   # 改名后仍不得出现（含鱼名前缀版本）
         self.assertIn("总结</h2>", html)  # 栏目名 2026-09-28 由「盘点总结」改为「总结」
 
