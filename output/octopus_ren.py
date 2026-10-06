@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""🦑 鲜鲜解读 —— 日报每个栏目的「00 后接地气版」翻译层（2026-09-29 新增）。
+"""🦑 AI帮你提鲜 —— 日报每个栏目的「00 后接地气版」翻译层（2026-09-29 新增）。
 
 用户是入门兼职投资者，看不懂专业术语。本模块把日报里每个栏目的关键数字
-翻译成一句到三句大白话 + 网络梗，附在每个栏目末尾「🦑 鲜鲜解读」行里。
+翻译成一句到三句大白话 + 网络梗，附在每个栏目末尾「🦑 AI帮你提鲜」块里。
+（2026-10-06 由「鲜鲜解读」更名：名字直接说人话——AI 帮你把这栏的数字「提鲜」；
+标题常量 REN_TITLE 统一出口，改名只改一处。）
 
 设计原则（与整仓「防自欺」文化一致，写进 tests/test_ren.py 兜底）：
   1. 纯确定性规则合成：不调大模型、可复现——同一份输入永远得到同一份解读；
@@ -28,11 +30,46 @@ from __future__ import annotations
 import os
 import zlib
 
-# OCTOPUS_REN=0 / false / no 关闭「鲜鲜解读」；其余值（含未设置）默认开启。
+# OCTOPUS_REN=0 / false / no 关闭「AI帮你提鲜」；其余值（含未设置）默认开启。
 ENABLED = str(os.environ.get("OCTOPUS_REN", "1")).strip().lower() not in ("0", "false", "no")
 
-# 每条解读行下面的小字口径（诚实标注：规则合成 + 非投资建议）。
+# 块标题（2026-10-06 由「鲜鲜解读」更名）：渲染层（pipeline._ren_judgment_row）与
+# 测试都从这里取，保证改名后页面 / 文档 / 测试三处口径一致。
+REN_TITLE = "AI帮你提鲜"
+REN_ICON = "🦑"
+# 每条解读块下面的小字口径（诚实标注：规则合成 + 非投资建议）。
 DISCLAIMER = "规则合成 · 大白话翻译，非投资建议"
+
+
+# ------------------------------------------------------------------
+# 字符图：涨跌几率条（▓ 涨 / ░ 跌，每格 10%）——纯字符、双主题可上色
+# ------------------------------------------------------------------
+def fresh_meter(p_pct, width=10):
+    """多头概率（0~100）→ 几率条字符图：{"filled", "empty", "bar", "odds"}。
+
+    filled/empty：▓ 与 ░ 的格数（渲染层按格数分段上色，两段颜色不同）；
+    bar：拼好的纯文本条（▓▓▓▓▓░░░░░，供纯文本场景直接用）；
+    odds：几率口径文案「涨 52 ： 48 跌」——只是同一概率的另一种写法，
+    不引入任何新数字（防自欺：52 : 48 就是 52% 的重新排版）。
+    p_pct 非法（None / 非数）→ 返回 None，渲染层整条几率条缺席。
+    """
+    try:
+        p = float(p_pct)
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= p <= 100.0):
+        return None
+    # 半进位取格（+0.5 再取整）：5% 至少亮 1 格、95% 顶满 10 格，视觉上不失真；
+    # 格数始终夹在 [0, width]，绝不出现 11 格或负格。
+    filled = max(0, min(width, int(p / 100.0 * width + 0.5)))
+    empty = width - filled
+    p_int = int(round(p))
+    return {
+        "filled": filled,
+        "empty": empty,
+        "bar": "▓" * filled + "░" * empty,
+        "odds": f"涨 {p_int} ： {100 - p_int} 跌",
+    }
 
 
 # ------------------------------------------------------------------
@@ -697,7 +734,7 @@ def _seafood_garnish(kicker, ctx):
 
 
 def section_ren(kicker, ctx):
-    """返回某栏目的「鲜鲜解读」文本；数据不足 / 出错返回 ""（调用方就不加行）。
+    """返回某栏目的「AI帮你提鲜」正文文本；数据不足 / 出错返回 ""（调用方就不加块）。
 
     2026-09-30 起：解读末尾按行情状态确定性点缀「🦐 活鲜度」标签 + 一句活鲜比喻
     （octopus_lexicon 词库；条件驱动、无数字、可复现）。数据不足时整行仍缺席。
@@ -708,7 +745,7 @@ def section_ren(kicker, ctx):
     try:
         text = str(gen(ctx) or "")
     except Exception as exc:            # 单栏出措不拖垮整份日报
-        print(f"  ⚠️ 鲜鲜解读（{kicker}）生成失败，本栏跳过：{exc}")
+        print(f"  ⚠️ AI帮你提鲜（{kicker}）生成失败，本栏跳过：{exc}")
         return ""
     if not text:
         return ""
@@ -718,6 +755,30 @@ def section_ren(kicker, ctx):
         print(f"  ⚠️ 活鲜点缀（{kicker}）生成失败，跳过点缀：{exc}")
         garnish = ""
     return text + garnish if garnish else text
+
+
+def section_ren_block(kicker, ctx):
+    """「AI帮你提鲜」整块数据（2026-10-06 新增）：正文 + 方向 label + 概率 p_pct。
+
+    返回 {"text", "label", "p_pct"}（text 非空才返回，否则 None，调用方就不加块）。
+    label / p_pct 与「⌁ AI 研判」行同源（_garnish_dir 同一套取数，不另算一套），
+    渲染层只负责把 p_pct 画成几率条字符图，绝不在这里造新数字。
+    p_pct 缺失（栏目没有研判概率）→ None：渲染层跳过几率条，只出字符图头 + 正文。
+    """
+    text = section_ren(kicker, ctx)
+    if not text:
+        return None
+    try:
+        obj = _garnish_obj(kicker, ctx)
+        label, p_pct = _garnish_dir(kicker, ctx, obj)
+    except Exception as exc:            # 元数据出错只丢几率条，正文照常
+        print(f"  ⚠️ AI帮你提鲜（{kicker}）几率条元数据失败，跳过几率条：{exc}")
+        label, p_pct = None, None
+    if isinstance(p_pct, (int, float)):
+        p_pct = round(float(p_pct), 1)
+    else:
+        p_pct = None
+    return {"text": text, "label": label or None, "p_pct": p_pct}
 
 
 def digest_ren(ctx):
@@ -745,3 +806,26 @@ def digest_ren(ctx):
         return ""
     return ("今日画风：" + "，".join(labels) + "。"
             f"一句话攻略：信息量再大也别慌，今天的姿势是{_tip(seed)}。")
+
+
+def digest_meta(ctx):
+    """首屏速览「AI帮你提鲜」块的几率条元数据：与今日预判（量化 headline）同源。
+
+    取不到概率时退回策略研判 note 的 bull_pct；再取不到返回 None（不画几率条）。
+    """
+    label, p_pct = None, None
+    try:
+        label, p_pct = _garnish_dir("FORECAST", ctx, _garnish_obj("FORECAST", ctx))
+    except Exception:
+        label, p_pct = None, None
+    note = (ctx.get("notes") or {}).get("STRATEGY READ") or {}
+    if not isinstance(p_pct, (int, float)):
+        if isinstance(note.get("bull_pct"), (int, float)):
+            p_pct = note["bull_pct"]
+    if not (isinstance(label, str) and label):
+        label = str(note.get("label") or "") or None
+    if isinstance(p_pct, (int, float)):
+        p_pct = round(float(p_pct), 1)
+    else:
+        p_pct = None
+    return {"label": label, "p_pct": p_pct}

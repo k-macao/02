@@ -1,4 +1,4 @@
-"""「🦑 鲜鲜解读」（output/octopus_ren.py）回归测试（全部离线）。
+"""「🦑 AI帮你提鲜」（output/octopus_ren.py，原名鲜鲜解读）回归测试（全部离线）。
 
 防自欺口径与整仓一致：
   · 确定性——同一份输入永远得到同一份解读（可复现，绝不随机跳变）；
@@ -213,8 +213,71 @@ class ContentTests(unittest.TestCase):
         self.assertIn("一句话攻略", text)
 
 
+class FreshMeterTests(unittest.TestCase):
+    """2026-10-06 改版：涨跌几率条字符图（▓/░）+ 更名「AI帮你提鲜」。"""
+
+    def test_title_constant(self):
+        """改名只认 REN_TITLE 一处出口：页面 / 测试 / 文档统一口径。"""
+        self.assertEqual(ren.REN_TITLE, "AI帮你提鲜")
+
+    def test_fresh_meter_rounding_and_bounds(self):
+        """概率 → 格数半进位取整、越界夹紧；▓+░ 恒等于 10 格，不凭空多格。"""
+        cases = {0: (0, 10), 5: (1, 9), 25: (3, 7), 45: (5, 5), 52: (5, 5),
+                 55: (6, 4), 62: (6, 4), 95: (10, 0), 100: (10, 0)}
+        for p, (filled, empty) in cases.items():
+            m = ren.fresh_meter(p)
+            self.assertEqual((m["filled"], m["empty"]), (filled, empty), p)
+            self.assertEqual(len(m["bar"]), 10, p)
+            self.assertEqual(m["bar"], "▓" * filled + "░" * empty, p)
+        # 越界 / 非法输入：绝不硬画一条，直接 None（渲染层整条几率条缺席）
+        self.assertIsNone(ren.fresh_meter(None))
+        self.assertIsNone(ren.fresh_meter("52%"))
+        self.assertIsNone(ren.fresh_meter(120))
+        self.assertIsNone(ren.fresh_meter(-5))
+
+    def test_fresh_meter_odds_no_new_numbers(self):
+        """几率「涨 52 ： 48 跌」只是同一概率的重新排版，不引入新数字。"""
+        m = ren.fresh_meter(52.0)
+        self.assertEqual(m["odds"], "涨 52 ： 48 跌")
+        m = ren.fresh_meter(62.3)
+        self.assertEqual(m["odds"], "涨 62 ： 38 跌")   # 62.3% → 62 : 38（同源四舍五入）
+
+    def test_section_ren_block_meta_same_source(self):
+        """整块数据：text 与 section_ren 一字不差；label/p_pct 与 ⌁AI研判同源取数。"""
+        ctx = rich_ctx()
+        block = ren.section_ren_block("QUANT FORECAST", ctx)
+        self.assertIsNotNone(block)
+        self.assertEqual(block["text"], ren.section_ren("QUANT FORECAST", ctx))
+        self.assertEqual(block["label"], "中性")          # quant.headline.label 同源
+        self.assertAlmostEqual(block["p_pct"], 52.0)      # 0.52 → 52.0，不另算一套
+
+    def test_section_ren_block_empty_when_no_data(self):
+        """数据缺失 → None（调用方就不加块），绝不硬编。"""
+        self.assertIsNone(ren.section_ren_block("NOT A KICKER", rich_ctx()))
+        self.assertIsNone(ren.section_ren_block("QUANT FORECAST", {}))
+        self.assertIsNone(ren.section_ren_block("HK 7D PROB", rich_ctx()))
+
+    def test_section_ren_block_meta_optional(self):
+        """栏目没有研判概率 → p_pct=None（几率条缺席），正文照常。"""
+        ctx = rich_ctx()
+        ctx["notes"] = {}
+        # SUMMARY 走 coverage，不带方向概率
+        block = ren.section_ren_block("SUMMARY", ctx)
+        self.assertIsNotNone(block)
+        self.assertTrue(block["text"])
+        self.assertIsNone(block["p_pct"])
+        self.assertIsNone(block["label"])
+
+    def test_digest_meta_follows_quant_headline(self):
+        """首屏速览几率条与今日预判（量化 headline）同源；缺数据返回 None。"""
+        meta = ren.digest_meta(rich_ctx())
+        self.assertEqual(meta["label"], "中性")
+        self.assertAlmostEqual(meta["p_pct"], 52.0)
+        self.assertIsNone(ren.digest_meta({})["p_pct"])
+
+
 class PipelineIntegrationTests(unittest.TestCase):
-    """走完整的 generate_report（离线合成数据），验证两主题都会挂上「鲜鲜解读」行。"""
+    """走完整的 generate_report（离线合成数据），验证两主题都会挂上「AI帮你提鲜」块。"""
 
     @classmethod
     def setUpClass(cls):
@@ -257,20 +320,22 @@ class PipelineIntegrationTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             html = self.pipeline.generate_report(
                 self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
-            self.assertIn("鲜鲜解读", html, theme)
+            self.assertIn(ren.REN_TITLE, html, theme)
             self.assertIn("🦑", html, theme)
+            self.assertIn("AI帮你提鲜", html, theme)
             # 入门版（默认）：每栏重复的免责副行不出，全篇只在页脚保留一句
             self.assertNotIn(ren.DISCLAIMER, html, theme)
             with self.pipeline.notes_mode():
                 html = self.pipeline.generate_report(
                     self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
-            self.assertIn("鲜鲜解读", html, theme)
+            self.assertIn(ren.REN_TITLE, html, theme)
             self.assertIn(ren.DISCLAIMER, html, theme)
 
     def test_ren_disabled_by_flag(self):
         with unittest.mock.patch.object(self.pipeline, "REN_ENABLED", False):
             html = self.pipeline.generate_report(
                 self._data(), "2026年9月29日 · 周二", "20260929")
+        self.assertNotIn(ren.REN_TITLE, html)
         self.assertNotIn("鲜鲜解读", html)
         self.assertNotIn("🦑", html)
 
@@ -280,6 +345,23 @@ class PipelineIntegrationTests(unittest.TestCase):
             self._data(), "2026年9月29日 · 周二", "20260929")
         self.assertIn("0.18", html)          # 上证 +0.18% 与正文同源
         self.assertIn("1 涨 / 1 跌", html)  # 报价面计数进入解读
+
+    def test_ren_block_char_art_and_odds_meter(self):
+        """2026-10-06 改版：独立内容区 + 字符图头 + 概率 / 几率条（两主题都出）。"""
+        for theme in ("guizang", "pixel"):
+            html = self.pipeline.generate_report(
+                self._data(), "2026年9月29日 · 周二", "20260929", theme=theme)
+            self.assertIn("AI帮你提鲜", html, theme)
+            # 字符图：头部渐变条 + 几率条（▓ 涨 / ░ 跌）都真实上页
+            self.assertIn("█▓▒░", html, theme)
+            self.assertIn("░▒▓█", html, theme)
+            self.assertIn("▓", html, theme)
+            self.assertIn("░", html, theme)
+            # 概率 / 几率口径（报价面 note 同源，绝不另算一套数字）
+            self.assertIn("上涨概率", html, theme)
+            self.assertRegex(html, r"几率 涨 \d+ ： \d+ 跌", theme)
+            # 独立内容区域：块标题与大白话正文同块出现
+            self.assertIn("大白话", html, theme)
 
 
 if __name__ == "__main__":
