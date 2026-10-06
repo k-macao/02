@@ -3988,11 +3988,12 @@ class ForumThemeTests(unittest.TestCase):
     """暗色社区主题 forum（2026-10-05 起默认）：卡片暗底 + 彩色图标 + 暗色字色保护。
 
     设计契约：画布 #1C1C1E / 卡片 #2C2C2E / 1px rgba(255,255,255,0.08) 描边 + 圆角；
-    正文 #F2F2F7、标题 #FFFFFF、次要 #A1A1AA、强调 #FFD60A；彩色微型图标
-    （黄闪电 / 红火焰 / 绿行情 / 紫机器人 / 橙文档 / 青日历）；所有可见文字在
-    #1C1C1E 与 #2C2C2E 上都 ≥ WCAG AA 4.5:1；纯内联样式，无 <style> / class /
-    远程资源；分条推送与推送门禁逻辑不变。历史浅色主题（guizang / dossier / pixel）
-    一律不得渗进暗色页面。
+    正文 #F2F2F7、标题 #FFFFFF、次要 #A1A1AA、点缀 #D8B4FE（紫，2026-10-06 起，
+    原闪电黄 #FFD60A）；彩色微型图标（紫闪电 / 红行情 / 红火焰 / 紫机器人 /
+    橙文档 / 青日历 / 青趋势）；涨跌走 A 股口径：涨 ▲ 红 #FF6B6B、跌 ▼ 绿
+    #32D74B；所有可见文字在 #1C1C1E、#2C2C2E 与结论块底 #241A2E 上都 ≥ WCAG AA
+    4.5:1；纯内联样式，无 <style> / class / 远程资源；分条推送与推送门禁逻辑不变。
+    历史浅色主题（guizang / dossier / pixel）一律不得渗进暗色页面。
     """
 
     def _data(self):
@@ -4065,7 +4066,10 @@ class ForumThemeTests(unittest.TestCase):
         self.assertEqual(pipeline.F_INK, "#F2F2F7")         # 正文近白
         self.assertEqual(pipeline.F_INK_STRONG, "#FFFFFF")  # 标题纯白
         self.assertEqual(pipeline.F_MUTED, "#A1A1AA")       # 次要中灰
-        self.assertEqual(pipeline.F_ACCENT, "#FFD60A")      # 闪电黄
+        self.assertEqual(pipeline.F_ACCENT, "#D8B4FE")      # 点缀：落字紫
+        self.assertEqual(pipeline.F_ACCENT_DEEP, "#C77DFF")  # 紫加深（按下 / 更重）
+        self.assertEqual(pipeline.F_WASH, "#241A2E")        # 结论 / AI 块：深紫底
+        self.assertEqual(pipeline.F_ACCENT, pipeline.F_PURPLE)  # 点缀紫＝AI 紫，同一支
         html = self._html()
         self.assertIn(f'bgcolor="{pipeline.F_BG}"', html)
         self.assertIn(f"background:{pipeline.F_CARD}", html)
@@ -4078,7 +4082,7 @@ class ForumThemeTests(unittest.TestCase):
         self.assertTrue(any(glyph in html for glyph in ("⚡", "📈", "📅", "🤖")))
 
     def test_every_text_color_is_legible_on_dark(self):
-        """暗色硬门禁：文字色必须是主题色板内的可读色，且在画布与卡片上都 ≥ 4.5:1。"""
+        """暗色硬门禁：文字色必须是主题色板内的可读色，且在画布 / 卡片 / 结论块底上都 ≥ 4.5:1。"""
         html = self._html()
         colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})\b", html))
         self.assertTrue(colors)
@@ -4088,11 +4092,53 @@ class ForumThemeTests(unittest.TestCase):
             self.assertIn(color.upper(), allowed, f"文字色 {color} 不在暗色主题色板内")
             if color.upper() in on_fill:
                 continue
-            for bg in (pipeline.F_BG, pipeline.F_CARD):
+            for bg in (pipeline.F_BG, pipeline.F_CARD, pipeline.F_WASH):
                 ratio = pipeline._contrast_ratio(color, bg)
                 self.assertGreaterEqual(
                     round(ratio, 2), 4.5,
                     f"文字色 {color} 在 {bg} 上对比度仅 {ratio:.2f}:1（需 ≥ 4.5:1）")
+
+    def test_accent_is_purple_and_no_yellow_left(self):
+        """2026-10-06 换色：点缀文字色由闪电黄改落字紫，页面里不留任何黄字 / 黄砖。"""
+        html = self._html()
+        self.assertIn(f"color:{pipeline.F_ACCENT}", html)          # 点缀紫确实落字
+        for legacy_yellow in ("#FFD60A", "#FFC400", "#2E2712", "#5C4B10", "#2E2718"):
+            self.assertNotIn(legacy_yellow, html, f"旧闪电黄残留：{legacy_yellow}")
+        # 色板内允许的每一支字色都在结论块底上过 AA（含新的深档紫 #C77DFF）
+        for color in dict.fromkeys(pipeline.FORUM_TEXT_ALLOWED):
+            if color.upper() == pipeline.F_ON_FILL.upper():
+                continue
+            self.assertGreaterEqual(
+                round(pipeline._contrast_ratio(color, pipeline.F_WASH), 2), 4.5,
+                f"{color} 在结论块底 {pipeline.F_WASH} 上不足 4.5:1")
+        # 黄色锚点已撤：历史黄字按色相落到橙，不会变成紫
+        self.assertNotIn(0.14, [hue for _, hue in pipeline.FORUM_HUE_SNAP])
+        self.assertEqual(pipeline._dark_text_color_for("#FFE66D"), pipeline.F_ORANGE)
+
+    def test_forum_up_red_down_green(self):
+        """涨跌改 A 股口径：涨 ▲ 落字红、跌 ▼ 落字绿，图例 / 刊头 / kit 色槽同口径。"""
+        self.assertEqual(pipeline._FORUM_GZ_SWAP["GZ_UP"], pipeline.F_RED)
+        self.assertEqual(pipeline._FORUM_GZ_SWAP["GZ_DOWN"], pipeline.F_GREEN)
+        self.assertEqual(pipeline._FORUM_GZ_SWAP["GZ_UP_INK"], pipeline.F_RED)
+        self.assertEqual(pipeline._FORUM_GZ_SWAP["GZ_DOWN_INK"], pipeline.F_GREEN)
+        self.assertEqual(pipeline.FORUM_KIT.ok_color, pipeline.F_RED)
+        self.assertEqual(pipeline.FORUM_KIT.bad_color, pipeline.F_GREEN)
+        self.assertEqual(pipeline._forum_palette._KIT_COLORS["ok_color"], pipeline.F_RED)
+        html = self._html()
+        # 尾注图例：▲ 涨＝红、▼ 跌＝绿（符号与颜色双编码）
+        self.assertIn(f'color:{pipeline.F_RED};font-size:11px;white-space:nowrap;">▲ 涨', html)
+        self.assertIn(f'color:{pipeline.F_GREEN};font-size:11px;white-space:nowrap;">▼ 跌', html)
+        # 渲染期确实换了涨跌色，退出后浅色主题的 GZ_* 原样还原
+        with pipeline._forum_palette():
+            self.assertEqual(pipeline.GZ_UP, pipeline.F_RED)
+            self.assertEqual(pipeline.GZ_DOWN, pipeline.F_GREEN)
+        self.assertEqual(pipeline.GZ_UP, pipeline.GZ_KLEIN)
+        self.assertEqual(pipeline.GUIZANG_KIT.ok_color, pipeline.GZ_UP)
+        # 其它主题不受影响：guizang 仍是克莱因蓝涨 / 深灰跌，dossier 仍是绿涨红跌
+        guizang = self._html("guizang")
+        self.assertIn("#002FA7", guizang)
+        dossier = self._html("dossier")
+        self.assertIn(pipeline.D_GREEN_INK, dossier)
 
     def test_no_light_theme_colors_leak_into_forum(self):
         html = self._html()

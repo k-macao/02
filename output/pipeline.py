@@ -11920,10 +11920,17 @@ def _dossier_html_frame(masthead, first_section, content_html, footer_text,
 #    / #3A3A3C（控件与内嵌块）
 #  · 1px rgba(255,255,255,0.08) 描边 + 8~14px 圆角，内容一律装进卡片
 #  · 正文近白 #F2F2F7、标题纯白 #FFFFFF、次要信息中灰 #A1A1AA
-#  · 彩色微型图标砖：黄 ⚡ / 红 🔥 / 绿 📈 / 紫 🤖 / 橙 📄 / 青 📅
+#  · 彩色微型图标砖：紫 ⚡ / 红 🔥 / 红 📈 / 紫 🤖 / 橙 📄 / 青 📅
 #  · 区块小标题「大写 + 拉开字距」（tracking-wider）；按钮 / 胶囊用
 #    「顶亮渐变 + 浅色内描边 + 柔和投影」做出轻微立体按压感
 #  · 所有可见文字在 #1C1C1E / #2C2C2E 上都 ≥ WCAG AA 4.5:1（tests 看守）
+# 2026-10-06 换色（用户定稿）：
+#  · 点缀文字色 闪电黄 #FFD60A → 落字紫 #D8B4FE（栏目编号 / 微标题 / 强调数值 /
+#    图标砖 / 结论块左边条 / 分条横幅统一走这一支；深档 #C77DFF 用于按下与更重的强调）。
+#    纯正克莱因蓝 #002FA7 在暗底只有 1.3:1（看不清）、荧光绿 #39FF14 会与跌色
+#    #32D74B 撞色，两支均不落字；紫色是暗底上既够亮又不占涨跌语义的一支。
+#  · 涨跌改 A 股口径：涨 ▲ = 落字红 #FF6B6B、跌 ▼ = 落字绿 #32D74B（原为绿涨红跌），
+#    符号 ▲▼■ 与颜色双编码不变；点缀紫因此不再和任何涨跌语义色冲突。
 # 实现：内容块复用 guizang 研报渲染器（同一套 _collect_report_parts），
 #       渲染期间由 _forum_palette 上下文整体换色；刊头 / 栏目卡 / 尾注为本主题专属。
 #       纯内联样式，无 <style> / class / 远程图片；推送分条与推送门禁逻辑完全不变。
@@ -11937,20 +11944,22 @@ F_HAIR = "rgba(255,255,255,0.08)"   # 规范要求的 1px 细描边
 F_INK = "#F2F2F7"          # 正文近白
 F_INK_STRONG = "#FFFFFF"   # 标题纯白
 F_MUTED = "#A1A1AA"        # 次要信息中灰（卡片上 5.4:1）
-F_ON_FILL = "#1C1C1E"      # 亮色填充块上的深色字（配黄 / 绿 / 青底）
-F_ACCENT = "#FFD60A"       # 主强调：闪电黄
-F_ACCENT_DEEP = "#FFC400"
-F_RED = "#FF6B6B"          # 落字红（卡片上 5.0:1）
+F_ON_FILL = "#1C1C1E"      # 亮色填充块上的深色字（配紫 / 绿 / 青底）
+F_ACCENT = "#D8B4FE"       # 主强调（点缀文字色）：落字紫，卡片上 7.9:1
+F_ACCENT_DEEP = "#C77DFF"  # 紫加深：链接按下 / 更重的强调，卡片上 5.2:1（仍过 AA）
+F_RED = "#FF6B6B"          # 落字红（卡片上 5.0:1）｜2026-10-06 起＝涨 ▲（A 股红涨）
 F_RED_FILL = "#FF453A"     # 填充红：图标 / 描边（只做填充，不落小字）
-F_GREEN = "#32D74B"
-F_PURPLE = "#D8B4FE"       # 落字紫（卡片上 7.9:1）
+F_GREEN = "#32D74B"        # 落字绿（卡片上 7.3:1）｜2026-10-06 起＝跌 ▼（A 股绿跌）
+F_PURPLE = "#D8B4FE"       # 落字紫：与点缀色 F_ACCENT 同值，AI / 预判图标与点缀合流
 F_PURPLE_FILL = "#BF5AF2"  # 填充紫：图标（只做填充）
 F_ORANGE = "#FF9F0A"
 F_CYAN = "#64D2FF"
 F_BLUE = "#409CFF"         # 链接 / 交互蓝
 F_BLUE_DEEP = "#6FB4FF"
-F_WASH = "#2E2718"         # 结论 / AI 块：深琥珀底（配黄强调）
+F_WASH = "#241A2E"         # 结论 / AI 块：深紫底（配紫强调，紫字在上 9.4:1）
 # 暗色主题允许出现的文字色（其余一律由 _enforce_dark_mode_font 归一化）
+# F_PURPLE 与点缀色 F_ACCENT 同值 #D8B4FE（白名单里去重后只有一支紫），两支都列出
+# 只为读代码时看得清「点缀紫」与「AI 紫」是同一支色。
 FORUM_TEXT_ALLOWED = (
     F_INK, F_INK_STRONG, F_MUTED, F_ON_FILL, F_ACCENT, F_ACCENT_DEEP,
     F_RED, F_GREEN, F_PURPLE, F_ORANGE, F_CYAN, F_BLUE, F_BLUE_DEEP,
@@ -11978,8 +11987,9 @@ _FORUM_GZ_SWAP = {
     "GZ_ZEBRA": F_STRIPE,
     "GZ_CREAM": F_INK,
     "GZ_INK_TINT": F_INK,
-    "GZ_UP": F_GREEN, "GZ_DOWN": F_RED, "GZ_FLAT": F_MUTED,
-    "GZ_UP_INK": F_GREEN, "GZ_DOWN_INK": F_RED, "GZ_FLAT_INK": F_MUTED,
+    # 涨跌走 A 股口径（2026-10-06 起）：涨 ▲ 落字红、跌 ▼ 落字绿
+    "GZ_UP": F_RED, "GZ_DOWN": F_GREEN, "GZ_FLAT": F_MUTED,
+    "GZ_UP_INK": F_RED, "GZ_DOWN_INK": F_GREEN, "GZ_FLAT_INK": F_MUTED,
     "GZ_WARN": F_ORANGE, "GZ_WARN_INK": F_ORANGE,
     "GZ_PRIMARY": F_BLUE, "GZ_PRIMARY_HOVER": F_BLUE_DEEP,
     "GZ_PRIMARY_LIGHT": F_CONTROL,
@@ -12000,7 +12010,8 @@ class _forum_palette:
     """
 
     _KIT_SLOTS = ("ok_color", "warn_color", "bad_color")
-    _KIT_COLORS = {"ok_color": F_GREEN, "warn_color": F_ORANGE, "bad_color": F_RED}
+    # ok / bad 跟着涨跌口径走：ok（偏多 / 上行）＝红，bad（偏空 / 下行）＝绿
+    _KIT_COLORS = {"ok_color": F_RED, "warn_color": F_ORANGE, "bad_color": F_GREEN}
 
     def __enter__(self):
         self._saved = {k: globals()[k] for k in _FORUM_GZ_SWAP}
@@ -12023,12 +12034,14 @@ class _forum_palette:
 
 
 # 彩色微型图标：kicker → (字形, 颜色)。字形用系统 emoji / 几何符号，不用图片与 SVG。
+# 2026-10-06 起：点缀色改紫，⚡ 速览类图标随点缀走紫；📈 行情改红（A 股红涨），
+# 📊 趋势跟踪改青（避开「绿＝跌」的新语义），✅ 数据核对仍用绿（勾号＝通过，非涨跌）。
 FORUM_ICONS = {
-    "AI DIGEST": ("⚡", F_ACCENT),          # 闪电：速览，一眼看完
+    "AI DIGEST": ("⚡", F_ACCENT),          # 闪电：速览，一眼看完（点缀紫）
     "FORECAST": ("🔮", F_PURPLE),           # 紫色：预判 / AI
     "SUMMARY": ("📌", F_ORANGE),
     "SHORT CARD": ("⚡", F_ACCENT),
-    "MARKET REVIEW": ("📈", F_GREEN),       # 绿色：行情
+    "MARKET REVIEW": ("📈", F_RED),         # 红色：行情（红涨口径下的上升折线）
     "WEEKLY FORECAST": ("🗓", F_CYAN),
     "QUANT FORECAST": ("🤖", F_PURPLE),  # 紫色机器人：量化
     "HK PROBABILITY": ("🎲", F_PURPLE),
@@ -12037,8 +12050,8 @@ FORUM_ICONS = {
     "INDUSTRY ROTATION": ("🧭", F_ORANGE),
     "ECON CALENDAR": ("📅", F_CYAN),
     "POLICY SHOCK": ("📄", F_ORANGE),       # 橙色文档：政策
-    "DATA AUDIT": ("✅", F_GREEN),
-    "TREND TRACKING": ("📊", F_GREEN),
+    "DATA AUDIT": ("✅", F_GREEN),          # 绿色勾号：核对通过（与涨跌无关）
+    "TREND TRACKING": ("📊", F_CYAN),       # 青色：趋势跟踪（绿已让给「跌」）
     "STRATEGY READ": ("🧮", F_PURPLE),
     "HK QUOTES": ("🏦", F_CYAN),
     "GLOBAL HEADLINES": ("🌏", F_CYAN),
@@ -12053,21 +12066,22 @@ FORUM_ICONS = {
 }
 # 图标砖配色：主色 → (砖底, 砖描边)，深色低饱和，衬托高饱和字形
 FORUM_TILE_TINT = {
-    F_ACCENT: ("#2E2712", "#5C4B10"),
     F_RED_FILL: ("#2E1B1C", "#5C2A2C"),
     F_RED: ("#2E1B1C", "#5C2A2C"),
     F_GREEN: ("#152A1B", "#22522F"),
     F_PURPLE_FILL: ("#291D33", "#4B2F61"),
-    F_PURPLE: ("#291D33", "#4B2F61"),
+    F_PURPLE: ("#291D33", "#4B2F61"),      # ＝点缀色 F_ACCENT 的图标砖
     F_ORANGE: ("#2E2413", "#5C3F12"),
     F_CYAN: ("#132A32", "#1F4C5C"),
 }
+# 认不出主色时的兜底砖：跟点缀色同族（深紫底 + 紫描边）
+FORUM_TILE_FALLBACK = ("#291D33", "#4B2F61")
 
 
 def forum_icon(kicker_en):
     """彩色微型图标砖：圆角小方块 + 高饱和字形（纯 Unicode，无图片 / SVG）。"""
     glyph, color = FORUM_ICONS.get(str(kicker_en or "").strip().upper(), ("●", F_ACCENT))
-    wash, border = FORUM_TILE_TINT.get(color, ("#2E2712", "#5C4B10"))
+    wash, border = FORUM_TILE_TINT.get(color, FORUM_TILE_FALLBACK)
     return (f'<span style="display:inline-block;width:22px;height:22px;text-align:center;'
             f'border-radius:7px;background:{wash};border:1px solid {border};'
             f'color:{color};font-size:12px;vertical-align:middle;">{glyph}</span>')
@@ -12141,12 +12155,13 @@ def _forum_masthead(date_display, date_str, today_n, total, generated_at):
         f'font-weight:700;letter-spacing:0.22em;">OCTOPUS · MARKET QUEST</td>'
         f'<td align="right" style="padding:7px 12px 7px 0;color:{F_MUTED};">'
         f'<span style="display:inline-block;padding:1px 8px;border-radius:999px;'
-        f'border:1px solid #22522F;background:#152A1B;color:{F_GREEN};'
+        f'border:1px solid #4B2F61;background:#291D33;color:{F_ACCENT};'
         f'font-family:{F_MONO};font-size:10px;letter-spacing:0.1em;line-height:17px;">'
         f'● LIVE</span></td></tr></table>')
+    # 标题后的三枚记号＝本页配色图例：⚡ 点缀紫 / ▲ 涨红 / ▼ 跌绿（A 股口径）
     icon_block = (f'<span style="color:{F_ACCENT};font-size:14px;">⚡</span>'
-                  f'<span style="color:{F_RED};font-size:13px;padding-left:3px;">🔥</span>'
-                  f'<span style="color:{F_GREEN};font-size:12px;padding-left:3px;">▲</span>')
+                  f'<span style="color:{F_RED};font-size:12px;padding-left:3px;">▲</span>'
+                  f'<span style="color:{F_GREEN};font-size:12px;padding-left:3px;">▼</span>')
     stamp = forum_stamp()
     hero = (
         f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_CARD}" '
@@ -12163,7 +12178,7 @@ def _forum_masthead(date_display, date_str, today_n, total, generated_at):
         f'<div style="padding-top:6px;">'
         + forum_chip("DATE", str(date_display))
         + f'<span style="padding-left:4px;color:{F_MUTED};font-size:11px;">'
-        f'SOURCES <b style="color:{F_GREEN};">{today_n}/{total}</b></span>'
+        f'SOURCES <b style="color:{F_ACCENT};">{today_n}/{total}</b></span>'
         + f'</div></td></tr></table>')
     return (
         f'<div style="border:1px solid {F_HAIR_SOLID};border:1px solid {F_HAIR};'
@@ -12176,7 +12191,7 @@ def _forum_footer(footer_text):
     def legend(text, color):
         return (f'<span style="display:inline-block;margin-right:10px;'
                 f'color:{color};font-size:11px;white-space:nowrap;">{text}</span>')
-    legend_html = (legend(f"▲ 涨", F_GREEN) + legend(f"▼ 跌", F_RED)
+    legend_html = (legend(f"▲ 涨", F_RED) + legend(f"▼ 跌", F_GREEN)
                    + legend(f"■ 平", F_MUTED) + legend("🤖 AI 合成", F_PURPLE))
     return (
         f'<div style="margin-top:14px;border:1px solid {F_HAIR_SOLID};'
@@ -12220,7 +12235,8 @@ def generate_report_forum(data, date_display, date_str, sentiment_history=None,
             "仅供参考，非投资建议 · 数据来自公开来源，未抓到内容的栏目自动缺席。"
             if PLAIN() else
             f'暗色社区排版（Forum） · 画布 {F_BG} + 卡片 {F_CARD} + 1px {F_HAIR} 描边 · '
-            f'正文 {F_INK} / 次要 {F_MUTED} · 涨 ▲ 绿、跌 ▼ 红，符号与颜色双编码<br>\n'
+            f'正文 {F_INK} / 次要 {F_MUTED} / 点缀 {F_ACCENT} · '
+            f'涨 ▲ 红、跌 ▼ 绿（A 股口径），符号与颜色双编码<br>\n'
             '数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。')
         masthead = _forum_masthead(date_display, date_str, today_n, total, generated_at)
         html = _forum_html_frame(masthead, first_section, content_html, footer_text,
@@ -12295,7 +12311,8 @@ FORUM_KIT = _RenderKit(
     section=forum_section,
     kv=gz_kv_table,
     trend=gz_trend_badge,
-    ok_color=F_GREEN, warn_color=F_ORANGE, bad_color=F_RED,
+    # ok / bad 与 _forum_palette._KIT_COLORS 同口径：涨红 / 跌绿（渲染期还会再覆盖一次）
+    ok_color=F_RED, warn_color=F_ORANGE, bad_color=F_GREEN,
 )
 
 
@@ -12405,15 +12422,16 @@ def _contrast_ratio(hex_a, hex_b):
     return (hi + 0.05) / (lo + 0.05)
 
 
-# 色相吸附表：任意历史彩色字都归到这七支主题强调色里最接近的一支（色相距离最近）。
+# 色相吸附表：任意历史彩色字都归到这六支主题强调色里最接近的一支（色相距离最近）。
+# 2026-10-06 起黄色锚点撤掉（点缀色改紫，紫与 F_PURPLE 同值同锚）：历史黄字
+# （pixel 的 #FFE66D 等）按色相距离落到橙 #FF9F0A，仍是暖色、仍过 AA。
 FORUM_HUE_SNAP = (
-    (F_RED, 0.0),        # 红
-    (F_ORANGE, 0.09),    # 橙
-    (F_ACCENT, 0.14),    # 黄
-    (F_GREEN, 0.375),    # 绿
+    (F_RED, 0.0),        # 红（＝涨 ▲）
+    (F_ORANGE, 0.09),    # 橙（＝警示 / 暂缺）
+    (F_GREEN, 0.375),    # 绿（＝跌 ▼）
     (F_CYAN, 0.533),     # 青
-    (F_BLUE, 0.583),     # 蓝
-    (F_PURPLE, 0.764),   # 紫
+    (F_BLUE, 0.583),     # 蓝（＝链接）
+    (F_PURPLE, 0.764),   # 紫（＝点缀色 F_ACCENT / AI）
 )
 
 
@@ -13190,7 +13208,7 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
                 f'<tr><td style="padding:8px 10px;font-family:{FONT_MONO};font-size:11px;'
                 f'font-weight:900;color:#000;line-height:1.6;">{text}</td></tr></table>')
     if theme == "forum":
-        # 暗色分条横幅：卡内亮块 + 闪电黄字，圆角描边与卡片语言一致
+        # 暗色分条横幅：卡内亮块 + 点缀紫字，圆角描边与卡片语言一致
         return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{F_STRIPE}" '
                 f'style="width:100%!important;border-collapse:collapse;margin:12px 0;'
                 f'background:{F_STRIPE};border:1px solid {F_HAIR_SOLID};'
