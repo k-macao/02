@@ -2284,7 +2284,8 @@ class PolicyFactorTests(unittest.TestCase):
     def test_pixel_renders_policy_in_analysis_group(self):
         html = pipeline.generate_report(
             self._policy_data(), "2026年8月2日 · 周日", "20260802", theme="pixel")
-        self.assertIn("LVL 01 // STRATEGY READ", html)
+        # LVL 00 = AI 全篇速览，LVL 01 = 散户群体情绪因子·量化策略分析（导读之后固定栏目）
+        self.assertIn("LVL 02 // STRATEGY READ", html)
         self.assertIn("// POLICY SHOCK", html)
         self.assertLess(html.find("// STRATEGY READ"), html.find("// POLICY SHOCK"))
         self.assertLess(html.find("// POLICY SHOCK"), html.find("// MARKET REVIEW"))
