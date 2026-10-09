@@ -1,158 +1,326 @@
-"""【散户群体情绪因子·量化策略分析】日报栏目（策略部分，2026-10-10 新增）。
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Reddit / StockTwits 社区样本的散户情绪因子计算与渲染。
 
-内容来源：仓库根目录 `散户情绪因子-量化策略分析.md` 的「2/策略如下」部分（原文逐条保留，
-仅把公式改写为可在微信里直接阅读的纯文字）。纯静态文本：不抓取、不计算、不调用外部服务，
-因此不进入数据审计 / 当天源统计，也不影响推送门禁。
-
-栏目位置：由 pipeline._collect_report_parts 固定插在「AI 全篇速览（导读）」之后、
-正文第一栏之前，四套主题（pixel / guizang / forum / dossier）共用同一份数据。
-
-渲染只使用 kit 提供的原语（kv / sub / esc），因此同一份内容自动适配各主题的配色与字号；
-入门版（PLAIN）下不会被「说明文字」开关删除——这是栏目本身的正文。
+只读取本次采集结果，不请求网络、不补历史数据、不把缺失项伪装成数值。
+报告正文只展示样本数、来源分项、净情绪指数、分歧熵与热度榜，不渲染方法说明。
 """
+from __future__ import annotations
+
+import math
+import re
 
 SECTION_KICKER = "RETAIL SENTIMENT"
 SECTION_TITLE = "散户群体情绪因子·量化策略分析"
-SECTION_CAPTION = "策略框架 · 非投资建议"
+SECTION_CAPTION = "Reddit · StockTwits · 非投资建议"
 
-INTRO = (
-    "散户群体情绪因子（Retail Sentiment Factors）是量化投资与行为金融学中非常关键的非结构化 alpha 因子。"
-    "由于散户行为具有显著的羊群效应（Herd Behavior）、过度反应与反应不足、高频换手以及对舆论热点高度敏感等特征，"
-    "对散户情绪进行因子化提取，在反向指标预测（反向 Alpha）、波动率预测、流动性溢价评估及小盘股选股中具有极高价值。"
+# Reddit 仅提供公开标题；方向计数使用固定词表，单条帖子最多计入一个方向。
+# StockTwits 优先使用平台消息自带的 Bullish / Bearish 标签。
+_RETAIL_BULL_RE = re.compile(
+    r"\b(?:rall(?:y|ies|ied)|surge\w*|soar\w*|pump\w*|moon\w*|bulls?|bullish|"
+    r"breakout|rebound\w*|recover\w*|upgrade\w*|record\s+high|all[- ]time\s+high|"
+    r"beat\w*|boom\w*|gain\w*|outperform\w*)\b"
+    r"|看多|利好|上涨|大涨|暴涨|拉升|反弹|突破|创新高|走强|涨停|牛市",
+    re.IGNORECASE,
+)
+_RETAIL_BEAR_RE = re.compile(
+    r"\b(?:crash\w*|dump\w*|tank\w*|plunge\w*|selloff|bear\w*|short\w*|fud|"
+    r"scam|bankrupt\w*|layoff\w*|warn\w*|loss\w*|correction|decline\w*|"
+    r"tumble\w*|slump\w*|sank|sink|underperform\w*)\b"
+    r"|看空|利空|下跌|大跌|暴跌|跳水|回落|走弱|跌停|熊市|崩盘|亏损|做空",
+    re.IGNORECASE,
 )
 
-# 一、数据源与构建路线：每组为 (小标题, [(项目, 说明), ...])
-SOURCES_INTRO = (
-    "构建散户情绪因子主要依赖两类数据：文本/社交媒体数据（显式情绪）和市场交易微观结构数据（隐式情绪）。"
-)
-SOURCES_EXPLICIT = [
-    ("显式 · 数据来源",
-     "国内：东方财富股吧、雪球社区、新浪财经微博、淘股吧、贴吧。"
-     "国外：Reddit (r/wallstreetbets)、StockTwits、Twitter/X。"),
-    ("显式 · 词频/字典法",
-     "基于金融情感词典（如 Loughran-McDonald 词典或中文金融专属字典），统计看多/看空词汇频率。"),
-    ("显式 · 深度学习/大模型",
-     "使用 FinBERT、RoBERTa 或微调的大语言模型（LLM），对帖子/评论进行多标签分类（看涨、看跌、焦虑、追涨等），"
-     "计算每日或每小时的净看涨情绪指数（Net Bullishness Index）。"
-     "若模型仅输出看多/看空二分类，或剔除了中性帖子：NBI = (Pos − Neg) ÷ (Pos + Neg)；"
-     "或使用对数形式（降低极端爆流量带来的扰动）：NBI-Log = ln((1 + Pos) ÷ (1 + Neg))。"
-     "Pos、Neg 分别为股票 i 在第 t 日（或小时）的看多、看空帖子数。"),
-    ("显式 · 热度/讨论量",
-     "统计某只股票在特定时间窗口内的发帖量、发帖增量增速（Spike Detector），即 Attention Factor。"),
-]
-SOURCES_IMPLICIT = [
-    ("隐式 · 小单净买入占比",
-     "基于逐笔成交数据（Tick Data），按单笔成交金额划分（如 4 万元以下为小单/散户单），"
-     "计算小单净买入金额占总成交额的比率（Small Order Net Flow）。"),
-    ("隐式 · 开户数与保证金",
-     "新增开户数、证券结算资金净流入（宏观/行业层面的散户情绪）。"),
-    ("隐式 · 融资买入比例",
-     "散户为主导的融资买入额占总成交额比重（Margin Trading Intensity）。"),
-    ("隐式 · 挂单偏离度",
-     "散户倾向于挂不理性的深买/深卖单（Limit Order Disparity）。"),
-]
 
-# 二、常用散户情绪因子定义与逻辑：每个因子 (名称, 构造原理, 行为金融学解释, 常见应用/作用机制)
-FACTORS = [
-    ("散户注意力爆发因子 (Attention Spike)",
-     "发帖量(t) ÷ 近 20 日发帖量均值（t-20 至 t-1）",
-     "散户对突发新闻/热点的过度反应（Overreaction）",
-     "短期促使股价剧烈波动，中长期往往面临均值回归（Mean Reversion）。"),
-    ("社区净看涨倾向 (Net Sentiment Score)",
-     "(看多帖子数 − 看空帖子数) ÷ 总帖子数",
-     "散户群体的乐观/悲观共识度",
-     "高看涨情绪配合低成交量往往是顶部反向信号。"),
-    ("小单资金持续净流入 (Small-Order Flow Continuity)",
-     "连续 N 日小单净买入占比的加权均值",
-     "散户盲目追涨或“抄底陷阱”",
-     "连续高额小单买入往往对应机构出货，通常为负向选股因子。"),
-    ("论坛讨论分歧度 (Sentiment Dispersion)",
-     "论坛帖子情绪看涨/看跌的标准差/熵",
-     "市场对该股存在严重分歧（Divergence of Opinion）",
-     "高分歧通常伴随高波动率和更高的换手率。"),
-]
-
-# 三、特征与反向指标特性
-CHARACTER_INTRO = "散户情绪因子在实际量化应用中，最核心的规律在于“时间粒度决定方向”："
-CHARACTER = [
-    ("超短期（1~3 日）· 顺向动量效应（Momentum）",
-     "在情绪刚被点燃的初期（例如突然爆出热点或涨停），散户情绪具有强烈的追涨效应，"
-     "推动股价在 1~3 天内继续上涨（羊群效应驱动的自我实现）。"),
-    ("中长期（1~4 周）· 显著的反向均值回归（Reversal / Contrarian Signal）",
-     "当散户情绪达到极值（绝对看多或散户资金高度集中流入）时，通常意味着潜在买方枯竭或机构主力正在趁高出货。"),
-    ("实践结论",
-     "在日频或周频策略中，高散户看涨情绪因子往往与未来收益率呈显著负相关（即散户指标用作反向指标）。"),
-]
-
-# 四、构建与使用的注意事项
-CAUTIONS = [
-    ("噪声过滤与水军/机器人识别（Bot Detection）",
-     "社交媒体上存在大量配资广告、水军刷屏、自动发帖机器人。构建文本因子前，必须经过严格的去重、垃圾过滤和用户权重赋予"
-     "（如按注册时长、粉丝数、历史准确率赋权）。"),
-    ("结合机构情绪与资金流向交叉验证",
-     "散户情绪因子在与机构资金流向（如大单/特大单净买入）或 smart money 因子结合使用时效果最佳。"
-     "典型多空信号：散户极度看多 + 机构资金大额净卖出 = 极强卖出信号。"),
-    ("市值敏感性（Market Cap Bias）",
-     "散户情绪因子在小盘股、高换手率股、散户持股比例高的股票中 IC（信息系数）显著较高；"
-     "在机构重仓的大盘股中，散户情绪对股价的影响力被大幅稀释。"),
-    ("衰减速度极快（High Decay Rate）",
-     "舆论热点和散户情绪的变化极快，因子换手率非常高。在扣除交易费率和冲击成本后，需评估其纯 Alpha 收益。"),
-]
-
-# 五、总结与典型量化应用
-APPLICATIONS = [
-    ("应用场景 1（选股/Alpha）",
-     "作为反向因子，剔除散户情绪过于狂热（小单净买入占比处于前 5% 且论坛讨论度爆表）的标的。"),
-    ("应用场景 2（择时/Timing）",
-     "当全市场散户情绪指标（如全市场融资买入占比、论坛全盘情绪）达到历史 95% 分位数时，降低策略总体仓位。"),
-    ("应用场景 3（风险/波动率预测）",
-     "散户高分歧度（Sentiment Dispersion）可作为预测未来 5-10 日股票日内波动率上升的有效前瞻指标。"),
-]
+def _integer(value, *, minimum=None):
+    """Parse an integer-like source value; invalid values remain missing."""
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    return parsed
 
 
-def _line(kit, label, text):
-    """一条条目：加粗小标题 + 说明文字，转义后用 <br> 连接（同一行表格内换行）。"""
-    return f"<b>{kit.esc(label)}</b>：{kit.esc(text)}"
+def _source_items(data, name, *, require_symbol=False):
+    source = (data or {}).get(name)
+    if not isinstance(source, dict) or source.get("status") != "success":
+        return source if isinstance(source, dict) else {}, []
+    raw_items = source.get("items")
+    if not isinstance(raw_items, list):
+        return source, []
+    items = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if require_symbol:
+            if not str(item.get("symbol") or "").strip():
+                continue
+        elif not str(item.get("title") or "").strip():
+            continue
+        items.append(item)
+    return source, items
 
 
-def _lines(kit, pairs):
-    return "<br>".join(_line(kit, label, text) for label, text in pairs)
+def _reddit_class(title):
+    bull = len(_RETAIL_BULL_RE.findall(str(title or "")))
+    bear = len(_RETAIL_BEAR_RE.findall(str(title or "")))
+    if bull > bear:
+        return "bull"
+    if bear > bull:
+        return "bear"
+    if bull and bear:
+        return "mixed"
+    return "unclassified"
 
 
-def _body(kit, html):
-    """键值表的值列统一左对齐（像素主题默认右对齐，长段落需要左对齐）。"""
-    return f'<div style="text-align:left;">{html}</div>'
+def _nbi(bull, bear):
+    total = bull + bear
+    if total <= 0:
+        return None
+    return round(100.0 * (bull - bear) / total, 1)
 
 
-def _rows(kit, pairs):
-    """多条说明压成一张键值表（每行一个 kit 行，减少重复的表格样式）。"""
-    return kit.kv([(kit.esc(label), _body(kit, kit.esc(text))) for label, text in pairs])
+def _nbi_label(value):
+    if value is None:
+        return "样本不足"
+    if value >= 20:
+        return "偏多"
+    if value <= -20:
+        return "偏空"
+    return "中性"
 
 
-def build_section(kit):
-    """返回与 pipeline 栏目元组同构的 (kicker, title, content, badge, caption)。"""
+def _dispersion_entropy(bull, bear):
+    total = bull + bear
+    if total <= 0:
+        return None
+    p = bull / total
+    if p in (0.0, 1.0):
+        return 0.0
+    entropy = -(p * math.log2(p) + (1 - p) * math.log2(1 - p))
+    return round(entropy * 100, 1)
+
+
+def _retail_reddit(source, items):
+    counts = {"bull": 0, "bear": 0, "mixed": 0, "unclassified": 0}
+    score_sum = comments_sum = 0
+    score_n = comments_n = 0
+    seen = set()
+    for item in items:
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        identity = url or (str(item.get("community") or ""), title,
+                           str(item.get("published_cst") or ""))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        counts[_reddit_class(title)] += 1
+        score = _integer(item.get("score"))
+        comments = _integer(item.get("comments"), minimum=0)
+        if score is not None:
+            score_sum += score
+            score_n += 1
+        if comments is not None:
+            comments_sum += comments
+            comments_n += 1
+    return {
+        "available": bool(items),
+        "content_date": str(source.get("content_date") or ""),
+        "sample_n": sum(counts.values()),
+        **counts,
+        "score_sum": score_sum if score_n else None,
+        "score_n": score_n,
+        "comments_sum": comments_sum if comments_n else None,
+        "comments_n": comments_n,
+        "nbi": _nbi(counts["bull"], counts["bear"]),
+    }
+
+
+def _retail_stocktwits(source, items):
+    checked = bull = bear = streams_available = 0
+    unique = {}
+    labels_seen = set()
+    for item in items:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        rank = _integer(item.get("rank"), minimum=1)
+        watchers = _integer(item.get("watchlist_count"), minimum=0)
+        current = unique.get(symbol)
+        entry = {
+            "symbol": symbol,
+            "title": str(item.get("title") or symbol),
+            "rank": rank,
+            "watchlist_count": watchers,
+            "trending_score": _integer(item.get("trending_score"), minimum=0),
+        }
+        if current is None:
+            unique[symbol] = entry
+            current = entry
+        else:
+            current_rank = current.get("rank")
+            if rank is not None and (current_rank is None or rank < current_rank):
+                current["rank"] = rank
+            if watchers is not None and (current.get("watchlist_count") is None
+                                         or watchers > current["watchlist_count"]):
+                current["watchlist_count"] = watchers
+
+        sentiment = item.get("sentiment_counts")
+        if not isinstance(sentiment, dict):
+            continue
+        n_checked = _integer(sentiment.get("checked"), minimum=0)
+        n_bull = _integer(sentiment.get("bull"), minimum=0)
+        n_bear = _integer(sentiment.get("bear"), minimum=0)
+        if n_checked is None or n_bull is None or n_bear is None:
+            continue
+        # 采集端由同一消息数组统计，若异常 payload 出现多计数则整条不纳入。
+        if n_bull + n_bear > n_checked:
+            continue
+        current["sentiment_counts"] = {
+            "checked": n_checked, "bull": n_bull, "bear": n_bear,
+            "unclassified": n_checked - n_bull - n_bear,
+        }
+        # 同一标的若重复出现，平台 feed 计数只纳入一次。
+        if symbol in labels_seen:
+            continue
+        labels_seen.add(symbol)
+        checked += n_checked
+        bull += n_bull
+        bear += n_bear
+        streams_available += 1
+
+    ranked = sorted(unique.values(), key=lambda row: (
+        row["rank"] if row["rank"] is not None else 10**9,
+        -(row["watchlist_count"] if row["watchlist_count"] is not None else -1),
+        row["symbol"],
+    ))
+    return {
+        "available": bool(ranked),
+        "content_date": str(source.get("content_date") or ""),
+        "symbol_n": len(ranked),
+        "checked": checked,
+        "bull": bull,
+        "bear": bear,
+        "unclassified": max(0, checked - bull - bear),
+        "streams_available": streams_available,
+        "nbi": _nbi(bull, bear),
+        "top_symbols": ranked[:5],
+    }
+
+
+def calculate(data):
+    """仅由本次 Reddit / StockTwits 原始结果计算散户情绪数据。"""
+    reddit_source, reddit_items = _source_items(data, "Reddit")
+    stocktwits_source, stocktwits_items = _source_items(
+        data, "StockTwits", require_symbol=True)
+    reddit = _retail_reddit(reddit_source, reddit_items)
+    stocktwits = _retail_stocktwits(stocktwits_source, stocktwits_items)
+
+    bull = reddit["bull"] + stocktwits["bull"]
+    bear = reddit["bear"] + stocktwits["bear"]
+    total = bull + bear
+    score = _nbi(bull, bear)
+    return {
+        "available": reddit["available"] or stocktwits["available"],
+        "reddit": reddit,
+        "stocktwits": stocktwits,
+        "bull": bull,
+        "bear": bear,
+        "directional_n": total,
+        "mixed": reddit["mixed"],
+        "unclassified": reddit["unclassified"] + stocktwits["unclassified"],
+        "nbi": score,
+        "label": _nbi_label(score),
+        "dispersion": _dispersion_entropy(bull, bear),
+    }
+
+
+def _format_score(value):
+    return "—" if value is None else f"{value:+.1f}"
+
+
+def _render_stocktwits_top(rows):
+    bits = []
+    for row in rows:
+        bit = row["symbol"]
+        if row.get("rank") is not None:
+            bit += f" #{row['rank']}"
+        if row.get("watchlist_count") is not None:
+            bit += f" · 关注 {row['watchlist_count']:,}"
+        counts = row.get("sentiment_counts") or {}
+        if counts:
+            bit += (f" · 标签 多{counts['bull']} / 空{counts['bear']}"
+                    f" / 未标记{counts['unclassified']}")
+        bits.append(bit)
+    return "；".join(bits)
+
+
+def build_section(kit, data):
+    """返回数据驱动栏目元组；两路社区源都没有样本时不占版面。"""
+    result = calculate(data)
+    if not result["available"]:
+        return None
+
     esc = kit.esc
-    parts = [
-        kit.kv([(esc("总述"), _body(kit, esc(INTRO)))]),
-        kit.sub(esc("一、散户情绪因子的数据源与构建路线")),
-        kit.kv([
-            (esc("概述"), _body(kit, esc(SOURCES_INTRO))),
-            (esc("显式情绪"), _body(kit, _lines(kit, SOURCES_EXPLICIT))),
-            (esc("隐式情绪"), _body(kit, _lines(kit, SOURCES_IMPLICIT))),
-        ]),
-        kit.sub(esc("二、常用散户情绪因子定义与逻辑")),
-    ]
-    parts.append(kit.kv([
-        (esc(name), _body(kit, esc("构造：" + build) + "<br>" + esc("解释：" + meaning)
-                          + "<br>" + esc("作用：" + usage)))
-        for name, build, meaning, usage in FACTORS
-    ]))
-    parts.append(kit.sub(esc("三、散户情绪因子的特征与反向指标特性")))
-    parts.append(kit.kv([(esc("核心规律"), _body(kit, esc(CHARACTER_INTRO)))]
-                        + [(esc(label), _body(kit, esc(text))) for label, text in CHARACTER]))
-    parts.append(kit.sub(esc("四、构建与使用散户情绪因子的注意事项")))
-    parts.append(_rows(kit, CAUTIONS))
-    parts.append(kit.sub(esc("五、总结与典型量化应用")))
-    parts.append(_rows(kit, APPLICATIONS))
-    content = "".join(p for p in parts if p)
-    return (SECTION_KICKER, SECTION_TITLE, content, "", SECTION_CAPTION)
+    rows = []
+    nbi = result["nbi"]
+    if nbi is None:
+        nbi_value = "—"
+    else:
+        nbi_value = f"{_format_score(nbi)} / 100 · {result['label']}"
+    rows.append(("综合净情绪 NBI", nbi_value))
+    rows.append(("方向样本", f"看多 {result['bull']} · 看空 {result['bear']}"
+                              f" · 混合 {result['mixed']} · 未标记 {result['unclassified']}"))
+    if result["dispersion"] is not None:
+        rows.append(("多空分歧熵", f"{result['dispersion']:.1f} / 100"))
+
+    reddit = result["reddit"]
+    if reddit["available"]:
+        rows.append(("Reddit", f"{reddit['sample_n']} 帖 · 看多 {reddit['bull']}"
+                                f" / 看空 {reddit['bear']} · 混合 {reddit['mixed']}"
+                                f" · 未命中 {reddit['unclassified']}"
+                                f" · NBI {_format_score(reddit['nbi'])}"))
+        if reddit["score_n"] or reddit["comments_n"]:
+            engagement = []
+            if reddit["score_n"]:
+                engagement.append(f"得分 {reddit['score_sum']:,}（{reddit['score_n']} 帖）")
+            if reddit["comments_n"]:
+                engagement.append(f"评论 {reddit['comments_sum']:,}（{reddit['comments_n']} 帖）")
+            rows.append(("Reddit 互动", " · ".join(engagement)))
+    else:
+        rows.append(("Reddit", "暂缺"))
+
+    stocktwits = result["stocktwits"]
+    if stocktwits["available"]:
+        stocktwits_row = (f"标的流样本 {stocktwits['checked']} 条"
+                          f"（{stocktwits['streams_available']}/{stocktwits['symbol_n']} 标的可读）")
+        if stocktwits["checked"]:
+            stocktwits_row += (f" · 看多 {stocktwits['bull']} / 看空 {stocktwits['bear']}"
+                               f" · 未标记 {stocktwits['unclassified']}")
+        elif stocktwits["streams_available"]:
+            stocktwits_row += " · 暂无情绪消息样本"
+        else:
+            stocktwits_row += " · 情绪标签不可读"
+        stocktwits_row += f" · NBI {_format_score(stocktwits['nbi'])}"
+        rows.append(("StockTwits", stocktwits_row))
+        top = _render_stocktwits_top(stocktwits["top_symbols"])
+        if top:
+            rows.append(("StockTwits 热度前五", top))
+    else:
+        rows.append(("StockTwits", "暂缺"))
+
+    source_dates = []
+    if reddit.get("available") and reddit.get("content_date"):
+        source_dates.append(f"Reddit {reddit['content_date']}")
+    if stocktwits.get("available") and stocktwits.get("content_date"):
+        source_dates.append(f"StockTwits {stocktwits['content_date']}")
+    if source_dates:
+        rows.append(("数据日期", " · ".join(source_dates)))
+
+    content = kit.kv([(esc(label), esc(value)) for label, value in rows])
+    badge = kit.badge("因子结果", "ai")
+    return (SECTION_KICKER, SECTION_TITLE, content, badge, SECTION_CAPTION)

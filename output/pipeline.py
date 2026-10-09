@@ -21,7 +21,7 @@
      Google News 中文版，标题本身即中文，无需翻译。2026-10-02 起该栏目
      （【无敌帝王蟹】全球头条）同样在页面隐藏（见第 24 条），数据用途不变。
   5. 新增「东方财富快讯」数据源：东方财富免费公开接口的最新 5 条财经新闻。
-     2026-10-02 起页面隐藏「东方财富快讯」栏目（正文与首屏速览均不再单独展示），
+     2026-10-02 起页面隐藏「东方财富快讯」栏目（正文不再单独展示），
      原始快讯数据仅作为政策因子、策略研判、新闻情绪与数据审计的信号源。
   6. 新增「热门榜单」数据源：最近交易日收盘后 A股/港股/美股 成交量前五
      （东方财富 push2 免费接口）。2026-08-06 起不再单独渲染三个成交量榜单栏目，
@@ -44,7 +44,7 @@
   6.2 逐栏目 AI 研判（2026-09-27 新增）：每个有数据的内容栏目（【及时秋刀鱼】AI 行情复盘 /
       政策因子 / 趋势跟踪 / 新闻情绪）正文末尾追加一行概率化多空判断
       （全球头条 / 东方财富快讯 / 港股名家频道三栏已于 2026-10-02 在页面隐藏，
-      其研判照旧计算，但因栏目不再渲染而不会成行，首屏速览也不再列出这三栏）：
+      其研判照旧计算，但因栏目不再渲染而不会成行）：
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
@@ -81,7 +81,7 @@
      暗色街机终端底、霓虹青 / 电光蓝 / 像素黄 / 品红，纯直角像素块 + 3px 硬描边 + 实色阴影；
      等宽字体栈（Courier New / Lucida Console / monospace，回退苹方/雅黑）。刊头含纯 HTML 8-bit
      章鱼图标；每个 LVL 关卡配独立 44px 大图标砖。涨跌用高对比底色 + ▲涨 / ▼跌 / ■平三重
-     编码，并覆盖行情等板块。策略研判首屏使用 QUANT CORE 主控卡、方向 / 信号分 /
+     编码，并覆盖行情等板块。策略研判栏目使用 QUANT CORE 主控卡、方向 / 信号分 /
      置信度计分板和大字号「AI 主结论」，板块 / 技术 / 风险 / 关注各自成独立像素面板；窗口标题栏
      升级为 OCTOPUS_OS v3。成交量榜单不再单独成栏，只保留 策略研判结果。
      硬约束：全部内联样式 + 表格布局（微信/PushPlus 会剥离 <style> 与 class）。
@@ -211,13 +211,12 @@
       OCTOPUS_HK7=0 / --no-hk7 关闭；--hk7-only 研究模式。非投资建议。
 
   19. 栏目更名（2026-09-29 按用户要求，只改标题文字，内容 / 顺序 / 抓取 / 推送门禁
-      与拆分逻辑完全不变）：AI 全篇速览→**【爪爪八爪鱼】AI 全篇速览**、
-      今日预判→**【回游金枪鱼】今日预判**、未来30天影响经济时间点→**【探照安康鱼】时间节点**、
-      量化预测总览→**【蜉蝣天地水母】量化预测总览**。四个标题集中定义为
-      SECTION_TITLE_AI_DIGEST / SECTION_TITLE_FORECAST / SECTION_TITLE_ECON_CALENDAR /
-      SECTION_TITLE_QUANT_FORECAST，guizang 与 pixel 两个主题共用；首屏速览按栏目引用
-      标题，因此自动跟随新名。「时间节点」栏目的窗口天数不再写在标题里，仍在栏目内
-      「窗口摘要 · 时间窗口」如实显示（OCTOPUS_CALENDAR_DAYS 改窗口时同步变化）。
+      与拆分逻辑完全不变）：今日预判→**【回游金枪鱼】今日预判**、
+      未来30天影响经济时间点→**【探照安康鱼】时间节点**、
+      量化预测总览→**【蜉蝣天地水母】量化预测总览**。相关标题集中定义为
+      SECTION_TITLE_FORECAST / SECTION_TITLE_ECON_CALENDAR / SECTION_TITLE_QUANT_FORECAST，
+      guizang 与 pixel 两个主题共用。「时间节点」栏目的窗口天数不再写在标题里，
+      仍在栏目内「窗口摘要 · 时间窗口」如实显示（OCTOPUS_CALENDAR_DAYS 改窗口时同步变化）。
       其余栏目名称不变。
 
   20. 栏目合并（2026-09-30 按用户要求：「行情速览」与「全球大盘全景复盘」内容重复）：
@@ -239,8 +238,7 @@
       「日期新者胜」：东财行情日比 Yahoo 的 as_of 新才用东财价并标「（东财）」，
       无法比较日期就不动 Yahoo 的值；子块标题只在自己能支撑时写截止日期。
       **研判不混算**：原两栏各自的「⌁ AI 研判」保留为两行——「（报价面）」与
-      「（A股全景面）」，两套口径的证据与概率算法都不变（不合成一个没有依据的概率）；
-      首屏速览把两条研判各留 48 字后用「；」接成一行（总长度与合并前两行一致）。
+      「（A股全景面）」，两套口径的证据与概率算法都不变（不合成一个没有依据的概率）。
       **徽标 / 副标题**：两路数据各自出状态徽标并标明「报价 / A股全景」是哪一路，
       来源名用「 ＋ 」相接，暂缺的一路在副标题点名（如「暂缺：报价」）；任意一路成功
       即渲染该栏，两路都失败才整栏缺席。
@@ -256,8 +254,8 @@
         每周量化走势预测   → **【贪吃大白鲨】量化走势预测**（按用户给的新名，标题不再带「每周」，
                           周度口径仍在栏目内如实披露：「未来 5 个交易日」「锚定 X 收盘」）
       四个标题集中定义为 SECTION_TITLE_GLOBAL_HEADLINES / SECTION_TITLE_TREND /
-      SECTION_TITLE_POLICY / SECTION_TITLE_WEEKLY_FORECAST，与第 19 条的四个常量并列，
-      guizang 与 pixel 两个主题共用；首屏速览按栏目标题引用，因此自动跟随新名。
+      SECTION_TITLE_POLICY / SECTION_TITLE_WEEKLY_FORECAST，与第 19 条的现行栏目常量并列，
+      guizang 与 pixel 两个主题共用。
       **只改「标题文字」的边界**：数据源键名与审计标签（全球头条 / 国家政策（中国政府网）/
       每周走势预测 / Reddit…）、freshness_checker 与 backup_sources 的源名、新闻情绪里的
       来源归属（「全球头条1条」）、像素主题英文关卡名（GLOBAL HEADLINES / TREND TRACKING /
@@ -300,8 +298,8 @@
   24. 隐藏「【无敌帝王蟹】全球头条」与「港股名家频道」两个栏目（2026-10-02 按用户要求，
       与同日隐藏「东方财富快讯」同一口径）：
       · 页面侧：两个 kicker（GLOBAL HEADLINES / HK GURU CHANNELS）退出正文顺序表
-        REPORT_DATA_SECTIONS，_collect_report_parts 不再建区块，因此正文、首屏
-        「AI 全篇速览」逐栏摘要、像素主题关卡名与推送分条里都不再出现这两栏；
+        REPORT_DATA_SECTIONS，_collect_report_parts 不再建区块，因此正文、像素主题
+        关卡名与推送分条里都不再出现这两栏；
       · 数据侧完全不变：Google News 全球头条与港股名家频道（YouTube / 通用 RSS）
         照旧抓取，仍进数据覆盖审计（当天源 / 总源计数不变）、政策因子、策略研判、
         新闻情绪归因、逐栏 AI 研判与「AI帮你提鲜」的输入，freshness_checker 与
@@ -376,7 +374,7 @@ from octopus_quant import industry_rotation as _industry_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
-import sentiment_strategy as _senti_strategy  # noqa: E402  # 📐 散户群体情绪因子·量化策略分析（固定栏目，导读之后）
+import sentiment_strategy as _senti_strategy  # noqa: E402  # 📐 散户情绪因子（有 Reddit / StockTwits 样本时渲染）
 import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（AI帮你提鲜 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import jev_bridge as _jev  # noqa: E402
@@ -500,7 +498,6 @@ LITE_LIMITS = {
     "senti_stocks": (2, 15),         # 情绪逐股：每市场最多几只
     "senti_headlines": (1, 3),       # 每只股票的证据标题条数
     "em_summary": (60, 0),           # 东财快讯摘要截断字数（0 = 不截断）
-    "digest_brief": (30, 48),        # 首屏速览每栏摘要字数
     "notes": (0, 1),                 # 方法论长注：0 = 折叠成一句，1 = 全文
     "risk_cards": (2, 0),            # 风险提示卡条数（0 = 全部）
 }
@@ -2713,17 +2710,35 @@ _REDDIT_HEAT_RE = re.compile(
     r"(\d[\d,.]*\s*k?)\s*points?\s*(\d[\d,.]*\s*k?)\s*comments?", re.I)
 
 
+def _reddit_heat_counts_from_html(fragment):
+    """从 RSS 的 points / comments 文本提取结构化计数；缺字段保持 None。"""
+    text = re.sub(r"<[^>]*>", " ", _html_unescape(str(fragment or "")))
+    match = _REDDIT_HEAT_RE.search(text)
+    if not match:
+        return None, None
+
+    def parse_count(raw):
+        value = str(raw or "").strip().lower().replace(",", "")
+        try:
+            return int(round(float(value[:-1]) * 1000)) if value.endswith("k") else int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    return parse_count(match.group(1)), parse_count(match.group(2))
+
+
 def _reddit_heat_from_html(fragment):
     """从 RSS 公开帖子片段提取热度数据；无法核实时返回空串，不猜测。"""
     text = re.sub(r"<[^>]*>", " ", _html_unescape(str(fragment or "")))
-    m = _REDDIT_HEAT_RE.search(text)
-    if not m:
+    match = _REDDIT_HEAT_RE.search(text)
+    if not match:
         return ""
-    return f" · {m.group(1).strip()} 赞 · {m.group(2).strip()} 评论"
+    return f" · {match.group(1).strip()} 赞 · {match.group(2).strip()} 评论"
 
 
-def _reddit_item(community, title, url, published, *, heat="", now=None):
-    """组装单条热帖样本：community 供栏目按板块分组，发布时间统一北京时间。"""
+def _reddit_item(community, title, url, published, *, heat="", score=None,
+                 comments=None, now=None):
+    """组装单条热帖样本：community 供栏目分组，发布时间与可验证热度均结构化。"""
     now = now or datetime.now(CST)
     pub = published.strftime("%Y-%m-%d %H:%M")
     return {
@@ -2733,6 +2748,8 @@ def _reddit_item(community, title, url, published, *, heat="", now=None):
         "published_cst": pub,
         "community": community,
         "platform": "Reddit",
+        "score": score,
+        "comments": comments,
         "is_today": published.date() == now.date(),
     }
 
@@ -2767,9 +2784,11 @@ def _reddit_hot_items(xml_text, community, base, *, now=None):
         if not latest or dt > latest:
             latest = dt
         seen.add(url)
+        score, comments = _reddit_heat_counts_from_html(row.get("summary"))
         items.append(_reddit_item(
             f"r/{community}", title, url, dt,
-            heat=_reddit_heat_from_html(row.get("summary")), now=now))
+            heat=_reddit_heat_from_html(row.get("summary")),
+            score=score, comments=comments, now=now))
     return items, (latest.strftime("%Y-%m-%d") if latest else None)
 
 
@@ -2802,15 +2821,21 @@ def _reddit_json_items(payload, community, *, now=None):
         if not latest or published > latest:
             latest = published
         seen.add(url)
-        heat = ""
+        score = comments = None
         try:
-            score = int(post.get("score") or 0)
-            comments = int(post.get("num_comments") or 0)
-            if score > 0:
-                heat = f" · {score:,} 赞" + (f" · {comments:,} 评论" if comments else "")
-        except (TypeError, ValueError):
-            heat = ""
-        items.append(_reddit_item(f"r/{community}", title, url, published, heat=heat, now=now))
+            if post.get("score") is not None:
+                score = int(post["score"])
+            if post.get("num_comments") is not None:
+                comments = max(0, int(post["num_comments"]))
+        except (TypeError, ValueError, OverflowError):
+            score = comments = None
+        heat = ""
+        if score is not None and score > 0:
+            heat = f" · {score:,} 赞"
+            if comments:
+                heat += f" · {comments:,} 评论"
+        items.append(_reddit_item(f"r/{community}", title, url, published,
+                                  heat=heat, score=score, comments=comments, now=now))
     return items, (latest.strftime("%Y-%m-%d") if latest else None)
 
 
@@ -2878,12 +2903,13 @@ _PLATFORM_HEADERS = {"User-Agent": "octopus-daily/1.0 (+https://github.com/k-mac
 
 
 def _platform_item(platform, community, title, url, published, *, detail="", symbol="",
-                   now=None):
-    """组装单条平台样本：community 供栏目分组（板块/榜单名），时间统一北京时间。"""
+                   rank=None, watchlist_count=None, trending_score=None,
+                   sentiment_counts=None, now=None):
+    """组装单条平台样本：社区通用字段加来源确实返回的结构化榜单/标签数据。"""
     now = now or datetime.now(CST)
     dt = published.astimezone(CST) if published else None
     pub = dt.strftime("%Y-%m-%d %H:%M") if dt else ""
-    return {
+    item = {
         "title": title,
         "url": url,
         "detail": detail or (f"发布于 {pub}（北京时间）" if pub else ""),
@@ -2893,6 +2919,12 @@ def _platform_item(platform, community, title, url, published, *, detail="", sym
         "symbol": symbol,
         "is_today": bool(dt and dt.date() == now.date()),
     }
+    for key, value in (("rank", rank), ("watchlist_count", watchlist_count),
+                       ("trending_score", trending_score),
+                       ("sentiment_counts", sentiment_counts)):
+        if value is not None:
+            item[key] = value
+    return item
 
 
 def _platform_rss_items(xml_text, platform, base, *, limit, now, community="", title_cleaner=None):
@@ -3007,13 +3039,15 @@ def fetch_stocktwits():
         return _public_site_result(name, [], error="公开趋势榜接口未返回有效数据")
 
     ranked = []
-    for row in symbols:
+    for source_position, row in enumerate(symbols, 1):
         if not isinstance(row, dict) or not row.get("symbol"):
             continue
         try:
-            rank = int(row.get("rank") or 10 ** 6)
-        except (TypeError, ValueError):
-            rank = 10 ** 6
+            rank = int(row.get("rank")) if row.get("rank") is not None else source_position
+            if rank <= 0:
+                rank = source_position
+        except (TypeError, ValueError, OverflowError):
+            rank = source_position
         ranked.append((rank, row))
     ranked.sort(key=lambda pair: pair[0])
 
@@ -3040,10 +3074,19 @@ def fetch_stocktwits():
         url = _public_url(f"/symbol/{symbol}", PUBLIC_SITE_URLS[name])
         if not (symbol and title and url):
             continue
+        raw_watchers = row.get("watchlist_count")
         try:
-            watchers = int(row.get("watchlist_count") or 0)
-        except (TypeError, ValueError):
-            watchers = 0
+            watchers = int(raw_watchers) if raw_watchers is not None else None
+            if watchers is not None:
+                watchers = max(0, watchers)
+        except (TypeError, ValueError, OverflowError):
+            watchers = None
+        raw_trending_score = row.get("trending_score")
+        try:
+            trending_score = (int(raw_trending_score)
+                              if raw_trending_score is not None else None)
+        except (TypeError, ValueError, OverflowError):
+            trending_score = None
         trends = row.get("trends") or {}
         published = _cst_from_iso(trends.get("summary_at"))
         if published is None:
@@ -3051,7 +3094,7 @@ def fetch_stocktwits():
         if not latest or published > latest:
             latest = published
         bits = [f"平台趋势榜 #{rank}"]
-        if watchers:
+        if watchers is not None:
             bits.append(f"关注 {watchers:,} 人")
         summary = _public_text(trends.get("summary"), 150)
         if summary:
@@ -3059,9 +3102,11 @@ def fetch_stocktwits():
         label = counts.get(symbol)
         if label and label.get("checked"):
             bits.append(f"近 {label['checked']} 条消息平台标签：看多 {label['bull']} / 看空 {label['bear']}")
-        items.append(_platform_item(name, "平台趋势榜", f"{symbol} · {title}", url,
-                                    published, detail=" · ".join(bits),
-                                    symbol=symbol, now=now))
+        items.append(_platform_item(
+            name, "平台趋势榜", f"{symbol} · {title}", url, published,
+            detail=" · ".join(bits), symbol=symbol, rank=rank,
+            watchlist_count=watchers, trending_score=trending_score,
+            sentiment_counts=label if isinstance(label, dict) else None, now=now))
     note = ("StockTwits 为公开趋势榜与平台自带情绪标签，只计数不复制消息正文；"
             "散户情绪热度不等于事实或投资建议。")
     return _public_site_result(name, items,
@@ -4791,7 +4836,7 @@ def collect_all_data():
 #  · 等宽像素字体栈，中文回退苹方/雅黑；不依赖外部字体、图片或 SVG
 #  · 纯 HTML 像素章鱼 + 每栏独立 44px 图标砖，图标始终先于文字建立层级
 #  · 涨跌 = 高对比颜色底块 + ▲/▼/■ + 涨/跌/平，兼顾色觉差异
-#  · AI = 首屏主控卡 + 关键指标计分板 + 大字号主结论 + 四个独立面板
+#  · AI = 主控卡 + 关键指标计分板 + 大字号主结论 + 四个独立面板
 # 硬约束：仍全部内联样式 + 表格布局，兼容微信/PushPlus
 # ============================================================
 # 复古游戏像素调色板
@@ -6661,7 +6706,7 @@ def _calendar_block(res, date_str=None):
 
 # ============================================================
 # 精简排版：专业分析 → 数据显示 → 结论收尾
-# ——导读只给结果与关键数字，不展示推导过程；正文不出现「数据暂缺」占位行、
+# ——正文不展示重复推导过程，不出现「数据暂缺」占位行、
 #   抓取失败的来源与过期内容；来源状态只在「总结」里压成一行。
 # ============================================================
 REPORT_STALE_DAYS = 7          # 频道视频 / 全球头条超过 N 天视为过期，不进正文
@@ -7193,24 +7238,10 @@ def _summary_pairs(ai_result, pan, policy, source_items, today_n, total, quant=N
 
 
 # ------------------------------------------------------------
-# 栏目标题（2026-09-29 起按用户要求改名，只改标题文字，栏目内容 / 顺序 / 抓取 /
-# 推送门禁 / 拆分逻辑一律不变）。两个主题（guizang / pixel）共用同一份标题，
-# 首屏速览引用各栏目时也自动带上新名字。
-#   AI 全篇速览            → 【爪爪八爪鱼】AI 全篇速览
-#   今日预判               → 【回游金枪鱼】今日预判
-#   未来30天影响经济时间点  → 【探照安康鱼】时间节点（窗口天数仍在栏目「窗口摘要 · 时间窗口」里）
-#   量化预测总览           → 【蜉蝣天地水母】量化预测总览
-#   行情速览 + 全球大盘全景复盘（2026-09-30 合并去重）→ 【及时秋刀鱼】AI 行情复盘
-# 第二批改名（2026-09-29 同日追加，同样只改标题文字）：
-#   每周量化走势预测        → 【贪吃大白鲨】量化走势预测
-#   政策因子               → 【深海肥蓝鲸】政策因子
-#   趋势跟踪               → 【深海大鲨鱼】趋势跟踪
-#   全球头条               → 【无敌帝王蟹】全球头条
-#   策略研判               → 【六眼飞鱼】量化策略 AI 整体研判
-# 数据源键名（全球头条 / 国家政策 / 每周走势预测 …）、审计标签、抓取与门禁一律不动，
-# 因此「数据线主备」注册表与 freshness_checker 的源名保持原样。
+# 栏目标题（guizang / pixel 两个主题共用同一份标题）。历史栏目更名只影响显示文字；
+# 数据源键名（全球头条 / 国家政策 / 每周走势预测 …）、审计标签、抓取与门禁保持独立。
 # ------------------------------------------------------------
-SECTION_TITLE_AI_DIGEST = "【爪爪八爪鱼】AI 全篇速览"
+SECTION_TITLE_RETAIL_SENTIMENT = _senti_strategy.SECTION_TITLE
 # 2026-09-30 新增（用户要求「内容再精炼，适合短线操作，入门观看」）：
 # 末尾「短线速查卡」——≤600 字归纳今日动作要点，末尾附【新手三句话】（从百句股票梗句库读取配对）。
 # 纯规则合成（output/octopus_short.py），数字全部取自下文各栏同一批实参；
@@ -7232,9 +7263,9 @@ SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
 SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
 
 # 正文顺序：专业分析 → 数据显示 → 结论。
-# 方法与计算过程不放在导读；数据栏目保留可核对数字，结论收尾并视觉强调。
+# 社区情绪因子使用当次 Reddit / StockTwits 样本；没有可用样本时该栏缺席。
 REPORT_ANALYSIS_SECTIONS = (
-    "STRATEGY READ", "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
+    "RETAIL SENTIMENT", "STRATEGY READ", "QUANT FORECAST", "HK PROBABILITY", "LIQUIDITY FLOW",
     "WEEKLY FORECAST", "SECTOR ROTATION", "INDUSTRY ROTATION",
     "POLICY SHOCK", "FED TREND", "GEO TREND",
 )
@@ -7749,20 +7780,13 @@ def _section_note_keys(kicker):
     return MERGED_SECTION_NOTES.get(kicker) or (("", kicker),)
 
 
-def _section_note_texts(notes, kicker):
-    """某栏目的研判文字（合并栏目按顺序返回两条），供首屏速览拼接。"""
-    return [str((notes.get(key) or {}).get("text") or "")
-            for _, key in _section_note_keys(kicker)
-            if isinstance(notes.get(key), dict) and notes[key].get("text")]
-
-
 def _ai_judge_row(note, kit, aspect="", seed=""):
     """逐栏 AI 研判行（两主题共用）：⌁ AI 研判 ▲ 偏多 · 多头 68% / 空头 32% — 判断预测。
 
     aspect：合并栏目（【及时秋刀鱼】AI 行情复盘）里标明这一行是哪一路证据
     （报价面 / A股全景面），两套口径各自出概率，不混算成一个数。
     seed：🦐 活鲜点缀的确定性种子（含日期 + 栏目），同一天同一栏永远同一句比喻；
-    点缀只加在渲染文字上，note["text"] 本体不动（首屏速览等读 note 的地方不受影响）。
+    点缀只加在渲染文字上，note["text"] 本体不动，不影响原始研判数据。
     """
     bull_c, bear_c, flat_c = kit.ok_color, kit.bad_color, kit.warn_color
     lc = (bull_c if note["label"] == "偏多"
@@ -7798,7 +7822,7 @@ def _ren_judgment_row(text, kit, meta=None):
     text 由 octopus_ren 规则合成（纯文本，这里统一转义）；
     🦑 直接写进文字头（guizang 主题的行函数不渲染图标格，两主题都要能看到）；
     副行固定小字口径「规则合成 · 大白话翻译，非投资建议」，与整仓诚实文化一致
-    （入门版不出副行，页脚与导读各保留一次「非投资建议」）。
+    （入门版不出副行，页脚统一保留「非投资建议」）。
     """
     gz = _is_guizang_like(kit)
     meta = meta if isinstance(meta, dict) else {}
@@ -8329,77 +8353,6 @@ def _short_card_section(card_ctx, kit, today_n, total):
             _short.CAPTION_PLAIN if plain else _short.CAPTION)
 
 
-def _opening_digest(sections, notes, conclusion, today_n, total, kit):
-    """以「专业分析 → 数据显示 → 结论」生成结果导读，不展开推导过程。"""
-    def brief(value, limit=None):
-        limit = int(limit or LITE("digest_brief"))
-        text = _strip_html_text(value)
-        return text if len(text) <= limit else text[:limit].rstrip(" ·，；") + "…"
-
-    conclusions = dict(conclusion or [])
-    lead_raw = (conclusions.get("核心判断") or conclusions.get("市场倾向")
-                or conclusions.get("量化预测"))
-    lead = _strip_html_text(lead_raw) if lead_raw else \
-        "当前信息不足以形成综合方向判断。"
-
-    groups = (
-        ("专业分析", set(REPORT_ANALYSIS_SECTIONS)),
-        ("数据显示", set(REPORT_DATA_SECTIONS)),
-    )
-    rows = []
-    covered = set()
-    for label, keys in groups:
-        bits = []
-        for kick, title, content, badge, caption in sections:
-            if kick not in keys:
-                continue
-            # 只呈现结论性短句和关键数字；合并栏目仍分别保留各自研判。
-            texts = _section_note_texts(notes, kick)
-            text = "；".join(brief(t, 48) for t in texts) if texts else brief(content, 48)
-            if text:
-                bits.append(f"{_esc(title)}：{_esc(text)}")
-                covered.add(kick)
-        if bits:
-            rows.append((label, "<br>".join(bits)))
-
-    # 新增栏目按本身类别自动补入速览，避免维护分组时漏掉正文内容。
-    for kick, title, content, badge, caption in sections:
-        if kick in covered or kick in {"FORECAST", "SUMMARY", "SHORT CARD"}:
-            continue
-        group = "专业分析" if kick in set(REPORT_ANALYSIS_SECTIONS) else "数据显示"
-        text = _esc(brief(content, 48))
-        if text:
-            existing = next((i for i, (name, _value) in enumerate(rows) if name == group), None)
-            line = f"{_esc(title)}：{text}"
-            if existing is None:
-                rows.append((group, line))
-            else:
-                name, value = rows[existing]
-                rows[existing] = (name, value + "<br>" + line)
-
-    # 覆盖率是可核对数据，置于结论之前；不写模型步骤或推导描述。
-    # 入门版只留数字本身，「非当天内容不代表实时信号」的口径解释不进导读。
-    coverage = (f"当天来源 {today_n}/{total}" if PLAIN()
-                else f"当天来源 {today_n}/{total}；非当天内容不代表实时信号。")
-    data_row = next((i for i, (name, _value) in enumerate(rows) if name == "数据显示"), None)
-    if data_row is None:
-        rows.append(("数据显示", _esc(coverage)))
-    else:
-        name, value = rows[data_row]
-        rows[data_row] = (name, value + "<br>" + _esc(coverage))
-
-    lead_color = GZ_INK_STRONG if _is_guizang_like(kit) else C_INK
-    accent = GZ_KLEIN if _is_guizang_like(kit) else C_LEMON
-    background = GZ_KLEIN_WASH if _is_guizang_like(kit) else C_AI_BG
-    conclusion_html = (
-        f'<div style="margin-top:12px;border-left:5px solid {accent};background:{background};'
-        f'padding:10px 12px;overflow-wrap:anywhere;">'
-        f'<div style="font-size:11px;font-weight:900;letter-spacing:.08em;color:{accent};">结论</div>'
-        f'<div style="font-size:20px;line-height:1.55;font-weight:900;color:{lead_color};padding-top:3px;">'
-        f'{_esc(brief(lead, 110))}</div></div>')
-    return ("AI DIGEST", SECTION_TITLE_AI_DIGEST, kit.kv(rows) + conclusion_html, "",
-            "非投资建议" if PLAIN() else "专业分析 → 数据显示 → 结论 · 结论重点突出 · 非投资建议")
-
 
 def _sector_rotation_rows(item, kit, rank_label=None, plain=None):
     """一条映射概念的窄屏渲染行：名称、可用总分、港股观察股、五维和三票。
@@ -8772,6 +8725,9 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
 
     # ---- 栏目拼版：专业分析 → 数据显示 → 结论收尾（有内容才渲染）----
     blocks = {}  # kicker -> (kicker_en, title, content, badge_html, caption)
+    retail_sentiment_section = _senti_strategy.build_section(kit, data)
+    if retail_sentiment_section:
+        blocks[retail_sentiment_section[0]] = retail_sentiment_section
 
     policy = {}
     ai_result = {}
@@ -8945,7 +8901,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "TREND TRACKING", SECTION_TITLE_TREND, digest, "", "")
 
     # ⑥ 资讯：三个资讯栏目（东方财富快讯 / 【无敌帝王蟹】全球头条 / 港股名家频道）
-    #    自 2026-10-02 起全部在页面隐藏（用户要求），正文与首屏速览均不再单独展示；
+    #    自 2026-10-02 起全部在页面隐藏（用户要求），不再单独渲染为栏目；
     #    原始抓取数据照旧保留，仅作为 政策因子 / 策略研判 / 新闻情绪 / 逐栏 AI 研判 /
     #    AI帮你提鲜 / 数据审计 的信号源（与「东方财富快讯」隐藏时的口径完全一致）。
     #    A股资讯已按用户要求移除，其数据不再采集。
@@ -8975,6 +8931,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                              backup_events=(data.get("_backup_info") or {}).get("events"))
     blocks["SUMMARY"] = ("SUMMARY", "总结", kit.kv(summary), "", "")
 
+    # 栏目顺序固定为专业分析 → 数据显示 → 结论；没有采集到社区样本时情绪因子缺席。
     sections = [blocks[k] for k in REPORT_SECTION_ORDER if k in blocks]
 
     # ⑧ 逐栏目 AI 研判：有实际数据的数据栏目末尾追加「⌁ AI 研判」行
@@ -9023,11 +8980,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
             decorated.append((kick, title, content, badge, caption))
         sections = decorated
 
-    # 全部栏目构建完成后再提炼导读，保证摘要与本次正文同源。
-    sections.insert(0, _opening_digest(sections, judge_notes, conclusion,
-                                       today_n, total, kit))
-    # 「散户群体情绪因子·量化策略分析」固定栏目：置于导读之后、正文第一栏之前（不进导读统计、不占数据源）。
-    sections.insert(1, _senti_strategy.build_section(kit))
     # 短线速查卡收尾呈现：正文按分析 → 数据 → 结论阅读后，再给行动要点。
     # 取材全部是上面渲染正文用的同一批对象，缺数据自动缺席（LITE=0 / --full 整卡不出）。
     if LITE_ENABLED:
@@ -9041,18 +8993,6 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         }, kit, today_n, total)
         if card:
             sections.append(card)
-    if ren_ctx is not None:
-        digest_text = _ren.digest_ren(ren_ctx)
-        # 按 kicker 定位「AI 全篇速览」：短线速查卡在正文之后，不影响导读定位。
-        if digest_text:
-            digest_meta = _ren.digest_meta(ren_ctx)   # 几率条与今日预判（量化 headline）同源
-            for i, (kick, title, content, badge, caption) in enumerate(sections):
-                if kick != "AI DIGEST":
-                    continue
-                sections[i] = (kick, title,
-                               content + _ren_judgment_row(digest_text, kit, meta=digest_meta),
-                               badge, caption)
-                break
     return {
         "sections": sections,
         "total": total,
@@ -11779,7 +11719,7 @@ class _dossier_palette:
 # 形状只用圆 ● / 三角 ▲▼▶ / 方 ■□ / 菱 ◆ / 半圆 ◐◍◎ 等几何字形；
 # 颜色只用落字深绿 / 落字深红 / 黑；原色只作荧光填充与描边，确保几何字形在浅灰底上清晰。
 DOSSIER_ICONS = {
-    "AI DIGEST": ("■", D_BLACK, "●", D_RED_INK),
+    "RETAIL SENTIMENT": ("◉", D_RED_INK, "●", D_GREEN_INK),
     "FORECAST": ("▲", D_GREEN_INK, "●", D_RED_INK),
     "SUMMARY": ("■", D_BLACK, "▲", D_RED_INK),
     "MARKET REVIEW": ("▲", D_RED_INK, "■", D_BLACK),
@@ -12173,7 +12113,7 @@ class _forum_palette:
 # 2026-10-06 起：点缀色改紫，⚡ 速览类图标随点缀走紫；📈 行情改红（A 股红涨），
 # 📊 趋势跟踪改青（避开「绿＝跌」的新语义），✅ 数据核对仍用绿（勾号＝通过，非涨跌）。
 FORUM_ICONS = {
-    "AI DIGEST": ("⚡", F_ACCENT),          # 闪电：速览，一眼看完（点缀紫）
+    "RETAIL SENTIMENT": ("💬", F_CYAN),     # Reddit / StockTwits 社区样本
     "FORECAST": ("🔮", F_PURPLE),           # 紫色：预判 / AI
     "SUMMARY": ("📌", F_ORANGE),
     "SHORT CARD": ("⚡", F_ACCENT),

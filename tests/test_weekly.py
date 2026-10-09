@@ -354,8 +354,8 @@ class WeeklyPipelineIntegrationTests(unittest.TestCase):
                              "quotes": {"恒生指数": {"price": 24600, "change_pct": 0.38}}}}
         html = pipeline.generate_report(data, "2026年4月10日 · 周五", "20260410",
                                         theme="guizang")
-        # 页首「AI 全篇速览」会先提到各栏目标题，因此用栏目 kicker（只在正文栏目头出现）定位顺序。
-        # 本回归显式选 Guizang，核对其「07 · WEEKLY FORECAST」栏目头，不依赖默认主题。
+        # 用栏目 kicker（只在正文栏目头出现）定位顺序，避免命中正文中的跨栏目引用。
+        # 本回归显式选 Guizang，核对栏目头，不依赖默认主题。
         def _kicker_at(text, kicker):
             for anchor in (f"· {kicker}<", f"{kicker}</span>"):
                 at = text.find(anchor)
