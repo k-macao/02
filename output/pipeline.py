@@ -376,6 +376,7 @@ from octopus_quant import industry_rotation as _industry_rotation  # noqa: E402
 import octopus_weekly as _weekly  # noqa: E402
 import octopus_ren as _ren  # noqa: E402
 import octopus_short as _short  # noqa: E402  # 🎯 短线速查卡（≤600 字，日报结尾）
+import sentiment_strategy as _senti_strategy  # noqa: E402  # 📐 散户群体情绪因子·量化策略分析（固定栏目，导读之后）
 import octopus_lexicon as _lex  # noqa: E402  # 🦐 活鲜词库（AI帮你提鲜 / AI 研判点缀）
 import hk_seven_day as _hk7  # noqa: E402
 import jev_bridge as _jev  # noqa: E402
@@ -8966,6 +8967,8 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
     # 全部栏目构建完成后再提炼导读，保证摘要与本次正文同源。
     sections.insert(0, _opening_digest(sections, judge_notes, conclusion,
                                        today_n, total, kit))
+    # 「散户群体情绪因子·量化策略分析」固定栏目：置于导读之后、正文第一栏之前（不进导读统计、不占数据源）。
+    sections.insert(1, _senti_strategy.build_section(kit))
     # 短线速查卡收尾呈现：正文按分析 → 数据 → 结论阅读后，再给行动要点。
     # 取材全部是上面渲染正文用的同一批对象，缺数据自动缺席（LITE=0 / --full 整卡不出）。
     if LITE_ENABLED:
