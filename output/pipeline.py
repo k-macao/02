@@ -5055,11 +5055,35 @@ def _pixel_icon(kicker, size=44):
             f'</td></tr></table>')
 
 
-def _pixel_table(headers, rows, aligns=None, widths=None):
-    """pixel 主题的多列数据表（等宽字体 + 霓虹表头；单元格内容由调用方转义）。
+def _stacked_cells(headers, row, *, label_style=""):
+    """把一行多列数据拆成「字段：内容」的竖排小块（单列排版的公共实现）。
 
-    widths 为各列百分比（如 ("17%", "13%", "70%")）：表格是 table-layout:fixed，
-    给出列宽才能让「窄日期 + 窄时间 + 宽正文」这类排版不被平均分配。
+    首列当标题，其余列逐行堆叠；只有真正的空单元格不出行——占位短横「—」照常
+    保留，缺数据要看得见，不能被排版吞掉。标签只包一层 <b>，样式越省越好：
+    微信正文有字数上限，逐格写内联样式会把一页推送顶爆。
+    """
+    parts = []
+    first = row[0] if row else ""
+    if str(first).strip():
+        parts.append(f"<b>{first}</b>")
+    for i in range(1, len(headers or [])):
+        value = row[i] if i < len(row) else ""
+        if not str(value).strip():
+            continue
+        label = _esc(str(headers[i])).strip()
+        style = f' style="{label_style}"' if label_style else ""
+        label_html = f"<b{style}>{label}</b> " if label else ""
+        parts.append(f"{label_html}{value}")
+    # <br> 换行比逐行 <div> 省十来个字符：微信一页推送有字数上限，宁可省标签。
+    return "<br>".join(parts)
+
+
+def _pixel_table(headers, rows, aligns=None, widths=None):
+    """pixel 主题的数据表：三列及以上改成单列条目（「字段：内容」逐行堆叠）。
+
+    2026-10-10 起正文统一单列：多列表格在手机上会把长句挤成竖排、数字挤成两行，
+    改为每行一个条目后既不分列也不横滑；两列表仍走紧凑的「标签 值」单行。
+    widths / aligns 仅在两列模式下仍有意义，单列模式忽略。
     """
     rows = [list(r) for r in (rows or [])]
     if not rows:
@@ -5067,6 +5091,21 @@ def _pixel_table(headers, rows, aligns=None, widths=None):
     n = len(headers) if headers else len(rows[0])
     if n <= 0:
         return ""
+    if n >= 3 and headers:
+        label_style = f"color:{C_CYAN}"
+        body = []
+        for row in rows:
+            inner = _stacked_cells(headers, row, label_style=label_style)
+            if not inner:
+                continue
+            body.append(f'<tr><td style="padding:3px 0;border-bottom:1px solid {C_HAIR};'
+                        f'font-size:11px;color:{C_INK};line-height:1.5;'
+                        f'font-family:{FONT_MONO};">{inner}</td></tr>')
+        if not body:
+            return ""
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                f'style="width:100%!important;border-collapse:collapse;">'
+                f'{"".join(body)}</table>')
     aligns = list(aligns or (["left"] + ["right"] * (n - 1)))
     aligns = (aligns + ["left"] * n)[:n]
     widths = (list(widths) + [None] * n)[:n] if widths else [None] * n
@@ -5078,7 +5117,7 @@ def _pixel_table(headers, rows, aligns=None, widths=None):
         return f' width="{widths[i]}"' if widths[i] else ""
 
     head = "".join(
-        f'<td{_width_attr(i)} align="{aligns[i]}" style="{_width_css(i)}padding:5px 6px;'
+        f'<td{_width_attr(i)} align="{aligns[i]}" style="{_width_css(i)}padding:3px 5px;'
         f'border-bottom:1px solid {C_ACCENT};'
         f'font-size:10px;font-weight:900;color:{C_CYAN};letter-spacing:.5px;'
         f'font-family:{FONT_MONO};text-align:{aligns[i]};">{_esc(h)}</td>'
@@ -5086,9 +5125,9 @@ def _pixel_table(headers, rows, aligns=None, widths=None):
     body = []
     for row in rows:
         body.append("<tr>" + "".join(
-            f'<td{_width_attr(i)} align="{aligns[i]}" valign="top" style="{_width_css(i)}padding:5px 6px;'
+            f'<td{_width_attr(i)} align="{aligns[i]}" valign="top" style="{_width_css(i)}padding:3px 5px;'
             f'border-bottom:1px solid {C_HAIR};font-size:11px;color:{C_INK};'
-            f'line-height:1.6;font-family:{FONT_MONO};text-align:{aligns[i]};">'
+            f'line-height:1.5;font-family:{FONT_MONO};text-align:{aligns[i]};">'
             f'{row[i] if i < len(row) else ""}</td>' for i in range(n)) + "</tr>")
     head_row = f"<tr>{head}</tr>" if headers else ""
     return (f'<table width="100%" cellpadding="0" cellspacing="0" '
@@ -5129,10 +5168,10 @@ def _ledger_table(rows, pad):
     return html + '</table>'
 
 def _data_table(rows):
-    return _ledger_table(rows, "8px")
+    return _ledger_table(rows, "5px")
 
 def _mini_table(rows):
-    return _ledger_table(rows, "6px")
+    return _ledger_table(rows, "4px")
 
 def _note(text):
     """像素主题的口径脚注：精简排版（2026-09-27）起不再输出说明性文字。"""
@@ -5399,9 +5438,9 @@ def _gz_flow_rows(pairs):
                     f'color:{GZ_META}">{label or ""}</td>'
                     f'<td valign="top" style="border-bottom:1px solid {GZ_HAIR};'
                     f'color:{GZ_INK}">{value}</td></tr>')
-    return (f'<table width="100%" cellpadding="4" cellspacing="0" '
+    return (f'<table width="100%" cellpadding="3" cellspacing="0" '
             f'style="width:100%!important;font-size:{GZ_FS_TABLE}px;'
-            f'line-height:1.55;table-layout:fixed;word-break:break-word">'
+            f'line-height:1.45;table-layout:fixed;word-break:break-word">'
             f'{"".join(rows)}</table>')
 
 
@@ -5418,6 +5457,26 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
         return ""
     if kv and n == 2:
         return _gz_flow_rows([(r[0] if r else "", r[1] if len(r) > 1 else "") for r in rows])
+    if n >= 3 and headers:
+        # 2026-10-10 起正文统一单列：三列及以上拆成「字段：内容」逐行堆叠的条目，
+        # 不再分列（窄屏不会把长句挤成竖排），空值不占行。
+        anchors = list(row_anchors or [])
+        while len(anchors) < len(rows):
+            anchors.append(None)
+        trs = []
+        for ri, row in enumerate(rows):
+            inner = _stacked_cells(headers, row)
+            if not inner:
+                continue
+            attr = f' id="{_esc(anchors[ri])}"' if anchors[ri] else ""
+            trs.append(f'<tr><td{attr} style="padding:3px 0;'
+                       f'border-bottom:1px solid {GZ_HAIR}">{inner}</td></tr>')
+        if not trs:
+            return ""
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                f'style="width:100%!important;border-collapse:collapse;'
+                f'font-size:{GZ_FS_TABLE}px;line-height:1.5;color:{GZ_INK};'
+                f'word-break:break-word">{"".join(trs)}</table>')
     if aligns is None:
         aligns = ["left"] + ["right"] * (n - 1) if n > 1 else ["left"]
     aligns = (list(aligns) + ["left"] * n)[:n]
@@ -5464,7 +5523,7 @@ def gz_data_table(headers, rows, aligns=None, kv=False, row_anchors=None, widths
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="width:100%!important;border-collapse:separate;'
-        f'border-spacing:6px 4px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.55;color:{GZ_INK}">'
+        f'border-spacing:5px 2px;{align_css}font-size:{GZ_FS_TABLE}px;line-height:1.45;color:{GZ_INK}">'
         f'{cols}{"".join(trs)}</table>'
     )
 
