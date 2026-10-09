@@ -206,11 +206,6 @@ class ContentTests(unittest.TestCase):
         self.assertIn("后视镜", ren.section_ren("NEWS SENTIMENT", ctx))
         self.assertIn("非投资建议", ren.section_ren("SUMMARY", ctx) + ren.DISCLAIMER)
 
-    def test_digest_ren_empty_and_rich(self):
-        self.assertEqual(ren.digest_ren({}), "")
-        text = ren.digest_ren(rich_ctx())
-        self.assertTrue(text)
-        self.assertIn("一句话攻略", text)
 
 
 class FreshMeterTests(unittest.TestCase):
@@ -268,12 +263,6 @@ class FreshMeterTests(unittest.TestCase):
         self.assertIsNone(block["p_pct"])
         self.assertIsNone(block["label"])
 
-    def test_digest_meta_follows_quant_headline(self):
-        """首屏速览几率条与今日预判（量化 headline）同源；缺数据返回 None。"""
-        meta = ren.digest_meta(rich_ctx())
-        self.assertEqual(meta["label"], "中性")
-        self.assertAlmostEqual(meta["p_pct"], 52.0)
-        self.assertIsNone(ren.digest_meta({})["p_pct"])
 
 
 class PipelineIntegrationTests(unittest.TestCase):

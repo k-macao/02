@@ -104,6 +104,12 @@ class SentimentFactorTests(unittest.TestCase):
             pipeline._reddit_heat_from_html(
                 f'<div class="score">1,234 points</div><span>56 comments</span>'),
             " · 1,234 赞 · 56 评论")
+        heat = '<div class="score">1,234 points</div><span>56 comments</span>'
+        self.assertEqual(pipeline._reddit_heat_counts_from_html(heat), (1234, 56))
+        self.assertEqual(pipeline._reddit_heat_counts_from_html("<p>no heat data here</p>"),
+                         (None, None))
+        self.assertEqual(pipeline._reddit_heat_counts_from_html("1.2k points 8 comments"),
+                         (1200, 8))
         self.assertEqual(pipeline._reddit_heat_from_html("<p>no heat data here</p>"), "")
         self.assertEqual(pipeline._reddit_heat_from_html(None), "")
 
@@ -135,6 +141,7 @@ class SentimentFactorTests(unittest.TestCase):
         self.assertTrue(all(it["community"] == "r/stocks" for it in items))
         self.assertIn("512 赞", items[0]["detail"])
         self.assertIn("234 评论", items[0]["detail"])
+        self.assertEqual((items[0]["score"], items[0]["comments"]), (512, 234))
         self.assertTrue(all("发布于" in it["detail"] for it in items))
         # 全部条目超窗时返回空
         old = atom(atom_entry("Old", "https://www.reddit.com/r/stocks/comments/9/h/",
@@ -163,8 +170,10 @@ class SentimentFactorTests(unittest.TestCase):
         self.assertEqual(items[0]["url"], "https://www.reddit.com/r/wallstreetbets/comments/a1/p1/")
         self.assertIn("100 赞", items[0]["detail"])
         self.assertIn("50 评论", items[0]["detail"])
+        self.assertEqual((items[0]["score"], items[0]["comments"]), (100, 50))
         self.assertIn("70 赞", items[2]["detail"])
         self.assertNotIn("评论", items[2]["detail"])  # 无评论数时不显示
+        self.assertEqual((items[2]["score"], items[2]["comments"]), (70, 0))
         self.assertEqual(latest, now.strftime("%Y-%m-%d"))
         # 非 dict / 缺 children 的 payload 一律安全返回空
         self.assertEqual(pipeline._reddit_json_items(None, "stocks", now=now), ([], None))
@@ -386,7 +395,7 @@ class SentimentFactorTests(unittest.TestCase):
         with patch.object(pipeline, "AI_ANALYSIS_ENABLED", False):
             for kit in (pipeline.GUIZANG_KIT, pipeline.PIXEL_KIT):
                 titles = [s[1] for s in pipeline._collect_report_parts(data, kit)["sections"]]
-                # 结论导读后：专业分析 → 行情与资讯数据 → 今日结论收尾
+                # 正文顺序：专业分析 → 行情与资讯数据 → 今日结论收尾
                 # 2026-09-30 起「行情速览」+「全球大盘全景复盘」合并为「【及时秋刀鱼】AI 行情复盘」
                 review = pipeline.SECTION_TITLE_MARKET_REVIEW
                 self.assertLess(titles.index(review),
@@ -461,6 +470,10 @@ class SentimentFactorTests(unittest.TestCase):
         # 按平台 rank 排序（不是请求返回顺序），非法 symbol 构造出的 URL 被 allowlist 拒绝
         self.assertEqual([it["symbol"] for it in result["items"]], ["BTC.X", "MU"])
         self.assertEqual(result["items"][0]["community"], "平台趋势榜")
+        self.assertEqual((result["items"][0]["rank"],
+                          result["items"][0]["watchlist_count"]), (1, 681982))
+        self.assertEqual(result["items"][1]["sentiment_counts"],
+                         {"checked": 5, "bull": 2, "bear": 1})
         detail = result["items"][1]["detail"]
         self.assertIn("平台趋势榜 #2", detail)
         self.assertIn("关注 217,113 人", detail)
@@ -555,6 +568,124 @@ class SentimentFactorTests(unittest.TestCase):
         self.assertTrue(can_push)
         self.assertIn("当天", reason)
 
+
+
+class RetailSentimentFactorTests(unittest.TestCase):
+    """散户情绪栏只计算 Reddit / StockTwits 本次真实样本。"""
+
+    @staticmethod
+    def _data():
+        reddit = pipeline._public_site_result("Reddit", [
+            {"title": "NVDA bullish rally", "url": "https://www.reddit.com/r/stocks/comments/1/a/",
+             "community": "r/stocks", "published_cst": "2026-09-27 10:00",
+             "score": 5, "comments": 2},
+            {"title": "TSLA bearish crash", "url": "https://www.reddit.com/r/stocks/comments/2/b/",
+             "community": "r/stocks", "published_cst": "2026-09-27 11:00",
+             "score": 2, "comments": 1},
+            {"title": "Bullish crash", "url": "https://www.reddit.com/r/stocks/comments/3/c/",
+             "community": "r/stocks", "published_cst": "2026-09-27 12:00",
+             "score": -1, "comments": 4},
+            {"title": "flat discussion", "url": "https://www.reddit.com/r/stocks/comments/4/d/",
+             "community": "r/stocks", "published_cst": "2026-09-27 13:00",
+             "score": 0, "comments": 0},
+        ], latest="2026-09-27")
+        stocktwits = pipeline._public_site_result("StockTwits", [
+            {"title": "NVDA · NVIDIA", "symbol": "NVDA", "rank": 1,
+             "watchlist_count": 100000, "trending_score": 42,
+             "sentiment_counts": {"checked": 4, "bull": 3, "bear": 1},
+             "url": "https://stocktwits.com/symbol/NVDA"},
+            {"title": "AAPL · Apple", "symbol": "AAPL", "rank": 2,
+             "watchlist_count": 80000, "trending_score": 30,
+             "sentiment_counts": {"checked": 3, "bull": 0, "bear": 1},
+             "url": "https://stocktwits.com/symbol/AAPL"},
+            {"title": "TSLA · Tesla", "symbol": "TSLA", "rank": 3,
+             "watchlist_count": 70000,
+             "url": "https://stocktwits.com/symbol/TSLA"},
+        ], latest="2026-09-27")
+        return {"Reddit": reddit, "StockTwits": stocktwits}
+
+    def test_calculates_source_counts_composite_nbi_and_dispersion(self):
+        result = pipeline._senti_strategy.calculate(self._data())
+        self.assertTrue(result["available"])
+        self.assertEqual((result["reddit"]["bull"], result["reddit"]["bear"],
+                          result["reddit"]["mixed"], result["reddit"]["unclassified"]),
+                         (1, 1, 1, 1))
+        self.assertEqual((result["reddit"]["score_sum"], result["reddit"]["comments_sum"]),
+                         (6, 7))
+        self.assertEqual((result["stocktwits"]["symbol_n"],
+                          result["stocktwits"]["checked"],
+                          result["stocktwits"]["bull"],
+                          result["stocktwits"]["bear"],
+                          result["stocktwits"]["unclassified"]),
+                         (3, 7, 3, 2, 2))
+        self.assertEqual((result["bull"], result["bear"], result["mixed"],
+                          result["unclassified"]), (4, 3, 1, 3))
+        self.assertEqual(result["nbi"], 14.3)
+        self.assertEqual(result["label"], "中性")
+        self.assertAlmostEqual(result["dispersion"], 98.5, places=1)
+
+    def test_builds_data_only_section_in_all_report_themes(self):
+        data = self._data()
+        for theme, kit in (("pixel", pipeline.PIXEL_KIT),
+                           ("forum", pipeline.FORUM_KIT),
+                           ("dossier", pipeline.DOSSIER_KIT),
+                           ("guizang", pipeline.GUIZANG_KIT)):
+            with self.subTest(theme=theme):
+                section = pipeline._senti_strategy.build_section(kit, data)
+                self.assertEqual(section[0], "RETAIL SENTIMENT")
+                self.assertEqual(section[1], "散户群体情绪因子·量化策略分析")
+                parts = pipeline._collect_report_parts(data, kit, date_str="20260927")
+                self.assertEqual(parts["sections"][0][0], "RETAIL SENTIMENT")
+                report = pipeline.generate_report(
+                    data, "2026年9月27日 · 周日", "20260927", theme=theme)
+                self.assertIn("综合净情绪 NBI", report)
+                self.assertIn("+14.3 / 100", report)
+                self.assertIn("多空分歧熵", report)
+                self.assertIn("Reddit 互动", report)
+                self.assertIn("StockTwits 热度前五", report)
+                self.assertIn("标的流样本 7 条（2/3 标的可读）", report)
+                self.assertIn("NVDA #1", report)
+                self.assertIn("关注 100,000", report)
+                self.assertNotIn("AI DIGEST", report)
+                self.assertNotIn("AI 全篇速览", report)
+                self.assertNotIn("小单净买入", report)
+                self.assertNotIn("计算方法", report)
+
+    def test_missing_direction_labels_stay_missing_and_empty_sources_skip_section(self):
+        data = {"Reddit": pipeline._public_site_result("Reddit", [
+            {"title": "quiet market", "url": "https://www.reddit.com/r/stocks/comments/1/a/"}
+        ], latest="2026-09-27")}
+        result = pipeline._senti_strategy.calculate(data)
+        self.assertIsNone(result["nbi"])
+        section = pipeline._senti_strategy.build_section(pipeline.GUIZANG_KIT, data)
+        self.assertIn("综合净情绪 NBI", section[2])
+        self.assertIn("—", section[2])
+        self.assertIn("Reddit", section[2])
+        self.assertIn("StockTwits", section[2])
+
+        empty = {
+            "Reddit": pipeline._public_site_result("Reddit", [], error="HTTP 403"),
+            "StockTwits": pipeline._public_site_result("StockTwits", [], error="offline"),
+        }
+        self.assertFalse(pipeline._senti_strategy.calculate(empty)["available"])
+        self.assertIsNone(pipeline._senti_strategy.build_section(pipeline.GUIZANG_KIT, empty))
+
+    def test_unreadable_stocktwits_streams_show_zero_sample_and_readable_ratio(self):
+        data = {"StockTwits": pipeline._public_site_result("StockTwits", [
+            {"title": "ABC · Example", "symbol": "ABC", "rank": 1,
+             "url": "https://stocktwits.com/symbol/ABC"},
+            {"title": "XYZ · Example", "symbol": "XYZ", "rank": 2,
+             "url": "https://stocktwits.com/symbol/XYZ"},
+        ], latest="2026-09-27")}
+        result = pipeline._senti_strategy.calculate(data)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["stocktwits"]["symbol_n"], 2)
+        self.assertEqual(result["stocktwits"]["streams_available"], 0)
+        self.assertEqual(result["stocktwits"]["checked"], 0)
+        section = pipeline._senti_strategy.build_section(pipeline.GUIZANG_KIT, data)
+        self.assertIn("标的流样本 0 条（0/2 标的可读）", section[2])
+        self.assertIn("情绪标签不可读", section[2])
+        self.assertIn("NBI —", section[2])
 
 def _rss_feed(items):
     """构造 RSS 2.0 文档；items 为 (title, link, pubDate) 元组列表。"""

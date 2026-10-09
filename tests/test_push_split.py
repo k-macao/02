@@ -214,7 +214,7 @@ class SplitHtmlForPushTests(unittest.TestCase):
         return chunks
 
     def test_parts_never_exceed_limit_and_keep_every_character(self):
-        sections = [_section("00", "全篇速览", "<p>" + "甲" * 4000 + "</p>"),
+        sections = [_section("00", "散户情绪因子", "<p>" + "甲" * 4000 + "</p>"),
                     _section("01", "行情速览", "<p>" + "乙" * 9000 + "</p>"),
                     _section("02", "全球头条", "<p>" + "丙" * 3000 + "</p>")]
         html = _report(sections)
@@ -225,7 +225,7 @@ class SplitHtmlForPushTests(unittest.TestCase):
         chunks = self._chunks(html, parts)
         merged = _text("".join(chunks))
         # 每个栏目名都要出现（续片重开栏目头时会出现多次，缺失则说明内容被丢了）
-        for title in ("全篇速览", "行情速览", "全球头条"):
+        for title in ("散户情绪因子", "行情速览", "全球头条"):
             self.assertIn(title, merged)
         # 正文一个字符不丢：三段正文的字符数完全一致
         original = _text(html[html.find(pipeline.PART_BREAK_MARK):

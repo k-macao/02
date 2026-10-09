@@ -449,7 +449,8 @@ class CardRenderingTests(unittest.TestCase):
         for kit in (self.pipeline.GUIZANG_KIT, self.pipeline.PIXEL_KIT):
             sections = self.pipeline._collect_report_parts(data, kit,
                                                            date_str="20260802")["sections"]
-            self.assertEqual(sections[0][0], "AI DIGEST")
+            self.assertNotEqual(sections[0][0], "AI DIGEST")
+            self.assertIn(sections[0][0], self.pipeline.REPORT_SECTION_ORDER)
             self.assertEqual(sections[-1][0], "SHORT CARD")
             self.assertEqual(sections[-1][1], self.pipeline.SECTION_TITLE_SHORT_CARD)
             titles = [section[1] for section in sections]
@@ -462,7 +463,7 @@ class CardRenderingTests(unittest.TestCase):
             html = self.pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
                                                 theme=theme)
             self.assertIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html)
-            self.assertLess(html.index(self.pipeline.SECTION_TITLE_AI_DIGEST),
+            self.assertLess(html.index(sections[0][1]),
                             html.index(self.pipeline.SECTION_TITLE_FORECAST))
             self.assertLess(html.index(self.pipeline.SECTION_TITLE_FORECAST),
                             html.index(self.pipeline.SECTION_TITLE_SHORT_CARD),
@@ -491,7 +492,7 @@ class CardRenderingTests(unittest.TestCase):
                 self.pipeline._quant.render.LITE = True
         self.assertNotIn("SHORT CARD", [s[0] for s in sections])
         self.assertNotIn(self.pipeline.SECTION_TITLE_SHORT_CARD, html)
-        self.assertEqual(sections[0][0], "AI DIGEST")
+        self.assertNotEqual(sections[0][0], "AI DIGEST")
         # 全量长版：日程逐日表与校准曲线表回来
         self.assertIn("逐日时间点（北京时间）", html)
         self.assertIn("校准曲线", html)
