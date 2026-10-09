@@ -33,7 +33,10 @@ SOURCES_EXPLICIT = [
      "基于金融情感词典（如 Loughran-McDonald 词典或中文金融专属字典），统计看多/看空词汇频率。"),
     ("显式 · 深度学习/大模型",
      "使用 FinBERT、RoBERTa 或微调的大语言模型（LLM），对帖子/评论进行多标签分类（看涨、看跌、焦虑、追涨等），"
-     "计算每日或每小时的净看涨情绪指数（Net Bullishness Index）。"),
+     "计算每日或每小时的净看涨情绪指数（Net Bullishness Index）。"
+     "若模型仅输出看多/看空二分类，或剔除了中性帖子：NBI = (Pos − Neg) ÷ (Pos + Neg)；"
+     "或使用对数形式（降低极端爆流量带来的扰动）：NBI-Log = ln((1 + Pos) ÷ (1 + Neg))。"
+     "Pos、Neg 分别为股票 i 在第 t 日（或小时）的看多、看空帖子数。"),
     ("显式 · 热度/讨论量",
      "统计某只股票在特定时间窗口内的发帖量、发帖增量增速（Spike Detector），即 Attention Factor。"),
 ]
