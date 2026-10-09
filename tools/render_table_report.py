@@ -178,40 +178,59 @@ def render_cell_content(value: str) -> str:
     return render_inline(value)
 
 
-def render_table(rows: list[list[str]], tone: str, table_number: int) -> str:
+def render_meter(cell: str, metric: tuple[float, str]) -> str:
+    """Inline mini-bar: keeps the number on the same line (no extra row)."""
+    width, mode = metric
+    explanation = "按实际比例" if mode == "share" else "按同组最大值归一"
+    tooltip = html.escape(f"原值：{plain_text(cell)}；条形{explanation}", quote=True)
+    return (f'<span class="meter" title="{tooltip}" aria-hidden="true">'
+            f'<span class="meter-fill" style="width:{width:.1f}%"></span></span>')
+
+
+def render_records(rows: list[list[str]], tone: str, block_number: int) -> str:
+    """Render a Markdown table as a single-column list: one compact entry per row.
+
+    不分列：每行拆成「字段：内容」逐行堆叠，窄屏不需要左右滑动；
+    压缩行：空单元格直接不出行，数值条形改为行内迷你条，不额外占一行。
+    """
     if len(rows) < 2:
         return ""
     headers = rows[0]
     body = rows[1:]
     widths = meter_widths(body, headers)
-    table_id = f"table-{table_number}"
 
-    out = [f'<div class="table-wrap tone-{tone}" role="region" aria-label="表格 {table_number}" tabindex="0">']
-    out.append(f'<table class="report-table" id="{table_id}"><thead><tr>')
-    for header in headers:
-        out.append(f"<th scope=\"col\">{render_inline(header)}</th>")
-    out.append("</tr></thead><tbody>")
-
+    out = [f'<ol class="record-list tone-{tone}" id="list-{block_number}" '
+           f'aria-label="条目组 {block_number}">']
     for row_index, row in enumerate(body):
-        out.append("<tr>")
-        for column, cell in enumerate(row):
-            cell_tag = "th scope=\"row\"" if column == 0 else "td"
+        out.append('<li class="record">')
+        head_cell = row[0] if row else ""
+        head_label = plain_text(headers[0]) if headers else ""
+        head_metric = widths.get((row_index, 0))
+        out.append('<p class="record-head">')
+        out.append(f'<span class="record-no">{row_index + 1:02d}</span>')
+        if head_label and row_index == 0:
+            # 首列表头只在该组第一条出现一次，重复出现只会拉长行数。
+            out.append(f'<span class="record-kicker">{render_inline(headers[0])}</span>')
+        out.append(f'<span class="record-title">{render_cell_content(head_cell)}</span>')
+        if head_metric is not None:
+            out.append(render_meter(head_cell, head_metric))
+        out.append('</p>')
+
+        for column in range(1, len(headers)):
+            cell = row[column] if column < len(row) else ""
+            if not plain_text(cell):
+                continue                      # 空值不占行
+            label = plain_text(headers[column])
             metric = widths.get((row_index, column))
-            content = render_cell_content(cell)
+            out.append('<p class="field">')
+            if label:
+                out.append(f'<span class="field-label">{render_inline(headers[column])}</span>')
+            out.append(f'<span class="field-value">{render_cell_content(cell)}</span>')
             if metric is not None:
-                width, mode = metric
-                width_text = f"{width:.1f}%"
-                explanation = "按实际比例" if mode == "share" else "按同列最大值归一"
-                tooltip = html.escape(f"原值：{plain_text(cell)}；条形{explanation}", quote=True)
-                out.append(
-                    f'<{cell_tag} class="metric-cell" title="{tooltip}">'
-                    f'<span class="bar-fill" style="width:{width_text}" aria-hidden="true"></span>'
-                    f'<span class="cell-content">{content}</span></{cell_tag.split()[0]}>'
-                )
-            else:
-                out.append(f"<{cell_tag}>{content}</{cell_tag.split()[0]}>")
-        out.append("</tr>")
-    out.append("</tbody></table></div>")
+                out.append(render_meter(cell, metric))
+            out.append('</p>')
+        out.append('</li>')
+    out.append('</ol>')
     return "".join(out)
 
 
@@ -296,7 +315,7 @@ def build_report(markdown: str) -> tuple[str, int, list[tuple[str, str]], str]:
                 if any(len(row) != len(headers) for row in data_rows):
                     raise ValueError(f"Table has inconsistent columns near line {index - len(raw_rows) + 1}")
                 table_count += 1
-                rendered.append(render_table([headers, *data_rows], current_tone, table_count))
+                rendered.append(render_records([headers, *data_rows], current_tone, table_count))
             else:
                 for row in raw_rows:
                     rendered.append(f'<p class="plain-text">{render_inline(" | ".join(row))}</p>')
@@ -350,22 +369,29 @@ body{margin:0;background:radial-gradient(ellipse at 8% 0%,#deeff4 0,transparent 
 .chapter-title{margin:0 0 22px;padding:0 0 13px;border-bottom:1px solid var(--line);color:#14273b;font-size:clamp(22px,3vw,30px);line-height:1.25;letter-spacing:-.02em}
 .subheading{display:flex;align-items:center;gap:10px;margin:29px 0 13px;color:#253c50;font-size:18px;line-height:1.35}.subheading:before{content:"";width:5px;height:21px;border-radius:5px;background:var(--accent)}
 .minor-heading{margin:21px 0 10px;color:var(--accent-dark);font-size:15px}
-.table-wrap{position:relative;margin:0 0 18px;overflow:auto;border:1px solid #dce6ed;border-radius:14px;background:#fff;box-shadow:0 5px 15px rgba(26,52,74,.045);scrollbar-color:#b6cbd6 #f4f8fa;scrollbar-width:thin}
-.report-table{width:100%;min-width:560px;border-collapse:separate;border-spacing:0;color:#23384a;font-size:13px;line-height:1.55}
-.report-table th,.report-table td{position:relative;padding:10px 12px;border-bottom:1px solid rgba(215,226,234,.78);vertical-align:top;text-align:left;overflow-wrap:anywhere}
-.report-table thead th{position:sticky;top:0;z-index:2;background:linear-gradient(120deg,var(--accent-dark),var(--accent));color:#fff;font-weight:750;letter-spacing:.015em;border-bottom:0}
-.report-table thead th:first-child{border-radius:12px 0 0 0}.report-table thead th:last-child{border-radius:0 12px 0 0}
-.report-table tbody tr:nth-child(odd){background:var(--row-a)}.report-table tbody tr:nth-child(even){background:#fff}.report-table tbody tr:hover{background:var(--row-hover)}
-.report-table tbody tr:last-child th,.report-table tbody tr:last-child td{border-bottom:0}
-.report-table tbody th[scope=row]{width:1%;min-width:135px;color:var(--accent-dark);font-weight:700}
-.metric-cell{font-variant-numeric:tabular-nums;white-space:nowrap}.metric-cell .bar-fill{position:absolute;z-index:0;left:0;top:0;bottom:0;max-width:100%;background:linear-gradient(90deg,rgba(var(--bar-rgb),.17),rgba(var(--bar-rgb),.07));border-right:2px solid rgba(var(--bar-rgb),.36);pointer-events:none}.metric-cell .cell-content{position:relative;z-index:1}
+.record-list{list-style:none;margin:0 0 14px;padding:0;border:1px solid #dde7ee;border-radius:12px;background:#fff;box-shadow:0 3px 10px rgba(26,52,74,.04);overflow:hidden}
+.record{padding:6px 12px 7px;border-top:1px solid rgba(215,226,234,.75)}
+.record:first-child{border-top:0}
+.record:nth-child(odd){background:var(--row-a)}
+.record:hover{background:var(--row-hover)}
+.record-head{margin:0;color:var(--accent-dark);font-size:13.5px;font-weight:700;line-height:1.45;overflow-wrap:anywhere}
+.record-no{display:inline-block;min-width:20px;margin-right:6px;padding:0 5px;border-radius:5px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:800;line-height:16px;text-align:center;vertical-align:1px}
+.record-kicker{margin-right:5px;color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.08em}
+.record-kicker:after{content:"·";margin-left:5px;color:#9fb3c2}
+.record-title{color:var(--accent-dark)}
+.field{margin:1px 0 0;padding-left:26px;color:#2b3f52;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.field-label{margin-right:5px;color:var(--accent);font-size:11px;font-weight:800}
+.field-label:after{content:"："}
+.field-value{font-variant-numeric:tabular-nums}
+.meter{display:inline-block;width:56px;height:6px;margin-left:7px;border-radius:99px;background:rgba(var(--bar-rgb),.14);vertical-align:middle;overflow:hidden}
+.meter-fill{display:block;height:100%;border-radius:99px;background:rgba(var(--bar-rgb),.6)}
 code{padding:.12em .38em;border:1px solid #dfe8ed;border-radius:5px;background:#f2f6f8;color:#22506a;font-size:.91em;overflow-wrap:anywhere}
 .badge{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border:1px solid transparent;border-radius:999px;font-size:11px;font-weight:800;line-height:1.5;white-space:nowrap}.badge-on,.badge-pass{background:#e5f5eb;color:#267142;border-color:#c8e9d3}.badge-off,.badge-neutral{background:#edf1f4;color:#677887;border-color:#dce4e9}.badge-fail{background:#fde8e6;color:#a63d36;border-color:#f4c8c3}.badge-warn{background:#fff2d8;color:#8a5a12;border-color:#f1dcae}.badge-missing{background:#fff1dc;color:#95590b;border-color:#f1ddba}
 .source-note{margin:0 0 18px;padding:12px 15px;border-left:4px solid #0c8178;border-radius:0 11px 11px 0;background:linear-gradient(100deg,#e9f7f4,#f4fbfa);color:#31524f;font-size:13px}.source-note a{color:#086b66;font-weight:800}
 .plain-text{margin:10px 0;color:#465a6c}.soft-rule{margin:27px 0;border:0;border-top:1px solid var(--line)}
 .footer{padding:16px 5px 0;color:#718192;text-align:center;font-size:11px}
-@media(max-width:760px){.page{padding:16px 12px 42px}.hero{padding:25px 21px 22px;border-radius:20px}.hero p{font-size:14px}.legend{padding:11px 12px}.toc{top:6px;gap:4px;padding:8px}.toc-link{padding:5px 7px;font-size:11px}.report-section{padding:21px 14px 18px;border-radius:17px}.report-table{min-width:520px;font-size:12px}.report-table th,.report-table td{padding:9px 10px}.subheading{font-size:16px}}
-@media print{body{background:#fff}.page{max-width:none;padding:0}.hero{background:#163c54!important;print-color-adjust:exact;-webkit-print-color-adjust:exact;box-shadow:none}.toc{position:static;box-shadow:none}.report-section{box-shadow:none;break-inside:avoid}.table-wrap{overflow:visible;box-shadow:none}.report-table thead th,.report-table tbody tr:nth-child(odd),.metric-cell .bar-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+@media(max-width:760px){.page{padding:16px 12px 42px}.hero{padding:25px 21px 22px;border-radius:20px}.hero p{font-size:14px}.legend{padding:11px 12px}.toc{top:6px;gap:4px;padding:8px}.toc-link{padding:5px 7px;font-size:11px}.report-section{padding:18px 12px 15px;border-radius:17px}.record{padding:6px 10px}.record-head{font-size:13px}.field{padding-left:0;font-size:12.5px}.subheading{font-size:16px}}
+@media print{body{background:#fff}.page{max-width:none;padding:0}.hero{background:#163c54!important;print-color-adjust:exact;-webkit-print-color-adjust:exact;box-shadow:none}.toc{position:static;box-shadow:none}.report-section{box-shadow:none;break-inside:avoid}.record-list{box-shadow:none}.record{break-inside:avoid}.record:nth-child(odd),.meter-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 """
 
 
@@ -378,8 +404,8 @@ def main() -> None:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<meta name="description" content="章鱼 AI 内容分类整理：数据源、量化、页面推送与问题诊断">
-<title>章鱼 AI · 内容分类整理（表格可视化）</title>
+<meta name="description" content="章鱼 AI 内容分类整理：单列条目排版，数据源、量化、页面推送与问题诊断">
+<title>章鱼 AI · 内容分类整理（单列条目版）</title>
 <style>{CSS}</style>
 </head>
 <body>
@@ -387,18 +413,18 @@ def main() -> None:
   <header class="hero">
     <div class="eyebrow">OCTOPUS AI · FIELD GUIDE</div>
     <h1>章鱼 AI · 内容分类整理</h1>
-    <p>同一份内容，改用更直观的表格呈现。章节以不同色系区分，表格行交替着色，关键数字附带同列比例条。</p>
+    <p>同一份内容，全部改成单列条目：不分列、不横滑，每行拆成「字段：内容」逐行堆叠，行距压紧，空字段不占行。</p>
     <div class="hero-meta">
       <span class="pill">{len(chapters)} 个内容分区</span>
-      <span class="pill">{table_count} 张数据表</span>
+      <span class="pill">{table_count} 组条目</span>
       <span class="pill">独立 HTML · 离线可读</span>
-      <span class="pill">响应式布局</span>
+      <span class="pill">单列 · 不分列 · 紧凑行距</span>
     </div>
   </header>
-  <div class="legend" aria-label="可视化说明">
-    <span class="legend-item"><span class="swatch"></span>表格行底色交替，悬停高亮</span>
-    <span class="legend-item"><span class="bar-swatch"></span>数值条：比例类按实际比例，其他指标按同列最大值归一</span>
-    <span class="legend-item">显示的数字始终保留原值；横向可滚动查看更多列</span>
+  <div class="legend" aria-label="阅读说明">
+    <span class="legend-item"><span class="swatch"></span>条目底色交替，悬停高亮</span>
+    <span class="legend-item"><span class="bar-swatch"></span>行内迷你条：比例类按实际比例，其他指标按同组最大值归一</span>
+    <span class="legend-item">显示的数字始终保留原值；单列排版，窄屏无需左右滑动</span>
   </div>
   <nav class="toc" aria-label="章节导航">{toc}</nav>
   <main>
@@ -410,7 +436,7 @@ def main() -> None:
 </html>
 '''
     OUTPUT.write_text(page, encoding="utf-8")
-    print(f"Rendered {SOURCE.name} → {OUTPUT.name} ({table_count} tables)")
+    print(f"Rendered {SOURCE.name} → {OUTPUT.name} ({table_count} record lists)")
 
 
 if __name__ == "__main__":
