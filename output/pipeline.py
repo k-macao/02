@@ -7252,7 +7252,7 @@ SECTION_TITLE_RETAIL_SENTIMENT = _senti_strategy.SECTION_TITLE
 # 纯规则合成（output/octopus_short.py），数字全部取自下文各栏同一批实参；
 # OCTOPUS_LITE=0 / --full 关闭，日报回到全量长版。
 SECTION_TITLE_SHORT_CARD = "【闪电飞鱼】短线速查卡"
-SECTION_TITLE_STRATEGY = "【六眼飞鱼】量化策略 AI 整体研判"
+SECTION_TITLE_STRATEGY = "【六眼飞鱼】量化 MACD 策略"
 SECTION_TITLE_STRATEGY_READ = SECTION_TITLE_STRATEGY
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"

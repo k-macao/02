@@ -113,7 +113,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
         "used_by": ("【蜉蝣天地水母】量化预测总览", "港股概率走势分析",
                     "【贪吃大白鲨】量化走势预测",
                     "【滚滚翻车鱼】板块轮动量化策略·港股与恒指日线",
-                    "【六眼飞鱼】量化策略 AI 整体研判·MACD日线"),
+                    "【六眼飞鱼】量化 MACD 策略·MACD日线"),
         "primary": ("Yahoo Finance query1", "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"),
         "backups": (
             ("Yahoo Finance query2（同格式镜像）",

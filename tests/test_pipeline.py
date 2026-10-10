@@ -3405,7 +3405,7 @@ class SectionRenameBatch2Tests(unittest.TestCase):
     """
 
     EXPECTED = {
-        "STRATEGY READ": "【六眼飞鱼】量化策略 AI 整体研判",
+        "STRATEGY READ": "【六眼飞鱼】量化 MACD 策略",
         "GLOBAL HEADLINES": "【无敌帝王蟹】全球头条",
         "TREND TRACKING": "【深海大鲨鱼】趋势跟踪",
         "POLICY SHOCK": "【深海肥蓝鲸】政策因子",
