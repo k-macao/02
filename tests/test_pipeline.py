@@ -1130,7 +1130,7 @@ class GuizangOnePageTests(unittest.TestCase):
         # 2026-10-02 起「东方财富快讯」「【无敌帝王蟹】全球头条」「港股名家频道」
         # 三个资讯栏目在页面隐藏（保留后台抓取供 AI 分析与审计）。
         for title in (pipeline.SECTION_TITLE_RETAIL_SENTIMENT, "【回游金枪鱼】今日预判",
-                      "【探照安康鱼】时间节点", "【蜉蝣天地水母】量化预测总览",
+                      "【探照安康鱼】时间节点量化预测", "【蜉蝣天地水母】量化预测总览",
                       "港股概率走势分析", "资金流动性分析", "【及时秋刀鱼】AI 行情复盘",
                       "【深海肥蓝鲸】政策因子", pipeline.SECTION_TITLE_STRATEGY,
                       "【深海大鲨鱼】趋势跟踪",
@@ -2615,7 +2615,7 @@ class ConciseLayoutTests(unittest.TestCase):
 
 
 class AiTrendAnalysisTests(unittest.TestCase):
-    """「AI趋势分析（美联储）」「AI趋势分析（地缘政治）」：专门抓取 + 词表定调 + 证据引用。
+    """「【火爆大鱿鱼】美联储因子量化分析」「【巡回巨鲸】地缘政治因子量化分析」：专门抓取 + 词表定调 + 证据引用。
 
     2026-09-28 按用户要求新增两栏目：阅读位置在政策因子之后、策略研判之前；
     各自由 Google News RSS 主题查询专门抓取，抓取失败整栏缺席、不以旧闻兜底。
@@ -2758,7 +2758,7 @@ class AiTrendAnalysisTests(unittest.TestCase):
     def test_fed_board_hides_calendar_subblock_when_calendar_absent(self):
         html = pipeline.generate_report(
             self._fed_data(), "2026年9月28日 · 周一", "20260928")
-        self.assertIn("AI趋势分析（美联储）", html)   # 栏目仍渲染
+        self.assertIn("【火爆大鱿鱼】美联储因子量化分析", html)   # 栏目仍渲染
         self.assertNotIn("未来相关时间点（财经日程）", html)  # 只隐藏日程子块
 
     # ---------- ③ 渲染：双主题 + 阅读位置 + 证据行 ----------
@@ -2791,15 +2791,15 @@ class AiTrendAnalysisTests(unittest.TestCase):
                 kit = pipeline.PIXEL_KIT if theme == "pixel" else pipeline.GUIZANG_KIT
                 titles = [s[1] for s in pipeline._collect_report_parts(
                     data, kit, date_str="20260928")["sections"]]
-                self.assertIn("AI趋势分析（美联储）", titles)
-                self.assertIn("AI趋势分析（地缘政治）", titles)
+                self.assertIn("【火爆大鱿鱼】美联储因子量化分析", titles)
+                self.assertIn("【巡回巨鲸】地缘政治因子量化分析", titles)
                 self.assertLess(titles.index(pipeline.SECTION_TITLE_STRATEGY),
                                 titles.index(pipeline.SECTION_TITLE_POLICY))
                 self.assertLess(titles.index(pipeline.SECTION_TITLE_POLICY),
-                                titles.index("AI趋势分析（美联储）"))
-                self.assertLess(titles.index("AI趋势分析（美联储）"),
-                                titles.index("AI趋势分析（地缘政治）"))
-                self.assertLess(titles.index("AI趋势分析（地缘政治）"),
+                                titles.index("【火爆大鱿鱼】美联储因子量化分析"))
+                self.assertLess(titles.index("【火爆大鱿鱼】美联储因子量化分析"),
+                                titles.index("【巡回巨鲸】地缘政治因子量化分析"))
+                self.assertLess(titles.index("【巡回巨鲸】地缘政治因子量化分析"),
                                 titles.index(pipeline.SECTION_TITLE_MARKET_REVIEW))
                 html = pipeline.generate_report(
                     data, "2026年9月28日 · 周一", "20260928", theme=theme)
@@ -2840,8 +2840,8 @@ class AiTrendAnalysisTests(unittest.TestCase):
         for theme in ("guizang", "pixel"):
             html = pipeline.generate_report(
                 data, "2026年9月28日 · 周一", "20260928", theme=theme)
-            self.assertNotIn("AI趋势分析（美联储）", html)
-            self.assertNotIn("AI趋势分析（地缘政治）", html)
+            self.assertNotIn("【火爆大鱿鱼】美联储因子量化分析", html)
+            self.assertNotIn("【巡回巨鲸】地缘政治因子量化分析", html)
             self.assertNotIn("FED TREND", html)
             self.assertNotIn("offline", html)  # 错误详情不进正文
             self.assertIn("暂缺：", html)
@@ -3200,7 +3200,7 @@ class EconCalendarTests(unittest.TestCase):
         with patch.object(pipeline, "safe_request", lambda *a, **k: None):
             res = pipeline.fetch_econ_calendar(today=self.TODAY)
         html = self._report(self._data(res))
-        self.assertNotIn("【探照安康鱼】时间节点", html, "抓取失败的栏目不进正文")
+        self.assertNotIn("【探照安康鱼】时间节点量化预测", html, "抓取失败的栏目不进正文")
         self.assertNotIn("未来30天影响经济时间点", html, "旧栏目名不得回潮")
         self.assertRegex(html, r"暂缺：[^<]*财经日历")
 
@@ -3216,7 +3216,7 @@ class EconCalendarTests(unittest.TestCase):
                          for k in ("ECON CALENDAR", "MARKET REVIEW", "SUMMARY",
                                    "FORECAST", "SHORT CARD") if k in kickers]
         for theme, markers in (
-            ("guizang", ["【探照安康鱼】时间节点</h2>",
+            ("guizang", ["【探照安康鱼】时间节点量化预测</h2>",
                          "【及时秋刀鱼】AI 行情复盘</h2>", "总结</h2>",
                          "【回游金枪鱼】今日预判</h2>", f"{pipeline.SECTION_TITLE_SHORT_CARD}</h2>"]),
             ("pixel", pixel_markers),
@@ -3349,7 +3349,7 @@ class SectionRenameTests(unittest.TestCase):
 
     EXPECTED = {
         "FORECAST": "【回游金枪鱼】今日预判",
-        "ECON CALENDAR": "【探照安康鱼】时间节点",
+        "ECON CALENDAR": "【探照安康鱼】时间节点量化预测",
         "QUANT FORECAST": "【蜉蝣天地水母】量化预测总览",
     }
 

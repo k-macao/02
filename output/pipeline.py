@@ -48,11 +48,11 @@
       「⌁ AI 研判 ▲偏多 / ▼偏空 / ■中性 · 多头 x% / 空头 y% — 栏内证据 → 预测：结论」。
       概率 = 50 + 45*(多−空)/(多+空)，夹在 5%–95%（持平 50%，绝不绝对化）；≥60% 偏多 /
       ≤40% 偏空 / 其间中性；多头 + 空头恒 100%。证据仅取自该栏目已抓取数据；结论类栏目
-      （【回游金枪鱼】今日预判 / 策略研判 / 总结）与前瞻日程类栏目（【探照安康鱼】时间节点：
+      （【回游金枪鱼】今日预判 / 策略研判 / 总结）与前瞻日程类栏目（【探照安康鱼】时间节点量化预测：
       日程不含方向信息，只给「最密集日 + 事件密度提示」）不附加，栏目无数据自然缺席。
       规则合成，非投资建议。
   6.3 新增「未来30天影响经济时间点」栏目（2026-09-28，位于专业分析之后的首个数据栏目；
-      2026-09-29 起更名为「【探照安康鱼】时间节点」）：
+      2026-09-29 起更名为「【探照安康鱼】时间节点量化预测」）：
       数据源为东方财富财经日历（数据中心公开报表 RPT_CPH_FECALENDAR，无需密钥，
       START_DATE 即北京时间）。服务端只支持按日期过滤，故一次拉全窗口 + 翻页，
       再在本地按写死的口径筛选：保留 数据（中美欧日英港等市场的宏观读数）/
@@ -160,7 +160,7 @@
       2026-09-29 再次改名，见第 21 条；行情速览见第 20 条）。像素主题英文关卡名同步更名
       （CONCLUSION→FORECAST、A-SHARE PANORAMA→GLOBAL PANORAMA、AI READ→STRATEGY READ、
       TREND CLUES→TREND TRACKING、WRAP-UP→SUMMARY），图标砖短标签同步为 STRAT / GLOBAL / SENTI。
-  16. 新增「AI趋势分析（美联储）」与「AI趋势分析（地缘政治）」两栏目（2026-09-28
+  16. 新增「【火爆大鱿鱼】美联储因子量化分析」与「【巡回巨鲸】地缘政治因子量化分析」两栏目（2026-09-28
       按用户要求）：阅读位置在政策因子之后、策略研判之前。各有**专门抓取**——Google News
       RSS 搜索查询（美联储：`美联储 OR FOMC OR 鲍威尔`；地缘政治：`地缘政治 OR 制裁 OR
       冲突 OR 关税`），抓取失败整栏缺席并在总结「数据覆盖」点名，绝不以旧闻兜底。
@@ -212,7 +212,7 @@
 
   19. 栏目更名（2026-09-29 按用户要求，只改标题文字，内容 / 顺序 / 抓取 / 推送门禁
       与拆分逻辑完全不变）：今日预判→**【回游金枪鱼】今日预判**、
-      未来30天影响经济时间点→**【探照安康鱼】时间节点**、
+      未来30天影响经济时间点→**【探照安康鱼】时间节点量化预测**、
       量化预测总览→**【蜉蝣天地水母】量化预测总览**。相关标题集中定义为
       SECTION_TITLE_FORECAST / SECTION_TITLE_ECON_CALENDAR / SECTION_TITLE_QUANT_FORECAST，
       guizang 与 pixel 两个主题共用。「时间节点」栏目的窗口天数不再写在标题里，
@@ -1566,7 +1566,7 @@ def fetch_google_news():
 
 # 数据源 1.x：AI趋势分析专题查询（Google News RSS 搜索）
 # ============================================================
-# 「AI趋势分析（美联储）」「AI趋势分析（地缘政治）」各自的专门抓取：
+# 「【火爆大鱿鱼】美联储因子量化分析」「【巡回巨鲸】地缘政治因子量化分析」各自的专门抓取：
 # 用 Google News RSS 搜索接口按主题查询，与「全球头条」（BUSINESS 头条流）互补。
 # 词条口径写死、可复现；接口不可用时整栏缺席，绝不以旧闻或推算内容兜底。
 GOOGLE_NEWS_SEARCH_RSS = ("https://news.google.com/rss/search?q={query}"
@@ -1638,13 +1638,13 @@ def _fetch_news_search(query, source_name, limit=8):
 
 
 def fetch_fed_trend():
-    """「AI趋势分析（美联储）」专门抓取：Google News RSS 主题查询。"""
+    """「【火爆大鱿鱼】美联储因子量化分析」专门抓取：Google News RSS 主题查询。"""
     print("📡 正在抓取美联储趋势专题（Google News 查询）...")
     return _fetch_news_search(FED_TREND_QUERY, FED_TREND_SOURCE)
 
 
 def fetch_geo_trend():
-    """「AI趋势分析（地缘政治）」专门抓取：Google News RSS 主题查询。"""
+    """「【巡回巨鲸】地缘政治因子量化分析」专门抓取：Google News RSS 主题查询。"""
     print("📡 正在抓取地缘政治趋势专题（Google News 查询）...")
     return _fetch_news_search(GEO_TREND_QUERY, GEO_TREND_SOURCE)
 
@@ -7255,7 +7255,11 @@ SECTION_TITLE_SHORT_CARD = "【闪电飞鱼】短线速查卡"
 SECTION_TITLE_STRATEGY = "【六眼飞鱼】量化 MACD 策略"
 SECTION_TITLE_STRATEGY_READ = SECTION_TITLE_STRATEGY
 SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
-SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
+SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点量化预测"
+# 2026-10-10 更名：原「【火爆大鱿鱼】美联储因子量化分析」「【巡回巨鲸】地缘政治因子量化分析」；数据源键名
+# （美联储趋势 / 地缘政治趋势）、像素关卡名 FED TREND / GEO TREND 不变。
+SECTION_TITLE_FED_TREND = "【火爆大鱿鱼】美联储因子量化分析"
+SECTION_TITLE_GEO_TREND = "【巡回巨鲸】地缘政治因子量化分析"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
 SECTION_TITLE_WEEKLY_FORECAST = "【嗜血大白鲨】逐日走势量化预测"
@@ -7425,7 +7429,7 @@ def _trend_topic_verdict(pos, neg, positive_label, negative_label, middle_label)
 
 
 def build_fed_trend_analysis(data, exclude_titles=()):
-    """「AI趋势分析（美联储）」：鹰鸽词表定调 + 命中证据 + 财经日程相关时间点。
+    """「【火爆大鱿鱼】美联储因子量化分析」：鹰鸽词表定调 + 命中证据 + 财经日程相关时间点。
 
     available=False 时不渲染整栏（抓取失败 / 无标题）。确定性规则，非投资建议。
     """
@@ -7466,7 +7470,7 @@ def build_fed_trend_analysis(data, exclude_titles=()):
 
 
 def build_geo_trend_analysis(data, exclude_titles=()):
-    """「AI趋势分析（地缘政治）」：升温/缓和词表定调 + 命中证据逐条引用。
+    """「【巡回巨鲸】地缘政治因子量化分析」：升温/缓和词表定调 + 命中证据逐条引用。
 
     available=False 时不渲染整栏。确定性规则，非投资建议。
     """
@@ -8874,11 +8878,11 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
         geo_res = build_geo_trend_analysis(data, exclude_titles=geo_shown)
         if fed_res.get("available"):
             blocks["FED TREND"] = (
-                "FED TREND", "AI趋势分析（美联储）", kit.trend_topic_block(fed_res),
+                "FED TREND", SECTION_TITLE_FED_TREND, kit.trend_topic_block(fed_res),
                 kit.ai_badge(), "")
         if geo_res.get("available"):
             blocks["GEO TREND"] = (
-                "GEO TREND", "AI趋势分析（地缘政治）", kit.trend_topic_block(geo_res),
+                "GEO TREND", SECTION_TITLE_GEO_TREND, kit.trend_topic_block(geo_res),
                 kit.ai_badge(), "")
 
     # ④ 策略研判（倾向 / 结论已置顶，此处只展开依据；MACD 是栏内子块）

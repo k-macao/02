@@ -176,7 +176,7 @@ def _ren_forecast(ctx):
 
 
 def _ren_econ_calendar(ctx):
-    """【探照安康鱼】时间节点：把日程表讲成「开盲盒预告」。"""
+    """【探照安康鱼】时间节点量化预测：把日程表讲成「开盲盒预告」。"""
     cal = ctx.get("cal") or {}
     if cal.get("status") != "success":
         return ""
@@ -395,7 +395,7 @@ def _ren_policy(ctx):
 
 
 def _ren_fed(ctx):
-    """AI趋势分析（美联储）：把鹰鸽讲成「紧箍咒」。"""
+    """【火爆大鱿鱼】美联储因子量化分析：把鹰鸽讲成「紧箍咒」。"""
     fed = ctx.get("fed") or {}
     if not fed.get("available"):
         return ""
@@ -413,7 +413,7 @@ def _ren_fed(ctx):
 
 
 def _ren_geo(ctx):
-    """AI趋势分析（地缘政治）：把冲突/缓和讲成「国际大瓜」。"""
+    """【巡回巨鲸】地缘政治因子量化分析：把冲突/缓和讲成「国际大瓜」。"""
     geo = ctx.get("geo") or {}
     if not geo.get("available"):
         return ""

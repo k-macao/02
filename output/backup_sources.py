@@ -189,7 +189,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     "em_datacenter": {
         "name": "东方财富 数据中心报表（沪深港通成交 / 财经日历）",
         "used_by": ("【及时秋刀鱼】AI 行情复盘·南北向", "资金流动性分析",
-                    "【探照安康鱼】时间节点"),
+                    "【探照安康鱼】时间节点量化预测"),
         "primary": ("东方财富 datacenter-web", EM_DATACENTER_URLS[0]),
         "backups": (
             ("东方财富 datacenter（同格式镜像）", EM_DATACENTER_URLS[1], True),
@@ -222,7 +222,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "google_news_search": {
         "name": "专题新闻搜索 · 美联储 / 地缘政治",
-        "used_by": ("AI趋势分析（美联储）", "AI趋势分析（地缘政治）"),
+        "used_by": ("【火爆大鱿鱼】美联储因子量化分析", "【巡回巨鲸】地缘政治因子量化分析"),
         "primary": ("Google News 搜索（中文·大陆版）", "https://news.google.com/rss/search?q={query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
         "backups": (
             ("Google News 搜索（中文·香港版）",
