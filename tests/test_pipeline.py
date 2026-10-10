@@ -1134,7 +1134,7 @@ class GuizangOnePageTests(unittest.TestCase):
                       "港股概率走势分析", "资金流动性分析", "【及时秋刀鱼】AI 行情复盘",
                       "【深海肥蓝鲸】政策因子", pipeline.SECTION_TITLE_STRATEGY,
                       "【深海大鲨鱼】趋势跟踪",
-                      "新闻情绪", "总结"):
+                      pipeline.SECTION_TITLE_NEWS_SENTIMENT, "总结"):
             self.assertIn(title, titles)
             self.assertIn(f"{title}</h2>", html)
         for hidden in ("东方财富快讯", "【无敌帝王蟹】全球头条", "港股名家频道"):
@@ -2480,7 +2480,7 @@ class SectionReadingOrderTests(unittest.TestCase):
         f"{pipeline.SECTION_TITLE_STRATEGY}</h2>",
         f"{pipeline.SECTION_TITLE_POLICY}</h2>",
         f"{pipeline.SECTION_TITLE_MARKET_REVIEW}</h2>",
-        "新闻情绪</h2>",
+        f"{pipeline.SECTION_TITLE_NEWS_SENTIMENT}</h2>",
         "总结</h2>",
         f"{pipeline.SECTION_TITLE_FORECAST}</h2>",
         f"{pipeline.SECTION_TITLE_SHORT_CARD}</h2>",
@@ -3491,7 +3491,9 @@ class SectionRenameBatch2Tests(unittest.TestCase):
         self.assertIn(pipeline.SECTION_TITLE_POLICY, used_by)
         self.assertIn(pipeline.SECTION_TITLE_TREND, used_by)
         self.assertIn(pipeline.SECTION_TITLE_WEEKLY_FORECAST, used_by)
-        for stale in ("策略研判", "策略研判·MACD日线", "全球头条", "政策因子", "趋势跟踪", "每周量化走势预测"):
+        self.assertIn(pipeline.SECTION_TITLE_NEWS_SENTIMENT, used_by)
+        for stale in ("策略研判", "策略研判·MACD日线", "全球头条", "政策因子", "趋势跟踪",
+                      "每周量化走势预测", "新闻情绪"):
             self.assertNotIn(stale, used_by, f"注册表里仍写着旧栏目标题：{stale}")
         # 审计标签（数据源名）不随栏目标题改名
         data = self._data()

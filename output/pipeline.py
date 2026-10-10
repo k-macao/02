@@ -101,7 +101,8 @@
      2026-10-02 起加入 MACD(12,26,9) 日线子策略：市场库 → 本次已有日线 →
      Yahoo / 东财免费源，仅已收盘、足够新鲜的序列；展示交叉、零轴、动能与规则动作，
      不改变原市场信号分、不把技术信号转换成未经校准的概率。
-  10. 「新闻情绪」栏目：按「最近交易日 A股 / 港股 / 美股 成交量前五」
+  10. 「新闻情绪」栏目（2026-10-10 起更名「【亮亮灯光鱿鱼】新闻情绪因子量化分析」，
+      见第 25 条）：按「最近交易日 A股 / 港股 / 美股 成交量前五」
       逐股输出 AI 新闻情绪分与总结评论（含原因）。标题窗口为近
       SENTI_WINDOW_HOURS=72 小时（含历史存档），对窗口内标题逐条词表评分（S，
       附命中词）并按热门榜单个股名归因；每只上榜股输出 DNS 情绪=
@@ -307,6 +308,10 @@
       · 风险提示：命中这两批标题时 shown=False（同东财快讯），保留完整标题展示，
         不再生成指向已隐藏栏目的锚点跳转（h-gh-* / h-hk-* 不再写入页面）；
       · 历史归档日报不改写。
+  25. 「新闻情绪」栏目更名为「【亮亮灯光鱿鱼】新闻情绪因子量化分析」（2026-10-10
+      按用户要求，标题常量 SECTION_TITLE_NEWS_SENTIMENT 与其余鱼名栏目同口径）：
+      只改显示标题与 backup_sources 的 used_by 标注；数据源键名、审计标签、
+      kicker（NEWS SENTIMENT）与 DNS/MOM/ANV 计算口径一律不变；历史归档日报不改写。
 
 退出码约定：
   0 = 正常完成（含 --no-push / --dry-run 等有意的跳过，或检验未通过但告警已送达）；
@@ -7270,6 +7275,8 @@ SECTION_TITLE_HK_QUOTES = "【深水石斑鱼】港股行情"
 SECTION_TITLE_POLICY = "【深海肥蓝鲸】政策因子"
 SECTION_TITLE_TREND = "【深海大鲨鱼】趋势跟踪"
 SECTION_TITLE_GLOBAL_HEADLINES = "【无敌帝王蟹】全球头条"
+# 2026-10-10 更名：原「新闻情绪」；数据源键名、审计标签与 kicker（NEWS SENTIMENT）不变。
+SECTION_TITLE_NEWS_SENTIMENT = "【亮亮灯光鱿鱼】新闻情绪因子量化分析"
 
 # 正文顺序：专业分析 → 数据显示 → 结论。
 # 社区情绪因子使用当次 Reddit / StockTwits 样本；没有可用样本时该栏缺席。
@@ -8925,7 +8932,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                                             news_corpus=news_corpus)
         if senti_result.get("by_market") and senti_result.get("total_matched"):
             blocks["NEWS SENTIMENT"] = (
-                "NEWS SENTIMENT", "新闻情绪",
+                "NEWS SENTIMENT", SECTION_TITLE_NEWS_SENTIMENT,
                 kit.sentiment_block(senti_result), kit.ai_badge(), "",
             )
 
