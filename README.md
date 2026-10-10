@@ -88,10 +88,10 @@ python3 output/push.py                # 完整流程：采集 → 分析 → 生
 | 入门版（默认） | 2026-10-03 起精简版面只留**结论、数字、动作**：计算口径、执行规则、回测 / 校准细节、数据来源与供数路径、筛选过程、折叠披露（"--full 看全文"）、每栏重复的免责副行整段不渲染，全篇只在页脚保留一句免责。数据日期、"非当天 / 滞后"标记、"暂缺"点名、备用源启用行照常保留。`--notes` 或 `OCTOPUS_NOTES=1` 在精简版面里找回说明文字；`--full` 仍是全量长版。 |
 | AI帮你提鲜 | 每个有数据的栏目末尾一块独立内容区（2026-10-06 由「鲜鲜解读」更名改版）：字符图头（█▓▒░ 渐变条）+ 涨跌概率 / 几率条（▓▓▓▓▓░░░░░，每格 10%，与 ⌁ AI 研判同源取数）+ 大白话翻译。规则合成、可复现，数字只引用正文数据；栏目没有概率时几率条整条缺席。`--no-ren` 或 `OCTOPUS_REN=0` 关闭。 |
 | 活鲜词库 | 50 个结构化词条，用于条件驱动的文字点缀；不新增行情数字，不随机堆砌方向判断，与AI帮你提鲜共用开关。 |
-| 默认视觉 | 2026-10-07 起默认 **pixel**（DOS 复古监视器 / Retro Pixel Market Quest v3）：暗色终端底 `#050711`，霓虹青 `#39FFB6`、电光蓝 `#22DFFF`、像素黄 `#FFE66D`、品红 `#FF3CAC`；直角像素块、硬边框、实色阶梯阴影与等宽字体，刊头采用 `OCTOPUS_OS v3` 窗口栏，栏目使用 `LVL` 关卡标记和 8-bit 图标，首屏突出 `QUANT CORE` 主控卡。涨跌同时用颜色、▲/▼/■ 与涨跌文字编码；单列、最大宽度 680px，全内联样式与表格布局，适配微信 / PushPlus。可切换 forum 暗色社区、dossier 德国档案或 guizang 白底研报。 |
+| 默认视觉 | 2026-10-10 起默认 **lime**（白底圆角卡片 + 荧光绿强调风，与《整理-表格可视化.html》同款）：白底画布 `#FFFFFF`、浅灰圆角卡片 `#F5F5F6`、卡内白/灰交替内容块、粗黑标题 `#111111` 与荧光绿 `#C8F03C` 胶囊序号 / 指示小方块；涨跌同时用颜色与 ▲/▼/■ 表达；单列、最大宽度 680px，全内联样式与表格布局，适配微信 / PushPlus。可切换 pixel DOS 复古监视器、forum 暗色社区、dossier 德国档案或 guizang 白底研报。 |
 | 微信表格排版 | 每个栏目里的说明、结论、资讯与数据块都使用全宽 HTML 表格承载；键值内容逐项成行，普通段落分行留白，表格单元格保留明确行距与分隔。PushPlus 超长精简版也按段落行重排成表格，避免微信窄屏把内容挤成连续长段。 |
-| 可读性保护 | 灰色正文有对比度测试门禁；涨跌同时使用 ▲ / ▼ / ■ 和正负号，不只依赖颜色（forum 暗色主题为 A 股口径：涨 ▲ 红、跌 ▼ 绿；guizang / dossier 等浅色主题仍按各自色板）。 |
-| 其他主题 | `forum` 暗色社区仪表盘：`--theme forum`；`dossier` 德国文件 / 档案风（浅灰底 + 荧光绿 + 鲜红）：`--theme dossier`；`guizang` 归藏白底研报（克莱因蓝/灰阶）：`--theme guizang`；默认主题为 DOS 复古监视器 `pixel`。可用 `OCTOPUS_PUSH_THEME=pixel|forum|dossier|guizang` 切换。 |
+| 可读性保护 | 灰色正文有对比度测试门禁；涨跌同时使用 ▲ / ▼ / ■ 和正负号，不只依赖颜色（forum 暗色主题为 A 股口径：涨 ▲ 红、跌 ▼ 绿；lime / guizang / dossier 等浅色主题仍按各自色板）。 |
+| 其他主题 | `pixel` DOS 复古监视器：`--theme pixel`；`forum` 暗色社区仪表盘：`--theme forum`；`dossier` 德国文件 / 档案风（浅灰底 + 荧光绿 + 鲜红）：`--theme dossier`；`guizang` 归藏白底研报（克莱因蓝/灰阶）：`--theme guizang`；默认主题为白底圆角卡片 + 荧光绿强调 `lime`。可用 `OCTOPUS_PUSH_THEME=lime|pixel|forum|dossier|guizang` 切换。 |
 
 ### 行情、日程与资讯
 
@@ -235,7 +235,7 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 | 强制推旧文件 | `python3 output/pipeline.py --force-push-old` | 允许推送无新鲜度标记的旧文件，不推荐 |
 | 列出日报 | `python3 output/pipeline.py --list` | 查看已生成日报 |
 | 查看备用源清单 | `python3 output/pipeline.py --sources` | 离线打印主源与备用源 |
-| 切换主题 | `python3 output/pipeline.py --theme pixel` / `--theme forum` / `--theme dossier` / `--theme guizang` | 临时选择 Pixel DOS 复古监视器、forum 暗色社区、德国档案风或归藏白底；默认 `pixel` |
+| 切换主题 | `python3 output/pipeline.py --theme lime` / `--theme pixel` / `--theme forum` / `--theme dossier` / `--theme guizang` | 临时选择 Lime 白底圆角卡片、Pixel DOS 复古监视器、forum 暗色社区、德国档案风或归藏白底；默认 `lime` |
 | 精简 + 说明文字 | `python3 output/pipeline.py --notes` | 保留精简版面，找回口径 / 来源 / 方法论等说明文字（默认入门版不出） |
 | 恢复完整长版 | `python3 output/pipeline.py --full` | 关闭短线速查卡与全篇精简，说明文字全部回来 |
 
@@ -256,8 +256,8 @@ GitHub 自动 / 手动工作流都读取同名 Repository Variables。MACD 为�
 
 | 范围 | 变量 | 用途 / 默认值 |
 |---|---|---|
-| 页面 | `OCTOPUS_PUSH_THEME=pixel` | 默认 `pixel`（DOS 复古监视器 / 8-bit Market Quest）；可选 `forum` / `dossier` / `guizang` |
-| 页面 | 字号阶梯 | Pixel DOS 版使用终端专属固定字号；forum / dossier / guizang 使用刊头 26px、栏目 18px、关键数字 20px、正文 14px、表格 13px。所有主题均不提供缩放变量。 |
+| 页面 | `OCTOPUS_PUSH_THEME=lime` | 默认 `lime`（白底圆角卡片 + 荧光绿强调）；可选 `pixel` / `forum` / `dossier` / `guizang` |
+| 页面 | 字号阶梯 | Pixel DOS 版使用终端专属固定字号；lime / forum / dossier / guizang 使用刊头 26px、栏目 18px、关键数字 20px、正文 14px、表格 13px。所有主题均不提供缩放变量。 |
 | 页面 | `OCTOPUS_LITE=0` | 关闭精简模式与短线卡，等同 `--full` |
 | 页面 | `OCTOPUS_NOTES=1` | 精简版面里保留说明文字 / 过程文字，等同 `--notes`；默认 0 = 入门版 |
 | 页面 | `OCTOPUS_CARD_CHARS=800` | 短线卡字数预算，默认 600，最少 200 |

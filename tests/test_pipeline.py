@@ -585,8 +585,8 @@ class RetroPixelVisualTests(unittest.TestCase):
 
     def test_pixel_default_report_splits_with_theme_and_size_limits(self):
         data = NewLayoutRenderingTests()._rich_data()
-        with patch.dict(os.environ, {"OCTOPUS_PUSH_THEME": ""}):
-            html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802")
+        html = pipeline.generate_report(data, "2026年8月2日 · 周日", "20260802",
+                                        theme="pixel")
         pieces = pipeline._split_html_for_push(html, 20_000)
         self.assertIsNotNone(pieces)
         self.assertGreater(len(pieces), 1)
@@ -631,21 +631,22 @@ class GuizangThemeTests(unittest.TestCase):
                                         theme="guizang")
 
     def test_default_theme_is_pixel_and_resolves_all_themes(self):
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "lime")
         self.assertEqual(pipeline.PUSH_THEMES,
-                         ("pixel", "forum", "dossier", "guizang"))
+                         ("lime", "pixel", "forum", "dossier", "guizang"))
         with patch.dict(os.environ, {"OCTOPUS_PUSH_THEME": ""}):
-            self.assertEqual(pipeline._resolve_push_theme(None), "pixel")
-            self.assertEqual(pipeline._resolve_push_theme(""), "pixel")
-            self.assertEqual(pipeline._resolve_push_theme("nonsense"), "pixel")
+            self.assertEqual(pipeline._resolve_push_theme(None), "lime")
+            self.assertEqual(pipeline._resolve_push_theme(""), "lime")
+            self.assertEqual(pipeline._resolve_push_theme("nonsense"), "lime")
+            self.assertEqual(pipeline._resolve_push_theme("LIME"), "lime")
             self.assertEqual(pipeline._resolve_push_theme("PIXEL"), "pixel")
             self.assertEqual(pipeline._resolve_push_theme("  guizang "), "guizang")
             self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
             self.assertEqual(pipeline._resolve_push_theme(" Forum "), "forum")
             default_html = pipeline.generate_report(
                 NewLayoutRenderingTests()._rich_data(), "2026年8月2日 · 周日", "20260802")
-        self.assertIn('name="octopus-theme" content="pixel"', default_html)
-        self.assertIn("OCTOPUS_OS v3.0", default_html)
+        self.assertIn('name="octopus-theme" content="lime"', default_html)
+        self.assertIn("OCTOPUS AI · FIELD GUIDE", default_html)
 
     def test_type_scale_is_one_page_friendly(self):
         """字号阶梯为「一页推」整体收一档：刊头 26 / 栏目 18 / 正文 14 / 次要 12"""
@@ -3807,9 +3808,9 @@ class DossierThemeTests(unittest.TestCase):
 
     # ---------------- 主题注册与解析 ----------------
     def test_dossier_is_registered_and_resolvable(self):
-        """dossier 保持注册可切换；默认主题为 DOS 复古监视器 pixel。"""
+        """dossier 保持注册可切换；默认主题为白底圆角卡片 + 荧光绿强调 lime。"""
         self.assertIn("dossier", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "lime")
         self.assertEqual(pipeline._resolve_push_theme("dossier"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("DOSSIER"), "dossier")
         self.assertEqual(pipeline._resolve_push_theme("nope"), pipeline.DEFAULT_PUSH_THEME)
@@ -4138,8 +4139,8 @@ class ForumThemeTests(unittest.TestCase):
     # ---------------- 主题注册与元信息 ----------------
     def test_forum_is_registered_and_selectable(self):
         self.assertIn("forum", pipeline.PUSH_THEMES)
-        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "pixel")
-        self.assertEqual(pipeline._resolve_push_theme(None), "pixel")
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "lime")
+        self.assertEqual(pipeline._resolve_push_theme(None), "lime")
         self.assertEqual(pipeline._resolve_push_theme("FORUM"), "forum")
         self.assertEqual(pipeline._resolve_push_theme(" forum "), "forum")
 
@@ -4371,6 +4372,57 @@ class ForumThemeTests(unittest.TestCase):
         dossier = self._html("dossier")
         self.assertLessEqual(len(forum), len(dossier) + 3000,
                              f"forum {len(forum)} vs dossier {len(dossier)}：暗色版面开销过大")
+
+
+class LimeThemeTests(unittest.TestCase):
+    """白底圆角卡片 + 荧光绿强调风（lime，2026-10-10 起默认主题）"""
+
+    def _html(self, theme="lime"):
+        data = NewLayoutRenderingTests()._rich_data()
+        return pipeline.generate_report(
+            data, "2026年10月10日 · 周六", "20261010", theme=theme)
+
+    def test_lime_is_default_and_resolvable(self):
+        self.assertEqual(pipeline.DEFAULT_PUSH_THEME, "lime")
+        self.assertIn("lime", pipeline.PUSH_THEMES)
+        self.assertEqual(pipeline._resolve_push_theme(None), "lime")
+        self.assertEqual(pipeline._resolve_push_theme("LIME"), "lime")
+
+    def test_lime_palette_values_and_card_chrome(self):
+        self.assertEqual(pipeline.L_BG, "#FFFFFF")
+        self.assertEqual(pipeline.L_CARD, "#F5F5F6")
+        self.assertEqual(pipeline.L_INK_STRONG, "#111111")
+        self.assertEqual(pipeline.L_LIME, "#C8F03C")
+        self.assertEqual(pipeline.L_LIME_WASH, "#F0F9C4")
+        html = self._html()
+        self.assertIn('name="octopus-theme" content="lime"', html)
+        self.assertIn(f'bgcolor="{pipeline.L_BG}"', html)
+        self.assertIn(f"background:{pipeline.L_CARD}", html)
+        self.assertIn(f"background:{pipeline.L_LIME}", html)
+        self.assertIn("border-radius:22px", html)
+        self.assertIn("border-radius:999px", html)
+        for banned in ("<style", 'class="', "<img", "<svg", "<script"):
+            self.assertNotIn(banned, html, banned)
+
+    def test_lime_text_colors_meet_wcag_aa_contrast(self):
+        html = self._html()
+        fg_colors = set(re.findall(r"(?<![-\w])color\s*:\s*(#[0-9A-Fa-f]{3,6})", html))
+        self.assertTrue(fg_colors)
+        for fg in fg_colors:
+            self.assertFalse(pipeline._is_light_or_mid_gray_hex(fg), f"浅灰文字漏网: {fg}")
+            for bg in (pipeline.L_BG, pipeline.L_CARD, pipeline.L_ZEBRA, pipeline.L_LIME_WASH):
+                ratio = pipeline._contrast_ratio(fg, bg)
+                self.assertGreaterEqual(ratio, 4.5, f"{fg} on {bg} contrast {ratio:.2f} < 4.5")
+
+    def test_lime_multipart_split_and_push_preserve_theme(self):
+        html = self._html()
+        parts = pipeline._split_html_for_push(html, 20_000)
+        self.assertIsNotNone(parts)
+        self.assertGreater(len(parts), 1)
+        for part in parts:
+            self.assertIn('name="octopus-theme" content="lime"', part)
+            self.assertIn(pipeline.L_CARD, part)
+            self.assertIn(pipeline.L_LIME, part)
 
 
 if __name__ == "__main__":

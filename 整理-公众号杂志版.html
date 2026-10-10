@@ -2,599 +2,848 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="color-scheme" content="light dark" />
-  <meta name="theme-color" content="#F9F9F7" />
-  <meta name="format-detection" content="telephone=no" />
-  <title>每日上水，新鲜活泼 · 章鱼 AI 上水日报 ｜ 归藏特刊 VOL.2026</title>
-  <meta name="description" content="一台自己采集、自己核对、自己排版、自己推送的市场日报机器。归藏杂志风微信长图特辑。" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
+  <title>章鱼 AI · 上水日报｜系统架构与量化方法论全览（杂志版）</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'media',
       theme: {
         extend: {
           colors: {
-            paper: '#F9F9F7',
-            ink: '#1C2D27',
-            night: '#0F1A15',
-            clay: '#A2553D'
+            paper: '#FFFFFF',
+            card: '#F5F5F6',
+            ink: '#111111',
+            muted: '#8A8A8E',
+            line: '#E4E4E7',
+            lime: '#C8F03C',
+            limeDeep: '#7A9A00',
+            limeSoft: '#F0F9C4'
           },
           fontFamily: {
-            sans: ['-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', 'sans-serif'],
-            serifcn: ['Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', 'serif']
+            sans: [
+              'Inter',
+              '-apple-system',
+              'BlinkMacSystemFont',
+              '"Segoe UI"',
+              '"PingFang SC"',
+              '"Hiragino Sans GB"',
+              '"Microsoft YaHei"',
+              'sans-serif'
+            ],
+            mono: [
+              'ui-monospace',
+              'SFMono-Regular',
+              'Menlo',
+              'Monaco',
+              'Consolas',
+              'monospace'
+            ]
           }
         }
       }
     }
   </script>
 
-  <!-- Font Awesome CDN -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-
   <style>
-    html { -webkit-text-size-adjust: 100%; }
-    body { -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
-
-    /* 克制的滚动淡入：仅轻微位移 + 淡入 */
-    .reveal {
-      opacity: 0;
-      transform: translateY(12px);
-      transition: opacity .65s ease, transform .65s ease;
+    :root {
+      color-scheme: light;
+      --ink: #111111;
+      --muted: #8a8a8e;
+      --paper: #ffffff;
+      --card: #f5f5f6;
+      --white: #ffffff;
+      --line: #e4e4e7;
+      --lime: #c8f03c;
+      --lime-deep: #7a9a00;
+      --lime-soft: #f0f9c4;
     }
-    .reveal.is-in { opacity: 1; transform: none; }
 
-    @media (prefers-reduced-motion: reduce) {
-      .reveal { opacity: 1; transform: none; transition: none; }
-      * { transition: none !important; animation: none !important; }
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::selection {
+      background-color: var(--lime);
+      color: var(--ink);
+    }
+
+    .mag-page {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 44px 24px 84px;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: var(--card);
+      color: #222222;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pill-lime {
+      background: var(--lime);
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .hero-title {
+      margin: 14px 0 12px;
+      font-size: clamp(32px, 5vw, 50px);
+      font-weight: 900;
+      line-height: 1.12;
+      letter-spacing: -0.04em;
+      color: var(--ink);
+    }
+
+    .hero-sub {
+      margin: 0;
+      color: #5b5b60;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .section-card {
+      margin: 0 0 22px;
+      padding: 28px 26px 24px;
+      border-radius: 26px;
+      background: var(--card);
+      border: 0;
+    }
+
+    .chapter-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .chapter-label::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      background: var(--lime);
+      flex: 0 0 auto;
+    }
+
+    .chapter-title {
+      margin: 0 0 18px;
+      padding: 0 0 14px;
+      border-bottom: 1px solid #e0e0e4;
+      color: var(--ink);
+      font-size: clamp(22px, 3vw, 30px);
+      font-weight: 900;
+      line-height: 1.22;
+      letter-spacing: -0.03em;
+    }
+
+    .subheading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 22px 0 12px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1.35;
+      letter-spacing: -0.01em;
+    }
+
+    .subheading::before {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      background: var(--lime);
+      flex: 0 0 auto;
+    }
+
+    .white-box {
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 16px 18px;
+      border: 0;
+    }
+
+    .white-list {
+      border-radius: 16px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .white-row {
+      padding: 11px 16px;
+      border-top: 1px solid #f0f0f2;
+    }
+
+    .white-row:first-child {
+      border-top: 0;
+    }
+
+    .white-row:nth-child(even) {
+      background: #fbfbfc;
+    }
+
+    .white-row:hover {
+      background: #f3f7e0;
+    }
+
+    .lime-no {
+      display: inline-block;
+      min-width: 24px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: var(--lime);
+      color: var(--ink);
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 18px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .gray-no {
+      display: inline-block;
+      min-width: 24px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #ececef;
+      color: #333333;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 18px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .meter-bar {
+      width: 100%;
+      height: 6px;
+      border-radius: 99px;
+      background: #e4e4e7;
+      overflow: hidden;
+    }
+
+    .meter-fill {
+      display: block;
+      height: 100%;
+      border-radius: 99px;
+      background: var(--lime);
+    }
+
+    .quote-card {
+      margin: 22px 0;
+      padding: 22px 24px;
+      border-radius: 22px;
+      background: var(--card);
+    }
+
+    .quote-text {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 900;
+      line-height: 1.45;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+    }
+
+    code {
+      padding: 0.1em 0.42em;
+      border-radius: 6px;
+      background: #ffffff;
+      border: 1px solid #e4e4e7;
+      color: #222222;
+      font-size: 0.9em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    @media (max-width: 760px) {
+      .mag-page {
+        padding: 24px 12px 48px;
+      }
+      .section-card {
+        padding: 20px 14px 16px;
+        border-radius: 20px;
+      }
+      .white-box {
+        padding: 14px;
+      }
     }
   </style>
 </head>
 
-<body class="bg-paper text-ink text-[16px] leading-normal font-sans dark:bg-night dark:text-[#E4ECE6]">
+<body class="bg-paper text-ink font-sans antialiased">
 
-  <!-- 阅读进度发丝线 -->
-  <div class="fixed top-0 left-0 z-50 h-[2px] w-0 bg-ink/70 dark:bg-[#E4ECE6]/60" id="read-progress" aria-hidden="true"></div>
+  <!-- Top Reading Progress Bar -->
+  <div class="fixed top-0 left-0 right-0 z-50 h-[4px] bg-[#f0f0f2]">
+    <div id="progress-bar" class="h-full bg-lime w-0 transition-[width] duration-150 ease-out"></div>
+  </div>
 
-  <main class="mx-auto w-full max-w-[640px] px-4 sm:px-8">
+  <!-- Magazine Container -->
+  <main class="mag-page">
 
-    <!-- ══════════════════════════════════════════════
-         1 · 封头模块 MAGAZINE HEADER
-    ══════════════════════════════════════════════ -->
-    <header class="pt-8 pb-5">
-
-      <!-- 微型杂志元数据 -->
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium uppercase tracking-[0.22em] text-ink/55 dark:text-[#E4ECE6]/55">
-        <span>VOL.2026</span>
-        <span class="text-ink/30 dark:text-[#E4ECE6]/30">//</span>
-        <span>INSIGHT</span>
-        <span class="text-ink/30 dark:text-[#E4ECE6]/30">//</span>
-        <span>阅读时间：4min</span>
+    <!-- ==================== HERO HEADER ==================== -->
+    <header class="pb-7 mb-5">
+      <div class="eyebrow mb-3">OCTOPUS AI · FIELD GUIDE &amp; MAGAZINE</div>
+      <div class="pill-row mb-4">
+        <span class="pill pill-lime">VOL.2026</span>
+        <span class="pill">INSIGHT</span>
+        <span class="pill">单列卡片 · 荧光绿强调</span>
+        <span class="pill">阅读时间：4 min</span>
       </div>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
 
-      <!-- 主标题 -->
-      <p class="mt-5 text-[11px] font-medium uppercase tracking-[0.35em] text-ink/50 dark:text-[#E4ECE6]/50">
-        Octopus Daily · 归藏特刊
-      </p>
-      <h1 class="mt-3 text-3xl sm:text-4xl font-black leading-tight tracking-tight text-ink dark:text-[#EDF3EE]">
-        每日上水，<br />新鲜活泼
+      <h1 class="hero-title">
+        章鱼 AI · 上水日报：把市场噪音炼成校准后的概率
       </h1>
 
-      <!-- 副题 -->
-      <p class="mt-6 text-[17px] leading-normal text-ink/75 dark:text-[#E4ECE6]/75">
-        一份每天自己长出来的市场日报——自己采集、自己核对新鲜度、自己排版、自己送进微信；以及一条写进代码的铁律：<span class="font-bold text-ink dark:text-[#EDF3EE]">宁可少说，不可说错。</span>
+      <p class="hero-sub">
+        每日上水，新鲜活泼 —— 从 17 条双备援数据线、6 阶段无前视量化引擎，到 Jev 类型化判断原语与微信端高对比度直推的完整方法论拆解。
       </p>
-
-      <!-- 署名行 -->
-      <div class="mt-5 border-t-[0.5px] border-gray-200 pt-3 dark:border-white/10">
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] tracking-wide text-ink/55 dark:text-[#E4ECE6]/55">
-          <span>文 / 章鱼 AI 编辑部</span>
-          <span class="text-ink/30 dark:text-[#E4ECE6]/30">·</span>
-          <span>2026.10.04</span>
-          <span class="text-ink/30 dark:text-[#E4ECE6]/30">·</span>
-          <span>资料整理自《内容分类整理》</span>
-        </div>
-      </div>
     </header>
 
-
-    <!-- ══════════════════════════════════════════════
-         2 · 导语模块 EDITORIAL NOTE
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-      <div class="rounded-r-lg border-l-[3px] border-ink bg-ink/[0.035] px-4 py-4 dark:border-[#E4ECE6]/70 dark:bg-white/[0.05]">
-        <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/55 dark:text-[#E4ECE6]/55">
-          Editorial Note · 导语
-        </p>
-        <p class="mt-2 font-serifcn text-lg italic leading-relaxed text-ink dark:text-[#E4ECE6]">
-          <span class="font-bold not-italic">每天上午九点到晚上九点，</span>一份中文日报自己敲开你的微信。它不靠任何人的手：公开市场与资讯数据自动采集，数据新鲜度自动检查，版面自动排，推送自动发。数据不够的时候，它宁可让栏目整块消失，也不拿旧数字冒充今天——这是一台把「诚实」写进流水线的机器。
-        </p>
-      </div>
+    <!-- ==================== EDITORIAL NOTE ==================== -->
+    <section aria-label="编者按" class="section-card">
+      <div class="chapter-label">EDITORIAL NOTE · 编者按</div>
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] m-0">
+        在信息过载的交易日里，真正稀缺的不是更多的快讯，而是<strong class="text-ink font-extrabold">经过校准的概率、可回溯的留痕，以及知道何时保持沉默的克制</strong>。本文完整梳理「章鱼 AI · 上水日报」背后的工程与量化体系：它如何采集全球与港 A 市场数据、如何用双层 <code class="text-[12px]">tanh</code> 驯服极端异常值、如何防止大模型幻觉，以及如何把复杂的策略语言翻译成散户听得懂的「海鲜大白话」。
+      </p>
     </section>
 
+    <!-- ==================== SECTION 01 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 01 · PIPELINE</div>
+      <h2 class="chapter-title">一套自动上水的金融流水线</h2>
 
-    <!-- ══════════════════════════════════════════════
-         3 · 结构化卡片 · 流水线 PIPELINE
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <!-- 小标题 + 上方发丝线 -->
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">01 — Pipeline</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        从采集到推送，一条不回头的流水线
-      </h2>
-
-      <p class="mt-3">
-        流水线只有五个动作：<span class="font-bold">采集 → 分析 → 生成 → 新鲜度检查 → 推送</span>。没有编辑值班，没有手动润色；每一环的输出，都必须带着日期与来源走进下一环。以下六段，是它每天要走完的路。
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-5">
+        「章鱼 AI · 上水日报」是一套纯 Python 驱动（仅需 Python 3.11+ 与 <code>requests</code>）的自动化市场研判流水线。每一个交易日，它按严格顺序完成五件事：<strong class="text-ink font-extrabold">采集 → 分析 → 生成 → 新鲜度检查 → 推送</strong>。
       </p>
 
-      <!-- 六段卡片：纵向单列平铺 -->
-      <div class="mt-5 space-y-3">
+      <!-- Key Specs Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+        <div class="white-box">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="lime-no">01</span>
+            <span class="text-[11px] font-bold tracking-wider uppercase text-muted">视觉主题 · Theme</span>
+          </div>
+          <p class="text-[15px] font-extrabold text-ink mb-1">默认 Lime 白底圆角卡片风</p>
+          <p class="text-[12.5px] leading-[1.6] text-[#4a4a50] m-0">
+            白底画布（<code>#FFFFFF</code>）、浅灰圆角卡片（<code>#F5F5F6</code>）、粗黑标题与荧光绿（<code>#C8F03C</code>）胶囊序号；支持一键切换 <code>pixel</code>、<code>forum</code>、<code>dossier</code> 或 <code>guizang</code>。
+          </p>
+        </div>
+        <div class="white-box">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="lime-no">02</span>
+            <span class="text-[11px] font-bold tracking-wider uppercase text-muted">研判内核 · Core</span>
+          </div>
+          <p class="text-[15px] font-extrabold text-ink mb-1">规则与量化合成为主</p>
+          <p class="text-[12.5px] leading-[1.6] text-[#4a4a50] m-0">
+            概率与策略由确定性量化模型驱动；港股七日分析可选接入大模型或本地 Jev 引擎。所有结果仅供参考，不构成投资建议。
+          </p>
+        </div>
+      </div>
 
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 01 · Collect</p>
-          <h3 class="mt-2 text-xl font-bold">收集</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">拉取指数与个股日线、沪深港通成交、港股成交数据，收敛成标准化数据序列。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 02 · Features</p>
-          <h3 class="mt-2 text-xl font-bold">五因子</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">逐日计算 MOM / TRD / REV / VOL / FLOW。每个时点只使用当时可得的数据——不偷看未来。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 03 · Probability</p>
-          <h3 class="mt-2 text-xl font-bold">概率校准</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">历史样本滚动重算、分桶、保序回归（PAVA）、逻辑回归校准，给出概率与区间。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 04 · Liquidity</p>
-          <h3 class="mt-2 text-xl font-bold">流动性画像</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">南北向成交、量能、Amihud 非流动性、CR5 / CR20 集中度，合成为有界修正。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 05 · Validate</p>
-          <h3 class="mt-2 text-xl font-bold">留痕与结算</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">推进式回测；每笔预测写入留痕，目标交易日后按真实收盘结算——对错都记账。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Step 06 · Decide</p>
-          <h3 class="mt-2 text-xl font-bold">一句话结论</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">综合概率、区间与趋势状态，压缩成一句话预测概括——读者只看这一句也够。</p>
-        </article>
-
+      <!-- Core Artifacts -->
+      <div class="white-list">
+        <div class="px-4 py-2.5 border-b border-[#f0f0f2] flex items-center justify-between">
+          <span class="text-[11px] font-extrabold uppercase tracking-wider text-ink">流水线四大留痕产物</span>
+          <span class="text-[11px] font-mono text-muted">output/*</span>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">01</span>最新日报与日期归档</span>
+          <span class="text-[12px] font-mono text-[#4a4a50]">output/latest.html · daily_report_YYYYMMDD.html</span>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">02</span>量化预测与真实收盘结算</span>
+          <span class="text-[12px] font-mono text-[#4a4a50]">quant_history.json · weekly_forecast.json · hk7_forecast.json</span>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">03</span>跨日新闻去重与情绪基线</span>
+          <span class="text-[12px] font-mono text-[#4a4a50]">news_history.json · sentiment_history.json</span>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">04</span>每日三档多源交叉验证快照</span>
+          <span class="text-[12px] font-mono text-[#4a4a50]">output/market_db/YYYYMMDD.json</span>
+        </div>
       </div>
     </section>
 
+    <!-- ==================== SECTION 02 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 02 · THE INDEX</div>
+      <h2 class="chapter-title">深海鱼群：19 个栏目的阅读节律</h2>
 
-    <!-- ══════════════════════════════════════════════
-         金句大字报 PULL QUOTE · 01
-    ══════════════════════════════════════════════ -->
-    <section class="py-8">
-      <div class="reveal text-center">
-        <div class="mx-auto h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-        <p class="mt-5 font-serifcn text-2xl font-bold leading-normal tracking-wide text-ink dark:text-[#EDF3EE]">
-          「没有有效数据的栏目，自动略过。」
-        </p>
-        <p class="mt-2 text-base text-ink/60 dark:text-[#E4ECE6]/60">
-          不用空白占位，更不用旧数据补位。
-        </p>
-        <div class="mx-auto mt-5 h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         结构化卡片 · 栏目索引 THE INDEX
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">02 — The Index</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        十八个栏目，一条从分析到结论的动线
-      </h2>
-
-      <p class="mt-3">
-        阅读顺序固定：<span class="font-bold">专业分析 → 数据显示 → 结论</span>，最终结论加粗突出。栏目以海中生物命名——毕竟这是一只章鱼的日报，它住在深海里。
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-5">
+        整份日报按照「从群体情绪 → 量化信号 → 港股概率与流动性 → 板块与行业轮动 → 宏观政策与日程 → 盘面复盘 → 最终行动速查」的阅读动线编排为 19 个栏目（编号 <code class="text-[12px]">00</code> 至 <code class="text-[18px] hidden"></code><code class="text-[12px]">18</code>），每个核心模块以深海鱼类命名，各司其职：
       </p>
 
-      <!-- 索引卡片 -->
-      <div class="reveal mt-5 rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] dark:border-white/10 dark:bg-white/[0.04]">
-        <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Reading Order</p>
-        <h3 class="mt-2 text-xl font-bold">栏目一览</h3>
+      <!-- 19 Columns Directory -->
+      <div class="white-list">
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">00</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">散户群体情绪因子 · 量化策略分析</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">Reddit / StockTwits 实际样本、净情绪指数（NBI）、分歧熵与趋势榜热度；无样本时自动缺席。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">01</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【六眼飞鱼】量化策略 AI 整体研判</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">市场信号、MACD 日线策略（12/26/9 双倍柱）及四大派生策略、板块强弱、风险预算与量化配置。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">02</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【蜉蝣天地水母】量化预测总览 &amp; <span class="font-mono text-[11px] text-muted">03</span> 港股概率走势 &amp; <span class="font-mono text-[11px] text-muted">04</span> 资金流动性</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">恒指/恒科/国指及个股池趋势概率、南北向成交、量能、Amihud 非流动性、CR5/CR20 集中度与综合评分。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">05</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【贪吃大白鲨】量化走势预测</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">未来 7 个交易日逐日走势与操作建议；内嵌 AI 七日港股走势子块。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">06</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【滚滚翻车鱼】板块轮动 &amp; <span class="font-mono text-[11px] text-muted">07</span> 【巡游旗鱼】申万一级行业轮动</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">A 股概念库映射到港股观察篮子（五维加权分 + 三策略投票）；31 个申万行业的周度评分与月度组合。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">08</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【深海肥蓝鲸】政策因子 &amp; <span class="font-mono text-[11px] text-muted">09–10</span> 美联储 / 地缘政治 &amp; <span class="font-mono text-[11px] text-muted">11</span> 【探照安康鱼】时间节点</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">政策冲击指数（PSI）、宏观趋势定调与关键证据、未来日程窗口与最高密集日。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3">
+          <span class="lime-no mt-0.5">12</span>
+          <div>
+            <p class="text-[14px] font-bold text-ink m-0">【及时秋刀鱼】AI 行情复盘 &amp; <span class="font-mono text-[11px] text-muted">13</span> 【深水石斑鱼】港股行情 &amp; <span class="font-mono text-[11px] text-muted">14–16</span> 趋势 / 情绪 / 总结</p>
+            <p class="text-[12.5px] text-[#4a4a50] mt-0.5 m-0">全球与美 A 港行情宽度、港股境外四路数据源明细、20 家港股媒体与公开社区追踪、热门标的情绪评分。</p>
+          </div>
+        </div>
+        <div class="white-row flex items-start gap-3 bg-[#f0f9c4]/60">
+          <span class="lime-no mt-0.5">17</span>
+          <div>
+            <p class="text-[14px] font-extrabold text-ink m-0">【回游金枪鱼】今日预判 &amp; <span class="lime-no mx-1">18</span> 【闪电飞鱼】短线速查卡</p>
+            <p class="text-[12.5px] text-[#333333] mt-0.5 m-0">全篇收束：30 秒读完最终方向判断、T+1 剧本、仓位建议、数据底，以及配对 100 句股票梗句库的「新手三句话」。</p>
+          </div>
+        </div>
+      </div>
+    </section>
 
-        <ul class="mt-2">
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">00</span>
-            <span class="flex-1 font-bold">散户群体情绪因子·量化策略分析</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">Reddit · StockTwits 数据</span>
+    <!-- ==================== PULL QUOTE 1 ==================== -->
+    <aside class="quote-card">
+      <div class="chapter-label">CORE PRINCIPLE · 核心准则</div>
+      <blockquote class="quote-text">
+        “每个历史时点只使用当时可得的数据；每一次预测都写入账本，等待目标交易日真实收盘的结算。”
+      </blockquote>
+      <p class="mt-2 mb-0 text-[12px] font-bold text-muted">
+        — Octopus Quant Engine · 推进式回测与留痕原则
+      </p>
+    </aside>
+
+    <!-- ==================== SECTION 03 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 03 · QUANT ENGINE</div>
+      <h2 class="chapter-title">六阶段量化引擎与「软压缩」数学</h2>
+
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-4">
+        在 <code class="text-[12px]">output/octopus_quant/</code> 下，港股量化引擎被拆解为 8 个职责清晰的模块，并严格遵循六阶段闭环演进：
+      </p>
+
+      <!-- 6 Stages -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-5">
+        <div class="white-box">
+          <span class="lime-no">① collect</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">标准化序列</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">收集指数/个股日线、沪深港通与港股成交数据。</p>
+        </div>
+        <div class="white-box">
+          <span class="lime-no">② features</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">五因子特征</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">逐日计算 MOM、TRD、REV、VOL、FLOW，杜绝前视偏差。</p>
+        </div>
+        <div class="white-box">
+          <span class="lime-no">③ probability</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">保序与逻辑校准</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">历史滚动重算、分桶、保序回归（PAVA）与逻辑回归校准。</p>
+        </div>
+        <div class="white-box">
+          <span class="lime-no">④ liquidity</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">流动性画像</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">融合南北向资金、Amihud 非流动性与集中度有界修正。</p>
+        </div>
+        <div class="white-box">
+          <span class="lime-no">⑤ validate</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">推进式回测</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">输出命中率与 Brier 分数，预测落盘并于日后结算。</p>
+        </div>
+        <div class="white-box">
+          <span class="lime-no">⑥ decide</span>
+          <p class="text-[13px] font-extrabold text-ink mt-2 mb-1">一句话概括</p>
+          <p class="text-[12px] text-[#4a4a50] m-0">综合概率、预期区间与趋势状态生成最终结论。</p>
+        </div>
+      </div>
+
+      <!-- Sector Rotation 5 Dimensions -->
+      <h3 class="subheading">板块轮动：五维加权与三策略投票</h3>
+      <div class="white-box mb-5">
+        <div class="space-y-3">
+          <div>
+            <div class="flex justify-between text-[12.5px] mb-1">
+              <span class="font-bold text-ink"><span class="lime-no mr-1.5">35%</span>技术面（20/60日收益映射 + MA20/MA60 结构）</span>
+              <span class="font-mono font-bold text-ink">35%</span>
+            </div>
+            <div class="meter-bar"><span class="meter-fill" style="width:35%"></span></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-[12.5px] mb-1">
+              <span class="font-bold text-ink"><span class="lime-no mr-1.5">35%</span>资金面（A 股概念主力净占比 + 港股映射股资金）</span>
+              <span class="font-mono font-bold text-ink">35%</span>
+            </div>
+            <div class="meter-bar"><span class="meter-fill" style="width:35%"></span></div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+            <div class="p-3 rounded-xl bg-[#f5f5f6]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="lime-no">10%</span>
+                <span class="text-[11px] font-mono text-muted">基本面</span>
+              </div>
+              <p class="text-[12px] text-[#4a4a50] m-0">正 PE-TTM / PB 横截面低值分位代理</p>
+            </div>
+            <div class="p-3 rounded-xl bg-[#f5f5f6]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="lime-no">10%</span>
+                <span class="text-[11px] font-mono text-muted">行业板块</span>
+              </div>
+              <p class="text-[12px] text-[#4a4a50] m-0">当日涨跌幅映射分 + 上涨家数宽度</p>
+            </div>
+            <div class="p-3 rounded-xl bg-[#f5f5f6]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="lime-no">10%</span>
+                <span class="text-[11px] font-mono text-muted">事件驱动</span>
+              </div>
+              <p class="text-[12px] text-[#4a4a50] m-0">近 72h 头条/快讯/政策关键词计分</p>
+            </div>
+          </div>
+        </div>
+        <p class="text-[12px] text-muted mt-3 pt-3 border-t border-[#f0f0f2] mb-0">
+          三策略投票机制：① MA20/MA60 多空排列 · ② 20/60/120 日等权动量 · ③ 对恒指 20/60 日超额收益象限（简化 RRG 代理）。
+        </p>
+      </div>
+
+      <!-- Tanh Soft Compression -->
+      <h3 class="subheading">因子软压缩（tanh cap）：温和对待温和，果断夹紧极端</h3>
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-4">
+        单日暴涨暴跌或成交异动往往让线性因子失真。系统采用软压缩公式 <code class="text-[12px] font-bold">显示值 = 2 · tanh(原始值 / 2)，cap = 2</code>：当原始值在 ±0.5 以内时保留 98% 以上的信息；而当原始值飙升至 ±10 时，削幅达 80%，牢牢封顶在 ±2.00（单因子最高占综合分权重 30%，贡献上限 0.60）。
+      </p>
+
+      <div class="white-list">
+        <div class="white-row grid grid-cols-4 text-[11px] font-extrabold uppercase tracking-wider text-muted bg-[#f5f5f6]/60">
+          <span>原始值 |raw|</span>
+          <span>压缩后显示值</span>
+          <span>信息保留率</span>
+          <span class="text-right">极端削幅</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center">
+          <span class="font-bold text-ink">0.25</span>
+          <span>0.249</span>
+          <span>99.5%</span>
+          <span class="text-right text-muted">0.5%</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center">
+          <span class="font-bold text-ink">0.50</span>
+          <span>0.490</span>
+          <span>98.0%</span>
+          <span class="text-right text-muted">2.0%</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center">
+          <span class="font-bold text-ink">1.00</span>
+          <span>0.924</span>
+          <span>92.4%</span>
+          <span class="text-right text-muted">7.6%</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center">
+          <span class="font-bold text-ink">2.00</span>
+          <span>1.523</span>
+          <span>76.2%</span>
+          <span class="text-right font-bold text-ink">23.8%</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center">
+          <span class="font-bold text-ink">4.00</span>
+          <span>1.928</span>
+          <span>48.2%</span>
+          <span class="text-right font-bold text-ink">51.8%</span>
+        </div>
+        <div class="white-row grid grid-cols-4 text-[13px] font-mono items-center bg-[#f0f9c4]/60">
+          <span class="font-extrabold text-ink">10.00</span>
+          <span class="font-extrabold text-ink">2.000</span>
+          <span>20.0%</span>
+          <span class="text-right"><span class="lime-no">80.0%</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== SECTION 04 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 04 · RESILIENCE</div>
+      <h2 class="chapter-title">多源韧性：17 条数据线与「防卡死四道闸」</h2>
+
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-5">
+        公开市场接口随时可能限流、超时或维护。为此，日报的 17 条数据线全部采用<strong class="text-ink font-extrabold">「主源 → 备用源 1 → 备用源 2」三级降级架构</strong>（例如 Yahoo <code class="text-[12px]">query1</code> → <code class="text-[12px]">query2</code> → 东方财富 / 新浪；20 家港股媒体官方 RSS → Bing News <code class="text-[12px]">site:</code> → Google News <code class="text-[12px]">site:</code>）。只要启用了备用源，页面都会如实披露。
+      </p>
+
+      <!-- Market DB 3 Hard Rules -->
+      <div class="white-box mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[15px] font-extrabold text-ink m-0">市场数据库（每天 08:00 / 12:30 / 17:00 采集）三条硬规则</h3>
+          <span class="lime-no">6 路并行</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="p-3 rounded-xl bg-[#f5f5f6]">
+            <p class="text-[12px] font-extrabold text-ink mb-1"><span class="lime-no mr-1.5">01</span>源头 &gt; 3</p>
+            <p class="text-[12px] text-[#4a4a50] leading-[1.55] m-0">东财 push2、新浪、腾讯、Yahoo、东财 push2his、通达信 mootdx 6 路独立并行；全失败绝不落库。</p>
+          </div>
+          <div class="p-3 rounded-xl bg-[#f5f5f6]">
+            <p class="text-[12px] font-extrabold text-ink mb-1"><span class="lime-no mr-1.5">02</span>稳健交叉验证</p>
+            <p class="text-[12px] text-[#4a4a50] leading-[1.55] m-0">中位数 + MAD 稳健离群检测，逐源判定滞后；至少 ≥2 路一致才计入有效共识。</p>
+          </div>
+          <div class="p-3 rounded-xl bg-[#f5f5f6]">
+            <p class="text-[12px] font-extrabold text-ink mb-1"><span class="lime-no mr-1.5">03</span>六维自我检查</p>
+            <p class="text-[12px] text-[#4a4a50] leading-[1.55] m-0">时段合法、成功源 ≥4、覆盖率 ≥80%、共识率 ≥90%、价格合理性与 SHA 哈希防改写。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 Anti-Hang Gates -->
+      <div class="white-box">
+        <p class="text-[12px] font-extrabold tracking-wider uppercase text-ink mb-3">
+          通达信通道（第 6 路）· 防卡死四道闸
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12.5px]">
+          <div class="flex gap-2.5 items-start">
+            <span class="lime-no mt-0.5">闸 1</span>
+            <p class="text-[#4a4a50] m-0"><strong class="text-ink">预置配置：</strong>建客户端前先写入 <code>~/.mootdx/config.json</code>，根绝配置文件阻塞。</p>
+          </div>
+          <div class="flex gap-2.5 items-start">
+            <span class="lime-no mt-0.5">闸 2</span>
+            <p class="text-[#4a4a50] m-0"><strong class="text-ink">TCP 预检：</strong>自建 socket 先探一次（3s 超时），死站 3 秒立即换台。</p>
+          </div>
+          <div class="flex gap-2.5 items-start">
+            <span class="lime-no mt-0.5">闸 3</span>
+            <p class="text-[#4a4a50] m-0"><strong class="text-ink">先验活后明细：</strong>先 <code>quotes()</code> 拿全标的，行情为空立刻换站，坏站最多 1 次调用。</p>
+          </div>
+          <div class="flex gap-2.5 items-start">
+            <span class="lime-no mt-0.5">闸 4</span>
+            <p class="text-[#4a4a50] m-0"><strong class="text-ink">总预算封顶：</strong><code>TDX_BUDGET_SEC=90s</code> 硬约束整条通道，单路再坏也不拖垮全局。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== SECTION 05 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 05 · GUARDRAILS</div>
+      <h2 class="chapter-title">Jev 本地研判层：砍掉废话，只输出类型化概率</h2>
+
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-4">
+        在港股七日走势分析中，除了云端大模型（默认 <code class="text-[12px]">deepseek-chat</code>）与量化基准外，系统引入了可选的第三引擎 —— <strong class="text-ink font-extrabold">Jev（TypeSafe 的 System One）</strong>。它的核心哲学极其锋利：<strong class="text-ink font-extrabold">砍掉自由文本生成，只输出类型化的判断和已校准的概率</strong>，只需 <code class="text-[12px]">onnxruntime + tokenizers + numpy</code>，无需 GPU、无需 API Key，CPU 单题延迟低至 15.6 ms（laya 322M int8）。
+      </p>
+
+      <!-- 3 Primitives -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div class="white-box">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-[13px] font-extrabold text-ink">choice</span>
+            <span class="lime-no">候选选一</span>
+          </div>
+          <p class="text-[12.5px] text-[#4a4a50] m-0">对应日报判断：未来 7 日方向（上行 / 震荡 / 下行）。</p>
+        </div>
+        <div class="white-box">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-[13px] font-extrabold text-ink">score</span>
+            <span class="lime-no">按档打分</span>
+          </div>
+          <p class="text-[12.5px] text-[#4a4a50] m-0">对应日报判断：市场不确定性与风险等级评估。</p>
+        </div>
+        <div class="white-box">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-[13px] font-extrabold text-ink">noul</span>
+            <span class="lime-no">命题真伪</span>
+          </div>
+          <p class="text-[12.5px] text-[#4a4a50] m-0">对应日报判断：校准后的收涨概率 P(未来 7 日收涨)。</p>
+        </div>
+      </div>
+
+      <!-- Guardrails Comparison -->
+      <div class="white-box">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-[#f0f0f2]">
+          <span class="text-[12px] font-extrabold uppercase tracking-wider text-ink">五道安全护栏对照</span>
+          <span class="lime-no">优先级：大模型 &gt; Jev &gt; 量化基准</span>
+        </div>
+        <ul class="space-y-2 text-[13px] text-[#4a4a50] m-0 p-0 list-none">
+          <li class="flex justify-between gap-4">
+            <span class="font-bold text-ink">1. 概率夹边与偏离收敛</span>
+            <span class="text-right">强制夹在 5%~95%；偏离量化基准 &gt;20pp 时自动收敛至 ±20pp</span>
           </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">01</span>
-            <span class="flex-1 font-bold">【六眼飞鱼】量化策略研判</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">MACD 与风险预算</span>
+          <li class="flex justify-between gap-4">
+            <span class="font-bold text-ink">2. 数字溯源校验</span>
+            <span class="text-right">大模型输出经正则逐条比对输入源；Jev 不产自由文本，天然免疫幻觉</span>
           </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">02</span>
-            <span class="flex-1 font-bold">【蜉蝣天地水母】量化预测总览</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">概率 · 区间 · 回测</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">03–04</span>
-            <span class="flex-1 font-bold">港股概率走势 · 资金流动性</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">趋势与量能</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">05</span>
-            <span class="flex-1 font-bold">【贪吃大白鲨】量化走势预测</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">未来 7 个交易日</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">06</span>
-            <span class="flex-1 font-bold">【滚滚翻车鱼】板块轮动策略</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">五维分 · 三策略投票</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">07–09</span>
-            <span class="flex-1 font-bold">政策因子 · 美联储 · 地缘政治</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">趋势定调</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">10</span>
-            <span class="flex-1 font-bold">【探照安康鱼】时间节点</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">日程窗口</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">11–12</span>
-            <span class="flex-1 font-bold">【及时秋刀鱼】行情复盘 · 【深水石斑鱼】港股行情</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">全球盘面</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">13–14</span>
-            <span class="flex-1 font-bold">【深海大鲨鱼】趋势跟踪 · 新闻情绪</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">20 家源头</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">15</span>
-            <span class="flex-1 font-bold">总结</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">风险与覆盖</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-t-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">16</span>
-            <span class="flex-1 font-bold">【回游金枪鱼】今日预判</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">最终方向判断</span>
-          </li>
-          <li class="flex items-baseline justify-between gap-3 border-y-[0.5px] border-gray-200 py-1.5 dark:border-white/10">
-            <span class="text-[13px] tabular-nums text-ink/40 dark:text-[#E4ECE6]/40">17</span>
-            <span class="flex-1 font-bold">【闪电飞鱼】短线速查卡</span>
-            <span class="text-right text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">30 秒读完</span>
+          <li class="flex justify-between gap-4">
+            <span class="font-bold text-ink">3. 诚实缺席与独立留痕</span>
+            <span class="text-right">无 Key / 无端点时整栏干脆缺席；预测分别落盘至 hk7 / jev_forecast.json</span>
           </li>
         </ul>
-
-        <p class="mt-3 text-[13px] leading-normal text-ink/55 dark:text-[#E4ECE6]/55">
-          ※ 没有有效数据的栏目整块略过，不占位、不补数。AI 七日港股概率作为「走势预测」的子块出现。
-        </p>
       </div>
     </section>
 
+    <!-- ==================== SECTION 06 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 06 · DELIVERY</div>
+      <h2 class="chapter-title">从模型数字到「人话」与微信端直推</h2>
 
-    <!-- ══════════════════════════════════════════════
-         结构化卡片 · 数据源 SOURCES
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">03 — Sources</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        每条数据线，都有两副备胎
-      </h2>
-
-      <p class="mt-3">
-        主源倒下，备用源接上；实际启用过哪一路，一律记入日志。全部失败时返回「暂缺」——<span class="font-bold">页面宁可空着，也不冒充。</span>
+      <p class="text-[14px] leading-[1.75] text-[#4a4a50] mb-4">
+        为了让读者在早盘前 30 秒抓住重点，日报自 2026-10 起默认启用<strong class="text-ink font-extrabold">「入门版（<code class="text-[12px]">OCTOPUS_LITE=1</code>）」</strong>：隐去繁琐的计算口径、筛选过程与折叠披露，只保留核心结论、数字、动作、滞后标记与「暂缺」点名（需要方法论时可通过 <code class="text-[12px]">--notes</code> 或 <code class="text-[12px]">--full</code> 展开）。
       </p>
 
-      <div class="mt-5 space-y-3">
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Chain 01 · Quotes</p>
-          <h3 class="mt-2 text-xl font-bold">行情快照</h3>
-          <p class="mt-2 text-[15px] text-ink/75 dark:text-[#E4ECE6]/75">
-            Yahoo <span class="tabular-nums">query1</span> → Yahoo <span class="tabular-nums">query2</span> → 东方财富 <span class="tabular-nums">ulist.np</span>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+        <div class="white-box">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="lime-no">AI 提鲜</span>
+            <span class="text-[14px] font-extrabold text-ink">AI 帮你提鲜 &amp; 活鲜词库</span>
+          </div>
+          <p class="text-[12.5px] text-[#4a4a50] leading-[1.65] m-0">
+            由原「鲜鲜解读」升级而来，搭配 50 词活鲜词库与 100 句股票梗句库，把枯燥的因子得分翻译成鲜活直白的盘面提醒。
           </p>
-          <p class="mt-2 text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">AI 行情复盘与今日预判共用的指数与个股快照。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Chain 02 · A-Shares</p>
-          <h3 class="mt-2 text-xl font-bold">A 股全景与榜单</h3>
-          <p class="mt-2 text-[15px] text-ink/75 dark:text-[#E4ECE6]/75">
-            东方财富 <span class="tabular-nums">push2</span> → <span class="tabular-nums">82.push2</span> → <span class="tabular-nums">72.push2</span> → 新浪 <span class="tabular-nums">hq.sinajs</span>
-          </p>
-          <p class="mt-2 text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">热门榜单、板块热力、行业列表与宽基指数。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Chain 03 · News &amp; Policy</p>
-          <h3 class="mt-2 text-xl font-bold">资讯与政策</h3>
-          <p class="mt-2 text-[15px] text-ink/75 dark:text-[#E4ECE6]/75">
-            Google News 中文 → 香港版 → 财经专题；中国政府网 最新政策 → 首页 → 政策文库
-          </p>
-          <p class="mt-2 text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">政策冲击指数（PSI）与情绪基线的原始燃料。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Chain 04 · HK Overseas</p>
-          <h3 class="mt-2 text-xl font-bold">港股境外四路</h3>
-          <p class="mt-2 text-[15px] text-ink/75 dark:text-[#E4ECE6]/75">
-            Yahoo Chart → Stooq 日线 CSV → 港交所「每日市场统计」→ stealth 浏览器（默认关闭）
-          </p>
-          <p class="mt-2 text-[13px] text-ink/55 dark:text-[#E4ECE6]/55">【深水石斑鱼】港股行情的供数链，逐只降级不整片停摆。</p>
-        </article>
-
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         金句大字报 PULL QUOTE · 02
-    ══════════════════════════════════════════════ -->
-    <section class="py-8">
-      <div class="reveal text-center">
-        <div class="mx-auto h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-        <p class="mt-5 font-serifcn text-2xl font-bold leading-normal tracking-wide text-ink dark:text-[#EDF3EE]">
-          「概率不是保证。」
-        </p>
-        <p class="mt-2 text-base text-ink/60 dark:text-[#E4ECE6]/60">
-          样本不足时只报样本量，不下命中率结论。
-        </p>
-        <div class="mx-auto mt-5 h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         结构化卡片 · 量化语言 QUANT
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">04 — Quant</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        概率、板块与 MACD：三种彼此制衡的语言
-      </h2>
-
-      <p class="mt-3">
-        概率以规则与量化合成为主，可选接入大模型；无论哪一层，都套同一副护栏：<span class="font-bold">概率夹在 5%~95% 之间，偏离基准超过 20pp 就收敛。</span>
-      </p>
-
-      <div class="mt-5 space-y-3">
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Language 01 · Five Factors</p>
-          <h3 class="mt-2 text-xl font-bold">五因子与软压缩</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">
-            MOM 动量 · TRD 趋势 · REV 反转 · VOL 波动 · FLOW 资金。极端原始值经 tanh 软压缩封顶于 ±2；单因子最多占综合分 30% 权重——再大的噪声，也掀不翻整张桌子。
-          </p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Language 02 · Sector Rotation</p>
-          <h3 class="mt-2 text-xl font-bold">板块轮动五维</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">
-            技术面 35% · 资金面 35% · 基本面 10% · 行业板块 10% · 事件驱动 10%，再由三策略投票定夺：MA 多空排列、20/60/120 日动量、相对恒指的超额象限。
-          </p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Language 03 · MACD</p>
-          <h3 class="mt-2 text-xl font-bold">MACD 铁律</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">
-            金叉且双线在零轴上方 → 观察入场；死叉或空头排列 → 退出 / 规避；水下金叉只算反弹。底线是至少 36 根已收盘日线——样本不够，不开口。
-          </p>
-        </article>
-
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         结构化卡片 · 新鲜度 FRESHNESS
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">05 — Freshness</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        新鲜度是门禁，不是装饰
-      </h2>
-
-      <p class="mt-3">
-        它曾经错过：行情源在日线翻篇的几个小时里暂时丢掉刚收盘那天，代码默默退回上一天，页面却不写日期——于是「上周五」被当成了「昨天」。修复之后，三道防线层层把守。
-      </p>
-
-      <div class="mt-5 space-y-3">
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Guard 01 · Data</p>
-          <h3 class="mt-2 text-xl font-bold">数据层</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">用行情 meta 补齐缺失的已收盘日线，第一现场就地回补。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Guard 02 · Cross-Check</p>
-          <h3 class="mt-2 text-xl font-bold">核对层</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">东方财富独立基准回补：A 股看全景，港股看恒指报价——第二双眼睛。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Guard 03 · Presentation</p>
-          <h3 class="mt-2 text-xl font-bold">呈现层</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">每个品种自带 as_of 日期；滞后报价不计入核心指数均值，页面上标得清清楚楚。</p>
-        </article>
-
-      </div>
-
-      <!-- 推送门禁补充行 -->
-      <div class="reveal mt-5 rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] dark:border-white/10 dark:bg-white/[0.04]">
-        <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Push Gate</p>
-        <h3 class="mt-2 text-xl font-bold">推送门禁</h3>
-        <ul class="mt-2 space-y-1 text-ink/75 dark:text-[#E4ECE6]/75">
-          <li class="flex gap-3"><span class="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-ink/40 dark:bg-[#E4ECE6]/40"></span><span>当天检查未通过 → 默认不推送，改为纯文本告警。</span></li>
-          <li class="flex gap-3"><span class="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-ink/40 dark:bg-[#E4ECE6]/40"></span><span>推送失败按 10 / 30 / 60 秒退避重试，最多 4 次。</span></li>
-          <li class="flex gap-3"><span class="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-ink/40 dark:bg-[#E4ECE6]/40"></span><span>单条超 100,000 字符，在栏目边界拆条续发，续片重新带栏目头。</span></li>
-        </ul>
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         金句大字报 PULL QUOTE · 03
-    ══════════════════════════════════════════════ -->
-    <section class="py-8">
-      <div class="reveal text-center">
-        <div class="mx-auto h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-        <p class="mt-5 font-serifcn text-2xl font-bold leading-normal tracking-wide text-ink dark:text-[#EDF3EE]">
-          「『上周五』不能被当成『昨天』。」
-        </p>
-        <p class="mt-2 text-base text-ink/60 dark:text-[#E4ECE6]/60">
-          每一个数字，都要写上它的日子。
-        </p>
-        <div class="mx-auto mt-5 h-[0.5px] w-12 bg-ink/30 dark:bg-[#E4ECE6]/30"></div>
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         结构化卡片 · 版面 READING MODES
-    ══════════════════════════════════════════════ -->
-    <section class="py-6">
-
-      <p class="text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">06 — Reading Modes</p>
-      <div class="mt-2 border-t-[0.5px] border-gray-200 dark:border-white/10"></div>
-      <h2 class="mt-3 text-xl font-bold leading-snug">
-        三种版面，一个默认答案
-      </h2>
-
-      <p class="mt-3">
-        同一份数据渲染：入门版 <span class="tabular-nums font-bold">9.8</span> 千字，长版 <span class="tabular-nums font-bold">15.8</span> 千字。文字少了，结论没有少。
-      </p>
-
-      <div class="mt-5 space-y-3">
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Default · Lite</p>
-          <h3 class="mt-2 text-xl font-bold">入门版<span class="ml-2 align-middle text-[11px] font-medium tracking-[0.15em] text-ink/45 dark:text-[#E4ECE6]/45">默认</span></h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">只留结论、数字、动作。口径、回测细节、来源、筛选过程整段不渲染——30 秒读完一张速查卡。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Notes</p>
-          <h3 class="mt-2 text-xl font-bold">精简 + 说明</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">逐栏保留口径 / 来源 / 方法论。想追问「为什么」的人，从这里开始。</p>
-        </article>
-
-        <article class="reveal rounded-xl border border-gray-100 bg-white p-4 shadow-[0_1px_2px_rgba(28,45,39,0.04)] transition duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(28,45,39,0.06)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-          <p class="text-[11px] font-medium uppercase tracking-[0.25em] text-ink/45 dark:text-[#E4ECE6]/45">Full</p>
-          <h3 class="mt-2 text-xl font-bold">全量长版</h3>
-          <p class="mt-2 text-ink/75 dark:text-[#E4ECE6]/75">完整展开：推导、公式、回测、映射与折叠披露，一项不少。</p>
-        </article>
-
-      </div>
-    </section>
-
-
-    <!-- ══════════════════════════════════════════════
-         5 · 封底模块 COLOPHON
-    ══════════════════════════════════════════════ -->
-    <footer class="mt-5 pb-8 pt-6">
-
-      <div class="border-t-[0.5px] border-gray-200 pt-5 dark:border-white/10">
-
-        <!-- 寄语 -->
-        <p class="reveal text-center font-serifcn text-xl italic leading-relaxed text-ink dark:text-[#EDF3EE]">
-          「愿你每天看到的数字，都属于今天。」
-        </p>
-        <p class="mt-2 text-center text-[11px] font-medium uppercase tracking-[0.3em] text-ink/50 dark:text-[#E4ECE6]/50">
-          每日上水 · 新鲜活泼
-        </p>
-
-        <!-- 署名 -->
-        <div class="mt-5 space-y-1 text-center text-[13px] text-ink/60 dark:text-[#E4ECE6]/60">
-          <p>文 / 章鱼 AI · 上水日报编辑部</p>
-          <p>资料 / 《章鱼 AI · 内容分类整理》</p>
-          <p>视觉 / 归藏杂志编辑部 · GUIZANG EDITORIAL</p>
         </div>
-
-        <!-- 社交媒体 -->
-        <div class="mt-5 flex items-center justify-center gap-4 text-lg text-ink/55 dark:text-[#E4ECE6]/55">
-          <a href="#" aria-label="微信公众号" class="transition-colors duration-300 hover:text-ink dark:hover:text-[#EDF3EE]"><i class="fa-brands fa-weixin"></i></a>
-          <a href="#" aria-label="GitHub" class="transition-colors duration-300 hover:text-ink dark:hover:text-[#EDF3EE]"><i class="fa-brands fa-github"></i></a>
-          <a href="#" aria-label="RSS 订阅" class="transition-colors duration-300 hover:text-ink dark:hover:text-[#EDF3EE]"><i class="fa-solid fa-rss"></i></a>
-          <a href="#" aria-label="邮件联系" class="transition-colors duration-300 hover:text-ink dark:hover:text-[#EDF3EE]"><i class="fa-solid fa-envelope"></i></a>
+        <div class="white-box">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="lime-no">微信直推</span>
+            <span class="text-[14px] font-extrabold text-ink">分条推送与深灰字体护航</span>
+          </div>
+          <p class="text-[12.5px] text-[#4a4a50] leading-[1.65] m-0">
+            针对 PushPlus <code>v-html</code> 剥离 <code>&lt;body&gt;</code> 的特性，容器自带显式深色内联样式并将浅灰文字压深至 <code>#333333</code>；超长日报按栏目边界智能切分、合并填满单条上限。
+          </p>
         </div>
+      </div>
 
-        <!-- 版权 -->
-        <div class="mt-5 border-t-[0.5px] border-gray-200 pt-4 text-center text-[12px] leading-normal text-ink/45 dark:text-white/35">
-          <p>© 2026 章鱼 AI · 上水日报 · VOL.2026 归藏特刊</p>
-          <p class="mt-1">本文整理自项目公开文档，所有数据与结论仅供参考，不构成投资建议。</p>
-          <p class="mt-2 text-[11px] uppercase tracking-[0.35em] text-ink/35 dark:text-white/25">— Fin —</p>
+      <!-- Freshness Gate Callout -->
+      <div class="white-box bg-[#f0f9c4]/70">
+        <p class="text-[13px] leading-[1.65] text-ink m-0">
+          <span class="lime-no mr-2">GATE</span><strong class="font-extrabold">当天新鲜度门禁：</strong>推送前自动扫描全部 21 个数据源。<strong class="font-extrabold">只要当天有效源 &lt; 1 个，立即阻断推送</strong>；而在周末或节假日休市期间，行情源未更新不会误杀当日正常更新的资讯与社区情绪。
+        </p>
+      </div>
+    </section>
+
+    <!-- ==================== SECTION 07 ==================== -->
+    <section class="section-card">
+      <div class="chapter-label">SECTION 07 · OPERATIONS</div>
+      <h2 class="chapter-title">常用命令与配置速查</h2>
+
+      <div class="white-list">
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">01</span>完整流水线（采集 → 检验 → 推送）</span>
+          <code class="text-[12px]">python3 output/push.py</code>
         </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">02</span>只生成最新日报、不推送微信</span>
+          <code class="text-[12px]">python3 output/pipeline.py --no-push</code>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">03</span>切换版面详略（入门版 / 含口径说明 / 全量长版）</span>
+          <code class="text-[12px]">默认入门版 ｜ --notes ｜ --full</code>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">04</span>切换视觉主题（Lime / Pixel / Forum / Dossier / 归藏）</span>
+          <code class="text-[12px]">OCTOPUS_PUSH_THEME=lime|pixel|forum|dossier|guizang</code>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">05</span>本地预览服务（自动渲染 output/latest.html）</span>
+          <code class="text-[12px]">python3 output/preview_server.py 8000</code>
+        </div>
+        <div class="white-row flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <span class="text-[13px] font-bold text-ink"><span class="lime-no mr-2">06</span>市场数据库拉取与全量自检</span>
+          <code class="text-[12px]">python3 output/market_db.py pull &amp;&amp; python3 output/market_db.py verify --all</code>
+        </div>
+      </div>
+    </section>
 
+    <!-- ==================== FOOTER ==================== -->
+    <footer class="pt-4 px-1 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-muted">
+      <div>
+        <p class="font-bold text-ink m-0">章鱼 AI · 上水日报（Octopus AI Daily Report）</p>
+        <p class="mt-0.5 m-0">由 <code>整理.md</code> 提炼生成 · 白底圆角卡片 + 荧光绿强调版式</p>
+      </div>
+      <div class="pill-row">
+        <span class="pill pill-lime">LIME CARD EDITION</span>
       </div>
     </footer>
 
   </main>
 
-
-  <!-- 克制的交互脚本：阅读进度 + 淡入 + 深浅色同步 -->
+  <!-- Minimal Reading Progress Script -->
   <script>
     (function () {
-      // 阅读进度发丝线
-      var bar = document.getElementById('read-progress');
-      function onScroll() {
-        var h = document.documentElement.scrollHeight - window.innerHeight;
-        var p = h > 0 ? (window.scrollY / h) * 100 : 0;
-        bar.style.width = p + '%';
-      }
-      window.addEventListener('scroll', onScroll, { passive: true });
-      onScroll();
-
-      // 滚动淡入（仅一次、轻微位移）
-      if ('IntersectionObserver' in window) {
-        var io = new IntersectionObserver(function (entries) {
-          entries.forEach(function (e) {
-            if (e.isIntersecting) {
-              e.target.classList.add('is-in');
-              io.unobserve(e.target);
-            }
-          });
-        }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
-        document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
-      } else {
-        document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('is-in'); });
-      }
-
-      // 跟随系统深浅色
-      var meta = document.querySelector('meta[name="theme-color"]');
-      function syncTheme() {
-        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        meta.setAttribute('content', dark ? '#0F1A15' : '#F9F9F7');
-      }
-      syncTheme();
-      try {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme);
-      } catch (err) { /* 旧内核忽略 */ }
+      const bar = document.getElementById('progress-bar');
+      if (!bar) return;
+      const updateProgress = () => {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const docHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+        const pct = docHeight > 0 ? Math.min(100, Math.max(0, (scrollTop / docHeight) * 100)) : 0;
+        bar.style.width = pct + '%';
+      };
+      window.addEventListener('scroll', updateProgress, { passive: true });
+      window.addEventListener('resize', updateProgress);
+      updateProgress();
     })();
   </script>
-
 </body>
 </html>

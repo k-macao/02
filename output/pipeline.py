@@ -572,17 +572,20 @@ PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "")
 #   行情 / 全景 / 情绪总览 / 政策冲击 / 数据审计等结构化数据用键值表整合。
 #   图标在白底独立显示，正文与次要文字保持纯黑 / 深灰；不依赖颜色区分涨跌。
 #   纯内联样式，不依赖 WebGL / JavaScript / 外部 CSS，兼容 PushPlus / 微信详情页。
-# pixel   —— 2026-10-07 起默认主题：DOS 复古监视器 / Retro Pixel Market Quest v3：
+# lime    —— 2026-10-10 起默认主题：白底圆角卡片 + 荧光绿强调风（与《整理-表格可视化.html》同款）：
+#   白底画布 #FFFFFF + 浅灰圆角卡片 #F5F5F6 + 卡内白底 #FFFFFF / 浅灰 #ECECEF 交替块；
+#   粗黑标题 #111111 + 荧光绿 #C8F03C 胶囊序号 / 章节小方块 / 信号条；全内联样式兼容微信。
+# pixel   —— DOS 复古监视器 / Retro Pixel Market Quest v3（可切换）：
 #   暗色街机终端底 #050711 + 霓虹青 / 电光蓝 / 像素黄 / 品红，直角像素块、硬描边与实色阴影；
 #   等宽字栈、OCTOPUS_OS v3 标题栏、逐栏 LVL 关卡与 AI CORE 主控卡；全内联样式兼容微信。
 # forum   —— 暗色社区仪表盘（Dark Mode Community Dashboard，可切换）：深灰画布 / 卡片、
 #   柔和圆角与紫色点缀；dossier 为德国档案 + 包豪斯风，guizang 为克莱因蓝白底研报。
-PUSH_THEMES = ("pixel", "forum", "dossier", "guizang")
-DEFAULT_PUSH_THEME = "pixel"
+PUSH_THEMES = ("lime", "pixel", "forum", "dossier", "guizang")
+DEFAULT_PUSH_THEME = "lime"
 
 
 def _resolve_push_theme(name=None):
-    """归一化推送主题：空 / 非法值一律回落到默认 DOS 复古监视器主题 pixel。"""
+    """归一化推送主题：空 / 非法值一律回落到默认白底圆角卡片 + 荧光绿强调主题 lime。"""
     theme = name if name is not None else os.environ.get("OCTOPUS_PUSH_THEME", "")
     theme = str(theme or "").strip().lower()
     return theme if theme in PUSH_THEMES else DEFAULT_PUSH_THEME
@@ -5359,7 +5362,9 @@ def _masthead_cell(label, value, value_color=C_INK, first=False):
 def _section(num, kicker_en, title, content, badge_html="", caption=""):
     """栏目头使用独立大图标砖；AI 栏目以黄色关卡色单独强调。"""
     _, _, section_color, _ = _section_visual(kicker_en)
-    badge_cell = (f'<td align="right" valign="middle" style="padding-left:6px;">{badge_html}</td>'
+    badge_cell = (f'<td align="right" valign="middle" '
+                  f'style="padding-left:6px;color:{C_MUTED};font-size:10px;font-family:{FONT_MONO};">'
+                  f'{badge_html}</td>'
                   if badge_html else "")
     caption_html = (f'<div style="font-size:10px;color:{C_MUTED};letter-spacing:.3px;'
                     f'padding:7px 0 8px 56px;line-height:1.6;font-family:{FONT_MONO};">'
@@ -11809,12 +11814,13 @@ def dossier_section(num, kicker_en, title, content, badge_html="", caption=""):
 
 
 def _is_guizang_like(kit):
-    """guizang / dossier / forum 共用同一套研报渲染器与取色分支。
+    """guizang / dossier / forum / lime 共用同一套研报渲染器与取色分支。
 
-    dossier 是浅色档案版，forum 是暗色社区版：两者的内容块都由 guizang 渲染器
-    产出，只是渲染期间由各自的 palette 上下文换掉 GZ_* 全局色。
+    dossier 是浅色档案版，forum 是暗色社区版，lime 是白底圆角卡片 + 荧光绿强调版：
+    内容块都由 guizang 渲染器产出，只是渲染期间由各自的 palette 上下文换掉 GZ_* 全局色。
     """
-    return kit is GUIZANG_KIT or kit is DOSSIER_KIT or kit is FORUM_KIT
+    return (kit is GUIZANG_KIT or kit is DOSSIER_KIT
+            or kit is FORUM_KIT or kit is LIME_KIT)
 
 
 DOSSIER_KIT = _RenderKit(
@@ -12392,6 +12398,281 @@ FORUM_KIT = _RenderKit(
 )
 
 
+# ============================================================
+# LIME 主题（2026-10-10 起默认主题 · 白底圆角卡片 + 荧光绿强调风）
+# 与《整理-表格可视化.html》（PR #135）同款视觉语言：
+#   - 画布：纯白 #FFFFFF
+#   - 栏目卡：浅灰圆角卡片 #F5F5F6（border-radius: 22px），卡内内容块白底 #FFFFFF / 浅灰 #ECECEF 交替
+#   - 标题：粗黑 #111111（font-weight: 900，紧凑字距）
+#   - 荧光绿强调：#C8F03C 胶囊序号（配 #111111 粗黑字）、章节方形指示点与浅荧绿底 #F0F9C4
+#   - 落字色：深黑 #111111 / 正文 #222222 / 次要深灰 #333333 / 深橄榄绿 #3D5200 / 深红 #B91C1C
+#     （全部通过微信端深灰门禁且在白底、浅灰卡、斑马灰、浅荧绿底上 WCAG 对比度 ≥ 4.9:1）
+# ============================================================
+L_BG = "#FFFFFF"          # 白底画布（--paper: #ffffff）
+L_CARD = "#F5F5F6"        # 浅灰圆角卡片底（--card: #f5f5f6）
+L_STRIPE = "#FFFFFF"      # 卡内白底内容块（--white: #fff）
+L_ZEBRA = "#ECECEF"       # 卡内交替浅灰块
+L_INK = "#222222"         # 正文深黑灰
+L_INK_STRONG = "#111111"  # 粗黑标题与重点文字（--ink: #111111）
+L_MUTED = "#333333"       # 次要深灰字（兼顾微信 v-html 深灰门禁与 ≥ 9.6:1 对比度）
+L_HAIR = "#E4E4E7"        # 分割线（--line: #e4e4e7）
+L_HAIR_SOFT = "#ECECEF"   # 细分隔线
+L_LIME = "#C8F03C"        # 荧光绿强调填充色（--lime: #c8f03c，配 #111111 粗黑字）
+L_LIME_WASH = "#F0F9C4"   # 浅荧绿底色（--accent-soft: #f0f9c4）
+L_LIME_INK = "#3D5200"    # 荧光绿落字深档（在所有底色上对比度 ≥ 6.65:1）
+L_LIME_DEEP = "#2B3A00"   # 荧光绿落字更深档
+L_RED_INK = "#B91C1C"     # 跌 / 警示落字深红（在所有底色上对比度 ≥ 4.92:1）
+L_FONT = ("Inter,-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',"
+          "'Hiragino Sans GB','Microsoft YaHei',sans-serif")
+L_MONO = "'SF Mono',Menlo,Consolas,'Courier New',monospace"
+
+_LIME_GZ_SWAP = {
+    "GZ_PAPER": L_STRIPE,
+    "GZ_PAPER_TINT": L_CARD,
+    "GZ_KLEIN": L_LIME_INK,
+    "GZ_KLEIN_DEEP": L_LIME_DEEP,
+    "GZ_KLEIN_WASH": L_LIME_WASH,
+    "GZ_INK": L_INK,
+    "GZ_INK_STRONG": L_INK_STRONG,
+    "GZ_DARK_GRAY": L_MUTED,
+    "GZ_META": L_MUTED,
+    "GZ_FAINT": L_MUTED,
+    "GZ_HAIR": L_HAIR,
+    "GZ_HAIR_SOFT": L_HAIR_SOFT,
+    "GZ_HAIR_INK": L_INK_STRONG,
+    "GZ_ZEBRA": L_ZEBRA,
+    "GZ_CREAM": L_INK_STRONG,
+    "GZ_INK_TINT": L_CARD,
+    "GZ_UP": L_LIME_INK, "GZ_DOWN": L_RED_INK, "GZ_FLAT": L_MUTED,
+    "GZ_UP_INK": L_LIME_INK, "GZ_DOWN_INK": L_RED_INK, "GZ_FLAT_INK": L_MUTED,
+    "GZ_WARN": L_RED_INK, "GZ_WARN_INK": L_RED_INK,
+    "GZ_PRIMARY": L_LIME_INK, "GZ_PRIMARY_HOVER": L_LIME_DEEP,
+    "GZ_PRIMARY_LIGHT": L_LIME_WASH,
+    "GZ_NEON": L_LIME_INK,
+    "GZ_FONT": L_FONT,
+    "GZ_SERIF": L_FONT,
+    "GZ_SANS": L_FONT,
+    "GZ_MONO": L_MONO,
+}
+
+
+class _lime_palette:
+    """渲染 lime 日报期间临时替换 GZ_* 色变量与 kit 色槽，退出时逐位还原。"""
+
+    _KIT_SLOTS = ("ok_color", "warn_color", "bad_color")
+    _KIT_COLORS = {"ok_color": L_LIME_INK, "warn_color": L_RED_INK, "bad_color": L_RED_INK}
+
+    def __enter__(self):
+        self._saved = {k: globals()[k] for k in _LIME_GZ_SWAP}
+        for k, v in _LIME_GZ_SWAP.items():
+            globals()[k] = v
+        self._saved_kit = {}
+        for kit in (GUIZANG_KIT, LIME_KIT):
+            self._saved_kit[id(kit)] = (kit, {s: getattr(kit, s) for s in self._KIT_SLOTS})
+            for slot, value in self._KIT_COLORS.items():
+                setattr(kit, slot, value)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for k, v in self._saved.items():
+            globals()[k] = v
+        for kit, slots in self._saved_kit.values():
+            for slot, value in slots.items():
+                setattr(kit, slot, value)
+        return False
+
+
+def lime_pill(text, lime=False):
+    """圆角胶囊标签：lime=True 用荧光绿 #C8F03C 底 + #111111 粗黑字；否则用浅灰圆角胶囊。"""
+    bg = L_LIME if lime else L_CARD
+    weight = "800" if lime else "700"
+    return (f'<span style="display:inline-block;margin:6px 6px 0 0;padding:4px 11px;'
+            f'border-radius:999px;background:{bg};color:{L_INK_STRONG};'
+            f'font-size:11px;font-weight:{weight};line-height:16px;white-space:nowrap;">'
+            f'{_esc(text)}</span>')
+
+
+def lime_section(num, kicker_en, title, content, badge_html="", caption=""):
+    """Lime 栏目卡：浅灰圆角卡片 #F5F5F6 + 荧光绿胶囊序号 #C8F03C + 粗黑标题 #111111 → 白/灰交替内容块。"""
+    content = content or ""
+    if content.lstrip().startswith("<tr"):
+        content = (f'<table width="100%" cellpadding="0" cellspacing="0" '
+                   f'style="width:100%!important;border-collapse:collapse;'
+                   f'font-size:{GZ_FS_TABLE}px;color:{L_INK}">{content}</table>')
+    content = _gz_zebra_bands(content)
+    meta_bits = [x for x in (badge_html, caption) if x]
+    meta = (f'<div style="color:{L_MUTED};font-size:{GZ_FS_META}px;padding-top:6px;">'
+            f'{" · ".join(meta_bits)}</div>') if meta_bits else ""
+    head = (
+        f'<div style="margin-top:18px;padding:18px 16px 14px;border-radius:22px;'
+        f'background:{L_CARD};color:{L_INK};overflow:hidden;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{L_CARD}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{L_CARD};color:{L_INK};">'
+        f'<tr><td valign="middle" style="padding:0;color:{L_MUTED};">'
+        f'<span style="display:inline-block;min-width:22px;margin-right:7px;padding:0 6px;'
+        f'border-radius:999px;background:{L_LIME};color:{L_INK_STRONG};'
+        f'font-size:10px;font-weight:900;line-height:18px;text-align:center;">{_esc(num)}</span>'
+        f'<span style="color:{L_LIME_INK};font-size:10px;padding-right:5px;">■</span>'
+        f'<span style="font-size:11px;font-weight:700;letter-spacing:0.14em;'
+        f'color:{L_MUTED};">SECTION {_esc(num)} · {_esc(kicker_en)}</span>'
+        f'</td></tr>'
+        f'<tr><td valign="top" style="padding:0 0 10px;color:{L_INK};">'
+        f'<h2 style="margin:6px 0 0;padding:0 0 10px;border-bottom:1px solid {L_HAIR};'
+        f'font-size:{GZ_FS_SECTION}px;font-weight:900;line-height:1.22;'
+        f'letter-spacing:-0.02em;color:{L_INK_STRONG};">{_esc(title)}</h2>'
+        f'{meta}</td></tr></table>'
+    )
+    body = f'{content}</div>'
+    return head + SECTION_BODY_MARK + body
+
+
+def _lime_masthead(date_display, date_str, today_n, total, generated_at):
+    """Lime 刊头：OCTOPUS AI · FIELD GUIDE 眉标 + 粗黑大标题 + 圆角胶囊元信息 + 浅灰阅读说明条。"""
+    pills = (
+        lime_pill(f"当天源 {today_n}/{total}", lime=True)
+        + lime_pill(str(date_display))
+        + lime_pill("单列 · 圆角卡片")
+    )
+    hero = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{L_BG}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{L_BG};color:{L_INK};">'
+        f'<tr><td valign="top" style="padding:4px 2px 14px;color:{L_INK};">'
+        f'<div style="color:{L_MUTED};font-size:11px;font-weight:700;letter-spacing:0.12em;">'
+        f'<span style="color:{L_LIME_INK};">■</span> OCTOPUS AI · FIELD GUIDE</div>'
+        f'<h1 style="margin:6px 0 8px;font-size:{GZ_FS_DISPLAY}px;font-weight:900;'
+        f'line-height:1.15;letter-spacing:-0.03em;color:{L_INK_STRONG};">'
+        f'{_esc(REPORT_TITLE)}</h1>'
+        f'<div style="color:{L_MUTED};font-size:{GZ_FS_META}px;line-height:1.6;">'
+        f'{_esc(REPORT_TAGLINE)} · 更新于 {_esc(generated_at)}</div>'
+        f'<div style="padding-top:6px;color:{L_INK};">{pills}</div>'
+        f'</td></tr></table>'
+    )
+    legend = (
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{L_CARD}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{L_CARD};'
+        f'border-radius:14px;color:{L_MUTED};">'
+        f'<tr><td style="padding:10px 14px;font-size:11px;color:{L_MUTED};line-height:1.6;">'
+        f'<span style="display:inline-block;padding:0 6px;margin-right:6px;border-radius:999px;'
+        f'background:{L_LIME};color:{L_INK_STRONG};font-size:10px;font-weight:900;">■</span>'
+        f'条目底色交替 · 单列紧凑排版 · 涨 <b style="color:{L_LIME_INK};">▲</b> / '
+        f'跌 <b style="color:{L_RED_INK};">▼</b> / 平 <b style="color:{L_MUTED};">■</b>'
+        f'</td></tr></table>'
+    )
+    return f'<div style="padding:0 0 4px;background:{L_BG};color:{L_INK};">{hero}{legend}</div>'
+
+
+def _lime_footer(footer_text):
+    """Lime 尾注：浅灰圆角卡片收尾。"""
+    return (
+        f'<div style="margin-top:18px;border-radius:16px;background:{L_CARD};'
+        f'color:{L_MUTED};overflow:hidden;">'
+        f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{L_CARD}" '
+        f'style="width:100%!important;border-collapse:collapse;background:{L_CARD};'
+        f'color:{L_MUTED};">'
+        f'<tr><td valign="top" style="padding:12px 16px 26px;color:{L_MUTED};'
+        f'font-size:11px;line-height:1.75;">{footer_text}</td></tr></table></div>'
+    )
+
+
+def _lime_html_frame(masthead, first_section, content_html, footer_text,
+                     date_str, generated_at, today_n, total):
+    """Lime 整页外壳（纯内联样式；白底画布 + 浅灰圆角卡片 + 荧光绿胶囊强调）。"""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only">
+<meta name="octopus-report-date" content="{date_str}">
+<meta name="octopus-generated-at" content="{generated_at}">
+<meta name="octopus-today-sources" content="{today_n}">
+<meta name="octopus-total-sources" content="{total}">
+<meta name="octopus-theme" content="lime">
+<meta name="description" content="{_esc(REPORT_TAGLINE)}">
+<title>{REPORT_TITLE}</title>
+</head>
+<body bgcolor="{L_BG}" style="margin:0;padding:0;background:{L_BG};color:{L_INK};font-family:{L_FONT};font-size:{GZ_FS_BODY}px;line-height:1.68;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+<div style="max-width:680px;margin:0 auto;padding:22px 14px 0;background:{L_BG};color:{L_INK};font-family:{L_FONT};font-size:{GZ_FS_BODY}px;line-height:1.68;color-scheme:light;-webkit-text-size-adjust:100%;word-break:break-word;overflow-wrap:break-word;">
+
+{masthead}
+
+{PART_BREAK_MARK}{first_section}
+<div id="report"></div>
+{content_html}
+
+{DOC_FOOT_MARK}
+{_lime_footer(footer_text)}
+
+</div>
+</body>
+</html>"""
+
+
+def generate_report_lime(data, date_display, date_str, sentiment_history=None,
+                         policy_result=None, news_corpus=None):
+    """Lime 排版（白底圆角卡片 + 荧光绿强调风）：与《整理-表格可视化.html》同款。"""
+    with _lime_palette():
+        parts = _collect_report_parts(data, LIME_KIT,
+                                      sentiment_history=sentiment_history,
+                                      date_str=date_str,
+                                      policy_result=policy_result,
+                                      news_corpus=news_corpus)
+        sections = parts["sections"]
+        content_html = "".join(
+            PART_BREAK_MARK + LIME_KIT.section(f"{i:02d}", kicker, title, content, badge, caption)
+            for i, (kicker, title, content, badge, caption) in enumerate(sections[1:], 1))
+        first_section = LIME_KIT.section("00", *sections[0])
+        total = parts["total"]
+        today_n = parts["today_n"]
+        generated_at = _now()
+        footer_text = (
+            "仅供参考，非投资建议 · 数据来自公开来源，未抓到内容的栏目自动缺席。"
+            if PLAIN() else
+            f'白底圆角卡片排版（Lime） · 画布 {L_BG} + 圆角卡片 {L_CARD} + 荧光绿胶囊 {L_LIME} · '
+            f'标题 {L_INK_STRONG} / 正文 {L_INK} / 次要 {L_MUTED} · '
+            f'涨跌符号与颜色双编码<br>\n'
+            '数据来自公开来源，未抓到内容的栏目自动缺席，不以历史内容充数。')
+        masthead = _lime_masthead(date_display, date_str, today_n, total, generated_at)
+        html = _lime_html_frame(masthead, first_section, content_html, footer_text,
+                                date_str, generated_at, today_n, total)
+        return _enforce_dark_gray_font(html, dark_gray=L_MUTED)
+
+
+LIME_KIT = _RenderKit(
+    market_section=gz_market_section,
+    market_review=gz_market_review,
+    hk_quotes_block=gz_hk_quotes_block,
+    channel_block=gz_channel_block,
+    headline_row=gz_headline_row,
+    em_news_row=gz_em_news_row,
+    item_row=gz_item_row,
+    rows=gz_rows,
+    note=gz_note,
+    alert=gz_alert,
+    status_footer=gz_status_footer,
+    source_badge=lambda item: gz_source_badge(item),
+    ai_badge=lambda: gz_badge("AI 合成", "ai"),
+    ai_block=gz_ai_analysis_block,
+    sentiment_block=gz_sentiment_block,
+    sentiment_empty_block=gz_sentiment_empty_block,
+    senti_empty_badge=lambda: gz_badge("样本不足", "warn"),
+    policy_block=gz_policy_block,
+    panorama_block=gz_panorama_block,
+    calendar_block=lambda res, date_str=None: gz_calendar_block(res, date_str=date_str),
+    trend_topic_block=gz_trend_topic_block,
+    esc=_esc,
+    table=lambda headers, rows, aligns=None: gz_data_table(headers, rows, aligns=aligns),
+    sub=gz_subsection,
+    meter=lambda value, maximum: gz_meter(value, maximum, cells=5,
+                                          lit=GZ_KLEIN, off=GZ_FAINT),
+    badge=lambda text, kind="ok": gz_badge(text, kind),
+    section=lime_section,
+    kv=gz_kv_table,
+    trend=gz_trend_badge,
+    ok_color=L_LIME_INK, warn_color=L_RED_INK, bad_color=L_RED_INK,
+)
+
+
 def _harden_wechat_table_widths(html):
     """把 ``width=100%`` 同步写进内联 style，防止微信把日报压成半屏。
 
@@ -12587,14 +12868,19 @@ def generate_report(data, date_display, date_str, theme=None, sentiment_history=
                     policy_result=None, news_corpus=None):
     """生成完整的 HTML 日报（按推送主题分发排版）。
 
-    theme: "pixel"（默认 · DOS 复古监视器 / Retro Pixel Market Quest）
+    theme: "lime"（默认 · 白底圆角卡片 + 荧光绿强调风）/ "pixel"（DOS 复古监视器）
     / "forum"（暗色社区仪表盘）/ "dossier"（德国文件档案风 + 包豪斯几何）/ "guizang"（简洁白底研报）。
     sentiment_history: 跨日情绪基线（新闻情绪用），缺省冷启动。
     policy_result: 政策因子结果（main 单独构建），缺省时渲染侧兜底构建。
     news_corpus: 跨运行标题存档（output/news_history.json），供 15 日/72h 窗口。
     """
     theme = _resolve_push_theme(theme)
-    if theme == "forum":
+    if theme == "lime":
+        html = generate_report_lime(data, date_display, date_str,
+                                    sentiment_history=sentiment_history,
+                                    policy_result=policy_result,
+                                    news_corpus=news_corpus)
+    elif theme == "forum":
         html = generate_report_forum(data, date_display, date_str,
                                      sentiment_history=sentiment_history,
                                      policy_result=policy_result,
@@ -13278,6 +13564,17 @@ def _build_part_banner(index, total, theme=None, limit=None, tail_cut=False,
                  f"（内容不缺失）")
         if index < total:
             text += " · 本条未完，接下条" if unfinished else f" · 接下条 {index + 1}/{total}"
+    if theme == "lime":
+        return (f'<table width="100%" cellpadding="0" cellspacing="0" bgcolor="{L_CARD}" '
+                f'style="width:100%!important;border-collapse:collapse;margin:12px 0;'
+                f'background:{L_CARD};border:1px solid {L_HAIR};border-radius:14px;'
+                f'color:{L_INK_STRONG};">'
+                f'<tr><td style="padding:8px 12px;font-size:11px;font-weight:700;'
+                f'color:{L_INK_STRONG};line-height:1.6;">'
+                f'<span style="display:inline-block;padding:1px 7px;margin-right:6px;'
+                f'border-radius:999px;background:{L_LIME};color:{L_INK_STRONG};'
+                f'font-size:10px;font-weight:900;">{index}/{total}</span>'
+                f'{text}</td></tr></table>')
     if theme == "pixel":
         return (f'<table width="100%" cellpadding="0" cellspacing="0" '
                 f'style="border-collapse:collapse;margin:0 0 12px;background:{C_ACCENT};">'
@@ -13534,7 +13831,10 @@ def push_to_wechat(title, content_html, token=None, template="html", report_name
     mode = f"一对多群组 {topic}" if topic else "一对一"
     print(f"📤 正在推送到微信 (PushPlus, template={template}, {mode})...")
     if template == "html":
-        if _report_theme(content_html) == "dossier":
+        if _report_theme(content_html) == "lime":
+            with _lime_palette():
+                content_html = _enforce_dark_gray_font(content_html, dark_gray=L_MUTED)
+        elif _report_theme(content_html) == "dossier":
             # 生成时在档案色板下做灰字保护；推送前再次保护也必须使用同一色板。
             # 否则档案深灰 #4A4A4A 会被改成归藏 #333，漏色容器也会补成 #222。
             with _dossier_palette():
@@ -14213,10 +14513,11 @@ def main():
   python3 output/pipeline.py --no-hk7               # 跳过 AI 七日港股走势分析概率
   python3 output/pipeline.py --calendar-only        # 只抓「时间节点」（未来30天影响经济时间点）并打印
   python3 output/pipeline.py --calendar-only 7      # 同上，窗口改成未来 7 天
+  python3 output/pipeline.py --theme lime          # 默认：白底圆角卡片 + 荧光绿强调风
+  python3 output/pipeline.py --theme pixel         # 改用 DOS 复古监视器 / Retro Pixel Market Quest
   python3 output/pipeline.py --theme forum         # 改用 forum 暗色社区仪表盘
   python3 output/pipeline.py --theme dossier       # 改用德国档案风 + 包豪斯几何
   python3 output/pipeline.py --theme guizang       # 改用归藏白底研报
-  python3 output/pipeline.py --theme pixel         # 默认：DOS 复古监视器 / Retro Pixel Market Quest
   python3 output/pipeline.py --notes                # 精简版面里保留说明文字 / 过程文字（默认入门版不出）
   python3 output/pipeline.py --full                 # 全量长版：长文 / 表格 / 方法论注释全部回来
         """
@@ -14239,8 +14540,8 @@ def main():
     parser.add_argument("--allow-incomplete-push", action="store_true",
                        help="当本次所有数据源均不可用时仍推送状态报告（默认不推送）")
     parser.add_argument("--theme", default=None, choices=list(PUSH_THEMES),
-                       help="推送主题：pixel（默认 · DOS 复古监视器）/ forum（暗色社区仪表盘）"
-                         " / dossier（德国文件档案风+包豪斯）/ guizang（白底研报）")
+                       help="推送主题：lime（默认 · 白底圆角卡片+荧光绿）/ pixel（DOS 复古监视器）"
+                         " / forum（暗色社区仪表盘）/ dossier（德国文件档案风+包豪斯）/ guizang（白底研报）")
     parser.add_argument("--list", action="store_true",
                        help="列出已生成的日报")
     parser.add_argument("--no-quant", action="store_true",
