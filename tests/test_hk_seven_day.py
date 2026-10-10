@@ -440,7 +440,7 @@ class PipelineWiringTests(unittest.TestCase):
                                                       pipeline.GUIZANG_KIT), "")
 
     def test_report_contains_section_and_coverage_line(self):
-        """2026-09-30 合并：hk7 由独立栏目并入【贪吃大白鲨】量化走势预测的栏内子块。"""
+        """2026-09-30 合并：hk7 由独立栏目并入【嗜血大白鲨】逐日走势量化预测的栏内子块。"""
         bars = synthetic_bars()
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(pipeline, "REPORT_DIR", tmp), \

@@ -302,7 +302,7 @@ def _ren_liquidity(ctx):
 
 
 def _ren_weekly(ctx):
-    """【贪吃大白鲨】量化走势预测：把未来 7 个交易日的逐日表格讲成一句人话。"""
+    """【嗜血大白鲨】逐日走势量化预测：把未来 7 个交易日的逐日表格讲成一句人话。"""
     weekly = ctx.get("weekly") or {}
     entry = weekly.get("entry") or {}
     if not (weekly.get("available") and entry.get("p_up") is not None):

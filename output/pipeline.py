@@ -190,7 +190,7 @@
   18. 「AI 七日港股走势分析概率」子块（output/hk_seven_day.py，2026-09-29 起，取代原
       「每日量化策略（行业轮动）」栏目：该栏目从上线到 09-28 的 58 份日报出现率 0/58，
       东财行业板块两步取数在真实环境未跑通；2026-09-30 起由独立栏目并入第 17 节
-      【贪吃大白鲨】量化走势预测成为栏内子块，两路数据任一可用即出栏目，数据源键名 /
+      【嗜血大白鲨】逐日走势量化预测成为栏内子块，两路数据任一可用即出栏目，数据源键名 /
       审计标签 / 留痕文件各自保留）：恒生指数 / 恒生科技 / 国企指数三只标的、未来 7 个
       交易日（按交易日计数、假期顺延）的收盘上涨概率 + 依据 / 风险 / 三道防线。量化基准
       复用 octopus_weekly 的因果引擎（视界 7：扩张基准率 + 20 日特征最近邻、s+7≤t 已结算
@@ -251,7 +251,7 @@
         全球头条          → **【无敌帝王蟹】全球头条**
         趋势跟踪          → **【深海大鲨鱼】趋势跟踪**
         政策因子          → **【深海肥蓝鲸】政策因子**
-        每周量化走势预测   → **【贪吃大白鲨】量化走势预测**（按用户给的新名，标题不再带「每周」，
+        每周量化走势预测   → **【嗜血大白鲨】逐日走势量化预测**（按用户给的新名，标题不再带「每周」，
                           周度口径仍在栏目内如实披露：「未来 5 个交易日」「锚定 X 收盘」）
       四个标题集中定义为 SECTION_TITLE_GLOBAL_HEADLINES / SECTION_TITLE_TREND /
       SECTION_TITLE_POLICY / SECTION_TITLE_WEEKLY_FORECAST，与第 19 条的现行栏目常量并列，
@@ -4055,12 +4055,12 @@ def _calendar_events_for_weekly(cal_result):
 
 
 def fetch_weekly_forecast(cal_result=None):
-    """运行【贪吃大白鲨】量化走势预测（恒指日线 · 未来 7 个交易日逐日表格 · 无未来函数）。
+    """运行【嗜血大白鲨】逐日走势量化预测（恒指日线 · 未来 7 个交易日逐日表格 · 无未来函数）。
 
     cal_result: 可选，本次抓到的「时间节点」财经日历结果；用来给逐日表格标注事件日
     （★★★ 日程 → 「事件日波动可能放大」提醒），不参与任何概率计算。失败时如实降级。
     """
-    print("📡 正在计算【贪吃大白鲨】量化走势预测（恒生指数 · 未来 7 个交易日逐日 · 无未来函数）...")
+    print("📡 正在计算【嗜血大白鲨】逐日走势量化预测（恒生指数 · 未来 7 个交易日逐日 · 无未来函数）...")
     if not WEEKLY_ENABLED:
         print("  ⏭ 量化走势预测已关闭（OCTOPUS_WEEKLY=0 / --no-weekly）")
         return _source_result("每周量化走势预测", "unavailable", result=None,
@@ -6813,7 +6813,7 @@ def _market_review_meta(kit, market, pan):
 
 
 def _weekly_merged_meta(kit, weekly_src, hk7_src):
-    """【贪吃大白鲨】量化走势预测（合并栏目）的徽标与副标题：两路数据分别标状态。
+    """【嗜血大白鲨】逐日走势量化预测（合并栏目）的徽标与副标题：两路数据分别标状态。
 
     2026-09-30 起本节合并原「AI 七日港股走势分析概率」：① 恒指未来 7 个交易日逐日表格
     （因果量化引擎）与 ② 恒指 / 恒科 / 国企三指数七日概率（大模型研判，失败降级量化基准）
@@ -7258,7 +7258,7 @@ SECTION_TITLE_FORECAST = "【回游金枪鱼】今日预判"
 SECTION_TITLE_ECON_CALENDAR = "【探照安康鱼】时间节点"
 SECTION_TITLE_QUANT_FORECAST = "【蜉蝣天地水母】量化预测总览"
 SECTION_TITLE_MARKET_REVIEW = "【及时秋刀鱼】AI 行情复盘"
-SECTION_TITLE_WEEKLY_FORECAST = "【贪吃大白鲨】量化走势预测"
+SECTION_TITLE_WEEKLY_FORECAST = "【嗜血大白鲨】逐日走势量化预测"
 SECTION_TITLE_SECTOR_ROTATION = "【滚滚翻车鱼】板块轮动量化策略"
 # 2026-10-04 新增：原「每日量化策略（行业轮动）」的申万一级 31 行业版本（PR #84 的移植版）
 SECTION_TITLE_INDUSTRY_ROTATION = "【巡游旗鱼】申万一级行业轮动"
@@ -8016,7 +8016,7 @@ def _weekly_daily_cards(daily, kit):
 
 
 def _weekly_forecast_block(res, kit):
-    """【贪吃大白鲨】量化走势预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
+    """【嗜血大白鲨】逐日走势量化预测栏目内容（两主题共用；res 见 fetch_weekly_forecast 的 result）。
 
     2026-09-29 起升级为**未来 7 个交易日逐日表格**：① 逐日表格（预测数字，一行一天）
     → ② 逐日理由 / 分析 / AI 操作建议（长文本卡）→ ③ 七日整段结论（P(7日涨) + 因子 +
@@ -8762,7 +8762,7 @@ def _collect_report_parts(data, kit, sentiment_history=None, date_str=None,
                 "LIQUIDITY FLOW", "资金流动性分析", lq_html,
                 kit.source_badge(quant_src), _short_source(quant_src))
 
-    # ---- 【贪吃大白鲨】量化走势预测（2026-09-29 起：未来 7 个交易日逐日表格）----
+    # ---- 【嗜血大白鲨】逐日走势量化预测（2026-09-29 起：未来 7 个交易日逐日表格）----
     #      2026-09-30 合并原「AI 七日港股走势分析概率」为栏内子块：两路数据任一可用即出栏目，
     #      数据源键名 / 审计标签 / 留痕文件各自保留（与「行情速览 + 全景复盘」合并同一先例）。
     weekly_res = {}
@@ -14343,7 +14343,7 @@ def quant_only_report(*, enable_stocks=True):
 
 
 def weekly_only_report():
-    """只跑【贪吃大白鲨】量化走势预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
+    """只跑【嗜血大白鲨】逐日走势量化预测并打印结果（研究 / 排障用，不生成日报、不推送）。"""
     print("🐙 " + "=" * 48)
     print("   章鱼 AI · 量化走势预测（未来 7 个交易日 · 研究模式）")
     print("🐙 " + "=" * 48)
