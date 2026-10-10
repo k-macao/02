@@ -199,7 +199,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "em_news": {
         "name": "东方财富 快讯",
-        "used_by": ("东方财富快讯", "新闻情绪"),
+        "used_by": ("东方财富快讯", "【亮亮灯光鱿鱼】新闻情绪因子量化分析"),
         "primary": ("东方财富 np-weblist", "https://np-weblist.eastmoney.com/comm/web/getNewsByColumns"),
         "backups": (
             ("东方财富 np-listapi（同格式镜像）",
@@ -210,7 +210,7 @@ DATA_LINES: Dict[str, Dict[str, Any]] = {
     },
     "google_news": {
         "name": "全球头条 · Google News 财经",
-        "used_by": ("【无敌帝王蟹】全球头条", "新闻情绪"),
+        "used_by": ("【无敌帝王蟹】全球头条", "【亮亮灯光鱿鱼】新闻情绪因子量化分析"),
         "primary": ("Google News 中文（中国大陆版）",
                     "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
         "backups": (
