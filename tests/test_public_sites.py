@@ -633,7 +633,7 @@ class RetailSentimentFactorTests(unittest.TestCase):
             with self.subTest(theme=theme):
                 section = pipeline._senti_strategy.build_section(kit, data)
                 self.assertEqual(section[0], "RETAIL SENTIMENT")
-                self.assertEqual(section[1], "散户群体情绪因子·量化策略分析")
+                self.assertEqual(section[1], "【麻辣大龙虾】散户群体情绪量化分析")
                 parts = pipeline._collect_report_parts(data, kit, date_str="20260927")
                 self.assertEqual(parts["sections"][0][0], "RETAIL SENTIMENT")
                 report = pipeline.generate_report(
