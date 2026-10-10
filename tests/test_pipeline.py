@@ -3324,20 +3324,20 @@ class OpeningDigestRemovalTests(unittest.TestCase):
                 self.assertEqual(parts["sections"][0][0], "RETAIL SENTIMENT")
                 html = pipeline.generate_report(
                     data, "2026年9月28日", "20260928", theme=theme)
-                self.assertIn("散户群体情绪因子·量化策略分析", html)
+                self.assertIn("【麻辣大龙虾】散户群体情绪量化分析", html)
                 self.assertNotIn("【爪爪八爪鱼】AI 全篇速览", html)
                 self.assertNotIn("AI DIGEST", html)
                 self.assertNotIn("当前信息不足以形成综合方向判断", html)
                 if theme == "pixel":
                     self.assertIn("LVL 00 // RETAIL SENTIMENT", html)
-                self.assertLess(html.index("散户群体情绪因子·量化策略分析"),
+                self.assertLess(html.index("【麻辣大龙虾】散户群体情绪量化分析"),
                                 html.index(pipeline.SECTION_TITLE_TREND))
 
     def test_factor_and_opening_digest_both_absent_without_community_samples(self):
         parts = pipeline._collect_report_parts({}, pipeline.GUIZANG_KIT, date_str="20260928")
         self.assertNotIn("RETAIL SENTIMENT", [section[0] for section in parts["sections"]])
         html = pipeline.generate_report({}, "2026年9月28日", "20260928")
-        self.assertNotIn("散户群体情绪因子·量化策略分析", html)
+        self.assertNotIn("【麻辣大龙虾】散户群体情绪量化分析", html)
         self.assertNotIn("【爪爪八爪鱼】AI 全篇速览", html)
         self.assertNotIn("AI DIGEST", html)
         self.assertNotIn("当前信息不足以形成综合方向判断", html)
@@ -3361,7 +3361,7 @@ class SectionRenameTests(unittest.TestCase):
 
     def test_title_constants_match_requested_names(self):
         self.assertEqual(pipeline.SECTION_TITLE_RETAIL_SENTIMENT,
-                         "散户群体情绪因子·量化策略分析")
+                         "【麻辣大龙虾】散户群体情绪量化分析")
         self.assertEqual(pipeline.SECTION_TITLE_FORECAST, self.EXPECTED["FORECAST"])
         self.assertEqual(pipeline.SECTION_TITLE_ECON_CALENDAR, self.EXPECTED["ECON CALENDAR"])
         self.assertEqual(pipeline.SECTION_TITLE_QUANT_FORECAST, self.EXPECTED["QUANT FORECAST"])
