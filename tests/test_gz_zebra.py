@@ -103,6 +103,7 @@ class ZebraBandTests(unittest.TestCase):
                             "published_cst": f"2026-09-30 10:0{i}"} for i in range(4)]),
         }
         for theme, expected_paper, expected_zebra in (
+                ("lime", pipeline.L_STRIPE, pipeline.L_ZEBRA),
                 ("guizang", PAPER, pipeline.GZ_ZEBRA),
                 ("dossier", pipeline.D_PAPER, pipeline.D_ZEBRA),
                 # forum 暗色主题：卡片 #2C2C2E / 卡内条纹 #232325
